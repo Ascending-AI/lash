@@ -60,10 +60,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(answer) = self
             .admits(site)
             .then(|| {
-                let (exe, entry) = (self.exe, &site.entry);
-                let deepest = *site
-                    .deepest
-                    .get_or_init(|| entry.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id)));
+                let deepest = self.exe.lib(site.lib).prepared_depth(self.exe);
                 self.heap_answer(
                     site.lib,
                     args,
@@ -182,6 +179,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             absent: self.scratch.absent.take(),
         };
         let answer = operation(&mut cx);
+        #[cfg(any(test, feature = "testing"))]
+        assert!(
+            cx.args.is_empty(),
+            "a native exit must release its scratch operands"
+        );
         self.accumulator = cx.accumulator.take();
         self.scratch.absent = cx.absent.take();
         let events = if self.tape.is_some() {

@@ -58,7 +58,7 @@ const TS_GET_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_numeric,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_get_numeric_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_numeric`.
@@ -72,32 +72,6 @@ fn ts_get_numeric(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.call(0, 1, 2)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_get_numeric_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])?; let _ = v0;
-                let v1 = heap.index(args[0], v0)?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))]) { Some(value) => value, None => heap.call(0, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])? }; let _ = v0;
-                let v1 = heap.index(args[0], v0)?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
@@ -125,7 +99,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_computed,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_computed`.
@@ -158,53 +132,6 @@ fn ts_get_computed(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.len(p::Collection::Tuple, v0)?; let _ = v3;
-                let v4 = (natives[1].entry)(&[v3, Value::Int(0)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.len(p::Collection::Tuple, v0)?; let _ = v3;
-                let v4 = (natives[1].entry)(&[v3, Value::Int(0)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.set",
@@ -225,7 +152,7 @@ const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set`.
@@ -242,21 +169,6 @@ fn ts_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                heap.set_index(args[0], args[1], args[2])?;
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const LAW_ALLOCATING_ELEMENT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -347,7 +259,7 @@ const LAW_ELEMENT_READ_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_element_read,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: law_element_read_heap, depth: 1, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.element_read`.
@@ -379,53 +291,6 @@ fn law_element_read(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.begin()?;
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
-}
-fn law_element_read_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.len(p::Collection::Tuple, v0)?; let _ = v3;
-                let v4 = (natives[1].entry)(&[v3, Value::Int(0)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.len(p::Collection::Tuple, v0)?; let _ = v3;
-                let v4 = (natives[1].entry)(&[v3, Value::Int(0)])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.index(args[0], args[1])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const LAW_HANDLERS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -919,7 +784,7 @@ const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: law_declining_heap, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.declining`.
@@ -935,22 +800,6 @@ fn law_declining(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn law_declining_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                heap.set_index(args[0], v0, Value::Int(1))?;
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const LAW_DECLINE_CALLER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -1012,7 +861,7 @@ const LAW_BUDGET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_budget,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: law_budget_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `law.budget`.
@@ -1035,31 +884,6 @@ fn law_budget(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.call(2, 0, 2)?;
     Ok(ctx.take(0))
 }
-fn law_budget_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4611686018427387904)))])?; let _ = v1;
-                let v2 = match (natives[2].entry)(&[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))]) { Some(value) => value, None => heap.call(0, &[v1, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const LAW_COPY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "law.copy_length",
@@ -1079,7 +903,7 @@ const LAW_COPY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_copy_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: law_copy_length_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.copy_length`.
@@ -1090,22 +914,6 @@ fn law_copy_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.call(0, 0, 1)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn law_copy_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const LAW_COPY_READ_PLAN: p::HelperPlan = p::HelperPlan {
@@ -1211,7 +1019,7 @@ const LAW_COPY_SNAPSHOT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: law_copy_snapshot,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: law_copy_snapshot_bulk, depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: Some(law_copy_snapshot_bulk), depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.copy_snapshot`.

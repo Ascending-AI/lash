@@ -141,7 +141,7 @@ impl KernelMachine {
         let Some(compiled) = running
             .exe
             .island_plan(plan)
-            .and_then(|program| program.compiled(running.exe))
+            .and_then(|program| self.islands.compiled(program, running.exe))
         else {
             return Ok(None);
         };

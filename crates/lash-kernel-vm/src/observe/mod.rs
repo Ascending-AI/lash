@@ -180,6 +180,8 @@ pub struct RegisterWork {
     pub calls: u64,
     /// Typed runs a scalar loop ran whole.
     pub blocks: u64,
+    /// Canonical typed arithmetic packets committed in the shared stream.
+    pub typed_packets: u64,
 }
 
 impl ChargeTape {
@@ -220,6 +222,10 @@ impl ChargeTape {
     /// Counts `blocks` typed runs a scalar loop ran whole.
     pub(crate) fn typed(&self, blocks: u64) {
         self.lock().work.blocks += blocks;
+    }
+
+    pub(crate) fn typed_packet(&self) {
+        self.lock().work.typed_packets += 1;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Recorded> {

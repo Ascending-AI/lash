@@ -4,6 +4,9 @@ use super::*;
 
 impl Build<'_> {
     pub(super) fn fuse_accumulation(&mut self) {
+        if !self.fused {
+            return;
+        }
         let end = self.ops.len();
         if end < 2 {
             return;
@@ -54,28 +57,23 @@ impl Build<'_> {
             site,
             reads,
             covered,
+            ..
         } = operator.op
         else {
             unreachable!()
         };
         let function = self.exe.lib(site.lib);
-        let append = function.text_append(self.exe).map(|_| {
-            Box::new(Append {
-                charge: function.charge.text_charge(),
-            })
-        });
-        if append.is_some() {
-            let extra = site
-                .entry
-                .deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
-            self.site(Depth::Template(extra), site.body_when_observed);
+        if function.text_append(self.exe).is_some() {
+            self.site(
+                Depth::Template(function.prepared_depth(self.exe)),
+                site.body_when_observed,
+            );
         }
-        written.op = Op::Accumulation {
+        written.op = Op::DirectOperator {
             site,
-            append,
-            reads: Box::new([reads[0], reads[1]]),
+            reads,
             covered,
-            write,
+            to: Destination::Write(write),
         };
         written.begin = operator.begin;
         written.live = operator.live;

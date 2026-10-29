@@ -24,6 +24,11 @@ impl Arguments {
         }
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.extent == 0
+    }
+
     /// Releases every window an earlier operation left open, so that a
     /// reused stack starts empty.
     #[inline(always)]

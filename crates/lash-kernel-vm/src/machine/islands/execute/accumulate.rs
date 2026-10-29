@@ -1,13 +1,12 @@
 //! Binary local accumulation shares the statement's existing semantic owners.
 
-use super::super::compiled::WriteSite;
 use super::*;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(never)]
     pub(super) fn deferred(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         operation: &Deferred,
     ) -> Result<Next, Stop> {
         let (dst, constant, miss) = match operation {
@@ -46,7 +45,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return None;
         }
-        self.resident_concatenation(site, values, site.concat?)
+        self.resident_concatenation(site, values, site.concat(self.exe)?)
     }
 
     #[inline(never)]
@@ -143,13 +142,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    pub(super) fn accumulate(&mut self, frame: &mut Frame<'e>, at: usize) {
+    pub(super) fn accumulate(&mut self, frame: &mut Values<'_, 'e>, at: usize) {
         let left = match frame.slots[at] {
             SlotState::Value(Value::LongText(text)) => Some(text),
             _ => None,
         };
         let mut owned = false;
-        frame.texts.retain(|(slot, text)| {
+        frame.state.texts.retain(|(slot, text)| {
             if *slot != at {
                 return true;
             }
@@ -165,51 +164,48 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    pub(super) fn accumulation(
+    pub(super) fn operator_destination(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         site: &OperatorSite,
-        append: Option<&super::super::compiled::Append>,
-        reads: &[Read; 2],
+        values: &[Value],
         covered: bool,
-        write: &WriteSite,
+        to: &Destination,
     ) -> Result<Next, Stop> {
-        if write.accumulates {
-            self.accumulate(frame, write.at);
-        }
-        let mut values = [Value::Absent; 2];
-        self.inputs(&frame.slots, reads, &mut values)?;
-        if let Some(append) = append {
+        if let Destination::Write(write) = to
+            && self.exe.lib(site.lib).kernels(self.exe).append
+        {
             let before = self.transient;
-            if let Some(answer) = self.text_accumulation(site, append.charge, &values) {
-                frame.transient += self.transient.saturating_sub(before);
-                let made = answer?;
-                frame.slots[write.at] = SlotState::Value(Value::LongText(made.text));
-                frame.texts.push((write.at, made.text));
+            if let Some(answer) = self.text_accumulation(site, site.concat(self.exe), values) {
+                frame.state.transient += self.transient.saturating_sub(before);
+                let made = match answer {
+                    Ok(made) => {
+                        witnessed!(TextAppend, Commit);
+                        made
+                    }
+                    Err(stop) => {
+                        witnessed!(TextAppend, Prefix);
+                        return Err(stop);
+                    }
+                };
+                frame.state.texts.push((write.at, made.text));
                 self.accumulator = None;
                 #[cfg(any(test, feature = "perf-witness"))]
                 execution::accumulated(&self.scratch.census, self.scratch.counting);
                 #[cfg(test)]
                 super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
-                return self.finish_statement(frame, write.leaves, None);
+                return self.destination(frame, site.reg, Value::LongText(made.text), to);
             }
+            witnessed!(TextAppend, Guard);
         }
-        frame.regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-            island.operator_value(site, &values, covered)
+        let value = self.retaining(&mut frame.state.transient, |island| {
+            island.operator_value(site, values, covered)
         })?;
         #[cfg(test)]
-        super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
-        let value = frame.regs[site.reg as usize];
-        frame.slots[write.at] = SlotState::Value(value);
-        if write.accumulates
-            && let Some(made) = self
-                .accumulator
-                .take()
-                .and_then(|accumulator| accumulator.made)
-        {
-            self.accumulated(frame, write.at, value, made)?;
+        if matches!(to, Destination::Write(_)) {
+            super::super::ACCUMULATED.with(|n| n.set(n.get() + 1));
         }
-        self.finish_statement(frame, write.leaves, None)
+        self.destination(frame, site.reg, value, to)
     }
 
     /// The source-certified one-native text path borrows the same arena

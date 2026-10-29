@@ -165,7 +165,10 @@ pub struct Forwards {
 /// its other calls the general call of `callees`.
 #[derive(Debug)]
 pub struct HeapTemplate {
-    pub entry: fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>,
+    /// An externally supplied native composition. Generated helpers publish
+    /// facts only and execute their bodies through the packet stream.
+    pub entry:
+        Option<fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>>,
     /// The natives its paths call through [`TemplateHeap::call`], by index.
     pub callees: &'static [FunctionId],
     /// Conservative extra call-depth headroom, including the helper.

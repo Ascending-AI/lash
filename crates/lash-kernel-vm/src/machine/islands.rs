@@ -28,7 +28,21 @@
 //! reference saves them, so a park or seal after the exit projects the same
 //! bytes.
 
+#[cfg(any(test, feature = "testing"))]
+pub(crate) mod witness;
+
+macro_rules! witnessed {
+    ($family:ident, $exit:ident) => {{
+        #[cfg(any(test, feature = "testing"))]
+        crate::machine::islands::witness::record(
+            crate::machine::islands::witness::Family::$family,
+            crate::machine::islands::witness::Exit::$exit,
+        );
+    }};
+}
+
 pub(crate) mod admission;
+mod code;
 pub(crate) mod compiled;
 pub(crate) mod cx;
 mod entry;
@@ -117,6 +131,8 @@ type Answer = Result<Value, Stop>;
 
 /// Where an exited frame stands.
 pub(super) enum Stands {
+    /// Before the next source statement's unit, which the source must charge.
+    Statement,
     /// A backedge before its header charges or cursor step commit.
     Iteration { stmt: StmtId },
     /// At a step end, as its control says.
@@ -166,6 +182,8 @@ pub(super) struct Exit {
     scheduling: bool,
     /// The registers the frame being left holds.
     regs: Vec<(u32, Value)>,
+    /// A grouped kernel already saved the exact roles at its current source phase.
+    mapped: bool,
     /// Its control, innermost first.
     control: Vec<Control>,
     stands: Option<Stands>,
@@ -203,6 +221,7 @@ struct Cached {
 /// The statement a converted top frame runs on, the op it runs on from and
 /// the registers it holds there.
 enum RunsOn {
+    Statement,
     Instruction(StmtId, u32, Vec<(u32, Value)>),
     Iteration(StmtId),
     Scheduling(StmtId, u32, Vec<(u32, Value)>),
@@ -212,12 +231,18 @@ enum RunsOn {
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
 pub(super) struct Scratch {
-    /// Physical slot/register/control windows, emptied at their logical death.
+    /// Initialized value storage for every active physical frame.
+    slab: execute::Slab,
+    /// Empty control buffers reused after a frame leaves.
     windows: Vec<execute::Window>,
     /// A force-cold law's run: every native call leaves the island for the
     /// call that puts its arguments back on their pages first.
     #[cfg(test)]
     pub(super) chilled: bool,
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) source_only: bool,
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) generic_only: bool,
     /// Islands are held off until the step ends: a statement an island
     /// exited in runs on through the reference.
     held: bool,
@@ -245,6 +270,14 @@ pub(super) struct Scratch {
 }
 
 impl Scratch {
+    fn compiled<'e>(&self, plan: &'e IslandPlan, exe: &Executable) -> Option<&'e Compiled> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.generic_only {
+            return plan.generic(exe);
+        }
+        plan.compiled(exe)
+    }
+
     /// Opens a resolution scope: no callee resolved before is found in
     /// it, and the captured values it reads start afresh. Its entries
     /// share what they resolve while no closure they resolved can be
@@ -292,10 +325,6 @@ struct Island<'a, const OBSERVING: bool> {
     /// The slice end a resumption into a spent slice holds off until its
     /// first statement or loop header runs: a step does one step's work.
     deferred_end: Option<u64>,
-    /// The run's limiters, lent to a resumed frame ([`Self::unit`]).
-    limiters: Option<&'a mut super::Limiters>,
-    /// The bound its limiter grew to.
-    grown: Option<u64>,
     slice_end: u64,
     counters: &'a mut Occurrences,
     /// An observer is attached: helper calls answer as observed runs do.
@@ -460,11 +489,8 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         Ok(())
     }
 
-    /// A resumed frame's statement unit passes the bound: the run's
-    /// charge limiter grows it or the run halts there, as the source
-    /// charger decides it. A frame the island called leaves that decision
-    /// to its resumption, where the frames below it stand as the
-    /// reference's do.
+    /// Refusal reconstructs the current bindings before the source charger
+    /// asks the limiter. Even a resumed root may have replaced its locals.
     #[cold]
     #[inline(never)]
     fn reached(&mut self) -> Result<(), Stop> {
@@ -472,25 +498,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         {
             self.scratch.exit.reason = Some(Reason::Charge);
         }
-        if self.depth != 1 {
-            return Err(Stop);
-        }
-        let Some(limiters) = self.limiters.as_deref_mut() else {
-            return Err(Stop);
-        };
-        self.charged += 1;
-        if let Some(tape) = self.tape {
-            tape.push(Weight::Atomic(1));
-        }
-        let mut limit = self.bound;
-        match limiters.charge_reached(self.charged, &mut limit) {
-            Ok(()) => {
-                self.bound = limit;
-                self.grown = Some(limit);
-                Ok(())
-            }
-            Err(halt) => Err(self.halt(halt)),
-        }
+        Err(Stop)
     }
 
     /// Closes charge region `close`, charged whole with its events, as
@@ -682,8 +690,8 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             match values {
                 [x] if self.accounting => compiled::unary(site, *x, self.exe),
                 [x, y] => site
-                    .pair
-                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging)),
+                    .pair(self.exe)
+                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging, self.exe)),
                 _ => None,
             }
         };
@@ -695,7 +703,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         {
             typed
                 .map(|(value, _)| value)
-                .or_else(|| site.entry.call(values))
+                .or_else(|| site.entry(self.exe).call(values))
                 .map(Ok)
                 .unwrap_or_else(|| self.operate(site, values))
         } else if OBSERVING || (site.root.is_some() && self.accounting) {
@@ -782,25 +790,26 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 .and_then(|(entry, fast)| {
                     self.answered(function, fast, args, entry.answer(args, self.charging)?)
                 })
-        } else if let ([x, y], Some(pair)) = (args, site.pair)
-            && let Some((value, Some(units))) = compiled::typed(site, &pair, *x, *y, self.charging)
+        } else if let ([x, y], Some(pair)) = (args, site.pair(self.exe))
+            && let Some((value, Some(units))) =
+                compiled::typed(site, &pair, *x, *y, self.charging, self.exe)
         {
             // A statement root's operator runs the typed kernel nested
             // operators run, charged its table's units as its entry is.
             Some((value, units))
         } else if let [x, y] = args
             && matches!(x, Value::Text(_) | Value::LongText(_))
-            && site.texts.is_some()
+            && self.exe.lib(site.lib).kernels(self.exe).texts.is_some()
             && let Some((value, Some(units))) =
                 compiled::text_relation(site, *x, *y, self.exe, self.arena, self.charging)
         {
             Some((value, units))
         } else if !self.charging {
-            site.entry.call(args).map(|value| (value, 0))
+            site.entry(self.exe).call(args).map(|value| (value, 0))
         } else if args.iter().all(scalar) {
-            match site.entry.call(args) {
+            match site.entry(self.exe).call(args) {
                 Some(result) if scalar(&result) => site
-                    .table
+                    .table(self.exe)
                     .units(sizes(args, &result))
                     .map(|units| (result, units)),
                 Some(_) => self.measured(site, args),
@@ -929,7 +938,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     fn measured(&self, site: &OperatorSite, args: &[Value]) -> Option<(Value, u64)> {
         let function = self.exe.lib(site.lib);
         let (_, fast) = function.specialization.prepared.as_ref()?;
-        let answer = site.entry.answer(args, true)?;
+        let answer = site.entry(self.exe).answer(args, true)?;
         self.answered(function, fast, args, answer)
     }
 
@@ -1143,7 +1152,6 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 pc: site.miss,
                 reg: site.reg,
                 depth: Depth::None,
-                direct: None,
             };
             let mut args = [Value::Absent; MAX_ARGS];
             args[0] = value;
@@ -1240,7 +1248,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             link: self.link,
             plan: island,
             stream: island.stream(exe),
-            compiled: island.compiled(exe)?,
+            compiled: self.scratch.compiled(island, exe)?,
             captured,
         })
     }
@@ -1255,7 +1263,16 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             link: cached.link,
             plan,
             stream: plan.stream(self.exe),
-            compiled: plan.resolved()?,
+            compiled: {
+                #[cfg(any(test, feature = "testing"))]
+                if self.scratch.generic_only {
+                    plan.generic(self.exe)?
+                } else {
+                    plan.resolved()?
+                }
+                #[cfg(not(any(test, feature = "testing")))]
+                plan.resolved()?
+            },
             captured: cached.captured,
         })
     }
@@ -1344,9 +1361,13 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         slots: &Slots,
         library: Option<super::LibraryCall>,
         boundary: Option<crate::compile::LibId>,
+        source: Option<(StmtId, u32)>,
     ) {
-        let exit = &mut self.scratch.exit;
         let mut slots = slots[..plan.slots].to_vec();
+        if let Some((statement, pc)) = source {
+            self.restore_expression_scopes(&mut slots, statement, pc);
+        }
+        let exit = &mut self.scratch.exit;
         if captured != RESIDENT {
             for (index, at) in plan.captures.iter().enumerate() {
                 let (_, cell) = self.scratch.captured[captured as usize + index];
@@ -1365,6 +1386,29 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             control,
             stands,
         });
+    }
+
+    /// A region can replay before a physical expression binding was made.
+    /// Source lexical coordinates decide which of those slots owns a value.
+    fn restore_expression_scopes(&self, slots: &mut Slots, statement: StmtId, pc: u32) {
+        let (stream, statement, _) = self.exe.statement(statement);
+        let mut active = std::collections::BTreeMap::new();
+        for at in statement.ops.start..statement.ops.end() {
+            match stream.ops[at as usize] {
+                lash_kernel_exec::Op::LetBind { local, .. } => {
+                    *active.entry(local.at).or_insert(false) |= at < pc;
+                }
+                lash_kernel_exec::Op::LetEnd { local } if at < pc => {
+                    active.insert(local.at, false);
+                }
+                _ => {}
+            }
+        }
+        for (at, live) in active {
+            if !live {
+                slots[at as usize] = SlotState::Empty;
+            }
+        }
     }
 
     /// `stop` inside statement `stmt` of the frame being left: where the
@@ -1415,8 +1459,10 @@ pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
 
 #[cfg(test)]
 thread_local! {
-    /// Real iterations executed in unboxed typed registers.
-    pub(crate) static TYPED_REPEATED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Source-certified visitor commits.
+    pub(crate) static COLLECTION_VISITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Complete iterations of a fixed recurrence template.
+    pub(crate) static REPEATED_TEMPLATE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Collection operations answered without a heap context.
     pub(crate) static DIRECT_COLLECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     pub(crate) static DIRECT_ITEMS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };

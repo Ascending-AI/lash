@@ -5,6 +5,12 @@ use super::*;
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
+#[path = "program/update.rs"]
+mod update;
+pub(crate) use update::Update;
+#[path = "program/format.rs"]
+mod format;
+pub(crate) use format::Format;
 #[path = "program/numeric.rs"]
 mod numeric;
 pub(crate) use numeric::{CallInputs, Destination, Operand};
@@ -21,8 +27,29 @@ pub(crate) use merge::{
     Append as CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
 };
 
+pub(crate) struct CollectionKernel {
+    pub(crate) step: std::sync::Arc<CollectionStep>,
+    pub(crate) tail: bool,
+}
+
+impl CollectionKernel {
+    pub(crate) fn addresses(&mut self, visit: &mut impl FnMut(&mut usize)) {
+        match std::sync::Arc::make_mut(&mut self.step) {
+            CollectionStep::Visit(step) => {
+                for at in &mut step.after {
+                    visit(at);
+                }
+            }
+            CollectionStep::Merge(step) => visit(&mut step.callback),
+            _ => {}
+        }
+    }
+}
+
 pub(crate) struct Instruction {
     pub(crate) op: Op,
+    /// A source-certified kernel with this operation as its generic suffix.
+    pub(crate) kernel: Option<CollectionKernel>,
     /// Source statement admission immediately before its first operation.
     pub(crate) begin: Option<StatementEntry>,
     /// Evaluated operands, in source evaluation order, before this op.
@@ -77,278 +104,6 @@ pub(crate) struct StoreInputs {
     pub(crate) roles: [usize; 3],
 }
 
-pub(crate) enum Op {
-    Collection {
-        step: std::sync::Arc<CollectionStep>,
-        tail: bool,
-        original: Box<Op>,
-    },
-    Try {
-        id: StmtId,
-        finally: Option<usize>,
-        after: usize,
-    },
-    /// A `while`: its entry ends the ownership of the texts its
-    /// accumulators made in an earlier activation.
-    Loop {
-        id: StmtId,
-        header: usize,
-        texts: Box<[usize]>,
-    },
-    /// A linear text accumulator's statement (FIG-6795) takes the long text
-    /// of the variable at its slot, owned where its own write made it.
-    Accumulate(usize),
-    /// A `for` over the value in `reg`. One through a protocol (`via`)
-    /// opens at source op `pc`, where its `open` hook runs.
-    For {
-        id: StmtId,
-        header: usize,
-        reg: u32,
-        pc: u32,
-        via: bool,
-        texts: Box<[usize]>,
-    },
-    Header {
-        repeat: Option<Box<RepeatSite>>,
-        id: StmtId,
-        cost: u64,
-        metered: u64,
-        at: Option<usize>,
-        /// An item transform runs for every native cursor step. The active
-        /// cursor and guard decide whether `next` or `check` runs.
-        item_hook: bool,
-        otherwise: usize,
-        after: usize,
-    },
-    LoopBranch {
-        reg: u32,
-        pc: u32,
-        otherwise: usize,
-    },
-    EndLoop,
-    LoopDone(u32),
-    Depart {
-        continuing: bool,
-    },
-    Open(usize),
-    /// A constant return is one semantic statement, without an operand
-    /// window or extra dispatch between its unit and its fixed close.
-    ReturnLiteral {
-        entry: Option<usize>,
-        id: StmtId,
-        index: usize,
-        ahead: u64,
-        value: Value,
-        close: Option<Close>,
-        covered: bool,
-        reg: u32,
-    },
-    Keep(super::Restart),
-    Constant {
-        dst: u32,
-        value: Value,
-    },
-    Local {
-        dst: u32,
-        at: usize,
-        shared: bool,
-        miss: u32,
-    },
-    Session {
-        dst: u32,
-        name: u32,
-        miss: u32,
-    },
-    Operator {
-        site: Box<OperatorSite>,
-        args: Box<[u32]>,
-        covered: bool,
-    },
-    /// Pure resident operands need no intermediate register dispatches.
-    DirectOperator {
-        site: Box<OperatorSite>,
-        reads: Box<[Read]>,
-        covered: bool,
-    },
-    /// Fixed arity scalar work with source-owned kernels and destinations.
-    Unary {
-        site: Box<OperatorSite>,
-        arg: Operand,
-        covered: bool,
-        to: Destination,
-    },
-    Binary {
-        kernel: lash_kernel_doc::scalar::Pair,
-        site: Box<OperatorSite>,
-        left: Operand,
-        right: Operand,
-        covered: bool,
-        to: Destination,
-    },
-    Native {
-        site: NativeSite,
-        args: Box<[u32]>,
-    },
-    DirectNative {
-        site: NativeSite,
-        reads: Box<[Read]>,
-    },
-    Heap {
-        site: HeapSite,
-        args: Box<[u32]>,
-    },
-    MemberAccess {
-        site: HeapSite,
-        args: Box<[u32]>,
-        units: super::MemberAccess,
-        reads: Option<Box<[Read; 2]>>,
-        to: Destination,
-    },
-    MemberStore {
-        site: HeapSite,
-        args: Box<[u32]>,
-        reads: Option<Box<[Read; 3]>>,
-        property: Box<super::MemberWrite>,
-        finish: Option<u32>,
-    },
-    Reserve {
-        kind: lash_kernel_doc::ValueKind,
-        members: usize,
-        miss: u32,
-    },
-    Make {
-        ahead: u64,
-        replay_guard: bool,
-        make: Make,
-        items: Box<[u32]>,
-        reg: u32,
-        members: usize,
-        miss: u32,
-    },
-    Record {
-        ahead: u64,
-        names: Box<[Value]>,
-        values: Box<[u32]>,
-        reg: u32,
-        members: usize,
-        miss: u32,
-    },
-    Closure {
-        code: CodeId,
-        reg: u32,
-        miss: u32,
-    },
-    Store {
-        target: u32,
-        index: Option<u32>,
-        value: u32,
-        field: Option<usize>,
-        pc: u32,
-        inputs: Option<Box<StoreInputs>>,
-        cache: bool,
-        finish: Option<u32>,
-    },
-    Remove {
-        target: u32,
-        index: u32,
-        pc: u32,
-    },
-    Unit {
-        site: UnitSite,
-        src: u32,
-    },
-    Kind {
-        site: Box<KindTest>,
-        src: u32,
-    },
-    DirectKind {
-        site: Box<KindTest>,
-        reads: Box<[Read]>,
-    },
-    Field {
-        dst: u32,
-        field: usize,
-        miss: u32,
-    },
-    Index {
-        site: Option<crate::compile::ReadSite>,
-        dst: u32,
-        miss: u32,
-    },
-    Call {
-        site: CallSite,
-        read: bool,
-        args: Box<[u32]>,
-    },
-    Bind {
-        at: usize,
-        src: u32,
-    },
-    Unbind(usize),
-    Cond {
-        reg: u32,
-        close: Option<Close>,
-        pc: u32,
-        otherwise: usize,
-    },
-    Jump(usize),
-    Close {
-        close: Close,
-        covered: bool,
-    },
-    Write {
-        site: Box<WriteSite>,
-    },
-    Return {
-        reg: u32,
-        pc: u32,
-    },
-    Done {
-        leaves: u32,
-        empty: Option<crate::compile::BlockId>,
-    },
-    Branch {
-        reg: u32,
-        pc: u32,
-        otherwise: usize,
-        opens: [Option<usize>; 2],
-    },
-    /// A session binding's write of the value in `reg`, at source op `pc`.
-    Publish {
-        name: u32,
-        reg: u32,
-        pc: u32,
-        bind: bool,
-    },
-    /// A statement's host or run effect on its live value, at source op
-    /// `pc`: its source handler prints, finishes, fails or raises it.
-    Effect(u32),
-    /// Task state is claimed only after the physical windows materialize.
-    Spawn(u32),
-    Yield(u32),
-    Join(u32),
-    Wait(u32),
-    Cancel(u32),
-    /// Heap text construction or an operation left to its source handler.
-    Cold(Deferred),
-    /// A resident member read with its complete source guard and completion edge.
-    Access(Box<AccessSite>),
-    /// A source initialization immediately followed by its compact read.
-    AccessInit {
-        head: usize,
-        original: Box<WriteSite>,
-        held: Option<Box<WriteSite>>,
-    },
-    /// A local's binary update and its write share one instruction.
-    Accumulation {
-        site: Box<OperatorSite>,
-        append: Option<Box<Append>>,
-        reads: Box<[Read; 2]>,
-        covered: bool,
-        write: Box<WriteSite>,
-    },
-}
-
 /// The most arms a guarded read enters.
 pub(crate) const GUARDED_ARMS: usize = 4;
 
@@ -363,6 +118,7 @@ pub(crate) struct StatementEntry {
 pub(crate) struct WriteSite {
     pub(crate) begin: Option<StatementEntry>,
     pub(crate) reads: Option<Box<[Read]>>,
+    pub(crate) access: Option<AccessStart>,
     pub(crate) at: usize,
     pub(crate) shared: bool,
     pub(crate) reg: u32,
@@ -373,6 +129,14 @@ pub(crate) struct WriteSite {
     pub(in crate::machine::islands) leaves: u32,
     /// A linear text accumulator's write (FIG-6795).
     pub(in crate::machine::islands) accumulates: bool,
+}
+
+/// A write may start the following member kernel. The source write remains
+/// its only fallback, and another initializer is an index into that stream.
+#[derive(Clone, Copy)]
+pub(crate) struct AccessStart {
+    pub(crate) head: usize,
+    pub(crate) init: Option<usize>,
 }
 
 pub(super) struct Build<'e> {
@@ -388,6 +152,8 @@ pub(super) struct Build<'e> {
     open: Option<usize>,
     pub(super) blocks: Vec<Block>,
     pub(super) ops: Vec<Instruction>,
+    pub(super) fused: bool,
+    pub(super) charged: bool,
     pub(super) registers: usize,
     restarts: usize,
     captures: Vec<(u32, super::Restart, bool)>,
@@ -419,6 +185,8 @@ impl<'e> Build<'e> {
             open: None,
             blocks: Vec::new(),
             ops: Vec::new(),
+            fused: true,
+            charged: true,
             registers: 0,
             restarts: 0,
             captures: Vec::new(),
@@ -433,6 +201,7 @@ impl<'e> Build<'e> {
         let pc = self.ops.len();
         self.ops.push(Instruction {
             op,
+            kernel: None,
             begin: self.begin.take(),
             live: self.live.clone().into(),
         });
@@ -500,7 +269,8 @@ impl<'e> Build<'e> {
             end: 0,
             after: 0,
         });
-        let literal_entry = index == 0
+        let literal_entry = self.fused
+            && index == 0
             && matches!(
                 &*block.statements,
                 [Statement {
@@ -574,14 +344,16 @@ impl<'e> Build<'e> {
         self.live.clear();
         let ahead = self.start();
         self.cover(1);
-        if let StatementKind::Return {
-            value: Expr {
-                kind: Kind::Const(value),
-                ..
-            },
-            close,
-            reg,
-        } = &statement.kind
+        if self.fused
+            && let StatementKind::Return {
+                value:
+                    Expr {
+                        kind: Kind::Const(value),
+                        ..
+                    },
+                close,
+                reg,
+            } = &statement.kind
         {
             let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
             self.emit(Op::ReturnLiteral {
@@ -612,6 +384,7 @@ impl<'e> Build<'e> {
             let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
             self.emit(Op::Write {
                 site: Box::new(WriteSite {
+                    access: None,
                     begin: Some(StatementEntry {
                         id: statement.id,
                         index,
@@ -715,18 +488,25 @@ impl<'e> Build<'e> {
                     header,
                     texts,
                 };
-                let repeat = self
-                    .exe
-                    .islands
-                    .scalar
-                    .iter()
-                    .find(|plan| plan.stmt == statement.id)
-                    .and_then(|plan| {
-                        Some(Box::new(RepeatSite {
-                            run: plan.typed_repeat(self.exe, &self.ops[start..exhausted])?,
-                            iteration_max: plan.iteration_max,
-                        }))
-                    });
+                let repeat = self.fused.then_some(()).and_then(|_| {
+                    self.exe
+                        .islands
+                        .scalar
+                        .iter()
+                        .find(|plan| plan.stmt == statement.id)
+                        .and_then(|plan| {
+                            Some(Box::new(RepeatSite {
+                                run: super::super::code::repeat::Repeat::of(
+                                    statement,
+                                    plan,
+                                    self.shared,
+                                    self.exe,
+                                    self.charged,
+                                )?,
+                                iteration_max: plan.iteration_max,
+                            }))
+                        })
+                });
                 self.ops[header].op = Op::Header {
                     repeat,
                     id: statement.id,
@@ -843,6 +623,7 @@ impl<'e> Build<'e> {
                 let covered = close.is_some_and(|close| self.cover(u64::from(close.total)));
                 self.emit(Op::Write {
                     site: Box::new(WriteSite {
+                        access: None,
                         begin: None,
                         reads: None,
                         at: *at as usize,
@@ -1116,7 +897,7 @@ impl<'e> Build<'e> {
             }
             Kind::Operator {
                 lib, args, closes, ..
-            } if unit_test(Some(self.exe.lib(*lib)), args) => {
+            } if self.fused && unit_test(Some(self.exe.lib(*lib)), args) => {
                 let [value, unit] = &args[..] else {
                     return None;
                 };
@@ -1136,7 +917,7 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &[value.reg]);
             }
-            Kind::Operator { lib, args, .. } if self.kind(expr, *lib, args)? => {}
+            Kind::Operator { lib, args, .. } if self.fused && self.kind(expr, *lib, args)? => {}
             Kind::Operator {
                 args,
                 lib,
@@ -1167,23 +948,36 @@ impl<'e> Build<'e> {
                     let args = self.args(args)?;
                     let close = self.ordered_closes(closes, reg);
                     self.open = None;
-                    self.emit(Op::Heap {
-                        site: HeapSite {
-                            lib: *lib,
-                            close,
-                            pc,
-                            reg,
-                            depth,
-                            checked: self.root_checked()
-                                || invoke.is_some_and(|invoke| invoke.checked),
-                            counted: invoke.and_then(|invoke| invoke.counted()),
-                            act: invoke
-                                .filter(|invoke| invoke.call)
-                                .and_then(|invoke| invoke.act),
-                            root: self.root,
-                        },
-                        args: args.clone(),
-                    });
+                    let site = HeapSite {
+                        lib: *lib,
+                        close,
+                        pc,
+                        reg,
+                        depth,
+                        checked: self.root_checked() || invoke.is_some_and(|invoke| invoke.checked),
+                        counted: invoke.and_then(|invoke| invoke.counted()),
+                        act: invoke
+                            .filter(|invoke| invoke.call)
+                            .and_then(|invoke| invoke.act),
+                        root: self.root,
+                    };
+                    if args.len() == 2
+                        && let Some(units) = self.member_charge(*lib)
+                    {
+                        self.emit(Op::MemberAccess {
+                            site,
+                            args: args.clone(),
+                            units,
+                            reads: None,
+                            to: Destination::Register,
+                        });
+                    } else {
+                        self.emit(Op::Heap {
+                            site,
+                            args: args.clone(),
+                            resident: None,
+                        });
+                    }
                     self.result(reg, &args);
                     return Some(());
                 };
@@ -1197,22 +991,19 @@ impl<'e> Build<'e> {
                     })
                 });
                 site.checked |= self.root_checked();
-                site.pair = crate::compile::numeric_pair(self.exe.lib(site.lib), site.checked);
                 site.body_when_observed |=
                     self.root.is_some() && matches!(self.exe.lib(site.lib).run, LibRun::Body(_));
                 self.site(site.depth, site.body_when_observed);
-                if site.concat.is_some() {
-                    let extra = site
-                        .entry
-                        .deepest(&|id| self.exe.lib(id), &|id| self.exe.library_lib(id));
+                if site.concat(self.exe).is_some() {
+                    let extra = self.exe.lib(site.lib).prepared_depth(self.exe);
                     self.site(Depth::Template(extra), site.body_when_observed);
                 }
                 let direct = (closes.len() <= 1).then(|| self.reads(args)).flatten();
                 if let Some(reads) = direct {
                     let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
-                    let covered = site.pair.is_some()
+                    let covered = site.pair(self.exe).is_some()
                         && reads.len() == 2
-                        && self.cover(site.fixed.saturating_add(site.table.max()));
+                        && self.cover(site.fixed.saturating_add(site.table(self.exe).max()));
                     if !covered {
                         self.open = None;
                     }
@@ -1220,6 +1011,7 @@ impl<'e> Build<'e> {
                         site: Box::new(site),
                         reads,
                         covered,
+                        to: Destination::Register,
                     });
                     self.result(reg, &consumed);
                     return Some(());
@@ -1227,9 +1019,9 @@ impl<'e> Build<'e> {
                 let args = self.args(args)?;
                 site.close = self.ordered_closes(closes, reg);
                 site.fixed = site.close.map_or(0, |close| u64::from(close.total));
-                let covered = site.pair.is_some()
+                let covered = site.pair(self.exe).is_some()
                     && args.len() == 2
-                    && self.cover(site.fixed.saturating_add(site.table.max()));
+                    && self.cover(site.fixed.saturating_add(site.table(self.exe).max()));
                 if !covered {
                     self.open = None;
                 }
@@ -1237,6 +1029,7 @@ impl<'e> Build<'e> {
                     site: Box::new(site),
                     args: args.clone(),
                     covered,
+                    to: Destination::Register,
                 });
                 self.result(reg, &args);
             }
@@ -1257,14 +1050,6 @@ impl<'e> Build<'e> {
                         Depth::Template(extra)
                     } else {
                         Depth::None
-                    },
-                    direct: {
-                        let lib = self.exe.lib(*lib);
-                        (lib.collection_length()
-                            .map(|(kind, units)| Direct::Length(kind, units)))
-                        .or_else(|| lib.item_read().map(Direct::Item))
-                        .or_else(|| lib.membership().map(Direct::Member))
-                        .or_else(|| lib.text_join().then_some(Direct::TextJoin))
                     },
                 };
                 self.site(site.depth, false);

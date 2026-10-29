@@ -2,9 +2,6 @@
 //! completion charge, tape and bound stop, including every value kind.
 
 use super::*;
-use lash_kernel_doc::Float;
-use lash_kernel_doc::PreparedNative;
-use lash_kernel_doc::Value;
 use lash_kernel_value::names::Name;
 use std::sync::Arc;
 
@@ -119,80 +116,16 @@ fn prepared_typescript_conversions_agree_with_their_general_paths() {
             "{name} must provide a prepared conversion entry"
         );
     }
-    // Where the generated scalar template answers, compare it directly.
-    // Longer spellings and object kinds are compared through their bodies below.
-    for (name, values) in [
-        (
-            "ts.number.format_value",
-            vec![
-                -0.0,
-                0.0,
-                f64::NAN,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-                1e21,
-                1e-7,
-                9007199254740991.0,
-                9007199254740992.0,
-                9007199254740994.0,
-                f64::from_bits(1),
-                f64::MIN_POSITIVE,
-            ],
-        ),
-        (
-            "ts.to_boolean",
-            vec![-0.0, 0.0, f64::NAN, f64::INFINITY, -1.0, f64::from_bits(1)],
-        ),
-        (
-            "ts.to_int32",
-            vec![
-                -0.0,
-                0.0,
-                f64::NAN,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-                2147483648.0,
-                4294967296.0,
-                -4294967297.0,
-                3.9,
-                -3.9,
-                1e100,
-            ],
-        ),
-        (
-            "ts.primitive_to_string",
-            vec![-0.0, 0.0, f64::NAN, f64::INFINITY, 1.5, 1000.0, 1e21],
-        ),
-    ] {
-        let (_, registered) = function(name);
-        let prepared = registered.native().unwrap().prepare().unwrap();
-        let template = registered.plan().unwrap().template.as_ref().unwrap();
-        let natives: Vec<PreparedNative> = template
-            .callees
-            .iter()
-            .map(|id| {
-                registry
-                    .get(id)
-                    .unwrap()
-                    .native()
-                    .unwrap()
-                    .prepare()
-                    .unwrap()
-            })
-            .collect();
-        for value in values {
-            let args = [Value::Float(Float::new(value))];
-            if let Some(expected) = template.entry.and_then(|entry| entry(&args, &natives)) {
-                let actual =
-                    (prepared.entry)(&args).expect("the template's inline answer is prepared");
-                assert!(actual.same(&expected), "{name}({value})");
-            }
-        }
-    }
     let (number, _) = function("ts.number.format_value");
     let (boolean, _) = function("ts.to_boolean");
     let named = |name| *function(name).0;
     let sources = [
+        format!(
+            r#"main {{ for value in [-0.0, 0.0, nan, inf, -inf, 1.5, 1000.0, 1e21] {{
+            print invoke @{primitive}(value)
+        }} return null }}"#,
+            primitive = named("ts.primitive_to_string")
+        ),
         format!(
             r#"main {{ for value in [nan, inf, -inf, -0.0, 2147483648.0, 4294967295.0, 4294967296.0, -4294967297.0, 3.9, -3.9, 1e100] {{ let converted = invoke @{int32}(value) print converted }} return null }}"#,
             int32 = named("ts.to_int32")
@@ -276,9 +209,9 @@ main {{
     }
 }
 
-/// PLAN-INDEP / FIG-7000: an Any-returning helper's text path may
-/// compose the same prepared calls as a Text-returning helper. Its
-/// completion formula still belongs to the outer helper.
+/// PLAN-INDEP / FIG-7000: a composed text path runs its canonical native
+/// conversions through the packet body. Its outer completion formula keeps
+/// the same source order at every finite bound.
 #[test]
 fn composed_text_addition_agrees_with_its_body_and_charge() {
     let runner = runner::Runner::new("typescript").unwrap();
@@ -294,37 +227,10 @@ fn composed_text_addition_agrees_with_its_body_and_charge() {
         panic!("fixture lowers")
     };
     let registry = base.library.registry();
-    let (add, registered) = registry
+    let (add, _) = registry
         .iter()
         .find(|(_, registered)| registered.name() == "ts.add")
         .unwrap();
-    let template = registered.plan().unwrap().template.as_ref().unwrap();
-    let natives: Vec<_> = template
-        .callees
-        .iter()
-        .map(|id| {
-            registry
-                .get(id)
-                .unwrap()
-                .native()
-                .unwrap()
-                .prepare()
-                .unwrap()
-        })
-        .collect();
-    let prefix = lash_kernel_doc::arena::ShortText::new("key_").unwrap();
-    for number in [-0.0, 0.0, -17.0, 42.0] {
-        let args = [Value::Text(prefix), Value::Float(Float::new(number))];
-        let actual = template.entry.and_then(|entry| entry(&args, &natives));
-        let expected = lash_kernel_doc::arena::ShortText::new(&format!("key_{}", number as i64))
-            .map(Value::Text);
-        assert!(
-            actual
-                .zip(expected)
-                .is_some_and(|(actual, expected)| actual.same(&expected)),
-            "composed path for {number}: {actual:?}"
-        );
-    }
     let source = format!(
         r#"kernel 1
 numbers by_spelling
@@ -351,6 +257,10 @@ main {{
     assert!(
         matches!(expected.end, crate::ExpectedEnd::Finished(_)),
         "{expected:?}"
+    );
+    assert_eq!(
+        &expected.prints[..4],
+        ["key_0", "key_0", "key_-17", "key_42"].map(|value| Datum::Text(value.into()))
     );
     assert_eq!(observe::<0>(&program, 50_000_000), expected);
     let mut charged = 0;

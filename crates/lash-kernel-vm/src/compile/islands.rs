@@ -185,6 +185,8 @@ pub(crate) struct IslandPlan {
     /// project their occurrence directly from their canonical source action.
     pub(crate) calls: Box<[usize]>,
     compiled: OnceLock<Option<Compiled>>,
+    #[cfg(any(test, feature = "testing"))]
+    generic: OnceLock<Option<Compiled>>,
 }
 
 /// Why lowering does not admit a formed plan.
@@ -351,6 +353,8 @@ pub(super) fn form(
             body,
             calls: former.calls.into(),
             compiled: OnceLock::new(),
+            #[cfg(any(test, feature = "testing"))]
+            generic: OnceLock::new(),
         };
         if plan.verify(&tables.stream).is_ok() {
             islands.sites = former.sites as usize;
@@ -1447,6 +1451,8 @@ impl IslandPlan {
             body: self.body.clone(),
             calls: self.calls.clone(),
             compiled: OnceLock::new(),
+            #[cfg(any(test, feature = "testing"))]
+            generic: OnceLock::new(),
         }
     }
 
@@ -1457,6 +1463,13 @@ impl IslandPlan {
         self.compiled.get()?.as_ref()
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn generic(&self, exe: &Executable) -> Option<&Compiled> {
+        self.generic
+            .get_or_init(|| Compiled::generic(self, exe))
+            .as_ref()
+    }
+
     /// The plan's compiled form, built on its first entry.
     pub(crate) fn compiled(&self, exe: &Executable) -> Option<&Compiled> {
         self.compiled
@@ -1465,7 +1478,7 @@ impl IslandPlan {
     }
 }
 
-fn verify_close(close: Option<&Close>, stream: &super::Stream) -> Result<(), Refused> {
+pub(crate) fn verify_close(close: Option<&Close>, stream: &super::Stream) -> Result<(), Refused> {
     let Some(close) = close else {
         return Ok(());
     };

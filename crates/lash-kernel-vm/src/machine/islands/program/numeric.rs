@@ -11,7 +11,7 @@ impl Build<'_> {
         let mut protected = BTreeSet::new();
         let mut targets = BTreeSet::new();
         for instruction in &mut self.ops {
-            instruction.op.addresses(|at| {
+            instruction.op.addresses(&mut |at| {
                 targets.insert(*at);
             });
             if let Op::Access(site) = &instruction.op {
@@ -36,7 +36,7 @@ impl Build<'_> {
                 continue;
             }
             if !protected.contains(&at) {
-                instruction.op = fixed(instruction.op);
+                instruction.op = fixed(instruction.op, self.exe);
                 if let Op::MemberStore { finish, .. } | Op::Store { finish, .. } =
                     &mut instruction.op
                     && let Some((next, following)) = old.peek()
@@ -98,7 +98,7 @@ impl Build<'_> {
         let end = relocation.len() - 1;
         relocation[end] = self.ops.len();
         for instruction in &mut self.ops {
-            instruction.op.addresses(|at| *at = relocation[*at]);
+            instruction.op.addresses(&mut |at| *at = relocation[*at]);
         }
         for block in &mut self.blocks {
             for start in &mut block.starts {
@@ -303,21 +303,29 @@ impl Build<'_> {
     }
 }
 
-fn eligible(site: &OperatorSite) -> bool {
+fn eligible(site: &OperatorSite, exe: &Executable) -> bool {
     !site.checked
         && site.counted.is_none()
         && site.act.is_none()
         && site.root.is_none()
-        && site.entry.immediate()
+        && site.entry(exe).immediate()
 }
 
-fn fixed(op: Op) -> Op {
+fn fixed(op: Op, exe: &Executable) -> Op {
+    let eligible_destination = |site: &OperatorSite, to: &Destination| match to {
+        Destination::Register => true,
+        Destination::Write(write) => !write.accumulates && !exe.lib(site.lib).kernels(exe).append,
+    };
     let (site, args, covered, to) = match op {
         Op::DirectOperator {
             site,
             reads,
             covered,
-        } if eligible(&site) && (reads.len() == 1 || (reads.len() == 2 && site.pair.is_some())) => {
+            to,
+        } if eligible(&site, exe)
+            && eligible_destination(&site, &to)
+            && (reads.len() == 1 || (reads.len() == 2 && site.pair(exe).is_some())) =>
+        {
             (
                 site,
                 reads
@@ -326,51 +334,42 @@ fn fixed(op: Op) -> Op {
                     .map(Operand::from)
                     .collect::<Vec<_>>(),
                 covered,
-                Destination::Register,
+                to,
             )
         }
         Op::Operator {
             site,
             args,
             covered,
-        } if eligible(&site) && (args.len() == 1 || (args.len() == 2 && site.pair.is_some())) => (
-            site,
-            args.into_vec().into_iter().map(Operand::Register).collect(),
-            covered,
-            Destination::Register,
-        ),
-        Op::Accumulation {
-            site,
-            append: None,
-            reads,
-            covered,
-            write,
-        } if eligible(&site) && reads.len() == 2 && site.pair.is_some() && !write.accumulates => (
-            site,
-            (*reads).into_iter().map(Operand::from).collect(),
-            covered,
-            Destination::Write(write),
-        ),
+            to,
+        } if eligible(&site, exe)
+            && eligible_destination(&site, &to)
+            && (args.len() == 1 || (args.len() == 2 && site.pair(exe).is_some())) =>
+        {
+            (
+                site,
+                args.into_vec().into_iter().map(Operand::Register).collect(),
+                covered,
+                to,
+            )
+        }
         other => return other,
     };
     let mut args = args.into_iter();
     let Some(left) = args.next() else {
-        unreachable!("a fixed scalar has an operand");
+        unreachable!("a fixed scalar has an operand")
     };
     match args.next() {
-        Some(right) => {
-            let Some(kernel) = site.pair else {
-                unreachable!("a binary site was certified");
-            };
-            Op::Binary {
-                kernel,
-                site,
-                left,
-                right,
-                covered,
-                to,
-            }
-        }
+        Some(right) => Op::Binary {
+            kernel: site
+                .pair(exe)
+                .unwrap_or_else(|| unreachable!("a binary site was certified")),
+            site,
+            left,
+            right,
+            covered,
+            to,
+        },
         None => Op::Unary {
             site,
             arg: left,
@@ -381,7 +380,7 @@ fn fixed(op: Op) -> Op {
 }
 
 impl Op {
-    fn addresses(&mut self, mut visit: impl FnMut(&mut usize)) {
+    pub(in crate::machine::islands) fn addresses(&mut self, visit: &mut impl FnMut(&mut usize)) {
         match self {
             Self::Try { finally, after, .. } => {
                 if let Some(at) = finally {
@@ -400,7 +399,14 @@ impl Op {
             | Self::Cond { otherwise, .. }
             | Self::Branch { otherwise, .. } => visit(otherwise),
             Self::Jump(to) => visit(to),
-            Self::AccessInit { head, .. } => visit(head),
+            Self::Write { site } => {
+                if let Some(access) = &mut site.access {
+                    visit(&mut access.head);
+                    if let Some(init) = &mut access.init {
+                        visit(init);
+                    }
+                }
+            }
             Self::Access(site) => {
                 visit(&mut site.after);
                 if let Some(short) = &mut site.short {

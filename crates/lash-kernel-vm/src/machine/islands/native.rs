@@ -29,12 +29,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         given: usize,
     ) -> Answer {
         let args = &padded[..given];
-        if matches!(site.direct, Some(Direct::TextJoin))
+        if matches!(site.direct(self.exe), Some(Direct::TextJoin))
             && let Some(answer) = self.joined_text(site, args)
         {
             return answer;
         }
-        let length = match (site.direct, padded[0]) {
+        let length = match (site.direct(self.exe), padded[0]) {
             (Some(Direct::Length(kind, units)), value)
                 if value.kind() == kind && !self.arena.any_cold() =>
             {
@@ -151,7 +151,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     /// `list.get` / `tuple.get` on a valid resident position. This reads
     /// and measures only; the call admits its charge before committing.
     pub(super) fn item_answer(&self, site: &NativeSite, args: &[Value]) -> Option<(Value, u64)> {
-        let Some(Direct::Item(kind)) = site.direct else {
+        let Some(Direct::Item(kind)) = site.direct(self.exe) else {
             return None;
         };
         if self.tape.is_some() || args[0].kind() != kind {
@@ -213,7 +213,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         padded: &[Value],
     ) -> Option<(Value, u64)> {
-        let Some(Direct::Member(table)) = site.direct else {
+        let Some(Direct::Member(table)) = site.direct(self.exe) else {
             return None;
         };
         self.member_answer(site, table, padded)

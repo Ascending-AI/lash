@@ -6,7 +6,7 @@ use super::*;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
-    pub(super) fn operand(&mut self, frame: &Frame<'e>, arg: &Operand) -> Result<Value, Stop> {
+    pub(super) fn operand(&mut self, frame: &Values<'_, 'e>, arg: &Operand) -> Result<Value, Stop> {
         let (value, miss) = match arg {
             Operand::Register(reg) => return Ok(frame.regs[*reg as usize]),
             Operand::Literal { value, .. } => return Ok(*value),
@@ -31,7 +31,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn numeric_unary(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         site: &OperatorSite,
         arg: &Operand,
         covered: bool,
@@ -39,14 +39,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     ) -> Result<Next, Stop> {
         let x = self.operand(frame, arg)?;
         let answer = if !OBSERVING && !self.accounting && self.admitted {
-            site.entry.call(&[x]).map(Ok)
+            site.entry(self.exe).call(&[x]).map(Ok)
         } else if !OBSERVING {
             scalar(&x)
-                .then(|| site.entry.call(&[x]))
+                .then(|| site.entry(self.exe).call(&[x]))
                 .flatten()
                 .and_then(|value| {
                     let units = if scalar(&value) {
-                        site.table.units(sizes(&[x], &value))
+                        site.table(self.exe).units(sizes(&[x], &value))
                     } else {
                         self.unary_units(site, x, value)
                     };
@@ -56,10 +56,28 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             None
         };
         let value = match answer {
-            Some(answer) => answer?,
+            Some(answer) => {
+                let value = match answer {
+                    Ok(value) => {
+                        witnessed!(Scalar, Commit);
+                        value
+                    }
+                    Err(stop) => {
+                        witnessed!(Scalar, Prefix);
+                        return Err(stop);
+                    }
+                };
+                if let Some(tape) = self.recorder {
+                    tape.typed_packet();
+                }
+                value
+            }
             None => {
+                witnessed!(Scalar, Guard);
                 self.covered = false;
-                self.retaining(&mut frame.transient, |island| island.operate(site, &[x]))?
+                self.retaining(&mut frame.state.transient, |island| {
+                    island.operate(site, &[x])
+                })?
             }
         };
         self.destination(frame, site.reg, value, to)
@@ -77,7 +95,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn numeric_binary(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         kernel: lash_kernel_doc::scalar::Pair,
         site: &OperatorSite,
         (left, right): (&Operand, &Operand),
@@ -89,16 +107,34 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.scratch.exit.regs.push((left.reg(), x));
         })?;
         let answer = if !OBSERVING {
-            let typed = super::super::compiled::typed(site, &kernel, x, y, self.charging);
+            let typed = super::super::compiled::typed(site, &kernel, x, y, self.charging, self.exe);
             typed.and_then(|(value, units)| self.numeric_charge(site, value, units, covered))
         } else {
             None
         };
         let value = match answer {
-            Some(answer) => answer?,
+            Some(answer) => {
+                let value = match answer {
+                    Ok(value) => {
+                        witnessed!(Scalar, Commit);
+                        value
+                    }
+                    Err(stop) => {
+                        witnessed!(Scalar, Prefix);
+                        return Err(stop);
+                    }
+                };
+                if let Some(tape) = self.recorder {
+                    tape.typed_packet();
+                }
+                value
+            }
             None => {
+                witnessed!(Scalar, Guard);
                 self.covered = false;
-                self.retaining(&mut frame.transient, |island| island.operate(site, &[x, y]))?
+                self.retaining(&mut frame.state.transient, |island| {
+                    island.operate(site, &[x, y])
+                })?
             }
         };
         self.destination(frame, site.reg, value, to)
@@ -129,7 +165,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn destination(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         reg: u32,
         value: Value,
         to: &Destination,
@@ -146,7 +182,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn write_value(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         site: &super::super::compiled::WriteSite,
         value: Value,
     ) -> Result<Next, Stop> {
@@ -168,7 +204,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if site.shared {
             if site.bind {
                 let cell = self
-                    .retaining(&mut frame.transient, |island| island.fresh_cell(value))
+                    .retaining(&mut frame.state.transient, |island| {
+                        island.fresh_cell(value)
+                    })
                     .ok_or_else(|| self.at_held(site.pc, site.reg, value))?;
                 frame.slots[site.at] = SlotState::Cell(cell);
             } else {

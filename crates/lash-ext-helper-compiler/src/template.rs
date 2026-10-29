@@ -4,15 +4,9 @@
 //! scalar calls use the registered native's prepared entry, never a second
 //! implementation of its semantics. An unsupported path simply declines.
 //!
-//! A second pass also takes lists, maps, records and long texts as operand
-//! kinds, and keeps the paths that read, build or write arena objects: each
-//! such form goes through the machine's [`lash_kernel_doc::plan::TemplateHeap`],
-//! and every other call through the native's general call. A heap path runs
-//! where the helper's plan would, so it declares its variables as the plan
-//! binds them and calls other helpers as the plan invokes them, never
-//! inlined. It writes at most once, as its last fallible step, and may
-//! decline after building an object only in its arm's last alternative, so
-//! that a path that declines leaves nothing behind but what a miss leaves.
+//! A second pass derives member, write and copy facts from object operands.
+//! Generated helpers publish those facts and native forwards. Their composite
+//! control executes the original body in the common packet stream.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -1254,7 +1248,6 @@ const HEAP: [(&str, ValueKind, bool); 4] = [
 /// One pass's arms: each code with the operand kinds that select it, a
 /// pattern name per parameter.
 struct Pass {
-    metered: bool,
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
     forwards: lash_kernel_doc::plan::Forwards,
@@ -1293,7 +1286,6 @@ impl Evaluator<'_> {
             .iter()
             .try_fold(1usize, |count, choices| count.checked_mul(choices.len()))?;
         let mut pass = Pass {
-            metered: false,
             arms: BTreeMap::new(),
             forwards: Default::default(),
             text_forwards: BTreeMap::new(),
@@ -1369,7 +1361,7 @@ impl Evaluator<'_> {
                 // that part alternatives let at most one's tests hold, so
                 // the one that may decline after building runs last, where
                 // an earlier one declining has built nothing.
-                if !objects && results.iter().all(|(state, _)| !state.effects().arena) {
+                if !objects {
                     continue;
                 }
                 results.sort_by_key(|(state, _)| state.exposed());
@@ -1417,19 +1409,11 @@ impl Evaluator<'_> {
             }
             let mut code = String::new();
             if !self.heap {
-                // A scalar path's steps are pure: alternatives share what
-                // they begin with alike.
-                let mut values = Vec::new();
-                for (state, value) in &results {
+                // Numeric forwarding is a source-derived native contract. Other
+                // scalar control stays in the canonical packet body.
+                for (state, _) in &results {
                     pass.depth = pass.depth.max(state.depth);
-                    values.push(
-                        value
-                            .clone()
-                            .or_else(|| Symbol::constant(Value::Null))?
-                            .code,
-                    );
                 }
-                // Preserve the forwarding fact before rendering the arm.
                 if let [(state, Some(value))] = results.as_slice()
                     && let Some(native) = self.forwarded(&names, &state.steps, value)
                 {
@@ -1439,16 +1423,6 @@ impl Evaluator<'_> {
                         _ => {}
                     }
                 }
-                let alternatives: Vec<_> = results
-                    .iter()
-                    .zip(&values)
-                    .map(|((state, _), value)| (state.steps.as_slice(), value.as_str()))
-                    .collect();
-                pass.metered |= results
-                    .iter()
-                    .any(|(state, _)| metering::has_charges(&state.steps));
-                tree(&mut code, &alternatives, "            ");
-                pass.arms.entry(code).or_default().push(names);
                 continue;
             }
             // What an earlier alternative declared is not a later one's;
@@ -1477,75 +1451,6 @@ impl Evaluator<'_> {
         }
         Some(pass)
     }
-}
-
-/// `combinations`, each a pattern name per parameter, as few slice
-/// patterns as merging them one parameter at a time gives: two that differ
-/// in one parameter alone become one with both names there.
-fn patterns(combinations: Vec<Vec<&'static str>>) -> String {
-    let mut merged: Vec<Vec<Vec<&'static str>>> = combinations
-        .into_iter()
-        .map(|names| names.into_iter().map(|name| vec![name]).collect())
-        .collect();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let mut index = 0;
-        while index < merged.len() {
-            let found = (index + 1..merged.len()).find(|other| {
-                let differ = merged[index]
-                    .iter()
-                    .zip(&merged[*other])
-                    .filter(|(a, b)| a != b)
-                    .count();
-                differ == 1
-            });
-            if let Some(other) = found {
-                let absorbed = merged.remove(other);
-                for (names, more) in merged[index].iter_mut().zip(absorbed) {
-                    for name in more {
-                        if !names.contains(&name) {
-                            names.push(name);
-                        }
-                    }
-                }
-                changed = true;
-            } else {
-                index += 1;
-            }
-        }
-    }
-    merged
-        .iter()
-        .map(|pattern| {
-            let parts = pattern
-                .iter()
-                .map(|names| {
-                    names
-                        .iter()
-                        .map(|name| format!("Value::{name}"))
-                        .collect::<Vec<_>>()
-                        .join(" | ")
-                })
-                .collect::<Vec<_>>();
-            format!("[{}]", parts.join(", "))
-        })
-        .collect::<Vec<_>>()
-        .join(" | ")
-}
-
-/// A match over `arms`, each a code with its patterns, and declining
-/// otherwise.
-fn arms(arms: BTreeMap<String, Vec<Vec<&'static str>>>) -> String {
-    arms.into_iter()
-        .map(|(code, combinations)| {
-            format!(
-                "        {} => {{\n{code}            None\n        }},",
-                patterns(combinations)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// A text-key path that only looks up unchanged operands and returns the
@@ -1622,7 +1527,7 @@ pub(crate) fn emit(
     let heap = evaluator
         .pass(definition, &kinds)
         .filter(|pass| !pass.arms.is_empty());
-    if scalar.arms.is_empty() && heap.is_none() {
+    if scalar.forwards.floats.is_none() && scalar.forwards.ints.is_none() && heap.is_none() {
         return None;
     }
     let forward = |native: Option<u8>| native.map_or("None".to_string(), |k| format!("Some({k})"));
@@ -1632,43 +1537,8 @@ pub(crate) fn emit(
         forward(scalar.forwards.ints),
         forward(forwarding::texts(&scalar, heap.as_ref()))
     );
-    let metered = scalar.metered;
-    let mut descriptor = String::from("Some(p::HelperTemplate { entry: ");
-    let mut code = String::new();
-    if scalar.arms.is_empty() {
-        descriptor.push_str("None");
-    } else {
-        let _ = write!(descriptor, "Some({ident}_template)");
-        let entry_name = if metered {
-            format!("{ident}_metered")
-        } else {
-            format!("{ident}_template")
-        };
-        let meter_arg = if metered {
-            ", meter: &mut dyn p::TemplateMeter"
-        } else {
-            ""
-        };
-        if metered {
-            let _ = writeln!(
-                code,
-                "fn {ident}_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {{ {ident}_metered(args, natives, &mut p::Unmetered) }}"
-            );
-        }
-        let _ = write!(
-            code,
-            "fn {entry_name}(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]{meter_arg}) -> Option<Value> {{\n    let _ = natives;\n    match args {{\n{}\n        _ => None,\n    }}\n}}\n",
-            arms(scalar.arms)
-        );
-    }
-    let meter = if metered {
-        format!("Some({ident}_metered)")
-    } else {
-        "None".to_owned()
-    };
-    let _ = write!(
-        descriptor,
-        ", metered: {meter}, depth: {}, callees: &[",
+    let mut descriptor = format!(
+        "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {}, callees: &[",
         scalar.depth
     );
     for callee in &evaluator.callees {
@@ -1689,21 +1559,16 @@ pub(crate) fn emit(
                 });
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, copy: None, element: {element}, record_write: {record_write}, callees: &[",
+                "Some(p::HeapTemplate {{ entry: None, depth: {}, writes: {}, copy: None, element: {element}, record_write: {record_write}, callees: &[",
                 heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {
                 let _ = write!(descriptor, "p::function({:?}), ", callee.to_string());
             }
             descriptor.push_str("] })");
-            let _ = write!(
-                code,
-                "fn {ident}_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {{\n    let _ = (&heap, natives);\n    match args {{\n{}\n        _ => None,\n    }}\n}}\n",
-                arms(heap.arms)
-            );
         }
     }
     let _ = write!(descriptor, ", forwards: {forwards}");
     descriptor.push_str(" })");
-    Some((descriptor, code))
+    Some((descriptor, String::new()))
 }

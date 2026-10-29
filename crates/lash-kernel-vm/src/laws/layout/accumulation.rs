@@ -34,7 +34,7 @@ fn probes(
             depth: 1,
             callees: Box::leak(Box::new([concat])),
             heap: Some(p::HeapTemplate {
-                entry: |heap, args, _| heap.call(0, args),
+                entry: Some(|heap, args, _| heap.call(0, args)),
                 depth: 1,
                 writes: false,
                 copy: None,
@@ -102,6 +102,8 @@ fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -
 /// charge and held byte when its scalar or text guard answers or fails.
 #[test]
 fn accumulations_agree() {
+    use crate::machine::islands::witness::{self, Exit, Family};
+    witness::begin();
     let source = scalar_document(
         r#"let s = "" let sum = 0 let i = 0 while flat.lt(i, 40) { set s = law.append(s, "é😀") set sum = flat.add(sum, 3) set i = flat.add(i, 1) } do perform 0("middle") as Any let old = s let j = 0 while flat.lt(j, 3) { set s = text.concat(s, "!") set j = flat.add(j, 1) } let huge = 9223372036854775807 try { set huge = flat.add(huge, 1) } catch err { print huge } let f = -0.0 set f = flat.add(f, 0.0) return (s, old, sum, huge, f)"#,
     );
@@ -158,4 +160,16 @@ fn accumulations_agree() {
             "memory {memory}"
         );
     }
+    let counts = witness::take();
+    for exit in [Exit::Commit, Exit::Guard, Exit::Prefix] {
+        assert!(
+            counts
+                .get(&(Family::TextAppend, exit))
+                .copied()
+                .unwrap_or(0)
+                > 0,
+            "owned appends must reach {exit:?}: {counts:?}"
+        );
+    }
+    println!("owned append exits: {counts:?}");
 }

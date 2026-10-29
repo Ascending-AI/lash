@@ -47,7 +47,7 @@ mod formula;
 pub(crate) mod islands;
 pub(crate) mod kind_test;
 mod library;
-pub(crate) use library::{Lib, LibRun};
+pub(crate) use library::{Lib, LibRun, Resident};
 mod frame;
 mod holding_sites;
 mod lazy;
@@ -65,7 +65,7 @@ mod templates;
 pub(crate) use reads::{
     Field, PropertySlot, ReadSite, find as find_property, write as write_property,
 };
-pub(crate) use template_meter::{MeteredCharges, TapedCharges};
+pub(crate) use template_meter::MeteredCharges;
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 
 pub(crate) use crate::machine::islands::cx::{
@@ -73,9 +73,10 @@ pub(crate) use crate::machine::islands::cx::{
     scalar, store,
 };
 pub(crate) use formula::{Charge, Fast, LengthCharge, Plan, ScalarTable, Source, TextCharge};
+pub(crate) use loop_plans::LoopPlan;
+pub(crate) use loop_plans::{Event, Head, RegionSlot, Step, Summary};
 #[cfg(test)]
-pub(crate) use loop_plans::{Event, Head, Lowered, Refused, RegionSlot, Step, Summary};
-pub(crate) use loop_plans::{Headroom, LoopPlan, Slots, Typed};
+pub(crate) use loop_plans::{Lowered, Refused};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and

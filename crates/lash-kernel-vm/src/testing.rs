@@ -1,24 +1,65 @@
-//! Differential execution controls for embedding laws. Both strategies keep
+//! Differential execution controls for embedding laws. All strategies keep
 //! the same semantic result, effects and exact charge; interpreted execution
 //! exercises the stored helper bodies instead of their native shortcuts.
 use crate::{Bounds, CellStart, KernelMachine, OpenError, PreparedLibrary, Program, StartError};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
 
-/// The two execution paths an embedder can compare without naming VM layout.
+/// The execution paths an embedder can compare without naming VM layout.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionStrategy {
     #[default]
     Optimized,
+    /// The canonical source evaluator with packet entry disabled.
+    Source,
+    /// The shared packet executor with all grouped kernels disabled.
+    GenericPackets,
+    /// Helper bodies with their native shortcuts disabled.
     Interpreted,
 }
 
 impl ExecutionStrategy {
     fn layout(self) -> crate::compile::Layout {
         crate::compile::Layout(match self {
-            Self::Optimized => 0,
+            Self::Optimized | Self::Source | Self::GenericPackets => 0,
             Self::Interpreted => 3,
         })
     }
+
+    fn select(self, mut machine: KernelMachine) -> KernelMachine {
+        match self {
+            Self::Source => machine.force_source_execution(),
+            Self::GenericPackets => machine.force_generic_packets(),
+            Self::Optimized | Self::Interpreted => {}
+        }
+        machine
+    }
+}
+
+pub use crate::machine::islands::witness::{Counts as FamilyCounts, Exit as FamilyExit, Family};
+
+/// Starts collecting actual grouped-kernel commits and exits on this thread.
+pub fn begin_family_witnesses() {
+    crate::machine::islands::witness::begin();
+}
+
+/// Takes the grouped-kernel events since the last collection began.
+pub fn take_family_witnesses() -> FamilyCounts {
+    crate::machine::islands::witness::take()
+}
+
+/// Takes the dispatched packet and specialized packet counts for this machine.
+pub fn take_packet_counts(machine: &mut KernelMachine) -> (u64, u64) {
+    machine.take_packet_counts()
+}
+
+/// Seals and reads the canonical cold equality domain at a legal boundary.
+///
+/// # Errors
+/// The seal or semantic reader could not read the complete checkpoint.
+pub fn semantic_checkpoint(
+    machine: &mut KernelMachine,
+) -> Result<lash_kernel_state::semantic::Checkpoint, crate::SealError> {
+    machine.try_semantic_checkpoint()
 }
 
 /// Prepares the same installed definitions under the selected strategy.
@@ -38,6 +79,7 @@ pub fn start(
     source: Box<dyn PageSource>,
 ) -> Result<KernelMachine, StartError> {
     KernelMachine::start_with_layout(program, bounds, start, strategy.layout(), source)
+        .map(|machine| strategy.select(machine))
 }
 
 /// Reopens an opaque parked run under the selected strategy.
@@ -58,4 +100,5 @@ pub fn open(
         source,
         strategy.layout(),
     )
+    .map(|machine| strategy.select(machine))
 }

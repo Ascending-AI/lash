@@ -391,7 +391,7 @@ const PKG_NOOP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: pkg_noop,
-    template: Some(p::HelperTemplate { entry: Some(pkg_noop_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: pkg_noop_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `pkg.noop`.
@@ -400,30 +400,4 @@ fn pkg_noop(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn pkg_noop_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Null)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn pkg_noop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }

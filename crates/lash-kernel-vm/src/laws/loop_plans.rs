@@ -29,7 +29,6 @@ fn checked_with(
     setup: Setup,
     check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Result<(), Refused>),
 ) {
-    let flat = setup.probes.is_some();
     let (program, _) = Embedder::with(text, setup).program(true);
     let admitted = program
         .library
@@ -64,9 +63,6 @@ fn checked_with(
         island: &island,
     };
     assert_eq!(plan.verify(&lowered, loop_test), Ok(()));
-    if flat {
-        plan.assert_flat_verified(&exe);
-    }
     // Another cost table's loop test is not this plan's.
     assert_eq!(plan.verify(&lowered, loop_test + 1), Err(Refused::LoopTest));
     check(plan, &|plan| plan.verify(&lowered, loop_test));
@@ -289,6 +285,18 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
     };
     let (stream, _, _) = exe.statement(plan.body.statements[0].id);
     assert_eq!(plan.verify(stream), Ok(()));
+    // K-CHG-001 / K-EVAL-008: packet publication independently rejects a
+    // changed source close and a lost evaluated argument role.
+    let mut packets = crate::machine::islands::Compiled::generic(plan, &exe).unwrap();
+    assert_eq!(packets.verify_packets(stream), Ok(()));
+    let region = packets.corrupt_packet_close();
+    assert_eq!(
+        packets.verify_packets(stream),
+        Err(islands::Refused::Region { region })
+    );
+    let mut packets = crate::machine::islands::Compiled::generic(plan, &exe).unwrap();
+    assert!(packets.corrupt_packet_role(stream));
+    assert_eq!(packets.verify_packets(stream), Err(islands::Refused::Calls));
     let refused = |change: &dyn Fn(&mut islands::IslandPlan)| {
         let mut misstated = plan.copied();
         change(&mut misstated);
@@ -535,8 +543,18 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 plan.verify(plan.stream(&exe)).unwrap();
                 assert_eq!(plan.source_room.site, exe.code(plan.code).site);
                 if let Some(compiled) = plan.compiled(&exe) {
-                    typed_count
-                        .set(typed_count.get() + compiled.verify_room_projections(&exe).unwrap());
+                    let repeats = compiled.verify_room_projections(&exe, plan).unwrap();
+                    typed_count.set(typed_count.get() + repeats);
+                    if repeats != 0 {
+                        let mut corrupted =
+                            crate::machine::islands::Compiled::of(plan, &exe).unwrap();
+                        assert!(corrupted.corrupt_repeat_input());
+                        assert_eq!(
+                            corrupted.verify_room_projections(&exe, plan),
+                            Err(crate::compile::room::Refused::Source),
+                            "a fixed graph must retain the source input role"
+                        );
+                    }
                     assert!(std::sync::Arc::ptr_eq(
                         &compiled.source_room,
                         &plan.source_room

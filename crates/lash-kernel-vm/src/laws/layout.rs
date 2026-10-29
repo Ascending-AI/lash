@@ -7,6 +7,13 @@ use lash_kernel_doc::Datum;
 use super::embedder::{Embedder, Setup, int, result, text};
 use crate::{Bounds, End, Layout, Machine, Request, Step};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ExecutionMode {
+    Source,
+    Generic,
+    Specialized,
+}
+
 /// A program that uses closures over loop variables, shared variables,
 /// tasks, effects in loops, cleanup blocks, maps and library calls of
 /// every kind.
@@ -585,6 +592,43 @@ fn observe_scalar_bounded(
     require_typed: bool,
     bounds: Bounds,
 ) -> ScalarObserved {
+    observe_scalar_selected(
+        source,
+        layout,
+        record,
+        cold,
+        require_typed,
+        bounds,
+        ScalarSelection {
+            mode: ExecutionMode::Specialized,
+            slice: if cold { 1 } else { u64::MAX },
+            detailed: false,
+        },
+    )
+    .0
+}
+
+struct ScalarSelection {
+    mode: ExecutionMode,
+    slice: u64,
+    detailed: bool,
+}
+
+type ScalarStops = Vec<(
+    &'static str,
+    crate::Meters,
+    Option<lash_kernel_state::semantic::Checkpoint>,
+)>;
+
+fn observe_scalar_selected(
+    source: &str,
+    layout: Layout,
+    record: bool,
+    cold: bool,
+    require_typed: bool,
+    bounds: Bounds,
+    selection: ScalarSelection,
+) -> (ScalarObserved, ScalarStops) {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -595,7 +639,7 @@ fn observe_scalar_bounded(
             }),
             bounds,
             layout,
-            slice: if cold { 1 } else { u64::MAX },
+            slice: selection.slice,
             ..Setup::default()
         },
     );
@@ -604,12 +648,33 @@ fn observe_scalar_bounded(
         embedder.machine.record_charges(tape.clone());
     }
     let mut checkpoints = Vec::new();
+    let mut stops = Vec::new();
+    let (mut packets, mut fused) = (0, 0);
     let mut registered = 0;
     let end = loop {
         if !record {
             embedder.machine.count_execution();
         }
+        match selection.mode {
+            ExecutionMode::Source => embedder.machine.force_source_execution(),
+            ExecutionMode::Generic => embedder.machine.force_generic_packets(),
+            ExecutionMode::Specialized => {}
+        }
         let step = embedder.run();
+        let (dispatched, specialized) = embedder.machine.take_packet_counts();
+        packets += dispatched;
+        fused += specialized;
+        assert!(embedder.machine.execution_storage_released());
+        if selection.detailed {
+            let kind = match &step {
+                Step::Ended(_) => "ended",
+                Step::Slice => "slice",
+                Step::Parked(_) => "parked",
+            };
+            let image =
+                (!matches!(&step, Step::Ended(_))).then(|| embedder.machine.semantic_checkpoint());
+            stops.push((kind, embedder.machine.meters(), image));
+        }
         if !record {
             registered += embedder
                 .machine
@@ -646,7 +711,14 @@ fn observe_scalar_bounded(
             }
         }
     };
-    if !record {
+    if selection.mode == ExecutionMode::Source {
+        assert_eq!(packets, 0);
+        assert_eq!(registered, 0);
+    }
+    if selection.mode == ExecutionMode::Generic {
+        assert_eq!(fused, 0);
+    }
+    if !record && selection.mode != ExecutionMode::Source {
         assert!(
             registered > 0,
             "expression corpus must run register statements: {source}"
@@ -654,8 +726,11 @@ fn observe_scalar_bounded(
     }
     if require_typed {
         assert!(
-            crate::kernel_internals::register_work(&tape).blocks > 0,
-            "the scalar layout must execute typed blocks: {source}"
+            {
+                let work = crate::kernel_internals::register_work(&tape);
+                work.blocks > 0 || work.typed_packets > 0
+            },
+            "the scalar layout must execute a fixed template or a typed packet: {source}"
         );
     }
     let events = tape
@@ -669,12 +744,15 @@ fn observe_scalar_bounded(
         })
         .collect();
     (
-        end,
-        embedder.world.printed,
-        embedder.requests,
-        events,
-        embedder.machine.meters().charged.unwrap(),
-        checkpoints,
+        (
+            end,
+            embedder.world.printed,
+            embedder.requests,
+            events,
+            embedder.machine.meters().charged.unwrap(),
+            checkpoints,
+        ),
+        stops,
     )
 }
 
@@ -682,6 +760,8 @@ fn observe_scalar_bounded(
 /// source layout, with and without a tape, warm or cold.
 #[test]
 fn scalar_layouts_agree() {
+    use crate::machine::islands::witness::{self, Exit, Family};
+    witness::begin();
     for (case, body) in [
         "let i = 0 let target = 0 let a = 0.1 let s = 0.0 while flat.lt(i, 5) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(a, a)) set a = flat.add(a, 1.1) } do perform 0((i, target, s, a)) as Any return (i, target, s, a)",
         "let i = 9223372036854775806 let target = 0 let s = -0.0 while flat.lt(i, 9223372036854775807) { set target = i set i = flat.add(i, 1) set s = flat.add(s, flat.mul(s, -0.0)) } return (i, target, s)",
@@ -712,6 +792,14 @@ fn scalar_layouts_agree() {
             }
         }
     }
+    let counts = witness::take();
+    for exit in [Exit::Commit, Exit::Guard] {
+        assert!(
+            counts.get(&(Family::Scalar, exit)).copied().unwrap_or(0) > 0,
+            "scalar packets must reach {exit:?}: {counts:?}"
+        );
+    }
+    println!("scalar packet exits: {counts:?}");
 }
 
 fn call_probes(
@@ -859,7 +947,7 @@ pub(super) fn allocation_probes(
                     element: None,
                     record_write: None,
                     callees: &[],
-                    entry: if writes {
+                    entry: Some(if writes {
                         |heap, args, _| {
                             let [target, index, value] = *args else {
                                 return None;
@@ -869,7 +957,7 @@ pub(super) fn allocation_probes(
                         }
                     } else {
                         |heap, args, _| heap.tuple(args)
-                    },
+                    }),
                 }),
             }),
         }));
@@ -1120,10 +1208,53 @@ fn capture_scopes_agree() {
     }
 }
 
+fn repeated_modes(
+    source: &str,
+    bounds: Bounds,
+    slice: u64,
+    cold: bool,
+    record: bool,
+) -> crate::machine::islands::witness::Counts {
+    use crate::machine::islands::witness;
+    let run = |mode| {
+        witness::begin();
+        let observed = observe_scalar_selected(
+            source,
+            Layout(0),
+            record,
+            cold,
+            false,
+            bounds,
+            ScalarSelection {
+                mode,
+                slice,
+                detailed: true,
+            },
+        );
+        let counts = witness::take();
+        if mode != ExecutionMode::Specialized {
+            assert!(counts.is_empty());
+        }
+        (observed, counts)
+    };
+    let source = run(ExecutionMode::Source).0;
+    assert_eq!(run(ExecutionMode::Generic).0, source, "generic recurrence");
+    let (specialized, counts) = run(ExecutionMode::Specialized);
+    assert_eq!(specialized, source, "fixed recurrence");
+    counts
+}
+
 /// K-CHG-001/007: real typed iterations retain the header's unpaid tail.
 /// Body-local values leave no roots in the parked continuation.
 #[test]
 fn typed_repeat_agrees() {
+    use crate::machine::islands::witness::{Counts, Exit, Family};
+    let seen = std::cell::RefCell::new(Counts::new());
+    let collect = |counts: Counts| {
+        for (event, count) in counts {
+            *seen.borrow_mut().entry(event).or_default() += count;
+        }
+    };
     for body in [
         "let i = -2 let before = 99 let after = 99 while flat.lt(i, 3) { set before = i set i = flat.add(i, 1) set after = i } do perform 0((i, before, after)) as Any return (i, before, after)",
         "let i = 1 let before = 0 while flat.lt(i, 20) { set before = i set i = flat.mul(i, 2) } return (i, before)",
@@ -1132,13 +1263,82 @@ fn typed_repeat_agrees() {
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
     ] {
         let source = scalar_document(body);
-        crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
-        observe_scalar(&source, Layout(0), false, false, false);
+        crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));
+        let roomy = observe_scalar(&source, Layout(0), false, false, false);
         assert!(
-            crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0,
+            crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 0,
             "real typed iterations execute"
         );
+        let compare = |bounds, slice, cold, record| {
+            collect(repeated_modes(&source, bounds, slice, cold, record))
+        };
+        for record in [false, true] {
+            compare(super::embedder::ROOMY, u64::MAX, false, record);
+            for slice in [1, 3, 11] {
+                compare(super::embedder::ROOMY, slice, true, record);
+            }
+        }
+        for limit in 0..roomy.4 {
+            compare(
+                Bounds {
+                    charge_limit: limit,
+                    ..super::embedder::ROOMY
+                },
+                u64::MAX,
+                false,
+                true,
+            );
+        }
     }
+    // K-CHG-001 / K-VAL-020: a mixed-domain test misses before work;
+    // overflowing multiplication misses after a completed iteration.
+    for (body, prefix) in [
+        (
+            "let i = 0 while flat.lt(i, 3.0) { set i = flat.add(i, 1) } return i",
+            false,
+        ),
+        (
+            "let i = 4611686018427387903 while flat.lt(i, 9223372036854775807) { set i = flat.mul(i, 2) } return i",
+            true,
+        ),
+    ] {
+        let source = scalar_document(body);
+        for record in [false, true] {
+            let counts = repeated_modes(&source, super::embedder::ROOMY, u64::MAX, false, record);
+            assert!(
+                counts
+                    .get(&(Family::Repeated, Exit::Guard))
+                    .copied()
+                    .unwrap_or(0)
+                    > 0
+            );
+            if prefix {
+                assert!(
+                    counts
+                        .get(&(Family::Repeated, Exit::Commit))
+                        .copied()
+                        .unwrap_or(0)
+                        > 0
+                );
+            }
+            collect(counts);
+            collect(repeated_modes(
+                &source,
+                super::embedder::ROOMY,
+                11,
+                true,
+                record,
+            ));
+        }
+    }
+    let seen = seen.into_inner();
+    for exit in [Exit::Commit, Exit::Guard, Exit::Prefix, Exit::End] {
+        assert!(
+            seen.get(&(Family::Repeated, exit)).copied().unwrap_or(0) > 0,
+            "missing repeat exit {exit:?}: {seen:?}"
+        );
+    }
+    println!("actual repeated family exits: {seen:?}");
 }
 
 mod accumulation;

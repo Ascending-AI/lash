@@ -25,7 +25,6 @@ impl super::NestedKind {
 
 /// A native entry, or a body-generated entry over resolved native callees.
 /// Native entries keep their direct function-pointer ABI.
-#[derive(Clone)]
 pub(crate) enum Entry {
     Native(PreparedNative),
     Template {
@@ -79,7 +78,11 @@ impl Entry {
                 registered.native()?.specialization().immediate
             })
             .collect::<Option<Box<[_]>>>()?;
-        if template.entry.is_none() && template.heap.is_none() {
+        if template.entry.is_none()
+            && template.heap.is_none()
+            && template.forwards.ints.is_none()
+            && template.forwards.floats.is_none()
+        {
             return None;
         }
         if let Some(path) = template.heap.as_ref().and_then(|heap| heap.copy)
@@ -130,7 +133,16 @@ impl Entry {
                 if template.metered.is_some() {
                     return None;
                 }
-                (template.entry?)(args, natives)
+                if let Some(entry) = template.entry {
+                    return entry(args, natives);
+                }
+                let native = match args {
+                    [Value::Int(_), Value::Int(_)] => template.forwards.ints?,
+                    [Value::Float(_), Value::Float(_)] => template.forwards.floats?,
+                    [Value::Text(_), Value::Text(_)] => template.forwards.texts?,
+                    _ => return None,
+                };
+                (natives.get(usize::from(native))?.entry)(args)
             }
         }
     }
@@ -186,7 +198,11 @@ impl Entry {
         match self {
             Self::Native(_) => true,
             Self::Template { template, .. } => {
-                template.entry.is_some() && template.metered.is_none()
+                template.metered.is_none()
+                    && (template.entry.is_some()
+                        || template.forwards.ints.is_some()
+                        || template.forwards.floats.is_some()
+                        || template.forwards.texts.is_some())
             }
         }
     }
@@ -207,6 +223,7 @@ impl Entry {
                 ..
             } => {
                 let paths = template.heap.as_ref()?;
+                paths.entry?;
                 let callees = heap.get_or_init(|| paths.callees.iter().map(lib_of).collect());
                 Some((paths, callees.as_deref()?, natives))
             }

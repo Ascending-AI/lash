@@ -7,12 +7,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn call(
         &mut self,
-        frame: &mut Frame<'e>,
-        site: &CallSite,
-        (read, args): (bool, &[u32]),
-        callers: &mut Vec<Frame<'e>>,
-        slots: &mut usize,
+        frame: &mut Values<'_, 'e>,
+        site: &'e CallSite,
+        (read, args, live): (bool, &'e [u32], &'e [u32]),
+        slots: usize,
     ) -> Result<Next, Stop> {
+        #[cfg(any(test, feature = "testing"))]
+        assert!(
+            self.scratch.arguments.is_empty(),
+            "a callback must receive no native scratch lease"
+        );
         // Borrow the source-sized window through admission and binding.
         // Only a wide call initializes a maximum-arity window; small calls
         // carry their source-sized operands directly.
@@ -73,7 +77,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         && let [target, key, value] = args
                         && let Some(values) = self.pure_call_values(frame, [target, key, value])
                         && let Some(answer) =
-                            self.member_write(frame.statement, property, site.close, &values)
+                            self.member_write(frame.state.statement, property, site.close, &values)
                     {
                         answer?;
                         frame.regs[site.reg as usize] = values[2];
@@ -144,7 +148,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         }
                     }
                     if !OBSERVING
-                        && self.retaining(&mut frame.transient, |island| {
+                        && self.retaining(&mut frame.state.transient, |island| {
                             island.call_answer(
                                 site,
                                 (args, inputs.as_ref().map(|input| input.1)),
@@ -169,7 +173,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             && self.accounting
                             && (OBSERVING || target.compiled.cleanups))
                         && self.depth < self.frames
-                        && *slots + target.plan.slots <= self.slot_room
+                        && slots + target.plan.slots <= self.slot_room
                         && {
                             room = self.register_room(target.compiled);
                             room
@@ -201,7 +205,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 } else if let Some(watching) = &self.projection() {
                     if let Some(act) = site.act {
                         watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
-                    } else if let Some(stmt) = frame.statement {
+                    } else if let Some(stmt) = frame.state.statement {
                         watching.root_call(self.exe, stmt, args.len());
                     }
                 }
@@ -215,27 +219,23 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     }
                     return Ok(Next::Continue);
                 }
-                frame.waiting = true;
-                (frame.admitted, frame.swift, frame.covered) =
+                frame.state.continuation = Some(CallContinuation { site, args, live });
+                (frame.state.admitted, frame.state.swift, frame.state.covered) =
                     (self.admitted, self.swift, self.covered);
-                self.record_entry(target, Some((frame.callee.plan.code, frame.statement)));
-                let mut inner = if let Some((callee, values)) = &inputs {
+                self.record_entry(
+                    target,
+                    Some((frame.state.callee.plan.code, frame.state.statement)),
+                );
+                if let Some((callee, values)) = &inputs {
                     if let Some(callee) = callee {
                         regs[site.reg as usize] = *callee;
                     }
                     for (reg, value) in args.iter().zip(values.iter()) {
                         regs[*reg as usize] = *value;
                     }
-                    self.frame_from(target, values[..args.len()].iter().copied())
-                } else {
-                    self.frame_from(target, args.iter().map(|reg| regs[*reg as usize]))
-                };
-                inner.boundary = site.library.filter(|_| site.checked);
-                *slots += inner.slots.len();
-                callers.push(std::mem::replace(frame, inner));
-                self.depth += 1;
-                self.activate(frame);
-                Ok(Next::Continue)
+                }
+                frame.state.pending_call = Some((target, site.library.filter(|_| site.checked)));
+                Ok(Next::Call)
             })();
         if answer.is_err()
             && let (Some(inputs), Some((callee, values))) = (&site.inputs, inputs)
@@ -257,7 +257,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
     /// A partial input read keeps the already evaluated source prefix.
     #[cold]
-    fn call_prefix(&mut self, frame: &Frame<'e>, site: &CallSite, callee: Option<Value>) {
+    fn call_prefix(&mut self, frame: &Values<'_, 'e>, site: &CallSite, callee: Option<Value>) {
         if let Some(callee) = callee {
             self.scratch.exit.regs.insert(0, (site.reg, callee));
         }

@@ -14,8 +14,8 @@
 //! tree, before lowering admits it. Lowering keeps only a scalar plan of a
 //! loop the register program owns: its statements hold scalars and charge
 //! each operator its scalar table, so one iteration's most is static, and
-//! [`LoopPlan::typed_repeat`] compiles its straight-line runs to one run
-//! over unboxed registers. Plans belong to the executable: deterministic,
+//! Fixed packet templates consume these verified source facts. Unmatched
+//! graphs stay in the one packet stream. Plans belong to the executable: deterministic,
 //! immutable and never saved.
 //!
 //! Plan ops: reads of unshared slots and of session bindings, resident
@@ -34,18 +34,16 @@ use eligibility::{
     scalar_site, writes, writes_last,
 };
 pub(crate) use eligibility::{Lowered, Refused};
-mod typed;
 mod verify;
 mod walk;
 use walk::Walk;
 
 use crate::machine::islands::cx::{Place, Role, scalar};
-pub(crate) use typed::{Headroom, Slots, Typed};
 
 use super::expr::{self, Expr, Kind};
 use super::{
-    BindingName, Block, BlockId, Code, CodeId, Constant, Executable, Form, Lib, LibId, LibRun,
-    NestedCallee, NestedKind, Stmt, StmtId, Stream,
+    BindingName, Block, BlockId, Code, CodeId, Constant, Form, Lib, LibId, LibRun, NestedCallee,
+    NestedKind, Stmt, StmtId, Stream,
 };
 
 /// The deepest `if` nesting a loop body's plan holds.
@@ -218,6 +216,21 @@ pub(crate) struct Summary {
 }
 
 impl Summary {
+    pub(crate) fn scalar_root(&self) -> Option<&Expr> {
+        if self.action.is_some()
+            || self.guest.is_some()
+            || !self.calls.is_empty()
+            || !self.arms.is_empty()
+            || self.general
+        {
+            return None;
+        }
+        match &*self.roots {
+            [(Role::Value, root)] => Some(root),
+            _ => None,
+        }
+    }
+
     /// The most the statement charges.
     fn max(&self) -> Option<u64> {
         self.fixed.checked_add(self.formula_max?)
@@ -1310,31 +1323,6 @@ fn lean(program: Vec<Event>) -> Box<[Event]> {
 }
 
 impl LoopPlan {
-    /// Project admitted registers, retaining this plan's independent semantic
-    /// and canonical event authority.
-    pub(crate) fn typed_repeat(
-        &self,
-        exe: &Executable,
-        registers: &[crate::machine::islands::compiled::Instruction],
-    ) -> Option<Typed> {
-        let Head::While(test) = &self.head else {
-            return None;
-        };
-        let run = typed::compile(
-            exe,
-            registers,
-            exe.charging(),
-            Some(test),
-            &self.body,
-            0,
-            super::room::Prefix {
-                source: &self.source_room,
-                at: &self.source_site,
-            },
-        )?;
-        run.whole.then_some(run)
-    }
-
     /// The plan as stated, uncompiled: what a law misstates.
     #[cfg(test)]
     pub(crate) fn copied(&self) -> Self {

@@ -33,6 +33,40 @@ pub(in crate::laws) fn helper_probes(
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
 ) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut out = call_probes(registry, ids);
+    for (definition, native) in lash_kernel_lib::text_json()
+        .into_iter()
+        .filter(|(definition, _)| definition.name.as_str() == "text.join")
+    {
+        out.push((
+            "text.join",
+            registry.register(definition, Some(native)).unwrap(),
+        ));
+    }
+    for (definition, native) in lash_kernel_lib::numbers()
+        .into_iter()
+        .filter(|(definition, _)| definition.name.as_str() == "num.to_text")
+    {
+        out.push((
+            "num.to_text",
+            registry.register(definition, Some(native)).unwrap(),
+        ));
+    }
+    for (name, signature) in [
+        ("num.min", "a: Number, b: Number) -> Number"),
+        ("bool.not", "value: Bool) -> Bool"),
+        ("list.get", "values: List(Any), index: Int) -> Any"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({signature}\nkernel 1\ncharge 1\nnative\n"
+        ))
+        .unwrap();
+        out.push((
+            name,
+            registry
+                .register(definition, lash_kernel_lib::native(name))
+                .unwrap(),
+        ));
+    }
     let add = out.iter().find(|(name, _)| *name == "flat.add").unwrap().1;
     let kind = out.iter().find(|(name, _)| *name == "kind").unwrap().1;
     let same = out.iter().find(|(name, _)| *name == "same").unwrap().1;
@@ -65,6 +99,135 @@ pub(in crate::laws) fn helper_probes(
         "function helper.place(values: List(Any), target: List(Any), position: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse flat.add = @{addition}\nbody {{ for value in values metered 2 {{ set target[position] = value set position = flat.add(position, 1) }} return (target, position) }}"
     )).unwrap();
     out.push(("helper.place", registry.register(definition, None).unwrap()));
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper.visit(values: List(Any), bound: Int) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\nuse same = @{same}\nuse flat.add = @{add}\nuse list.len = @{length}\nbody {{ let out = [] let i = 0 for value in values metered 2 {{ if same(i, bound) {{ break }} if same(value, ()) {{ set i = flat.add(i, 1) }} else {{ set out[list.len(out)] = value }} set i = flat.add(i, 1) }} return (out, i) }}"
+    )).unwrap();
+    out.push(("helper.visit", registry.register(definition, None).unwrap()));
+    struct Lookalike;
+    impl Lookalike {
+        fn answer(args: &[lash_kernel_doc::Value]) -> Option<lash_kernel_doc::Value> {
+            use lash_kernel_doc::Value;
+            match args {
+                [value @ Value::Bool(_)] => Some(*value),
+                [Value::Int(a), Value::Int(b)] => a.checked_add(*b).map(Value::Int),
+                _ => None,
+            }
+        }
+    }
+    impl lash_kernel_doc::NativeFunction for Lookalike {
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Self::answer(call.args.values()).ok_or(lash_kernel_doc::NativeError::Decline)
+        }
+        fn prepare(&self) -> Option<lash_kernel_doc::PreparedNative> {
+            Some(lash_kernel_doc::PreparedNative {
+                pair: None,
+                entry: Self::answer,
+                charged_entry: None,
+                operation: "law.lookalike",
+            })
+        }
+    }
+    for (alias, declaration) in [
+        ("law.not", "bool.not(value: Bool) -> Bool"),
+        ("law.minimum", "num.min(a: Number, b: Number) -> Number"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {declaration}\nkernel 1\ncharge 2\nnative\n"
+        ))
+        .unwrap();
+        out.push((
+            alias,
+            registry
+                .register(definition, Some(std::sync::Arc::new(Lookalike)))
+                .unwrap(),
+        ));
+    }
+    let references = ["num.add", "num.lt", "list.len"]
+        .map(|name| (name, ids[name]))
+        .into_iter()
+        .chain(
+            ["same", "bool.not", "num.min", "list.get"]
+                .map(|name| (name, out.iter().find(|(key, _)| *key == name).unwrap().1)),
+        )
+        .map(|(name, id)| format!("use {name} = @{id}\n"))
+        .collect::<String>();
+    for (name, params, body) in [
+        (
+            "helper.scan",
+            "values: List(Any), list: Bool",
+            r#"
+            let i = 0 let out = []
+            while num.lt(i, list.len(values)) metered 2 {
+                let present = false let value = absent
+                if list { if num.lt(i, list.len(values)) {
+                    set value = values[i] set present = bool.not(same(value, ()))
+                } }
+                if present { set out[list.len(out)] = value }
+                set i = num.add(i, 1)
+            }
+            return out
+        "#,
+        ),
+        (
+            "helper.merge",
+            "values: List(Any), compare: Any",
+            r#"
+            let sorted = values let out = [0, 0, 0, 0]
+            let n = list.len(sorted) let width = 1
+            while num.lt(width, n) metered 2 {
+                let dest = 0 let end = 0 let mid = 0 let left = 0 let right = 0
+                for unused in values metered 2 {
+                    if same(dest, end) {
+                        set mid = num.min(num.add(dest, width), n)
+                        set end = num.min(num.add(mid, width), n)
+                        set left = dest set right = mid
+                    }
+                    let from_right = false
+                    if num.lt(left, mid) {
+                        if num.lt(right, end) {
+                            let first = list.get(sorted, left)
+                            let second = list.get(sorted, right)
+                            let output = apply compare(first, second)
+                            let order = output
+                            if num.lt(0, order) { set from_right = true }
+                        }
+                    } else { set from_right = true }
+                    if from_right {
+                        set out[dest] = list.get(sorted, right) set right = num.add(right, 1)
+                    } else {
+                        set out[dest] = list.get(sorted, left) set left = num.add(left, 1)
+                    }
+                    set dest = num.add(dest, 1)
+                }
+                set sorted = out set out = [0, 0, 0, 0] set width = num.add(width, width)
+            }
+            return sorted
+        "#,
+        ),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({params}) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\n{references}body {{ {body} }}"
+        )).unwrap();
+        out.push((name, registry.register(definition, None).unwrap()));
+        let (alternate, original, replacement) = match name {
+            "helper.scan" => ("helper.scan_lookalike", "bool.not", "law.not"),
+            "helper.merge" => ("helper.merge_lookalike", "num.min", "law.minimum"),
+            _ => unreachable!(),
+        };
+        let current = out.iter().find(|(name, _)| *name == original).unwrap().1;
+        let replacement = out.iter().find(|(name, _)| *name == replacement).unwrap().1;
+        let references = references.replace(
+            &format!("use {original} = @{current}"),
+            &format!("use {original} = @{replacement}"),
+        );
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {alternate}({params}) -> Any\nkernel 1\ncharge sum(4, deep(values), size(result))\n{references}body {{ {body} }}"
+        )).unwrap();
+        out.push((alternate, registry.register(definition, None).unwrap()));
+    }
     out.extend(
         [
             ("helper.open", "x: Any", "return x"),
@@ -129,10 +292,10 @@ pub(in crate::laws) fn helper_probes(
             depth: 1,
             callees: &[],
             heap: Some(lash_kernel_doc::plan::HeapTemplate {
-                entry: |heap, args, _| match args {
+                entry: Some(|heap, args, _| match args {
                     [target, key] => heap.index(*target, *key),
                     _ => None,
-                },
+                }),
                 callees: &[],
                 depth: 1,
                 writes: false,
@@ -280,7 +443,7 @@ pub(in crate::laws) fn helper_probes(
                 depth: 1,
                 callees: &[],
                 heap: Some(lash_kernel_doc::plan::HeapTemplate {
-                    entry: if receiver == "Any" {
+                    entry: Some(if receiver == "Any" {
                         |heap, args, _| match args {
                             [record @ lash_kernel_doc::Value::Record(_), key] => {
                                 heap.index(*record, *key)
@@ -296,7 +459,7 @@ pub(in crate::laws) fn helper_probes(
                             ] => heap.index(*target, *key),
                             _ => None,
                         }
-                    },
+                    }),
                     callees: &[],
                     depth: 1,
                     writes: false,
@@ -395,11 +558,48 @@ const REDUCTION: &str = r#"main {
     return overflow
 }"#;
 
+const VISIT: &str = "main { return (invoke helper.visit([1, (), 2, 3], 3), invoke helper.visit([1, (), 2, 3], 99)) }";
+
+const SCAN: &str = r#"main {
+    let values = [1, (), 2, 3]
+    let first = invoke helper.scan(values, true)
+    do perform 0(first) as Any
+    set values[0] = 7
+    return (first, invoke helper.scan(values, true), invoke helper.scan(values, false))
+}"#;
+
+const MERGE: &str = r#"main {
+    let seen = [] let values = [{id: 0, k: 1}, {id: 1, k: 1}, {id: 2, k: 0}, {id: 3, k: 2}]
+    let compare = fn(a, b) {
+        set seen[list.len(seen)] = (a.id, b.id)
+        if same(list.len(seen), 2) { do perform 0(seen) as Any }
+        if num.lt(a.k, b.k) { return -1 } if num.lt(b.k, a.k) { return 1 } return 0
+    }
+    let ordered = invoke helper.merge(values, compare)
+    let failing = fn(a, b) { return "mixed" }
+    let failure = null
+    try { do invoke helper.merge(values, failing) } catch err { set failure = err.kind }
+    return (ordered, seen, values, failure)
+}"#;
+
+const LOOKALIKE_COUNTERS: &str = r#"main {
+    let copied = invoke helper.scan_lookalike([1, (), 2, 3], true)
+    let compare = fn(a, b) { if num.lt(a, b) { return -1 } if num.lt(b, a) { return 1 } return 0 }
+    let merged = null
+    try { set merged = invoke helper.merge_lookalike([3, 1, 2, 1], compare) } catch err { set merged = err.kind }
+    return (copied, merged)
+}"#;
+
 /// K-CHG-007 / K-MACH-008: helper and callback frames preserve every
 /// charge event and source continuation while entering the common loop.
 #[test]
 fn helper_frames_agree() {
+    use super::ExecutionMode as Mode;
+    use crate::machine::islands::witness::{self, Exit, Family};
     use crate::perf_witness::execution::{self, Owner};
+    let collection_exits = std::cell::RefCell::new(witness::Counts::new());
+    let limits = std::cell::Cell::new(super::super::embedder::ROOMY);
+    let cold_slice = std::cell::Cell::new(7);
     let fixture = super::super::embedder::library_with(false, Some(helper_probes));
     let helpers = std::sync::Arc::new(
         lash_kernel_doc::BuildHelpers::new(
@@ -417,14 +617,16 @@ fn helper_frames_agree() {
     );
     let prepared =
         crate::PreparedLibrary::with_helpers(std::sync::Arc::clone(&fixture.registry), helpers);
-    let run = |source: &str, layout, cold| {
+    let run = |source: &str, layout, cold, taped, mode| {
+        witness::begin();
         let mut embedder = Embedder::try_over(
             source,
             Setup {
                 native_twice: false,
                 probes: Some(helper_probes),
                 layout,
-                slice: if cold { 7 } else { u64::MAX },
+                slice: if cold { cold_slice.get() } else { u64::MAX },
+                bounds: limits.get(),
                 ..Setup::default()
             },
             Some(prepared.clone()),
@@ -434,13 +636,20 @@ fn helper_frames_agree() {
             embedder.machine.count_work();
         }
         let tape = crate::ChargeTape::new();
-        embedder.machine.record_charges(tape.clone());
-        if source != REDUCTION {
+        if taped {
+            embedder.machine.record_charges(tape.clone());
+        }
+        if ![REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS].contains(&source) {
             embedder.machine.count_execution();
         }
         let mut checkpoints = Vec::new();
         let mut stops = Vec::new();
         let end = loop {
+            match mode {
+                Mode::Source => embedder.machine.force_source_execution(),
+                Mode::Generic => embedder.machine.force_generic_packets(),
+                Mode::Specialized => {}
+            }
             let step = embedder.run();
             stops.push((
                 match &step {
@@ -452,8 +661,13 @@ fn helper_frames_agree() {
             ));
             match step {
                 Step::Ended(end) => {
-                    assert!(matches!(end, End::Finished(_)), "{end:?}");
-                    break format!("{:?}", result(end));
+                    if limits.get() == super::super::embedder::ROOMY {
+                        assert!(matches!(end, End::Finished(_)), "{end:?}");
+                    }
+                    break match end {
+                        end @ End::Finished(_) => format!("{:?}", result(end)),
+                        other => format!("{other:?}"),
+                    };
                 }
                 Step::Parked(_) => {
                     checkpoints.push(embedder.machine.semantic_checkpoint());
@@ -462,7 +676,9 @@ fn helper_frames_agree() {
                         if source == SORTS && layout == Layout(1) {
                             embedder.machine.count_work();
                         }
-                        embedder.machine.record_charges(tape.clone());
+                        if taped {
+                            embedder.machine.record_charges(tape.clone());
+                        }
                     }
                     embedder.deliver_next();
                 }
@@ -473,11 +689,25 @@ fn helper_frames_agree() {
                         if source == SORTS && layout == Layout(1) {
                             embedder.machine.count_work();
                         }
-                        embedder.machine.record_charges(tape.clone());
+                        if taped {
+                            embedder.machine.record_charges(tape.clone());
+                        }
                     }
                 }
             }
         };
+        let exits = witness::take();
+        if mode == Mode::Specialized && layout == Layout(0) && !taped {
+            let mut counts = collection_exits.borrow_mut();
+            for (event, count) in exits {
+                *counts.entry(event).or_default() += count;
+            }
+        } else if mode != Mode::Specialized {
+            assert!(
+                exits.is_empty(),
+                "a forced path selected a collection family: {exits:?}"
+            );
+        }
         let census = embedder.machine.take_execution_census();
         (
             (
@@ -521,8 +751,12 @@ main { return call rooted() }
     const BODY_PARK: &str = r#"main { let d = {step: fn(x) { do perform 0("forward") as Any return 7 }} return invoke helper.forward_next(d) }"#;
     const ROOT_CALLBACK: &str =
         "main { let d = {step: fn(x) { return 7 }} return invoke helper.next(d) }";
-    const CONTRACTS: [&str; 12] = [
+    const CONTRACTS: [&str; 16] = [
         REDUCTION,
+        VISIT,
+        SCAN,
+        MERGE,
+        LOOKALIKE_COUNTERS,
         r#"main { let data = map{"value": [1, 2]} let before = helper.minimum(data, absent) do perform 0(before) as Any return (before, helper.minimum(data, absent), helper.minimum("x", null)) }"#,
         r#"main { let xs = [1] let pair = (1, 2) let entries = map{"a": 1} let members = set{1, 2} let record = {a: 1} let before = (list.len(xs), tuple.len(pair), map.len(entries), set.len(members), record.len(record)) do perform 0(before) as Any set xs[1] = 2 set entries["b"] = 2 try { print map.len(xs) } catch err { print err.kind } return (before, list.len(xs), map.len(entries), map.len(map{}), set.len(set{}), tuple.len(()), record.len({})) }"#,
         r#"main { let xs = [1, 2, 3] let observe = fn() { return xs } remove xs[2] do perform 0(apply observe()) as Any remove xs[1] remove xs[0] return apply observe() }"#,
@@ -557,7 +791,24 @@ main { return call rooted() }
         SORTS,
     ]) {
         for cold in [false, true] {
-            let (actual, census) = run(source, Layout(0), cold);
+            crate::machine::islands::COLLECTION_VISITS.with(|n| n.set(0));
+            let (actual, census) = run(source, Layout(0), cold, true, Mode::Specialized);
+            if source == VISIT && !cold {
+                assert!(
+                    crate::machine::islands::COLLECTION_VISITS.with(|n| n.get()) > 0,
+                    "K-ITER-005: the visitor must execute both relocated arm entries"
+                );
+                assert_eq!(
+                    actual.0,
+                    format!(
+                        "{:?}",
+                        Datum::Tuple(vec![
+                            Datum::Tuple(vec![Datum::List(vec![int(1)]), int(3)]),
+                            Datum::Tuple(vec![Datum::List(vec![int(1), int(2), int(3)]), int(5)]),
+                        ])
+                    )
+                );
+            }
             if source == SORTS || CONTRACTS.contains(&source) {
                 let reference = run(
                     source,
@@ -567,6 +818,8 @@ main { return call rooted() }
                         Layout(3)
                     },
                     cold,
+                    true,
+                    Mode::Specialized,
                 )
                 .0;
                 assert_eq!(actual.0, reference.0, "helper result: {source}");
@@ -625,7 +878,7 @@ main { return call rooted() }
                     ]
                 );
             }
-            if !cold && source != REDUCTION {
+            if !cold && ![REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS].contains(&source) {
                 if source == SORTS {
                     assert!(
                         census
@@ -681,6 +934,88 @@ main { return call rooted() }
             }
         }
     }
+    for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
+        for cold in [false, true] {
+            let reference = run(source, Layout(0), cold, false, Mode::Source).0;
+            for mode in [Mode::Generic, Mode::Specialized] {
+                assert_eq!(
+                    run(source, Layout(0), cold, false, mode).0,
+                    reference,
+                    "quiet collection {mode:?}, cold={cold}: {source}"
+                );
+            }
+        }
+    }
+    for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
+        let reference = run(source, Layout(0), false, false, Mode::Source).0;
+        for charge_limit in 0..=reference.3.expect("exact charge is enabled") {
+            limits.set(Bounds {
+                charge_limit,
+                ..super::super::embedder::ROOMY
+            });
+            let source_only = run(source, Layout(0), false, false, Mode::Source).0;
+            for mode in [Mode::Generic, Mode::Specialized] {
+                assert_eq!(
+                    run(source, Layout(0), false, false, mode).0,
+                    source_only,
+                    "collection refusal {charge_limit}, {mode:?}: {source}"
+                );
+            }
+        }
+        limits.set(super::super::embedder::ROOMY);
+        for slice in [1, 31] {
+            cold_slice.set(slice);
+            let source_only = run(source, Layout(0), true, false, Mode::Source).0;
+            for mode in [Mode::Generic, Mode::Specialized] {
+                let actual = run(source, Layout(0), true, false, mode).0;
+                assert_eq!(
+                    (
+                        &actual.0, &actual.1, &actual.2, &actual.3, &actual.4, &actual.5
+                    ),
+                    (
+                        &source_only.0,
+                        &source_only.1,
+                        &source_only.2,
+                        &source_only.3,
+                        &source_only.4,
+                        &source_only.5
+                    ),
+                    "collection cold semantics at slice {slice}, {mode:?}: {source}"
+                );
+                assert_eq!(
+                    actual.6, source_only.6,
+                    "collection cold memory at slice {slice}, {mode:?}: {source}"
+                );
+            }
+        }
+    }
+    let counts = collection_exits.borrow();
+    for family in [
+        Family::CollectionAppend,
+        Family::Reduction,
+        Family::Placement,
+        Family::Visit,
+        Family::ReadSlot,
+        Family::Merge,
+    ] {
+        assert!(
+            counts.get(&(family, Exit::Commit)).copied().unwrap_or(0) > 0,
+            "the quiet helper must commit {family:?}: {counts:?}"
+        );
+        assert!(
+            counts.get(&(family, Exit::Guard)).copied().unwrap_or(0) > 0,
+            "the helper must reach {family:?}'s generic suffix: {counts:?}"
+        );
+    }
+    assert!(
+        counts
+            .get(&(Family::Merge, Exit::Callback))
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "the merge must publish its prefix before the actual guest callback: {counts:?}"
+    );
+    println!("quiet collection family exits: {counts:?}");
 }
 
 /// A native's display name does not certify its collection semantics.

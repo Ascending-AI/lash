@@ -58,6 +58,9 @@ impl Build<'_> {
     /// Makes the kind test at `head`, an `if`'s first instruction, a
     /// compact read where its true arms have a certified member shape.
     pub(super) fn guard(&mut self, head: usize) {
+        if !self.fused {
+            return;
+        }
         if !matches!(
             self.ops.get(head).map(|op| &op.op),
             Some(Op::DirectKind { .. })
@@ -84,7 +87,7 @@ impl Build<'_> {
                 | Op::Field { .. }
                 | Op::Index { .. }
                 | Op::DirectKind { .. } => {}
-                Op::DirectNative { site, .. } if site.direct.is_some() => {
+                Op::DirectNative { site, .. } if site.direct(self.exe).is_some() => {
                     fixed += total(site.close);
                 }
                 Op::Operator { site, args, .. } if pure(site) && args.len() <= 3 => {
@@ -174,7 +177,9 @@ impl Build<'_> {
         else {
             return None;
         };
-        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, charge)) = native.direct else {
+        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, charge)) =
+            native.direct(self.exe)
+        else {
             return None;
         };
         let Op::Operator {
@@ -280,7 +285,7 @@ impl Build<'_> {
             return None;
         };
         if !matches!(
-            len.direct,
+            len.direct(self.exe),
             Some(Direct::Length(lash_kernel_doc::ValueKind::List, _))
         ) {
             return None;
@@ -402,7 +407,8 @@ impl Build<'_> {
         {
             return None;
         }
-        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, native)) = len.direct else {
+        let Some(Direct::Length(lash_kernel_doc::ValueKind::List, native)) = len.direct(self.exe)
+        else {
             return None;
         };
         let literal = matches!(index, Read::Literal { .. });
@@ -457,7 +463,7 @@ impl Build<'_> {
         if at != other
             || shared != sharing
             || !matches!(
-                contains.direct,
+                contains.direct(self.exe),
                 Some(Direct::Member(lash_kernel_doc::plan::Table::Record))
             )
         {

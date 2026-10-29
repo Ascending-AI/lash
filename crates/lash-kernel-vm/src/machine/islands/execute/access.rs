@@ -39,16 +39,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let (value, units) = match args {
             [x] => super::super::compiled::unary(site, *x, self.exe)?,
             [x, y] => match site
-                .pair
-                .and_then(|pair| super::super::compiled::typed(site, &pair, *x, *y, true))
+                .pair(self.exe)
+                .and_then(|pair| super::super::compiled::typed(site, &pair, *x, *y, true, self.exe))
             {
                 Some(answer) => answer,
                 None if args.iter().all(scalar) => {
-                    let result = site.entry.call(args)?;
+                    let result = site.entry(self.exe).call(args)?;
                     if !scalar(&result) {
                         return None;
                     }
-                    (result, site.table.units(sizes(args, &result)))
+                    (result, site.table(self.exe).units(sizes(args, &result)))
                 }
                 None => return None,
             },
@@ -58,7 +58,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
     pub(super) fn pure_call_values<const N: usize>(
         &self,
-        frame: &Frame<'e>,
+        frame: &Values<'_, 'e>,
         args: [&super::super::compiled::Operand; N],
     ) -> Option<[Value; N]> {
         use super::super::compiled::Operand;
@@ -81,6 +81,57 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(values)
     }
 
+    pub(super) fn heap_destination(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        site: &super::super::compiled::HeapSite,
+        args: &[u32],
+        values: &[Value],
+        kernel: Option<&super::super::code::HeapKernel>,
+    ) -> Result<Next, Stop> {
+        use super::super::code::HeapKernel;
+        let selected = match (kernel, values) {
+            (Some(HeapKernel::Read { units, .. }), [left, right]) => {
+                self.member_value(site, &[*left, *right], *units)
+            }
+            (Some(HeapKernel::Write { property, .. }), [target, key, value]) => self
+                .member_write(
+                    frame.state.statement,
+                    property,
+                    site.close,
+                    &[*target, *key, *value],
+                )
+                .map(|answer| answer.map(|()| *value)),
+            _ => None,
+        };
+        let value = selected
+            .unwrap_or_else(|| {
+                self.retaining(&mut frame.state.transient, |island| {
+                    island.heap_call(site, values)
+                })
+            })
+            .inspect_err(|_| {
+                for (source, value) in args.iter().zip(values) {
+                    if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
+                        self.scratch.exit.regs.push((*source, *value));
+                    }
+                }
+            })?;
+        match kernel {
+            Some(HeapKernel::Read { to, .. }) => self.destination(frame, site.reg, value, to),
+            other => {
+                frame.regs[site.reg as usize] = value;
+                match other {
+                    Some(HeapKernel::Write {
+                        finish: Some(leaves),
+                        ..
+                    }) => self.finish_statement(frame, *leaves, None),
+                    _ => Ok(Next::Continue),
+                }
+            }
+        }
+    }
+
     pub(super) fn member_value(
         &mut self,
         site: &super::super::compiled::HeapSite,
@@ -92,11 +143,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             2 * lash_kernel_state::arena::VALUE_BYTES,
         )?;
         let (value, units, append) = match (charge, *values) {
-            (MemberAccess::Map(charge), [Value::Map(map), Value::Text(key)]) => (
-                self.arena.table_get_text(map, &key).ok()??,
-                charge.units(key.as_bytes().len() as u64),
-                None,
-            ),
+            (MemberAccess::Map(charge), [Value::Map(map), Value::Text(key)]) => {
+                let value = self.arena.table_get_text(map, &key).ok()??;
+                let units = match charge {
+                    Some(charge) => charge.units(key.as_bytes().len() as u64),
+                    None => measured_formula(
+                        self.arena,
+                        &self.exe.lib(site.lib).charge,
+                        values,
+                        Some(&value),
+                    )?,
+                };
+                (value, units, None)
+            }
             (MemberAccess::Append { units, values }, [Value::List(list), value])
                 if values & (1 << value.kind() as u32) != 0 =>
             {
@@ -267,7 +326,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(never)]
     pub(super) fn access(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         site: &AccessSite,
     ) -> Result<Next, Stop> {
         if self.admitted
@@ -280,34 +339,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         {
             return self.commit_access(frame, site, answer);
         }
+        witnessed!(GuardedRead, Guard);
         let mut values = [Value::Absent; 1];
-        self.inputs(
-            &frame.slots,
-            std::slice::from_ref(&site.target),
-            &mut values,
-        )?;
+        self.inputs(frame.slots, std::slice::from_ref(&site.target), &mut values)?;
         let [value] = values;
         frame.regs[site.kind.same.reg as usize] = self
-            .retaining(&mut frame.transient, |island| {
+            .retaining(&mut frame.state.transient, |island| {
                 island.kind_test(&site.kind, value)
             })?;
         Ok(Next::Continue)
     }
 
-    pub(super) fn access_init(
+    pub(super) fn access_start(
         &mut self,
-        frame: &mut Frame<'e>,
-        head: usize,
-        init: &WriteSite,
-        held: Option<&WriteSite>,
-    ) -> Result<Next, Stop> {
-        let original = held.unwrap_or(init);
-        if let Some(begin) = &original.begin {
-            self.begin(frame, begin.id, begin.index, begin.ahead)?;
-        }
-        let Op::Access(site) = &frame.callee.compiled.ops[head].op else {
-            unreachable!()
+        frame: &mut Values<'_, 'e>,
+        original: &WriteSite,
+    ) -> Option<Result<Next, Stop>> {
+        let start = original.access?;
+        let code = &frame.state.callee.compiled.code;
+        let (init, held) = match start.init {
+            Some(at) => (code.write(at), Some(original)),
+            None => (original, None),
         };
+        let site = code.access(start.head);
         let extra = 1
             + init.close.map_or(0, |close| u64::from(close.total))
             + held.map_or(0, |held| {
@@ -317,7 +371,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let [read] = held.reads.as_deref()? else {
                 return None;
             };
-            Some((held.at, self.pure(&frame.slots, read)?))
+            Some((held.at, self.pure(frame.slots, read)?))
         });
         if self.admitted
             && self.charging
@@ -331,10 +385,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             if let Some((at, value)) = saved {
                 frame.slots[at] = SlotState::Value(value);
             }
-            let Some(Position::Block(_, index)) = frame.control.last_mut() else {
+            let Some(Position::Block(_, index)) = frame.state.control.last_mut() else {
                 unreachable!()
             };
-            let Some(begin) = &frame.callee.compiled.ops[head].begin else {
+            let Some(begin) = frame.state.callee.compiled.code.entry(start.head) else {
                 unreachable!("a combined initializer precedes a source statement")
             };
             *index = begin.index + 1;
@@ -345,33 +399,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 1 + u64::from(held.is_some()),
                 self.scratch.counting,
             );
-            return self.commit_access(frame, site, answer);
+            return Some(self.commit_access(frame, site, answer));
         }
-        let Some(reads) = &original.reads else {
-            unreachable!("a combined initializer retains its literal operand")
-        };
-        let value = {
-            let mut values = [Value::Absent; 1];
-            self.inputs(&frame.slots, reads, &mut values)?;
-            values[0]
-        };
-        self.write_value(frame, original, value)
+        None
     }
 
     #[inline(always)]
     fn commit_access(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         site: &AccessSite,
         answer: ReadAnswer,
     ) -> Result<Next, Stop> {
         let prefix = answer.admission.request;
+        match prefix {
+            Prefix::Complete => witnessed!(GuardedRead, Commit),
+            Prefix::Access => witnessed!(GuardedRead, Partial),
+        }
         self.charged = answer.admission.end;
         self.covered = false;
         frame.slots[site.at] = SlotState::Value(answer.member);
         if let (Some(consumer), Some(value)) = (&site.consumer, answer.consumed) {
             frame.slots[consumer.at] = SlotState::Value(value);
-            let Some(Position::Block(_, index)) = frame.control.last_mut() else {
+            let Some(Position::Block(_, index)) = frame.state.control.last_mut() else {
                 unreachable!("an access consumer stays in its source block")
             };
             *index = consumer.next;
@@ -382,10 +432,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 _ => (site.after, site.leaves, site.statements, &site.arms),
             };
         for block in arms {
-            frame.control.push(Position::Block(*block, 1));
+            frame.state.control.push(Position::Block(*block, 1));
         }
-        frame.pc = after;
-        frame.statement = None;
+        frame.state.pc = after;
+        frame.state.statement = None;
         #[cfg(test)]
         super::super::GUARDED_READS.with(|n| n.set(n.get() + 1));
         #[cfg(any(test, feature = "perf-witness"))]
@@ -404,7 +454,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     fn access_value(
         &mut self,
-        frame: &Frame<'e>,
+        frame: &Values<'_, 'e>,
         site: &AccessSite,
         extra: u64,
         initializing: bool,
@@ -413,7 +463,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !initializing && matches!(frame.slots[site.at], SlotState::Empty) {
             return None;
         }
-        let target = self.pure(&frame.slots, &site.target)?;
+        let target = self.pure(frame.slots, &site.target)?;
         let (accepted, kind, same) = site.kind.memo.get(target.kind())?;
         if !accepted {
             return None;
@@ -431,12 +481,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let Value::List(list) = target else {
                     return None;
                 };
-                let Op::Operator {
-                    site: conversion, ..
-                } = &frame.callee.compiled.ops[*convert].op
-                else {
-                    unreachable!()
-                };
+                let conversion = frame.state.callee.compiled.code.operator(*convert);
                 let (value, charged) = self.scalar_operator(
                     conversion,
                     &[Value::Int(self.arena.len(list).ok()? as i64)],
@@ -482,15 +527,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let Value::List(list) = target else {
                     return None;
                 };
-                let at = self.pure(&frame.slots, index)?;
+                let at = self.pure(frame.slots, index)?;
                 let length = self.arena.len(list).ok()?;
                 if let Some([left, right, compare]) = validation {
                     let scalar = |at: usize, values: &[Value]| {
-                        let (Op::DirectOperator { site, .. } | Op::Operator { site, .. }) =
-                            &frame.callee.compiled.ops[at].op
-                        else {
-                            unreachable!()
-                        };
+                        let site = frame.state.callee.compiled.code.operator(at);
                         self.scalar_operator(site, values)
                     };
                     let (x, a) = scalar(*left, &[at])?;
@@ -508,12 +549,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     Some((_, units)) => *units,
                     None => {
-                        let Op::Operator {
-                            site: comparison, ..
-                        } = &frame.callee.compiled.ops[*test].op
-                        else {
-                            unreachable!()
-                        };
+                        let comparison = frame.state.callee.compiled.code.operator(*test);
                         let (answer, units) =
                             self.scalar_operator(comparison, &[at, Value::Int(length as i64)])?;
                         if !matches!(answer, Value::Bool(true)) {
@@ -541,7 +577,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         site.short.as_ref()?;
         let admission = self
             .admission_window()
-            .admit(Prefix::Access, 0, units, None, true)?;
+            .admit(Prefix::Access, 0, units, None, true)
+            .or_else(|| {
+                witnessed!(GuardedRead, Prefix);
+                None
+            })?;
         Some(ReadAnswer {
             member: value,
             consumed: None,
@@ -552,7 +592,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     fn access_tail(
         &self,
-        frame: &Frame<'e>,
+        frame: &Values<'_, 'e>,
         site: &AccessSite,
         value: Value,
         mut units: u64,
@@ -587,7 +627,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         let consumed = if let Some(consumer) = &site.consumer {
             if matches!(frame.slots[consumer.at], SlotState::Empty)
-                || (consumer.accumulates && (!frame.texts.is_empty() || self.accumulator.is_some()))
+                || (consumer.accumulates
+                    && (!frame.state.texts.is_empty() || self.accumulator.is_some()))
             {
                 return None;
             }
@@ -604,7 +645,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     Some(value)
                 } else {
-                    self.pure(&frame.slots, arg)
+                    self.pure(frame.slots, arg)
                 }
             };
             let values = [read(&consumer.reads[0])?, read(&consumer.reads[1])?];
@@ -613,12 +654,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     (lash_kernel_doc::scalar::floats(op, a, b)?, units)
                 }
                 _ => {
-                    let (Op::Accumulation { site: operator, .. }
-                    | Op::DirectOperator { site: operator, .. }) =
-                        &frame.callee.compiled.ops[consumer.operator].op
-                    else {
-                        unreachable!()
-                    };
+                    let operator = frame.state.callee.compiled.code.operator(consumer.operator);
                     self.scalar_operator(operator, &values)?
                 }
             };
@@ -629,7 +665,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         let admission = self
             .admission_window()
-            .admit(Prefix::Complete, 0, units, None, true)?;
+            .admit(Prefix::Complete, 0, units, None, true)
+            .or_else(|| {
+                witnessed!(GuardedRead, Prefix);
+                None
+            })?;
         Some(ReadAnswer {
             member: value,
             consumed,

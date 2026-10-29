@@ -5,7 +5,8 @@
 #[cfg(any(test, feature = "perf-witness"))]
 use crate::perf_witness::execution::{self, Owner, Reason};
 
-use super::compiled::{Instruction, Op};
+use super::code::{Opcode, Packet, Recovery, sites};
+use super::compiled::{Cleanup, Destination};
 use super::*;
 use crate::machine::loops::{Cursor, Guard, Header};
 use crate::machine::{Completion, LibraryCall, TryPhase};
@@ -14,8 +15,33 @@ mod access;
 mod accumulate;
 mod boundary;
 mod call;
+mod dispatch;
 mod merge;
 mod numeric;
+mod pending;
+use pending::{Departing, Departure, Phase};
+mod format;
+mod repeat;
+mod storage;
+mod update;
+#[cfg(test)]
+pub(super) use storage::StackPlacement;
+use storage::Values;
+pub(super) use storage::{Operands, Slab};
+
+#[derive(Clone, Copy)]
+struct CallContinuation<'e> {
+    site: &'e compiled::CallSite,
+    args: &'e [u32],
+    live: &'e [u32],
+}
+
+#[derive(Clone, Copy)]
+struct ReturnOperand {
+    statement: StmtId,
+    pc: u32,
+    reg: u32,
+}
 
 enum Position {
     Block(usize, usize),
@@ -28,14 +54,14 @@ enum Position {
         guard: Option<Box<Guard>>,
     },
     Try {
-        instruction: usize,
-        phase: TryPhase,
+        cleanup: Cleanup,
+        phase: Phase,
     },
 }
 
 impl Position {
     #[inline(always)]
-    fn project(&self, compiled: &Compiled, target: &mut Control) {
+    fn project(&self, compiled: &Compiled, pending: &Operands<'_>, target: &mut Control) {
         match self {
             Position::Block(block, next) => {
                 let id = compiled.blocks[*block].id;
@@ -95,46 +121,43 @@ impl Position {
                     };
                 }
             }
-            Position::Try { instruction, phase } => {
-                let Op::Try { id, .. } = compiled.ops[*instruction].op else {
-                    unreachable!("a try position names its instruction");
-                };
+            Position::Try { cleanup, phase } => {
                 if let Control::Try { stmt, phase: saved } = target {
-                    *stmt = id;
-                    saved.clone_from(phase);
+                    *stmt = cleanup.id;
+                    *saved = phase.project(pending[cleanup.pending]);
                 } else {
                     *target = Control::Try {
-                        stmt: id,
-                        phase: phase.clone(),
+                        stmt: cleanup.id,
+                        phase: phase.project(pending[cleanup.pending]),
                     };
                 }
             }
         }
     }
 
-    fn projected(&self, compiled: &Compiled) -> Control {
+    fn projected(&self, compiled: &Compiled, pending: &Operands<'_>) -> Control {
         let mut control = Control::Block {
             block: compiled.blocks[0].id,
             next: 0,
         };
-        self.project(compiled, &mut control);
+        self.project(compiled, pending, &mut control);
         control
     }
 }
 
-/// Reusable physical windows own no logical value between entries.
+/// Reused control buffers carry no value holdings between frames.
 #[derive(Default)]
 pub(super) struct Window {
-    slots: Vec<SlotState>,
-    regs: Vec<Value>,
     control: Vec<Position>,
     texts: Vec<(usize, ArenaHandle)>,
 }
 
 pub(super) struct Frame<'e> {
     callee: Callee<'e>,
-    slots: Vec<SlotState>,
-    regs: Vec<Value>,
+    bindings: std::ops::Range<usize>,
+    operands: std::ops::Range<usize>,
+    pending: std::ops::Range<usize>,
+    pending_call: Option<(Callee<'e>, Option<crate::compile::LibId>)>,
     pc: usize,
     /// Compiled block identity and next source statement, outermost first.
     control: Vec<Position>,
@@ -142,9 +165,8 @@ pub(super) struct Frame<'e> {
     /// loop's running activation, which nothing else holds (FIG-6795).
     texts: Vec<(usize, ArenaHandle)>,
     statement: Option<StmtId>,
-    /// A waiting caller stands at `pc - 1`; that instruction owns its
-    /// return destination, charge suffix and source continuation.
-    waiting: bool,
+    continuation: Option<CallContinuation<'e>>,
+    returned: Option<ReturnOperand>,
     may_clean: bool,
     admitted: bool,
     swift: bool,
@@ -152,56 +174,29 @@ pub(super) struct Frame<'e> {
     transient: u64,
     resident: bool,
     handoff: bool,
+    handoff_live: &'e [u32],
     recovery: bool,
     boundary: Option<crate::compile::LibId>,
 }
 
-impl crate::compile::Slots for Frame<'_> {
-    #[inline(always)]
-    fn value(&self, at: u32) -> Option<Value> {
-        if self.callee.plan.captures.contains(&at) {
-            return None;
-        }
-        match self.slots.get(at as usize)? {
-            SlotState::Value(value) => Some(*value),
-            SlotState::Empty | SlotState::Cell(_) => None,
-        }
-    }
-    #[inline(always)]
-    fn assign(&mut self, at: u32, value: Value) {
-        self.slots[at as usize] = SlotState::Value(value);
-    }
-}
-
 impl<'e> Frame<'e> {
-    /// An explicit return retains its source statement; falling out of the
-    /// last block clears it. Only the former copies a result out of the run.
     pub(super) fn returned_explicitly(&self) -> bool {
         self.statement.is_some()
     }
 
-    #[inline(always)]
-    fn new(
-        callee: Callee<'e>,
-        args: impl ExactSizeIterator<Item = Value>,
-        captured: &[(Value, ArenaHandle)],
-        mut window: Window,
-    ) -> Self {
-        window.slots.resize(callee.plan.slots, SlotState::Empty);
-        callee
-            .compiled
-            .layout
-            .fill(&mut window.slots, args, captured);
-        window.regs.resize(callee.compiled.registers, Value::Null);
+    fn new(callee: Callee<'e>, ranges: storage::Ranges, window: Window) -> Self {
         Self {
             callee,
-            slots: window.slots,
-            regs: window.regs,
+            bindings: ranges.bindings,
+            operands: ranges.operands,
+            pending: ranges.pending,
+            pending_call: None,
             pc: 0,
             control: window.control,
             texts: window.texts,
             statement: None,
-            waiting: false,
+            continuation: None,
+            returned: None,
             may_clean: false,
             admitted: false,
             swift: false,
@@ -209,6 +204,7 @@ impl<'e> Frame<'e> {
             transient: 0,
             resident: false,
             handoff: false,
+            handoff_live: &[],
             recovery: false,
             boundary: None,
         }
@@ -219,6 +215,7 @@ impl<'e> Frame<'e> {
 /// or exits with the source map. No operation owns another control loop.
 enum Next {
     Continue,
+    Call,
     Return(Value),
 }
 
@@ -250,36 +247,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.scratch.counting,
         );
         if OBSERVING && let Some(watching) = &self.projection() {
-            let Op::ReturnLiteral {
-                id, index, close, ..
-            } = &callee.compiled.ops[0].op
-            else {
-                unreachable!("the literal projection came from its instruction");
-            };
             watching.push(callee.plan.code, self.charged, self.arena.allocations());
             watching.statement(
                 self.exe,
                 StatementFact {
                     code: callee.plan.code,
-                    stmt: *id,
+                    stmt: literal.statement,
                     block: callee.plan.body.id,
-                    index: *index,
+                    index: literal.index,
                     charging: self.exe.charging(),
                 },
                 (self.charged + 1, self.arena.allocations()),
             );
-            if let Some(close) = close {
+            if let Some(close) = &literal.close {
                 watching.expressions(callee.stream, close, self.exe.charging());
             }
             watching.pop(self.charged + units, self.arena.allocations());
         }
         self.charged += units;
         if let Some(tape) = self.recorder.filter(|_| self.exe.charging()) {
-            let Op::ReturnLiteral { close, .. } = &callee.compiled.ops[0].op else {
-                unreachable!("the literal projection came from its instruction");
-            };
             tape.push(Weight::Atomic(1));
-            if let Some(close) = close {
+            if let Some(close) = &literal.close {
                 super::record(tape, callee.stream, close.region);
             }
         }
@@ -290,51 +278,53 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     // flag erases passive projection taps when no observer borrowed this run.
     #[inline(always)]
     pub(super) fn execute(&mut self, active: &mut Frame<'e>) -> Answer {
+        let mut slab = std::mem::take(&mut self.scratch.slab);
         #[cfg(any(test, feature = "perf-witness"))]
-        if self.scratch.counting {
-            return self.execute_counted(active);
+        let answer = if self.scratch.counting {
+            self.execute_counted(active, &mut slab)
+        } else {
+            self.execute_program(active, &mut slab)
+        };
+        #[cfg(not(any(test, feature = "perf-witness")))]
+        let answer = self.execute_program(active, &mut slab);
+        if !active.handoff {
+            slab.clear();
         }
-        self.execute_program(active)
+        self.scratch.slab = slab;
+        answer
     }
 
     #[cfg(any(test, feature = "perf-witness"))]
     #[cold]
     #[inline(never)]
-    fn execute_counted(&mut self, active: &mut Frame<'e>) -> Answer {
+    fn execute_counted(&mut self, active: &mut Frame<'e>, slab: &mut Slab) -> Answer {
         let _execution =
             execution::Scope::enter(&self.scratch.census, Owner::RegisterProgram, true);
-        self.execute_program(active)
+        self.execute_program(active, slab)
     }
 
-    fn execute_program(&mut self, active: &mut Frame<'e>) -> Answer {
+    fn execute_program(&mut self, active: &mut Frame<'e>, slab: &mut Slab) -> Answer {
         let mut callers = Vec::new();
         // This loop owns both the physical frames and their reservation.
         // It never commits a call that cannot fit all live windows.
-        let mut slots = active.slots.len();
+        let mut slots = active.bindings.len();
         self.depth = 1;
-        self.activate(active);
+        self.activate(&mut slab.view(active));
         loop {
-            let instruction = &active.callee.compiled.ops[active.pc];
+            #[cfg(test)]
+            slab.record_placement(&callers, active, self.arena);
+            let code = &active.callee.compiled.code;
+            let packet = code.packets[active.pc];
+            let recovery = &code.recovery[active.pc];
             active.pc += 1;
-            if let Some(begin) = &instruction.begin
-                && let Err(stop) = self.begin(active, begin.id, begin.index, begin.ahead)
-            {
-                return self.slow_exit(active, &mut callers, instruction, stop);
-            }
+            #[cfg(any(test, feature = "testing"))]
+            slab.dispatched(packet, code);
             if OBSERVING
                 && let Some(watching) = &self.projection()
                 && watching.sites()
                 && matches!(
-                    &instruction.op,
-                    Op::Call { .. }
-                        | Op::Operator { .. }
-                        | Op::DirectOperator { .. }
-                        | Op::Unary { .. }
-                        | Op::Binary { .. }
-                        | Op::Accumulation { .. }
-                        | Op::Heap { .. }
-                        | Op::MemberAccess { .. }
-                        | Op::MemberStore { .. }
+                    packet.opcode,
+                    Opcode::Call | Opcode::Operator | Opcode::Unary | Opcode::Binary | Opcode::Heap
                 )
             {
                 let mut loops = Vec::new();
@@ -355,14 +345,96 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 watching.loops(loops);
             }
-            let next = self.instruction(active, instruction, &mut callers, &mut slots);
+            // Ordinary placement and admission stay in the dispatch loop.
+            // They have no operation result or continuation to route.
+            match packet.opcode {
+                Opcode::Begin => {
+                    let begin = &code.sites.begin[packet.x as usize];
+                    if let Err(stop) =
+                        self.begin(&mut slab.view(active), begin.id, begin.index, begin.ahead)
+                    {
+                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                    }
+                    continue;
+                }
+                Opcode::Constant => {
+                    slab.view(active).regs[packet.dst as usize] = code.constant(packet);
+                    continue;
+                }
+                Opcode::Local => {
+                    let value = match slab.view(active).slots[packet.x as usize] {
+                        SlotState::Cell(cell) if packet.mode != 0 => self.arena.cell(cell).ok(),
+                        SlotState::Value(value) if packet.mode == 0 => Some(value),
+                        _ => None,
+                    };
+                    let Some(value) = value else {
+                        let stop = self.at(packet.y);
+                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                    };
+                    slab.view(active).regs[packet.dst as usize] = value;
+                    continue;
+                }
+                Opcode::Session => {
+                    let Some(value) = self.session(packet.x) else {
+                        let stop = self.at(packet.y);
+                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                    };
+                    slab.view(active).regs[packet.dst as usize] = value;
+                    continue;
+                }
+                Opcode::Bind => {
+                    let values = slab.view(active);
+                    values.slots[packet.dst as usize] =
+                        SlotState::Value(values.regs[packet.x as usize]);
+                    continue;
+                }
+                Opcode::Unbind => {
+                    slab.view(active).slots[packet.dst as usize] = SlotState::Empty;
+                    continue;
+                }
+                Opcode::Jump => {
+                    active.pc = packet.x as usize;
+                    continue;
+                }
+                _ => {}
+            }
+            let next = self.packet(&mut slab.view(active), packet, recovery, slots);
             match next {
                 Ok(Next::Continue) => {}
+                Ok(Next::Call) => {
+                    let Some((target, boundary)) = active.pending_call.take() else {
+                        return Err(self.halt(fault("a call has no admitted target")));
+                    };
+                    let Some(continuation) = active.continuation else {
+                        return Err(self.halt(fault("a call has no semantic continuation")));
+                    };
+                    let ranges = slab.call(
+                        active,
+                        target,
+                        continuation.args,
+                        &self.scratch.captured[target.captured as usize..],
+                    );
+                    let window = self.scratch.windows.pop().unwrap_or_default();
+                    let mut inner = Frame::new(target, ranges, window);
+                    Self::cell_parameters(self.arena, target, slab.view(&mut inner).slots);
+                    inner.boundary = boundary;
+                    self.register_bytes += target.compiled.register_bytes();
+                    slots += inner.bindings.len();
+                    callers.push(std::mem::replace(active, inner));
+                    self.depth += 1;
+                    self.activate(&mut slab.view(active));
+                }
                 Ok(Next::Return(value)) => {
-                    if (!active.callee.plan.charged || active.boundary.is_some())
-                        && let Err(stop) = self.complete_library(active, callers.last(), value)
-                    {
-                        return self.slow_exit(active, &mut callers, instruction, stop);
+                    if !active.callee.plan.charged || active.boundary.is_some() {
+                        let completion = if let Some(caller) = callers.last_mut() {
+                            let (caller, current) = slab.pair(caller, active);
+                            self.complete_library(&current, Some(&caller), value)
+                        } else {
+                            self.complete_library(&slab.view(active), None, value)
+                        };
+                        if let Err(stop) = completion {
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
                     }
                     if OBSERVING
                         && !active.resident
@@ -375,101 +447,87 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     {
                         sampling.pop();
                     }
-                    slots -= active.slots.len();
-                    self.recycle(active);
+                    slots -= active.bindings.len();
+                    self.recycle(&mut slab.view(active));
+                    slab.release(active);
                     let Some(caller) = callers.pop() else {
                         self.depth = 0;
                         return Ok(value);
                     };
                     *active = caller;
                     self.depth -= 1;
-                    self.activate_mode(active);
+                    self.activate_mode(&slab.view(active));
                     (self.admitted, self.swift, self.covered) =
                         (active.admitted, active.swift, active.covered);
-                    if !std::mem::take(&mut active.waiting) {
+                    let Some(continuation) = active.continuation.take() else {
                         return Err(self.halt(fault("a caller has no call continuation")));
-                    }
-                    let Op::Call { site, .. } = &active.callee.compiled.ops[active.pc - 1].op
-                    else {
-                        unreachable!("a caller's continuation is a call")
                     };
-                    active.regs[site.reg as usize] = value;
+                    let site = continuation.site;
+                    slab.view(active).regs[site.reg as usize] = value;
                     if site.after != 0 {
                         self.admit(site.after);
                     }
                 }
-                Err(stop) => return self.slow_exit(active, &mut callers, instruction, stop),
+                Err(stop) => return self.slow_exit(active, &mut callers, slab, recovery, stop),
             }
         }
     }
 
     #[inline(always)]
     fn new_frame(&mut self, callee: Callee<'e>, args: &[Value]) -> Frame<'e> {
-        self.frame_from(callee, args.iter().copied())
-    }
-
-    #[inline(always)]
-    fn frame_from(
-        &mut self,
-        callee: Callee<'e>,
-        args: impl ExactSizeIterator<Item = Value>,
-    ) -> Frame<'e> {
-        let mut frame = self.frame_window(callee, args);
-        if callee.compiled.cell_parameters != 0 {
-            for at in &callee.plan.params {
-                if callee.plan.shared[*at as usize] {
-                    let value = match frame.slots[*at as usize] {
-                        SlotState::Value(value) => value,
-                        _ => Value::Absent,
-                    };
-                    // Call admission claimed these bytes before its occurrence.
-                    frame.slots[*at as usize] = SlotState::Cell(self.arena.new_cell(value));
-                }
-            }
-        }
+        #[cfg(test)]
+        self.scratch.slab.entered_call();
+        self.register_bytes += callee.compiled.register_bytes();
+        let ranges = self.scratch.slab.open(
+            callee.plan.slots,
+            callee.compiled.registers,
+            callee.compiled.pending_slots(),
+        );
+        let window = self.scratch.windows.pop().unwrap_or_default();
+        let mut frame = Frame::new(callee, ranges, window);
+        let values = self.scratch.slab.view(&mut frame);
+        callee.compiled.layout.fill(
+            values.slots,
+            args.iter().copied(),
+            &self.scratch.captured[callee.captured as usize..],
+        );
+        Self::cell_parameters(self.arena, callee, values.slots);
         frame
     }
 
-    #[inline(always)]
-    fn frame_window(
-        &mut self,
-        callee: Callee<'e>,
-        args: impl ExactSizeIterator<Item = Value>,
-    ) -> Frame<'e> {
-        self.register_bytes += callee.compiled.register_bytes();
-        let window = self.scratch.windows.pop().unwrap_or_default();
-        Frame::new(
-            callee,
-            args,
-            &self.scratch.captured[callee.captured as usize..],
-            window,
-        )
+    fn cell_parameters(
+        arena: &mut lash_kernel_state::arena::Arena,
+        callee: Callee<'_>,
+        slots: &mut [SlotState],
+    ) {
+        if callee.compiled.cell_parameters != 0 {
+            for at in &callee.plan.params {
+                if callee.plan.shared[*at as usize] {
+                    let value = match slots[*at as usize] {
+                        SlotState::Value(value) => value,
+                        _ => Value::Absent,
+                    };
+                    slots[*at as usize] = SlotState::Cell(arena.new_cell(value));
+                }
+            }
+        }
     }
 
     #[inline(always)]
-    fn recycle(&mut self, frame: &mut Frame<'_>) {
+    fn recycle(&mut self, frame: &mut Values<'_, '_>) {
         self.end_statement(frame);
-        let mut slots = std::mem::take(&mut frame.slots);
-        let mut regs = std::mem::take(&mut frame.regs);
-        self.register_bytes -= frame.callee.compiled.register_bytes();
-        let mut control = std::mem::take(&mut frame.control);
-        let mut texts = std::mem::take(&mut frame.texts);
-        slots.fill(SlotState::Empty);
-        regs.fill(Value::Null);
+        self.register_bytes -= frame.state.callee.compiled.register_bytes();
+        let mut control = std::mem::take(&mut frame.state.control);
+        let mut texts = std::mem::take(&mut frame.state.texts);
         control.clear();
         texts.clear();
-        self.scratch.windows.push(Window {
-            slots,
-            regs,
-            control,
-            texts,
-        });
+        self.scratch.windows.push(Window { control, texts });
     }
 
-    fn end_statement(&mut self, frame: &mut Frame<'_>) {
+    fn end_statement(&mut self, frame: &mut Values<'_, '_>) {
         self.transient = self
             .transient
-            .saturating_sub(std::mem::take(&mut frame.transient));
+            .saturating_sub(std::mem::take(&mut frame.state.transient));
     }
 
     /// An accumulator statement, which cannot stop once its concatenation
@@ -480,7 +538,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     fn accumulated(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         at: usize,
         value: Value,
         made: crate::compile::Made,
@@ -491,7 +549,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 if made.moved.is_some() {
                     execution::accumulated(&self.scratch.census, self.scratch.counting);
                 }
-                frame.texts.push((at, text));
+                frame.state.texts.push((at, text));
                 Ok(())
             }
             _ if made.moved.is_none() => Ok(()),
@@ -516,12 +574,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
     }
 
-    fn activate(&mut self, frame: &mut Frame<'e>) {
+    fn activate(&mut self, frame: &mut Values<'_, 'e>) {
         self.activate_mode(frame);
         if let Some(sampling) = self.sampling {
-            sampling.statement(frame.callee.plan.code, frame.statement);
+            sampling.statement(frame.state.callee.plan.code, frame.state.statement);
         }
-        self.admitted = frame.callee.compiled.admits(
+        self.admitted = frame.state.callee.compiled.admits(
             self.base + u64::from(self.depth),
             self.call_depth,
             self.observed,
@@ -531,13 +589,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    fn activate_mode(&mut self, frame: &Frame<'e>) {
-        self.link = frame.callee.link;
-        self.stream = frame.callee.stream;
+    fn activate_mode(&mut self, frame: &Values<'_, 'e>) {
+        self.link = frame.state.callee.link;
+        self.stream = frame.state.callee.stream;
         // Entry starts in the charged/pace policy of Ground. Same-mode
         // calls retain that policy; a helper/callback handoff changes it.
-        if self.accounting != frame.callee.plan.charged {
-            self.accounting = frame.callee.plan.charged;
+        if self.accounting != frame.state.callee.plan.charged {
+            self.accounting = frame.state.callee.plan.charged;
             self.charging = self.exe.charging() && self.accounting;
             self.tape = self.recorder.filter(|_| self.charging);
             self.plain = self.charging && self.tape.is_none() && !OBSERVING;
@@ -569,22 +627,25 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     fn begin(
         &mut self,
-        frame: &mut Frame<'_>,
+        frame: &mut Values<'_, '_>,
         id: StmtId,
         index: usize,
         ahead: u64,
     ) -> Result<(), Stop> {
         self.end_statement(frame);
-        frame.statement = None;
+        frame.state.statement = None;
         if self.deferred_end.is_some() {
             self.progressed();
         }
         if self.admit(ahead) {
             self.charged += 1;
         } else if self.accounting {
-            self.unit()?;
+            self.unit().inspect_err(|_| {
+                self.scratch.exit.stands = Some(Stands::Statement);
+            })?;
         }
         let Position::Block(_, next) = frame
+            .state
             .control
             .last_mut()
             .ok_or_else(|| self.halt(fault("a statement has no enclosing block")))?
@@ -592,16 +653,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return Err(self.halt(fault("a statement's enclosing control is not a block")));
         };
         *next = index + 1;
-        frame.statement = Some(id);
+        frame.state.statement = Some(id);
         if OBSERVING && let Some(watching) = &self.projection() {
-            let Some(Position::Block(block, _)) = frame.control.last() else {
+            let Some(Position::Block(block, _)) = frame.state.control.last() else {
                 unreachable!("begin validated its block");
             };
-            let block = frame.callee.compiled.blocks[*block].id;
+            let block = frame.state.callee.compiled.blocks[*block].id;
             watching.statement(
                 self.exe,
                 StatementFact {
-                    code: frame.callee.plan.code,
+                    code: frame.state.callee.plan.code,
                     stmt: id,
                     block,
                     index,
@@ -631,767 +692,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
 
     #[inline(always)]
-    fn instruction(
-        &mut self,
-        frame: &mut Frame<'e>,
-        instruction: &Instruction,
-        callers: &mut Vec<Frame<'e>>,
-        slots: &mut usize,
-    ) -> Result<Next, Stop> {
-        let mut op = &instruction.op;
-        loop {
-            let regs = &mut frame.regs;
-            match op {
-                Op::Collection {
-                    step,
-                    tail,
-                    original,
-                } => {
-                    if let Some(answer) = self.collection_step(frame, step, *tail) {
-                        return answer;
-                    }
-                    op = original;
-                    continue;
-                }
-                Op::Try { .. } => {
-                    frame.may_clean = true;
-                    frame.control.push(Position::Try {
-                        instruction: frame.pc - 1,
-                        phase: TryPhase::Body,
-                    });
-                    frame.statement = None;
-                }
-                Op::Loop { id, header, texts } => {
-                    frame.texts.retain(|(slot, _)| !texts.contains(slot));
-                    frame.control.push(Position::Loop {
-                        id: *id,
-                        header: *header,
-                        started: 0,
-                        cursor: None,
-                        guard: None,
-                    });
-                    frame.statement = None;
-                }
-                Op::For {
-                    id,
-                    header,
-                    reg,
-                    pc,
-                    via,
-                    texts,
-                } => {
-                    if *via {
-                        return Err(self.at(*pc));
-                    }
-                    frame.texts.retain(|(slot, _)| !texts.contains(slot));
-                    let cursor =
-                        Cursor::over(regs[*reg as usize], false).map_err(|_| self.at(*pc))?;
-                    frame.control.push(Position::Loop {
-                        id: *id,
-                        header: *header,
-                        started: 0,
-                        cursor: Some(cursor),
-                        guard: None,
-                    });
-                    frame.statement = None;
-                }
-                Op::Header {
-                    repeat,
-                    id,
-                    cost,
-                    metered,
-                    at,
-                    item_hook,
-                    otherwise,
-                    ..
-                } => {
-                    if self.deferred_end.is_some() {
-                        self.progressed();
-                    }
-                    // No header fact is committed until the complete charge
-                    // prefix and (for a cursor) the resident next item fit.
-                    // A refusal resumes next_iteration in this same step.
-                    let next = if let Some(at) = at {
-                        let Some(Position::Loop {
-                            cursor: Some(cursor),
-                            guard,
-                            ..
-                        }) = frame.control.last()
-                        else {
-                            return Err(self.halt(fault("a for header has no cursor")));
-                        };
-                        if *item_hook || guard.is_some() {
-                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                            return Err(Stop);
-                        }
-                        let Some(next) = cursor.resident_step(self.arena) else {
-                            self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                            return Err(Stop);
-                        };
-                        match next {
-                            Ok((cursor, value)) => Some((*at, cursor, value)),
-                            _ => {
-                                self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                                #[cfg(any(test, feature = "perf-witness"))]
-                                {
-                                    self.scratch.exit.reason = Some(Reason::ResidentRead);
-                                }
-                                return Err(Stop);
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    if next.as_ref().is_some_and(|(at, _, value)| {
-                        value.is_some() && frame.callee.plan.shared[*at] && !self.cell_room(1)
-                    }) {
-                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                        return Err(Stop);
-                    }
-                    if !self
-                        .fits((if self.accounting { *cost } else { 0 }).saturating_add(*metered))
-                    {
-                        self.scratch.exit.stands = Some(Stands::Iteration { stmt: *id });
-                        #[cfg(any(test, feature = "perf-witness"))]
-                        {
-                            self.scratch.exit.reason = Some(Reason::Charge);
-                        }
-                        return Err(Stop);
-                    }
-                    if at.is_none()
-                        && OBSERVING
-                        && let Some(watching) = &self.projection()
-                    {
-                        watching.condition(self.exe, *id);
-                    }
-                    // The typed kernel executes every iteration and charges
-                    // the next test last. Reserve the metered tail so a paid
-                    // test never has to materialize without a source PC.
-                    let mut repeated = 0;
-                    if self.admitted
-                        && !OBSERVING
-                        && self.exe.charging()
-                        && let Some(site) = repeat
-                    {
-                        let headroom = crate::compile::Headroom {
-                            charged: self.charged + cost,
-                            bound: self.bound.saturating_sub(*metered),
-                            slice_end: self.slice_end.saturating_sub(*metered),
-                            iteration_max: site.iteration_max,
-                            loop_test: *cost,
-                        };
-                        let mut pending = Vec::new();
-                        let (iterations, units, _) =
-                            match (self.tape.is_some(), self.scratch.counting) {
-                                (true, true) => site.run.repeat::<true, true>(
-                                    self.exe,
-                                    #[cfg(any(test, feature = "perf-witness"))]
-                                    &self.scratch.census,
-                                    frame,
-                                    &mut pending,
-                                    headroom,
-                                ),
-                                (true, false) => site.run.repeat::<true, false>(
-                                    self.exe,
-                                    #[cfg(any(test, feature = "perf-witness"))]
-                                    &self.scratch.census,
-                                    frame,
-                                    &mut pending,
-                                    headroom,
-                                ),
-                                (false, true) => site.run.repeat::<false, true>(
-                                    self.exe,
-                                    #[cfg(any(test, feature = "perf-witness"))]
-                                    &self.scratch.census,
-                                    frame,
-                                    &mut pending,
-                                    headroom,
-                                ),
-                                (false, false) => site.run.repeat::<false, false>(
-                                    self.exe,
-                                    #[cfg(any(test, feature = "perf-witness"))]
-                                    &self.scratch.census,
-                                    frame,
-                                    &mut pending,
-                                    headroom,
-                                ),
-                            };
-                        if iterations != 0 {
-                            self.formula(*cost);
-                            self.charged += units;
-                            if let Some(tape) = self.tape {
-                                for weight in pending {
-                                    tape.push(weight);
-                                }
-                            }
-                            if let Some(recorder) = self.recorder {
-                                recorder.typed(iterations);
-                            }
-                            repeated = iterations;
-                            #[cfg(test)]
-                            super::TYPED_REPEATED.with(|n| n.set(n.get() + iterations));
-                        }
-                    }
-                    if repeated == 0 {
-                        self.formula(*cost);
-                    }
-                    if *metered != 0 {
-                        self.scheduled(*metered);
-                    }
-                    if repeated != 0
-                        && let Some(Position::Loop { started, .. }) = frame.control.last_mut()
-                    {
-                        *started += repeated;
-                    }
-                    self.covered = false;
-                    if let Some((at, next_cursor, value)) = next {
-                        let Some(Position::Loop {
-                            cursor, started, ..
-                        }) = frame.control.last_mut()
-                        else {
-                            return Err(self.halt(fault("a for header left its loop")));
-                        };
-                        *cursor = Some(next_cursor);
-                        match value {
-                            Some(value) => {
-                                *started += 1;
-                                frame.slots[at] = if frame.callee.plan.shared[at] {
-                                    SlotState::Cell(self.arena.new_cell(value))
-                                } else {
-                                    SlotState::Value(value)
-                                };
-                            }
-                            None => frame.pc = *otherwise,
-                        }
-                    } else {
-                        frame.statement = Some(*id);
-                    }
-                }
-                Op::LoopBranch { reg, pc, otherwise } => {
-                    self.transient = self
-                        .transient
-                        .saturating_sub(std::mem::take(&mut frame.transient));
-                    match regs[*reg as usize] {
-                        Value::Bool(true) => {
-                            let Some(Position::Loop { started, .. }) = frame.control.last_mut()
-                            else {
-                                return Err(self.halt(fault("a while test left its loop")));
-                            };
-                            *started += 1;
-                        }
-                        Value::Bool(false) => frame.pc = *otherwise,
-                        _ => return Err(self.at(*pc)),
-                    }
-                    frame.statement = None;
-                }
-                Op::EndLoop => {
-                    if !matches!(frame.control.pop(), Some(Position::Loop { .. })) {
-                        return Err(self.halt(fault("an exhausted loop has no control")));
-                    }
-                }
-                Op::LoopDone(leaves) => {
-                    let Some(Position::Loop { started, .. }) = frame.control.pop() else {
-                        return Err(self.halt(fault("an exhausted loop has no control")));
-                    };
-                    // Only the loop statement's own initial step takes its
-                    // statement edge. A backedge completes its header step.
-                    if started == 0 {
-                        for _ in 0..*leaves {
-                            Self::pop_block(frame);
-                        }
-                    }
-                    if self.spent() {
-                        return Err(Stop);
-                    }
-                }
-                Op::Depart { continuing } => {
-                    return self.departure(
-                        frame,
-                        if *continuing {
-                            Completion::Continue
-                        } else {
-                            Completion::Break
-                        },
-                    );
-                }
-                Op::Open(block) => {
-                    frame.control.push(Position::Block(*block, 0));
-                    frame.statement = None;
-                    if self.spent() || self.arena.boundary_due() {
-                        return Err(Stop);
-                    }
-                }
-                Op::ReturnLiteral {
-                    id,
-                    index,
-                    ahead,
-                    value,
-                    close,
-                    covered,
-                    reg,
-                    entry,
-                } => {
-                    if let Some(block) = entry
-                        && frame.control.is_empty()
-                    {
-                        frame.control.push(Position::Block(*block, 0));
-                        frame.statement = None;
-                        if self.spent() {
-                            return Err(Stop);
-                        }
-                    }
-                    self.begin(frame, *id, *index, *ahead)?;
-                    if let Some(close) = close
-                        && !self.close_in(close, *covered)
-                    {
-                        return Err(self.at_held(close.head, *reg, *value));
-                    }
-                    if frame.recovery || (self.public_return && self.depth == 1 && frame.may_clean)
-                    {
-                        return Err(self.at_held(self.exe.stmt(*id).ops.end() - 1, *reg, *value));
-                    }
-                    return self.returning(frame, *value);
-                }
-                Op::Keep(restart) => {
-                    regs[restart.saved as usize] = regs[restart.reg as usize];
-                    regs[restart.saved as usize + 1] = Value::Bool(true);
-                }
-                Op::Constant { dst, value } => regs[*dst as usize] = *value,
-                Op::Local {
-                    dst,
-                    at,
-                    shared,
-                    miss,
-                } => {
-                    regs[*dst as usize] = if *shared {
-                        let SlotState::Cell(cell) = frame.slots[*at] else {
-                            return Err(self.at(*miss));
-                        };
-                        self.arena.cell(cell).ok()
-                    } else {
-                        match frame.slots[*at] {
-                            SlotState::Value(value) => Some(value),
-                            _ => None,
-                        }
-                    }
-                    .ok_or_else(|| self.at(*miss))?;
-                }
-                Op::Session { dst, name, miss } => {
-                    regs[*dst as usize] = self.session(*name).ok_or_else(|| self.at(*miss))?;
-                }
-                Op::Operator {
-                    site,
-                    args,
-                    covered,
-                } => {
-                    let mut values = [Value::Absent; 3];
-                    for (to, reg) in values.iter_mut().zip(args.iter()) {
-                        *to = regs[*reg as usize];
-                    }
-                    let values = &values[..args.len()];
-                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                        island.operator_value(site, values, *covered)
-                    })?;
-                }
-                Op::DirectOperator {
-                    site,
-                    reads,
-                    covered,
-                } => {
-                    let mut values = [Value::Absent; 3];
-                    self.inputs(&frame.slots, reads, &mut values)?;
-                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                        island.operator_value(site, &values[..reads.len()], *covered)
-                    })?;
-                }
-                Op::Unary {
-                    site,
-                    arg,
-                    covered,
-                    to,
-                } => {
-                    return self.numeric_unary(frame, site, arg, *covered, to);
-                }
-                Op::Binary {
-                    kernel,
-                    site,
-                    left,
-                    right,
-                    covered,
-                    to,
-                } => {
-                    return self.numeric_binary(frame, *kernel, site, (left, right), *covered, to);
-                }
-                Op::Native { site, args } => {
-                    let mut values = [Value::Absent; MAX_ARGS];
-                    for (to, reg) in values.iter_mut().zip(args.iter()) {
-                        *to = regs[*reg as usize];
-                    }
-                    let answer = self.retaining(&mut frame.transient, |island| {
-                        island.native(site, &values, args.len())
-                    });
-                    regs[site.reg as usize] = answer?;
-                }
-                Op::DirectNative { site, reads } => {
-                    let mut values = [Value::Absent; MAX_ARGS];
-                    self.inputs(&frame.slots, reads, &mut values)?;
-                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                        island.native(site, &values, reads.len())
-                    })?;
-                }
-                Op::MemberStore {
-                    site,
-                    args,
-                    reads,
-                    property,
-                    finish,
-                } => {
-                    let mut values = [Value::Absent; 3];
-                    match reads {
-                        Some(reads) => self.inputs(&frame.slots, reads.as_slice(), &mut values)?,
-                        None => values = std::array::from_fn(|at| frame.regs[args[at] as usize]),
-                    }
-                    let answer = self
-                        .member_write(frame.statement, property, site.close, &values)
-                        .map(|answer| answer.map(|()| values[2]))
-                        .unwrap_or_else(|| {
-                            self.retaining(&mut frame.transient, |island| {
-                                island.heap_call(site, &values)
-                            })
-                        });
-                    frame.regs[site.reg as usize] = answer.inspect_err(|_| {
-                        for (source, value) in args.iter().zip(values) {
-                            if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
-                                self.scratch.exit.regs.push((*source, value));
-                            }
-                        }
-                    })?;
-                    if let Some(leaves) = finish {
-                        return self.finish_statement(frame, *leaves, None);
-                    }
-                }
-                Op::MemberAccess {
-                    site,
-                    args,
-                    units,
-                    reads,
-                    to,
-                } => {
-                    let mut values = [Value::Absent; 2];
-                    match reads {
-                        Some(reads) => self.inputs(&frame.slots, reads.as_slice(), &mut values)?,
-                        None => values = [regs[args[0] as usize], regs[args[1] as usize]],
-                    }
-                    let answer = self.member_value(site, &values, *units).unwrap_or_else(|| {
-                        self.retaining(&mut frame.transient, |island| {
-                            island.heap_call(site, &values)
-                        })
-                    });
-                    let value = answer.inspect_err(|_| {
-                        for (source, value) in args.iter().zip(values) {
-                            if !self.scratch.exit.regs.iter().any(|(reg, _)| reg == source) {
-                                self.scratch.exit.regs.push((*source, value));
-                            }
-                        }
-                    })?;
-                    return self.destination(frame, site.reg, value, to);
-                }
-                Op::Heap { site, args } => {
-                    let mut values = [Value::Absent; MAX_ARGS];
-                    for (to, reg) in values.iter_mut().zip(args.iter()) {
-                        *to = regs[*reg as usize];
-                    }
-                    let answer = self.retaining(&mut frame.transient, |island| {
-                        island.heap_call(site, &values[..args.len()])
-                    });
-                    regs[site.reg as usize] = answer?;
-                }
-                Op::Reserve {
-                    kind,
-                    members,
-                    miss,
-                } => {
-                    if !self.retaining(&mut frame.transient, |island| {
-                        island.reserve_construction(*kind, *members)
-                    }) {
-                        return Err(self.at(*miss));
-                    }
-                }
-                Op::Make {
-                    ahead,
-                    replay_guard,
-                    make,
-                    items,
-                    reg,
-                    members,
-                    miss,
-                } => {
-                    // Construction destroys its source operands. Refuse before
-                    // that overwrite when the unpaid source region cannot fit;
-                    // otherwise a later close would replay it with its result.
-                    if (*replay_guard && (!self.swift || self.tight)) || !self.fits(*ahead) {
-                        return Err(self.at(*miss));
-                    }
-                    let before = self.transient;
-                    let kind = make.kind();
-                    let floor = self.construction_floor(kind, *members);
-                    self.transient = self.transient.saturating_sub(floor);
-                    frame.transient = frame.transient.saturating_sub(floor);
-                    let values = items.iter().map(|reg| regs[*reg as usize]);
-                    let answer = self.make(*make, values);
-                    frame.transient += self.transient.saturating_sub(before);
-                    regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
-                }
-                Op::Record {
-                    ahead,
-                    names,
-                    values,
-                    reg,
-                    members,
-                    miss,
-                } => {
-                    if !self.fits(*ahead) {
-                        return Err(self.at(*miss));
-                    }
-                    let before = self.transient;
-                    let floor =
-                        self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
-                    self.transient = self.transient.saturating_sub(floor);
-                    frame.transient = frame.transient.saturating_sub(floor);
-                    let values = values.iter().map(|reg| regs[*reg as usize]);
-                    let answer = self.record(names, values);
-                    frame.transient += self.transient.saturating_sub(before);
-                    regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
-                }
-                Op::Closure { code, reg, miss } => {
-                    let closure = self.retaining(&mut frame.transient, |island| {
-                        island.fresh_closure(frame.callee, &frame.slots, *code)
-                    });
-                    regs[*reg as usize] = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
-                }
-                Op::Store {
-                    target,
-                    index,
-                    value,
-                    field,
-                    pc,
-                    inputs,
-                    cache,
-                    finish,
-                } => {
-                    let values = match inputs {
-                        Some(inputs) => {
-                            let mut values = [Value::Absent; 3];
-                            self.inputs(&frame.slots, &inputs.reads, &mut values)?;
-                            values
-                        }
-                        None => [
-                            regs[*target as usize],
-                            index.map_or(Value::Absent, |reg| regs[reg as usize]),
-                            regs[*value as usize],
-                        ],
-                    };
-                    let ordered = inputs
-                        .as_ref()
-                        .map_or(values, |inputs| inputs.roles.map(|at| values[at]));
-                    let statement = cache.then_some(frame.statement).flatten();
-                    let stored = self.retaining(&mut frame.transient, |island| {
-                        island.store(statement, *field, ordered[0], ordered[1], ordered[2])
-                    });
-                    if stored.is_none() {
-                        let stop = self.at(*pc);
-                        if let Some(inputs) = inputs {
-                            for (read, value) in inputs.reads.iter().zip(values) {
-                                if !self
-                                    .scratch
-                                    .exit
-                                    .regs
-                                    .iter()
-                                    .any(|(reg, _)| *reg == read.reg())
-                                {
-                                    self.scratch.exit.regs.push((read.reg(), value));
-                                }
-                            }
-                        }
-                        return Err(stop);
-                    }
-                    if let Some(leaves) = finish {
-                        return self.finish_statement(frame, *leaves, None);
-                    }
-                }
-                Op::Remove { target, index, pc } => {
-                    self.remove(regs[*target as usize], regs[*index as usize])
-                        .ok_or_else(|| self.at(*pc))?;
-                }
-                Op::Unit { site, src } => {
-                    regs[site.reg as usize] = self.retaining(&mut frame.transient, |island| {
-                        island.unit_test(site, regs[*src as usize])
-                    })?
-                }
-                Op::Kind { site, src } => {
-                    regs[site.same.reg as usize] = self
-                        .retaining(&mut frame.transient, |island| {
-                            island.kind_test(site, regs[*src as usize])
-                        })?
-                }
-                Op::Access(site) => return self.access(frame, site),
-                Op::AccessInit {
-                    head,
-                    original,
-                    held,
-                } => {
-                    return self.access_init(frame, *head, original, held.as_deref());
-                }
-                Op::DirectKind { site, reads } => {
-                    let mut values = [Value::Absent; 1];
-                    self.inputs(&frame.slots, reads, &mut values)?;
-                    let [value] = values;
-                    regs[site.same.reg as usize] = self
-                        .retaining(&mut frame.transient, |island| island.kind_test(site, value))?;
-                }
-                Op::Field { dst, field, miss } => {
-                    let x = regs[*dst as usize];
-                    regs[*dst as usize] = self
-                        .field(x, *field)
-                        .ok_or_else(|| self.at_held(*miss, *dst, x))?;
-                }
-                Op::Index { dst, site, miss } => {
-                    let (x, at) = (regs[*dst as usize], regs[*dst as usize + 1]);
-                    regs[*dst as usize] = self
-                        .retaining(&mut frame.transient, |island| island.item(*site, x, at))
-                        .ok_or_else(|| self.at_operands(*miss, *dst, &[x, at]))?;
-                }
-                Op::Call { site, read, args } => {
-                    return self.call(frame, site, (*read, args), callers, slots);
-                }
-                Op::Bind { at, src } => {
-                    let value = regs[*src as usize];
-                    frame.slots[*at] = SlotState::Value(value);
-                }
-                Op::Unbind(at) => frame.slots[*at] = SlotState::Empty,
-                Op::Cond {
-                    reg,
-                    close,
-                    pc,
-                    otherwise,
-                } => {
-                    if let Some(close) = close
-                        && !self.close(close)
-                    {
-                        return Err(self.at(close.head));
-                    }
-                    match regs[*reg as usize] {
-                        Value::Bool(true) => {}
-                        Value::Bool(false) => frame.pc = *otherwise,
-                        _ => return Err(self.at(*pc)),
-                    }
-                }
-                Op::Jump(pc) => frame.pc = *pc,
-                Op::Close { close, covered, .. } => {
-                    if !self.close_in(close, *covered) {
-                        return Err(self.at(close.head));
-                    }
-                }
-                Op::Write { site } => {
-                    if let Some(begin) = &site.begin {
-                        self.begin(frame, begin.id, begin.index, begin.ahead)?;
-                    }
-                    let value = if let Some(reads) = &site.reads {
-                        {
-                            let mut values = [Value::Absent; 1];
-                            self.inputs(&frame.slots, reads, &mut values)?;
-                            values[0]
-                        }
-                    } else {
-                        frame.regs[site.reg as usize]
-                    };
-                    return self.write_value(frame, site, value);
-                }
-                Op::Accumulate(at) => self.accumulate(frame, *at),
-                Op::Accumulation {
-                    site,
-                    append,
-                    reads,
-                    covered,
-                    write,
-                } => {
-                    return self.accumulation(
-                        frame,
-                        site,
-                        append.as_deref(),
-                        reads,
-                        *covered,
-                        write,
-                    );
-                }
-                Op::Publish {
-                    name,
-                    reg,
-                    pc,
-                    bind,
-                } => {
-                    if !self.write_session(*name, regs[*reg as usize], *bind) {
-                        return Err(self.at(*pc));
-                    }
-                }
-                Op::Effect(pc) => return Err(self.at(*pc)),
-                Op::Return { reg, pc } => {
-                    // A public root return copies its value out of the run in
-                    // its source statement, which raises a value that is no data
-                    // at that statement's coordinate (FIG-7377).
-                    if frame.recovery || (self.public_return && self.depth == 1) {
-                        return Err(self.at(*pc));
-                    }
-                    let value = regs[*reg as usize];
-                    return self.returning(frame, value);
-                }
-                Op::Done { leaves, empty } => return self.finish_statement(frame, *leaves, *empty),
-                Op::Branch {
-                    reg,
-                    pc,
-                    otherwise,
-                    opens,
-                } => {
-                    let arm = match regs[*reg as usize] {
-                        Value::Bool(true) => 0,
-                        Value::Bool(false) => {
-                            frame.pc = *otherwise;
-                            1
-                        }
-                        _ => return Err(self.at(*pc)),
-                    };
-                    self.transient = self
-                        .transient
-                        .saturating_sub(std::mem::take(&mut frame.transient));
-                    frame.statement = None;
-                    if let Some(block) = opens[arm] {
-                        frame.control.push(Position::Block(block, 0));
-                        if self.spent() || self.arena.boundary_due() {
-                            #[cfg(any(test, feature = "perf-witness"))]
-                            if !self.spent() && self.fits(1) {
-                                self.scratch.exit.reason = Some(Reason::SourceContinuation);
-                            }
-                            return Err(Stop);
-                        }
-                    }
-                }
-                Op::Spawn(pc) | Op::Yield(pc) | Op::Join(pc) | Op::Wait(pc) | Op::Cancel(pc) => {
-                    // The instruction has paid its ordered operand/charge prefix.
-                    // Project all windows before a scheduler handler can claim a
-                    // task, expose an effect, call the host, or collect the arena.
-                    self.scratch.exit.scheduling = true;
-                    return Err(self.at(*pc));
-                }
-                Op::Cold(operation) => return self.deferred(frame, operation),
-            }
-            return Ok(Next::Continue);
-        }
-    }
-
-    #[inline(always)]
     fn finish_statement(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         leaves: u32,
         empty: Option<crate::compile::BlockId>,
     ) -> Result<Next, Stop> {
@@ -1403,62 +706,63 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         self.transient = self
             .transient
-            .saturating_sub(std::mem::take(&mut frame.transient));
+            .saturating_sub(std::mem::take(&mut frame.state.transient));
         let due = self.arena.boundary_due();
-        frame.statement = None;
+        frame.state.statement = None;
         for _ in 0..leaves {
             let Position::Block(block, _) = frame
+                .state
                 .control
                 .pop()
                 .ok_or_else(|| self.halt(fault("a step has no enclosing block to leave")))?
             else {
                 return Err(self.halt(fault("a block edge leaves a loop")));
             };
-            let block = &frame.callee.compiled.blocks[block];
+            let block = &frame.state.callee.compiled.blocks[block];
             for at in &block.declares {
                 frame.slots[*at as usize] = SlotState::Empty;
             }
-            frame.pc = block.after;
+            frame.state.pc = block.after;
         }
-        if frame.control.is_empty() {
+        if frame.state.control.is_empty() {
             return Ok(Next::Return(Value::Null));
         }
-        if let Some(Position::Loop { header, .. }) = frame.control.last() {
-            frame.pc = *header;
+        if let Some(Position::Loop { header, .. }) = frame.state.control.last() {
+            frame.state.pc = *header;
             if due || self.spent() {
                 return Err(Stop);
             }
             return Ok(Next::Continue);
         }
-        if let Some(Position::Try {
-            phase:
-                TryPhase::Catch | TryPhase::Finally(Completion::Throw(_) | Completion::ReturnVia { .. }),
-            ..
-        }) = frame.control.last()
+        if matches!(frame.state.control.last(), Some(Position::Try { phase, .. }) if phase.needs_source())
         {
             return Err(Stop);
         }
-        if let Some(Position::Try { instruction, phase }) = frame.control.last_mut() {
-            let Op::Try { finally, after, .. } = frame.callee.compiled.ops[*instruction].op else {
-                unreachable!("a try position names its instruction");
-            };
-            match std::mem::replace(phase, TryPhase::Body) {
-                TryPhase::Finally(departure) => {
-                    frame.control.pop();
-                    if !matches!(departure, Completion::Normal) {
-                        return self.departure(frame, departure);
+        if let Some(Position::Try { cleanup, phase }) = frame.state.control.last_mut() {
+            let Cleanup {
+                finally,
+                after,
+                pending,
+                ..
+            } = *cleanup;
+            match std::mem::replace(phase, Phase::Body) {
+                Phase::Finally(how) => {
+                    let value = std::mem::replace(&mut frame.pending[pending], Value::Null);
+                    frame.state.control.pop();
+                    if !matches!(how, Departure::Normal) {
+                        return self.departure(frame, Departing { how, value });
                     }
-                    frame.pc = after;
+                    frame.state.pc = after;
                 }
-                TryPhase::Body | TryPhase::Catch => match finally {
+                Phase::Body | Phase::Catch => match finally {
                     Some(cleanup) => {
-                        *phase = TryPhase::Finally(Completion::Normal);
-                        frame.pc = cleanup;
+                        *phase = Phase::Finally(Departure::Normal);
+                        frame.state.pc = cleanup;
                         return Ok(Next::Continue);
                     }
                     None => {
-                        frame.control.pop();
-                        frame.pc = after;
+                        frame.state.control.pop();
+                        frame.state.pc = after;
                     }
                 },
             }
@@ -1469,74 +773,81 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Ok(Next::Continue)
     }
 
-    fn pop_block(frame: &mut Frame<'_>) {
-        if let Some(Position::Block(block, _)) = frame.control.pop() {
-            frame.pc = frame.callee.compiled.blocks[block].after;
-            for at in &frame.callee.compiled.blocks[block].declares {
+    fn pop_block(frame: &mut Values<'_, '_>) {
+        if let Some(Position::Block(block, _)) = frame.state.control.pop() {
+            frame.state.pc = frame.state.callee.compiled.blocks[block].after;
+            for at in &frame.state.callee.compiled.blocks[block].declares {
                 frame.slots[*at as usize] = SlotState::Empty;
             }
         }
     }
 
     #[inline(always)]
-    fn returning(&mut self, frame: &mut Frame<'e>, value: Value) -> Result<Next, Stop> {
+    fn returning(&mut self, frame: &mut Values<'_, 'e>, value: Value) -> Result<Next, Stop> {
         // A catch-only scope has no work on a successful return. Keep
         // that return's source coordinate for a library formula refusal.
-        if !frame.may_clean || !frame.callee.compiled.cleanups {
+        if !frame.state.may_clean || !frame.state.callee.compiled.cleanups {
             return Ok(Next::Return(value));
         }
-        self.departure(frame, Completion::Return(Box::new(value)))
+        self.departure(
+            frame,
+            Departing {
+                how: Departure::Return,
+                value,
+            },
+        )
     }
 
-    fn departure(&mut self, frame: &mut Frame<'e>, departure: Completion) -> Result<Next, Stop> {
+    fn departure(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        departure: Departing,
+    ) -> Result<Next, Stop> {
         // Dead physical operands are never roots or exit roles. Each next
         // read is produced by the same source expression before it is used.
-        frame.statement = None;
+        frame.state.statement = None;
         loop {
-            match frame.control.last_mut() {
+            match frame.state.control.last_mut() {
                 Some(Position::Block(..)) => Self::pop_block(frame),
                 Some(Position::Loop { header, .. }) => {
                     let header = *header;
-                    match departure {
-                        Completion::Continue => {
-                            frame.pc = header;
+                    match departure.how {
+                        Departure::Continue => {
+                            frame.state.pc = header;
                             return Ok(Next::Continue);
                         }
-                        Completion::Break => {
-                            let Op::Header { after, .. } = frame.callee.compiled.ops[header].op
-                            else {
-                                unreachable!("a loop position names its header");
-                            };
-                            frame.pc = after;
-                            frame.control.pop();
+                        Departure::Break => {
+                            frame.state.pc = frame.state.callee.compiled.code.loop_exit(header);
+                            frame.state.control.pop();
                             if self.spent() {
                                 return Err(Stop);
                             }
                             return Ok(Next::Continue);
                         }
                         _ => {
-                            frame.control.pop();
+                            frame.state.control.pop();
                         }
                     }
                 }
-                Some(Position::Try { instruction, phase }) => {
-                    let Op::Try { finally, .. } = frame.callee.compiled.ops[*instruction].op else {
-                        unreachable!("a try position names its instruction");
-                    };
-                    if !matches!(phase, TryPhase::Finally(_))
-                        && let Some(cleanup) = finally
+                Some(Position::Try { cleanup, phase }) => {
+                    let finally = cleanup.finally;
+                    if !matches!(phase, Phase::Finally(_))
+                        && let Some(target) = finally
                     {
-                        *phase = TryPhase::Finally(departure);
-                        frame.pc = cleanup;
+                        frame.pending[cleanup.pending] = departure.value;
+                        *phase = Phase::Finally(departure.how);
+                        frame.state.pc = target;
                         return Ok(Next::Continue);
                     }
-                    frame.control.pop();
+                    // Supersession ends this pending owner exactly once.
+                    frame.pending[cleanup.pending] = Value::Null;
+                    frame.state.control.pop();
                 }
                 None => {
-                    return match departure {
-                        Completion::Return(value) => Ok(Next::Return(*value)),
-                        departure @ Completion::Throw(_) => {
-                            self.scratch.exit.stands = Some(Stands::Departure(departure));
+                    return match departure.how {
+                        Departure::Return => Ok(Next::Return(departure.value)),
+                        Departure::Throw => {
+                            self.scratch.exit.stands = Some(Stands::Departure(departure.project()));
                             Err(Stop)
                         }
                         _ => Err(self.halt(fault("a control departure has no owner"))),

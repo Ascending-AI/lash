@@ -2076,7 +2076,7 @@ const TS_NUMBER_PARTS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parts,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), ], heap: Some(p::HeapTemplate { entry: ts_number_parts_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("244ba3de95bbfe0f666391e3f5fda0efcc507d12f62777e35b10a9daa080ae0e"), p::function("2f2fb0d9ce1fb6b905c91aaa6cbcfa49c90865f3a2839d99a463e38abf9e82ab"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.parts`.
@@ -2156,25 +2156,6 @@ fn ts_number_parts(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.index(1)?;
     ctx.tuple(0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_number_parts_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(2))?; let _ = v1;
-                let v2 = heap.index(v0, Value::Int(3))?; let _ = v2;
-                let v3 = heap.tuple(&[v1, v2])?; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_LAYOUT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -2381,7 +2362,7 @@ const TS_NUMBER_FORMAT_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_format_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_format_value_template), metered: None, depth: 1, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: ts_number_format_value_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("cae8ff722983c6e379e6f0f745e4760525dfbce2aea706f36b881c732868c20a"), p::function("244ba3de95bbfe0f666391e3f5fda0efcc507d12f62777e35b10a9daa080ae0e"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("04b26a5eb375991d9cb26f259b4fd6964bd14edef28c65b1e072e77a1779f8ee"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.format_value`.
@@ -2484,293 +2465,6 @@ fn ts_number_format_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.begin()?;
     ctx.local(5, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_format_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                if let Some(value) = (|| {
-                    let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                    if let Some(value) = (|| {
-                        if !matches!(v1, Value::Bool(true)) { return None; }
-                        if let Some(value) = (|| {
-                            let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                            if let Some(value) = (|| {
-                                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                                if let Some(value) = (|| {
-                                    if !matches!(v3, Value::Bool(true)) { return None; }
-                                    let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                                    let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                                    Some(v5)
-                                })() { return Some(value); }
-                                if let Some(value) = (|| {
-                                    if !matches!(v3, Value::Bool(false)) { return None; }
-                                    if let Some(value) = (|| {
-                                        let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                                        if let Some(value) = (|| {
-                                            if !matches!(v6, Value::Bool(true)) { return None; }
-                                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                                        })() { return Some(value); }
-                                        if let Some(value) = (|| {
-                                            if !matches!(v6, Value::Bool(false)) { return None; }
-                                            if let Some(value) = (|| {
-                                                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                                if let Some(value) = (|| {
-                                                    if !matches!(v7, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                                })() { return Some(value); }
-                                                if let Some(value) = (|| {
-                                                    if !matches!(v7, Value::Bool(false)) { return None; }
-                                                    let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                                    if !matches!(v8, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                                })() { return Some(value); }
-                                                None
-                                            })() { return Some(value); }
-                                            None
-                                        })() { return Some(value); }
-                                        None
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v1, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v11 = (natives[6].entry)(&[args[0]])?; let _ = v11;
-                            if let Some(value) = (|| {
-                                if !matches!(v11, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v11, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v12 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v12, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v12, Value::Bool(false)) { return None; }
-                                        let v13 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
-                                        if !matches!(v13, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                if let Some(value) = (|| {
-                    let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-                    if let Some(value) = (|| {
-                        if !matches!(v1, Value::Bool(true)) { return None; }
-                        if let Some(value) = (|| {
-                            let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                            if let Some(value) = (|| {
-                                let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                                if let Some(value) = (|| {
-                                    if !matches!(v3, Value::Bool(true)) { return None; }
-                                    let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                                    let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                                    Some(v5)
-                                })() { return Some(value); }
-                                if let Some(value) = (|| {
-                                    if !matches!(v3, Value::Bool(false)) { return None; }
-                                    if let Some(value) = (|| {
-                                        let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                                        if let Some(value) = (|| {
-                                            if !matches!(v6, Value::Bool(true)) { return None; }
-                                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                                        })() { return Some(value); }
-                                        if let Some(value) = (|| {
-                                            if !matches!(v6, Value::Bool(false)) { return None; }
-                                            if let Some(value) = (|| {
-                                                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                                if let Some(value) = (|| {
-                                                    if !matches!(v7, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                                })() { return Some(value); }
-                                                if let Some(value) = (|| {
-                                                    if !matches!(v7, Value::Bool(false)) { return None; }
-                                                    let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                                    if !matches!(v8, Value::Bool(true)) { return None; }
-                                                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                                })() { return Some(value); }
-                                                None
-                                            })() { return Some(value); }
-                                            None
-                                        })() { return Some(value); }
-                                        None
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v1, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
-                            if let Some(value) = (|| {
-                                if !matches!(v9, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v9, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v10, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v10, Value::Bool(false)) { return None; }
-                                        let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
-                                        if !matches!(v11, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_number_format_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                let v5 = match (natives[5].entry)(&[v4, Value::Int(10)]) { Some(value) => value, None => heap.call(2, &[v4, Value::Int(10)])? }; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                if !matches!(v7, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))]) { Some(value) => value, None => heap.call(1, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
-                if !matches!(v22, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v23;
-                if !matches!(v23, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = match (natives[1].entry)(&[v0, args[0]]) { Some(value) => value, None => heap.call(0, &[v0, args[0]])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v22 = (natives[6].entry)(&[args[0]])?; let _ = v22;
-                if !matches!(v22, Value::Bool(false)) { return None; }
-                let v23 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v23;
-                if !matches!(v23, Value::Bool(false)) { return None; }
-                let v24 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v24;
-                if !matches!(v24, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_RATIO_PLAN: p::HelperPlan = p::HelperPlan {
@@ -2897,7 +2591,7 @@ const TS_NUMBER_ROUND_DECIMAL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_round_decimal,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("90ebb54d3fbf93ccdd7bcd2c1b1d3f9c36ff70fe2c2fe2aad9bce640b594b02b"), p::function("0bcb506dd45f76e969183cf0ee4004e80f7f4d7615754afc185bb47e71c1920a"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), ], heap: Some(p::HeapTemplate { entry: ts_number_round_decimal_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("9c4239ab320c2c70e7f067109af2fc4b728567bdfeb5f51decce833ec9628b4f"), p::function("059950794130bfd51ec895289b249166890b7a6d75ccbbf647aba321aef30f13"), p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("90ebb54d3fbf93ccdd7bcd2c1b1d3f9c36ff70fe2c2fe2aad9bce640b594b02b"), p::function("0bcb506dd45f76e969183cf0ee4004e80f7f4d7615754afc185bb47e71c1920a"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.round_decimal`.
@@ -2968,39 +2662,6 @@ fn ts_number_round_decimal(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.literal(2, 1)?;
     ctx.call(8, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_number_round_decimal_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Int(_) | Value::Float(_), Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v0, Value::Int(1))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = (natives[2].entry)(&[Value::Int(0), args[1]])?; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(1, &[Value::Int(10), args[1]])?; let _ = v4;
-                let v5 = match (natives[3].entry)(&[v1, v4]) { Some(value) => value, None => heap.call(2, &[v1, v4])? }; let _ = v5;
-                heap.bind(v5, Some(v1))?;
-                let v6 = match (natives[4].entry)(&[v5, v2]) { Some(value) => value, None => heap.call(3, &[v5, v2])? }; let _ = v6;
-                heap.bind(v6, None)?;
-                let v7 = match (natives[5].entry)(&[v5, v2]) { Some(value) => value, None => heap.call(4, &[v5, v2])? }; let _ = v7;
-                heap.bind(v7, None)?;
-                let v8 = (natives[3].entry)(&[v7, Value::Int(2)])?; let _ = v8;
-                let v9 = match (natives[2].entry)(&[v2, v8]) { Some(value) => value, None => heap.call(5, &[v2, v8])? }; let _ = v9;
-                if !matches!(v9, Value::Bool(false)) { return None; }
-                let v12 = match (natives[7].entry)(&[v6, Value::Int(10)]) { Some(value) => value, None => heap.call(6, &[v6, Value::Int(10)])? }; let _ = v12;
-                Some(v12)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BIGINT_PARSE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -3610,7 +3271,7 @@ const TS_REGEXP_ESCAPED_SOURCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_escaped_source,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_escaped_source_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_escaped_source_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.escaped_source`.
@@ -3786,36 +3447,6 @@ fn ts_regexp_escaped_source(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.call(9, 0, 2)?;
     Ok(ctx.take(0))
 }
-fn ts_regexp_escaped_source_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_regexp_escaped_source_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_SPELL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.spell",
@@ -3839,7 +3470,7 @@ const TS_REGEXP_SPELL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_spell,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_spell_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_spell_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("6bfd0f59af9b7e44a89e3ec688b7dcb23d8f9d46d80714b468d3bd250036a165"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("6bfd0f59af9b7e44a89e3ec688b7dcb23d8f9d46d80714b468d3bd250036a165"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.spell`.
@@ -3859,42 +3490,6 @@ fn ts_regexp_spell(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.call(1, 1, 2)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_regexp_spell_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]])?; let _ = v1;
-                let v2 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("(?:)") }?), v1])?; let _ = v2;
-                let v3 = (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2])?; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_regexp_spell_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]]) { Some(value) => value, None => heap.call(1, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), args[1]])? }; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(1, &[v0, v1])? }; let _ = v2;
-                let v3 = match (natives[1].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2]) { Some(value) => value, None => heap.call(1, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_EXOTIC_ERROR_NAME_PLAN: p::HelperPlan = p::HelperPlan {
@@ -3928,7 +3523,7 @@ const TS_EXOTIC_ERROR_NAME_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_error_name,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_error_name_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.exotic.error_name`.
@@ -4009,151 +3604,6 @@ fn ts_exotic_error_name(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_exotic_error_name_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "data")?; let _ = v3;
-                let v4 = heap.field(v3, "properties")?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[0].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[1].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7_entry = heap.lookup(p::Table::Record, v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("name") }?))?; let v7 = Value::Bool(v7_entry.is_some()); let v7_found = v7_entry.unwrap_or(Value::Absent); let _ = (v7, v7_found);
-                if !matches!(v7, Value::Bool(true)) { return None; }
-                let v8 = heap.field(v4, "name")?; let _ = v8;
-                Some(v8)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "data")?; let _ = v3;
-                let v4 = heap.field(v3, "properties")?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[0].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[1].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7_entry = heap.lookup(p::Table::Record, v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("name") }?))?; let v7 = Value::Bool(v7_entry.is_some()); let v7_found = v7_entry.unwrap_or(Value::Absent); let _ = (v7, v7_found);
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v9 = heap.field(args[0], "kind")?; let _ = v9;
-                heap.bind(v9, None)?;
-                let v10 = match (natives[1].entry)(&[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v10;
-                if !matches!(v10, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("TypeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "data")?; let _ = v3;
-                let v4 = heap.field(v3, "properties")?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[0].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[1].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7_entry = heap.lookup(p::Table::Record, v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("name") }?))?; let v7 = Value::Bool(v7_entry.is_some()); let v7_found = v7_entry.unwrap_or(Value::Absent); let _ = (v7, v7_found);
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                let v9 = heap.field(args[0], "kind")?; let _ = v9;
-                heap.bind(v9, None)?;
-                let v10 = match (natives[1].entry)(&[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v10;
-                if !matches!(v10, Value::Bool(false)) { return None; }
-                let v11 = match (natives[1].entry)(&[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)]) { Some(value) => value, None => heap.call(0, &[v9, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)])? }; let _ = v11;
-                if !matches!(v11, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("RangeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "data")?; let _ = v3;
-                let v4 = heap.field(v3, "properties")?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[0].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[1].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v12 = heap.field(args[0], "kind")?; let _ = v12;
-                heap.bind(v12, None)?;
-                let v13 = match (natives[1].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v13;
-                if !matches!(v13, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("TypeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "data")?; let _ = v3;
-                let v4 = heap.field(v3, "properties")?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[0].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[1].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                let v12 = heap.field(args[0], "kind")?; let _ = v12;
-                heap.bind(v12, None)?;
-                let v13 = match (natives[1].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                let v14 = match (natives[1].entry)(&[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)]) { Some(value) => value, None => heap.call(0, &[v12, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)])? }; let _ = v14;
-                if !matches!(v14, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("RangeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v15 = heap.field(args[0], "kind")?; let _ = v15;
-                heap.bind(v15, None)?;
-                let v16 = match (natives[1].entry)(&[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v16;
-                if !matches!(v16, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("TypeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "data")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v15 = heap.field(args[0], "kind")?; let _ = v15;
-                heap.bind(v15, None)?;
-                let v16 = match (natives[1].entry)(&[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)]) { Some(value) => value, None => heap.call(0, &[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("type_error") }?)])? }; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                let v17 = match (natives[1].entry)(&[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)]) { Some(value) => value, None => heap.call(0, &[v15, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number_range") }?)])? }; let _ = v17;
-                if !matches!(v17, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("RangeError") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_EXOTIC_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.to_primitive",
@@ -4199,7 +3649,7 @@ const TS_EXOTIC_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_to_primitive,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_to_primitive_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("3fae34141560b0ec43e82c10d66bc8b35cf05e31d38cef3d61827953a04bc51e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("3fae34141560b0ec43e82c10d66bc8b35cf05e31d38cef3d61827953a04bc51e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.exotic.to_primitive`.
@@ -4319,20 +3769,6 @@ fn ts_exotic_to_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.literal(16, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_exotic_to_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Map(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("[object Map]") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_EXOTIC_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.exotic.get",
@@ -4371,7 +3807,7 @@ const TS_EXOTIC_GET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_get,
-    template: Some(p::HelperTemplate { entry: Some(ts_exotic_get_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_get_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.exotic.get`.
@@ -4509,46 +3945,6 @@ fn ts_exotic_get(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(5, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_exotic_get_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_exotic_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("url.whatwg") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("url") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(0, &[v0, v1])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = heap.field(args[0], "state")?; let _ = v3;
-                let v4 = heap.index(v3, args[1])?; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_EXOTIC_SET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -5076,7 +4472,7 @@ const BRAND_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: brand_of,
-    template: Some(p::HelperTemplate { entry: Some(brand_of_template), metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `brand.of`.
@@ -5139,139 +4535,6 @@ fn brand_of(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
     ctx.literal(7, 0)?;
     Ok(ctx.take(0))
 }
-fn brand_of_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Absent)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn brand_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
-                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
-                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
-                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                let v9 = heap.index(v1, Value::Int(1))?; let _ = v9;
-                let v10 = (natives[0].entry)(&[v9])?; let _ = v10;
-                let v11 = match (natives[1].entry)(&[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v11;
-                if !matches!(v11, Value::Bool(true)) { return None; }
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
-                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
-                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
-                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                let v9 = heap.index(v1, Value::Int(1))?; let _ = v9;
-                let v10 = (natives[0].entry)(&[v9])?; let _ = v10;
-                let v11 = match (natives[1].entry)(&[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v10, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
-                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = heap.index(v1, Value::Int(0))?; let _ = v6;
-                let v7 = (natives[0].entry)(&[v6])?; let _ = v7;
-                let v8 = match (natives[1].entry)(&[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)]) { Some(value) => value, None => heap.call(0, &[v7, Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?)])? }; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.len(p::Collection::Tuple, v1)?; let _ = v4;
-                let v5 = (natives[2].entry)(&[v4, Value::Int(2)])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = heap.field(args[0], "__lash_brand")?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.receiver",
@@ -5315,7 +4578,7 @@ const TS_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_receiver,
-    template: Some(p::HelperTemplate { entry: Some(ts_receiver_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: ts_receiver_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2934620e894cf65f63a9382958ec1dbc2880f9b41717ebf597fcdc6a3f8d0b28"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2934620e894cf65f63a9382958ec1dbc2880f9b41717ebf597fcdc6a3f8d0b28"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.receiver`.
@@ -5453,72 +4716,6 @@ fn ts_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_receiver_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_receiver_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("text") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.callable",
@@ -5543,7 +4740,7 @@ const TS_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_callable,
-    template: Some(p::HelperTemplate { entry: Some(ts_callable_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_callable_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.callable`.
@@ -5586,32 +4783,6 @@ fn ts_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_IDENTITY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.identity",
@@ -5638,7 +4809,7 @@ const TS_IDENTITY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_identity,
-    template: Some(p::HelperTemplate { entry: Some(ts_identity_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_identity_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.identity`.
@@ -5695,32 +4866,6 @@ fn ts_identity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_identity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_identity_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_REQUIRES_NEW_PLAN: p::HelperPlan = p::HelperPlan {
@@ -5819,7 +4964,7 @@ const TS_NOTHING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_nothing,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_nothing_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.nothing`.
@@ -5829,20 +4974,6 @@ fn ts_nothing(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_nothing_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_IS_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -5875,7 +5006,7 @@ const TS_IS_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_is_primitive_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_is_primitive_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.is_primitive`.
@@ -5960,40 +5091,6 @@ fn ts_is_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
-fn ts_is_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_is_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_IS_NULLISH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.is_nullish",
@@ -6016,7 +5113,7 @@ const TS_IS_NULLISH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_nullish,
-    template: Some(p::HelperTemplate { entry: Some(ts_is_nullish_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_is_nullish_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.is_nullish`.
@@ -6036,58 +5133,6 @@ fn ts_is_nullish(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(2, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_is_nullish_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(true)) { return None; }
-                    Some(Value::Bool(true))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(false)) { return None; }
-                    let v1 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v1;
-                    Some(v1)
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_is_nullish_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_TDZ_PLAN: p::HelperPlan = p::HelperPlan {
@@ -6115,7 +5160,7 @@ const TS_TDZ_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_tdz,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_tdz_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.tdz`.
@@ -6142,23 +5187,6 @@ fn ts_tdz(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_tdz_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.tuple(&[])?; let _ = v0;
-                let v1 = match (natives[0].entry)(&[args[0], v0]) { Some(value) => value, None => heap.call(0, &[args[0], v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REQUIRE_OBJECT_COERCIBLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.require_object_coercible",
@@ -6183,7 +5211,7 @@ const TS_REQUIRE_OBJECT_COERCIBLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_require_object_coercible,
-    template: Some(p::HelperTemplate { entry: Some(ts_require_object_coercible_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_require_object_coercible_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.require_object_coercible`.
@@ -6206,53 +5234,6 @@ fn ts_require_object_coercible(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_require_object_coercible_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v2 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(true)) { return None; }
-        Some(Value::Bool(true))
-    })() { return Some(value); }
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(false)) { return None; }
-        let v1 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v1;
-        Some(v1)
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v2;
-
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_require_object_coercible_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_TO_BOOLEAN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -6291,7 +5272,7 @@ const TS_TO_BOOLEAN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_to_boolean,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_boolean_template), metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_to_boolean_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.to_boolean`.
@@ -6405,81 +5386,6 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(12, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_to_boolean_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(true)) { return None; }
-                    Some(Value::Bool(false))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(false)) { return None; }
-                    let v1 = (natives[0].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
-                    let v2 = (natives[1].entry)(&[v1])?; let _ = v2;
-                    Some(v2)
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_boolean_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])? }; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_NOT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.not",
@@ -6500,7 +5406,7 @@ const TS_NOT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_not,
-    template: Some(p::HelperTemplate { entry: Some(ts_not_template), metered: None, depth: 2, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_not_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f6df6ed6d839b0136d92d7de63df9422c732fa26c089bb2e2b01952b1e01cb5b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f6df6ed6d839b0136d92d7de63df9422c732fa26c089bb2e2b01952b1e01cb5b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.not`.
@@ -6514,85 +5420,6 @@ fn ts_not(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.local(1, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_not_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[3].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?)])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v3 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(true)) { return None; }
-        Some(Value::Bool(false))
-    })() { return Some(value); }
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(false)) { return None; }
-        let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
-        let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-        Some(v2)
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v3;
-
-                let v4 = (natives[0].entry)(&[v3])?; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_not_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_TYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -6626,7 +5453,7 @@ const TS_TYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_typeof,
-    template: Some(p::HelperTemplate { entry: Some(ts_typeof_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.typeof`.
@@ -6694,42 +5521,6 @@ fn ts_typeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(10, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_typeof_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("boolean") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("object") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("string") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_PRIMITIVE_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_string",
@@ -6775,7 +5566,7 @@ const TS_PRIMITIVE_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_string_template), metered: None, depth: 2, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_string_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), p::function("c643de604111781463263d0372a7e70b9d946c86453a21393928480c50dd9773"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), p::function("c643de604111781463263d0372a7e70b9d946c86453a21393928480c50dd9773"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.primitive_to_string`.
@@ -6893,173 +5684,6 @@ fn ts_primitive_to_string(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.call(5, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
-fn ts_primitive_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v12 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-    if let Some(value) = (|| {
-        let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(true)) { return None; }
-            if let Some(value) = (|| {
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                if let Some(value) = (|| {
-                    let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(true)) { return None; }
-                        let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                        let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                        Some(v5)
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(false)) { return None; }
-                                        let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                        if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(false)) { return None; }
-            if let Some(value) = (|| {
-                let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(false)) { return None; }
-                    if let Some(value) = (|| {
-                        let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                        })() { return Some(value); }
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(false)) { return None; }
-                            let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
-                            if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        None
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v12;
-
-                Some(v12)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_primitive_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_PRIMITIVE_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.primitive_to_number",
@@ -7103,7 +5727,7 @@ const TS_PRIMITIVE_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_number,
-    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_number_template), metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_number_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e125286554cd17af030e290178dc47500fe4cec4158064b1a0d350de37ef3c3d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e125286554cd17af030e290178dc47500fe4cec4158064b1a0d350de37ef3c3d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.primitive_to_number`.
@@ -7240,57 +5864,6 @@ fn ts_primitive_to_number(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.call(5, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
-fn ts_primitive_to_number_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_primitive_to_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_primitive",
@@ -7325,7 +5898,7 @@ const TS_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_primitive_template), metered: None, depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_primitive_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.to_primitive`.
@@ -7377,34 +5950,6 @@ fn ts_to_primitive(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_to_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_string",
@@ -7444,7 +5989,7 @@ const TS_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_string_template), metered: None, depth: 2, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: ts_to_string_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c2ad63e91c88987d2cea33d9b3b6b63e5609f9a07810569451eb1954c1b9fe52"), p::function("c643de604111781463263d0372a7e70b9d946c86453a21393928480c50dd9773"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c2ad63e91c88987d2cea33d9b3b6b63e5609f9a07810569451eb1954c1b9fe52"), p::function("c643de604111781463263d0372a7e70b9d946c86453a21393928480c50dd9773"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.to_string`.
@@ -7518,149 +6063,6 @@ fn ts_to_string(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_to_string_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v12 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-    if let Some(value) = (|| {
-        let v1 = (natives[1].entry)(&[v0, args[0]])?; let _ = v1;
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(true)) { return None; }
-            if let Some(value) = (|| {
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                if let Some(value) = (|| {
-                    let v3 = (natives[3].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(true)) { return None; }
-                        let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                        let v5 = (natives[5].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                        Some(v5)
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v6 = (natives[6].entry)(&[args[0]])?; let _ = v6;
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v7 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(false)) { return None; }
-                                        let v8 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                        if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(false)) { return None; }
-            if let Some(value) = (|| {
-                let v9 = (natives[6].entry)(&[args[0]])?; let _ = v9;
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(false)) { return None; }
-                    if let Some(value) = (|| {
-                        let v10 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                        })() { return Some(value); }
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(false)) { return None; }
-                            let v11 = (natives[1].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
-                            if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        None
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v12;
-
-                Some(v12)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_string_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_number",
@@ -7696,7 +6098,7 @@ const TS_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_number,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_number_template), metered: None, depth: 3, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_number_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("42777f82d360b3a764fca297faa381de419dfd3d7e5082f8665915d42521961d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 3, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("42777f82d360b3a764fca297faa381de419dfd3d7e5082f8665915d42521961d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.to_number`.
@@ -7739,67 +6141,6 @@ fn ts_to_number(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_to_number_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_PROPERTY_KEY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_property_key",
@@ -7833,7 +6174,7 @@ const TS_TO_PROPERTY_KEY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_property_key,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_property_key_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_property_key_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.to_property_key`.
@@ -7875,32 +6216,6 @@ fn ts_to_property_key(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_to_property_key_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_property_key_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_numeric",
@@ -7937,7 +6252,7 @@ const TS_TO_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_numeric,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_numeric_template), metered: None, depth: 3, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.to_numeric`.
@@ -7984,49 +6299,6 @@ fn ts_to_numeric(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_to_numeric_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMERIC_PAIR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -8174,7 +6446,7 @@ const TS_STEP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_step,
-    template: Some(p::HelperTemplate { entry: Some(ts_step_template), metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_step_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0), texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0), texts: None } }),
 };
 
 /// `ts.step`.
@@ -8203,34 +6475,6 @@ fn ts_step(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanEx
     ctx.local(1, 1)?;
     ctx.call(3, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_step_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_step_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(0, &[args[0], args[1]])? }; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ADD_PLAN: p::HelperPlan = p::HelperPlan {
@@ -8298,7 +6542,7 @@ const TS_ADD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_add,
-    template: Some(p::HelperTemplate { entry: Some(ts_add_template), metered: None, depth: 3, callees: &[p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_add_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("c2ad63e91c88987d2cea33d9b3b6b63e5609f9a07810569451eb1954c1b9fe52"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), p::function("884f6b27baa1b7976fc125e02649d597a93207725553c0966e557d2c3ded157a"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: Some(1), ints: None, texts: Some(0) } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 3, callees: &[p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("c2ad63e91c88987d2cea33d9b3b6b63e5609f9a07810569451eb1954c1b9fe52"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), p::function("884f6b27baa1b7976fc125e02649d597a93207725553c0966e557d2c3ded157a"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: Some(1), ints: None, texts: Some(0) } }),
 };
 
 /// `ts.add`.
@@ -8440,305 +6684,6 @@ fn ts_add(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_add_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null, Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?), args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent, Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Null] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?)])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Absent] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?)])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[v0, args[1]])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[1], Value::Bool(true)) { return None; }
-    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("true") }?))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[1], Value::Bool(false)) { return None; }
-    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("false") }?))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[args[0], v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v12 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[2].entry)(&[args[0]])?; let _ = v0;
-    if let Some(value) = (|| {
-        let v1 = (natives[3].entry)(&[v0, args[0]])?; let _ = v1;
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(true)) { return None; }
-            if let Some(value) = (|| {
-                let v2 = (natives[4].entry)(&[args[0]])?; let _ = v2;
-                if let Some(value) = (|| {
-                    let v3 = (natives[5].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(true)) { return None; }
-                        let v4 = (natives[6].entry)(&[args[0]])?; let _ = v4;
-                        let v5 = (natives[7].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                        Some(v5)
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v6 = (natives[8].entry)(&[args[0]])?; let _ = v6;
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v7 = (natives[3].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(false)) { return None; }
-                                        let v8 = (natives[3].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                        if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(false)) { return None; }
-            if let Some(value) = (|| {
-                let v9 = (natives[8].entry)(&[args[0]])?; let _ = v9;
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(false)) { return None; }
-                    if let Some(value) = (|| {
-                        let v10 = (natives[3].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                        })() { return Some(value); }
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(false)) { return None; }
-                            let v11 = (natives[3].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
-                            if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        None
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v12;
-
-                let v13 = (natives[0].entry)(&[v12, args[1]])?; let _ = v13;
-                Some(v13)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v12 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[2].entry)(&[args[1]])?; let _ = v0;
-    if let Some(value) = (|| {
-        let v1 = (natives[3].entry)(&[v0, args[1]])?; let _ = v1;
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(true)) { return None; }
-            if let Some(value) = (|| {
-                let v2 = (natives[4].entry)(&[args[1]])?; let _ = v2;
-                if let Some(value) = (|| {
-                    let v3 = (natives[5].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(true)) { return None; }
-                        let v4 = (natives[6].entry)(&[args[1]])?; let _ = v4;
-                        let v5 = (natives[7].entry)(&[v4, Value::Int(10)])?; let _ = v5;
-                        Some(v5)
-                    })() { return Some(value); }
-                    if let Some(value) = (|| {
-                        if !matches!(v3, Value::Bool(false)) { return None; }
-                        if let Some(value) = (|| {
-                            let v6 = (natives[8].entry)(&[args[1]])?; let _ = v6;
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(true)) { return None; }
-                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                            })() { return Some(value); }
-                            if let Some(value) = (|| {
-                                if !matches!(v6, Value::Bool(false)) { return None; }
-                                if let Some(value) = (|| {
-                                    let v7 = (natives[3].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                                    })() { return Some(value); }
-                                    if let Some(value) = (|| {
-                                        if !matches!(v7, Value::Bool(false)) { return None; }
-                                        let v8 = (natives[3].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
-                                        if !matches!(v8, Value::Bool(true)) { return None; }
-                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                                    })() { return Some(value); }
-                                    None
-                                })() { return Some(value); }
-                                None
-                            })() { return Some(value); }
-                            None
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        if let Some(value) = (|| {
-            if !matches!(v1, Value::Bool(false)) { return None; }
-            if let Some(value) = (|| {
-                let v9 = (natives[8].entry)(&[args[1]])?; let _ = v9;
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(true)) { return None; }
-                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v9, Value::Bool(false)) { return None; }
-                    if let Some(value) = (|| {
-                        let v10 = (natives[3].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
-                        })() { return Some(value); }
-                        if let Some(value) = (|| {
-                            if !matches!(v10, Value::Bool(false)) { return None; }
-                            let v11 = (natives[3].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
-                            if !matches!(v11, Value::Bool(true)) { return None; }
-                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        })() { return Some(value); }
-        None
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v12;
-
-                let v13 = (natives[0].entry)(&[args[0], v12])?; let _ = v13;
-                Some(v13)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], args[1]]) { Some(value) => value, None => heap.call(3, &[args[0], args[1]])? }; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_SUB_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.sub",
@@ -8780,7 +6725,7 @@ const TS_SUB_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_sub,
-    template: Some(p::HelperTemplate { entry: Some(ts_sub_template), metered: None, depth: 1, callees: &[p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.sub`.
@@ -8862,19 +6807,6 @@ fn ts_sub(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MUL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.mul",
@@ -8916,7 +6848,7 @@ const TS_MUL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_mul,
-    template: Some(p::HelperTemplate { entry: Some(ts_mul_template), metered: None, depth: 1, callees: &[p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("1c451219c3b57df0401a1c4de01bb6f0a377289d68cc6230cca1451d0f3a3c98"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.mul`.
@@ -8998,19 +6930,6 @@ fn ts_mul(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_mul_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.div",
@@ -9057,7 +6976,7 @@ const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_div,
-    template: Some(p::HelperTemplate { entry: Some(ts_div_template), metered: None, depth: 1, callees: &[p::function("d52d9072685d07716384325d7ae5a45f93402903f4675ee17412adf48c0d084d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("90ebb54d3fbf93ccdd7bcd2c1b1d3f9c36ff70fe2c2fe2aad9bce640b594b02b"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d52d9072685d07716384325d7ae5a45f93402903f4675ee17412adf48c0d084d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("90ebb54d3fbf93ccdd7bcd2c1b1d3f9c36ff70fe2c2fe2aad9bce640b594b02b"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.div`.
@@ -9148,19 +7067,6 @@ fn ts_div(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_div_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.rem",
@@ -9207,7 +7113,7 @@ const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_rem,
-    template: Some(p::HelperTemplate { entry: Some(ts_rem_template), metered: None, depth: 1, callees: &[p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: None, forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.rem`.
@@ -9309,19 +7215,6 @@ fn ts_rem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_rem_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_POW_PLAN: p::HelperPlan = p::HelperPlan {
@@ -9509,7 +7402,7 @@ const TS_NEG_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_neg,
-    template: Some(p::HelperTemplate { entry: Some(ts_neg_template), metered: None, depth: 4, callees: &[p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.neg`.
@@ -9551,51 +7444,6 @@ fn ts_neg(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_neg_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9223372036854775808))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_TO_INT32_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.to_int32",
@@ -9635,7 +7483,7 @@ const TS_TO_INT32_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_int32,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_int32_template), metered: None, depth: 4, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("89dc289314ba1e06d1e8e97a6d404d7f4beb95b29d8db388cd2eec14c3dc35d3"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), ], heap: Some(p::HeapTemplate { entry: ts_to_int32_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.to_int32`.
@@ -9691,69 +7539,6 @@ fn ts_to_int32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_to_int32_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_to_int32_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0]) { Some(value) => value, None => heap.call(2, &[v0])? }; let _ = v2;
-                let v3 = match (natives[2].entry)(&[v2]) { Some(value) => value, None => heap.call(3, &[v2])? }; let _ = v3;
-                let v4 = (natives[3].entry)(&[v3, Value::Int(4294967296)])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[4].entry)(&[Value::Int(2147483648), v4])?; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = (natives[5].entry)(&[v4, Value::Int(4294967296)])?; let _ = v6;
-                Some(v6)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0]) { Some(value) => value, None => heap.call(2, &[v0])? }; let _ = v2;
-                let v3 = match (natives[2].entry)(&[v2]) { Some(value) => value, None => heap.call(3, &[v2])? }; let _ = v3;
-                let v4 = (natives[3].entry)(&[v3, Value::Int(4294967296)])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[4].entry)(&[Value::Int(2147483648), v4])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_WRAP_INT32_PLAN: p::HelperPlan = p::HelperPlan {
@@ -9836,7 +7621,7 @@ const TS_SHIFT_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shift_count,
-    template: Some(p::HelperTemplate { entry: Some(ts_shift_count_template), metered: None, depth: 5, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("89dc289314ba1e06d1e8e97a6d404d7f4beb95b29d8db388cd2eec14c3dc35d3"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), ], heap: Some(p::HeapTemplate { entry: ts_shift_count_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("9b0f166d52f035e56239eb8bc2993179f078c1dcfcc0511924a29c86d351f7d2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("89dc289314ba1e06d1e8e97a6d404d7f4beb95b29d8db388cd2eec14c3dc35d3"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("9b0f166d52f035e56239eb8bc2993179f078c1dcfcc0511924a29c86d351f7d2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.shift_count`.
@@ -9861,35 +7646,6 @@ fn ts_shift_count(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_shift_count_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_shift_count_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[3].entry)(&[v0, Value::Int(32)])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BITWISE32_PLAN: p::HelperPlan = p::HelperPlan {
@@ -10558,7 +8314,7 @@ const TS_BIT_NOT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_not,
-    template: Some(p::HelperTemplate { entry: Some(ts_bit_not_template), metered: None, depth: 4, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("89dc289314ba1e06d1e8e97a6d404d7f4beb95b29d8db388cd2eec14c3dc35d3"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.bit_not`.
@@ -10610,18 +8366,6 @@ fn ts_bit_not(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_bit_not_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_SHL_PLAN: p::HelperPlan = p::HelperPlan {
@@ -11194,7 +8938,7 @@ const TS_STRICT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_strict_equals,
-    template: Some(p::HelperTemplate { entry: Some(ts_strict_equals_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: None, forwards: p::Forwards { floats: Some(1), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: None, forwards: p::Forwards { floats: Some(1), ints: None, texts: None } }),
 };
 
 /// `ts.strict_equals`.
@@ -11267,38 +9011,6 @@ fn ts_strict_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
-fn ts_strict_equals_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null] | [Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Absent] | [Value::Null | Value::Absent | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Text(_), Value::Int(_) | Value::Float(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::Bool(_)] | [Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRICT_NOT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.strict_not_equals",
@@ -11320,7 +9032,7 @@ const TS_STRICT_NOT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_strict_not_equals,
-    template: Some(p::HelperTemplate { entry: Some(ts_strict_not_equals_template), metered: None, depth: 3, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: ts_strict_not_equals_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8f58c2f7602558da7a023db020629498e771132d078e1d91e2db21ec716c7ab3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 3, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8f58c2f7602558da7a023db020629498e771132d078e1d91e2db21ec716c7ab3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.strict_not_equals`.
@@ -11336,56 +9048,6 @@ fn ts_strict_not_equals(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
     ctx.local(2, 0)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_strict_not_equals_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null, Value::Null] | [Value::Absent, Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null] | [Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Absent] | [Value::Null | Value::Absent | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Text(_), Value::Int(_) | Value::Float(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_), Value::Bool(_)] | [Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[2].entry)(&[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_strict_not_equals_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_LOOSE_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -11485,7 +9147,7 @@ const TS_LOOSE_NOT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_loose_not_equals,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_loose_not_equals_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ea9d0c6827ee5d62afc4fec9f85a250dbcd66d0f9b55109c2df1256d0a5cb597"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ea9d0c6827ee5d62afc4fec9f85a250dbcd66d0f9b55109c2df1256d0a5cb597"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.loose_not_equals`.
@@ -11511,22 +9173,6 @@ fn ts_loose_not_equals(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_loose_not_equals_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_RELATIONAL_PLAN: p::HelperPlan = p::HelperPlan {
@@ -11904,7 +9550,7 @@ const TS_LT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_lt,
-    template: Some(p::HelperTemplate { entry: Some(ts_lt_template), metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: ts_lt_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ] }), forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ] }), forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.lt`.
@@ -11999,35 +9645,6 @@ fn ts_lt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_lt_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_lt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_GT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.gt",
@@ -12067,7 +9684,7 @@ const TS_GT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_gt,
-    template: Some(p::HelperTemplate { entry: Some(ts_gt_template), metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: ts_gt_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.gt`.
@@ -12162,35 +9779,6 @@ fn ts_gt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_gt_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], args[0]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_gt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1], args[0]])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_LE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.le",
@@ -12232,7 +9820,7 @@ const TS_LE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_le,
-    template: Some(p::HelperTemplate { entry: Some(ts_le_template), metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_le_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ] }), forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ] }), forwards: p::Forwards { floats: Some(0), ints: None, texts: None } }),
 };
 
 /// `ts.le`.
@@ -12329,36 +9917,6 @@ fn ts_le(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_le_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_le_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1], args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                let v2 = (natives[2].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_GE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.ge",
@@ -12400,7 +9958,7 @@ const TS_GE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_ge,
-    template: Some(p::HelperTemplate { entry: Some(ts_ge_template), metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_ge_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("5741b1569d4b7ec160a65a77f000483adbf29b6bdd29f156fbe4410c83398feb"), p::function("fb6547a75939cb77bbf74f25f0591ce6ae12be2a611677a9509be393f5b1e7fa"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.ge`.
@@ -12497,36 +10055,6 @@ fn ts_ge(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_ge_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_), Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[1], args[0]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_ge_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                let v2 = (natives[2].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_PAD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.pad",
@@ -12553,7 +10081,7 @@ const TS_PAD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_pad,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ], heap: Some(p::HeapTemplate { entry: ts_pad_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.pad`.
@@ -12614,23 +10142,6 @@ fn ts_pad(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     ctx.begin()?;
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_pad_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_HOLE_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -13269,7 +10780,7 @@ const TS_NUMBER_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_index,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_index_template), metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_number_index_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number_index`.
@@ -13325,80 +10836,6 @@ fn ts_number_index(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.begin()?;
     ctx.literal(5, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_index_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Text(_), Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_number_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Int(0), args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, args[0]]) { Some(value) => value, None => heap.call(0, &[v2, args[0]])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = (natives[4].entry)(&[args[0]])?; let _ = v4;
-                let v5 = (natives[5].entry)(&[v4, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Int(0), args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                let v3 = match (natives[3].entry)(&[v2, args[0]]) { Some(value) => value, None => heap.call(0, &[v2, args[0]])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Int(0), args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0], args[1]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Int(0), args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_LIST_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
@@ -13499,7 +10936,7 @@ const TS_GET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_get_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get`.
@@ -13558,24 +10995,6 @@ fn ts_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_LIST_WRITE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -13648,7 +11067,7 @@ const TS_LIST_WRITE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_list_write,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: ts_list_write_heap, depth: 2, writes: true, copy: None, element: None, record_write: None, callees: &[p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("55061b3f9685fe8b12b44ca44a9a2f5f60123f0b0130dea98a0209e5eb94d76a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: true, copy: None, element: None, record_write: None, callees: &[p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("55061b3f9685fe8b12b44ca44a9a2f5f60123f0b0130dea98a0209e5eb94d76a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.list_write`.
@@ -13872,52 +11291,6 @@ fn ts_list_write(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_list_write_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v14 = match (natives[4].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))]) { Some(value) => value, None => heap.call(7, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])? }; let _ = v14;
-                if !matches!(v14, Value::Bool(false)) { return None; }
-                let v15 = heap.len(p::Collection::List, args[0])?; let _ = v15;
-                let v16 = match (natives[4].entry)(&[v15, v0]) { Some(value) => value, None => heap.call(7, &[v15, v0])? }; let _ = v16;
-                if !matches!(v16, Value::Bool(false)) { return None; }
-                heap.set_index(args[0], v0, args[2])?;
-                Some(args[2])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13835058055282163712)))])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("length") }?)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Text(const { lash_kernel_doc::arena::ShortText::new("length") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v10 = heap.call(8, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4751297606873776128)))])?; let _ = v10;
-                heap.bind(v10, Some(v0))?;
-                let v11 = match (natives[4].entry)(&[v10, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))]) { Some(value) => value, None => heap.call(7, &[v10, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])? }; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                let v12 = heap.len(p::Collection::List, args[0])?; let _ = v12;
-                let v13 = match (natives[4].entry)(&[v12, v10]) { Some(value) => value, None => heap.call(7, &[v12, v10])? }; let _ = v13;
-                if !matches!(v13, Value::Bool(false)) { return None; }
-                heap.set_index(args[0], v10, args[2])?;
-                Some(args[2])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.set",
@@ -14085,7 +11458,7 @@ const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 2, writes: true, copy: None, element: Some(p::ElementPath { operation: p::Element::Write, depth: 4, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },] }), record_write: Some(p::RecordWrite { key: "__lash_brand", test: 0, holds: true, values: 5695 }), callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("195d169419b3032307d72fd973c62daa71d3a4390c01d4868f30fbf3529d1cb8"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: true, copy: None, element: Some(p::ElementPath { operation: p::Element::Write, depth: 4, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },] }), record_write: Some(p::RecordWrite { key: "__lash_brand", test: 0, holds: true, values: 5695 }), callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("195d169419b3032307d72fd973c62daa71d3a4390c01d4868f30fbf3529d1cb8"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set`.
@@ -14653,34 +12026,6 @@ fn ts_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], args[1], args[2]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                heap.set_index(args[0], args[1], args[2])?;
-                Some(args[2])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DELETE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -15602,7 +12947,7 @@ const TS_HAS_OWN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has_own,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_has_own_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("bd18173c571add630bc5d3fbfcd2c72af8934b6e6275c90c297c5b82f3e87a6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("bd18173c571add630bc5d3fbfcd2c72af8934b6e6275c90c297c5b82f3e87a6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.has_own`.
@@ -16290,38 +13635,6 @@ fn ts_has_own(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_has_own_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[2].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(3, &[args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3_entry = heap.lookup(p::Table::Record, args[0], v2)?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[2].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.has",
@@ -16395,7 +13708,7 @@ const TS_HAS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_has_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e009fcfed3d76e4abc815e63f8c0e4cae755aa3455fa27862dde8d3522a29a74"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e009fcfed3d76e4abc815e63f8c0e4cae755aa3455fa27862dde8d3522a29a74"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.has`.
@@ -16564,30 +13877,6 @@ fn ts_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(1, &[args[0]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(2, &[args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(3, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = heap.call(4, &[args[0], v2])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -18112,7 +15401,7 @@ const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_boundary,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boundary_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.boundary`.
@@ -18136,22 +15425,6 @@ fn ts_boundary(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_boundary_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], Value::Absent])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -18282,7 +15555,7 @@ const TS_SLEEP_DURATION_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_sleep_duration,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_sleep_duration_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.sleep_duration`.
@@ -18353,78 +15626,6 @@ fn ts_sleep_duration(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.call(9, 0, 1)?;
     Ok(ctx.take(0))
 }
-fn ts_sleep_duration_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                heap.bind(args[0], None)?;
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[v0])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[4].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4890909195324358656))), v0])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(Value::Int(9223372036854775807))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                heap.bind(args[0], None)?;
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[v0])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[4].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4890909195324358656))), v0])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[v0])?; let _ = v5;
-                let v6 = match (natives[6].entry)(&[v5]) { Some(value) => value, None => heap.call(0, &[v5])? }; let _ = v6;
-                Some(v6)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[v0])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[4].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4890909195324358656))), v0])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(Value::Int(9223372036854775807))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                let v1 = (natives[1].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0)))])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[2].entry)(&[v0])?; let _ = v2;
-                let v3 = (natives[3].entry)(&[v2])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = (natives[4].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4890909195324358656))), v0])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = (natives[5].entry)(&[v0])?; let _ = v5;
-                let v6 = match (natives[6].entry)(&[v5]) { Some(value) => value, None => heap.call(0, &[v5])? }; let _ = v6;
-                Some(v6)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.locale_arguments",
@@ -18456,7 +15657,7 @@ const TS_LOCALE_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_locale_arguments,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_locale_arguments_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.locale_arguments`.
@@ -18524,108 +15725,6 @@ fn ts_locale_arguments(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.literal(1, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_locale_arguments_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v6 = heap.len(p::Collection::List, args[0])?; let _ = v6;
-                let v7 = (natives[0].entry)(&[Value::Int(1), v6])?; let _ = v7;
-                if !matches!(v7, Value::Bool(true)) { return None; }
-                let v8 = heap.index(args[0], Value::Int(1))?; let _ = v8;
-                let v9 = match (natives[1].entry)(&[v8, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v8, Value::Absent])? }; let _ = v9;
-                if !matches!(v9, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v6 = heap.len(p::Collection::List, args[0])?; let _ = v6;
-                let v7 = (natives[0].entry)(&[Value::Int(1), v6])?; let _ = v7;
-                if !matches!(v7, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = heap.index(args[0], Value::Int(0))?; let _ = v4;
-                let v5 = match (natives[1].entry)(&[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)]) { Some(value) => value, None => heap.call(0, &[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v10 = heap.len(p::Collection::List, args[0])?; let _ = v10;
-                let v11 = (natives[0].entry)(&[Value::Int(1), v10])?; let _ = v11;
-                if !matches!(v11, Value::Bool(true)) { return None; }
-                let v12 = heap.index(args[0], Value::Int(1))?; let _ = v12;
-                let v13 = match (natives[1].entry)(&[v12, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v12, Value::Absent])? }; let _ = v13;
-                if !matches!(v13, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], Value::Int(0))?; let _ = v2;
-                let v3 = match (natives[1].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                let v4 = heap.index(args[0], Value::Int(0))?; let _ = v4;
-                let v5 = match (natives[1].entry)(&[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)]) { Some(value) => value, None => heap.call(0, &[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("en-US") }?)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v10 = heap.len(p::Collection::List, args[0])?; let _ = v10;
-                let v11 = (natives[0].entry)(&[Value::Int(1), v10])?; let _ = v11;
-                if !matches!(v11, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v14 = heap.len(p::Collection::List, args[0])?; let _ = v14;
-                let v15 = (natives[0].entry)(&[Value::Int(1), v14])?; let _ = v15;
-                if !matches!(v15, Value::Bool(true)) { return None; }
-                let v16 = heap.index(args[0], Value::Int(1))?; let _ = v16;
-                let v17 = match (natives[1].entry)(&[v16, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v16, Value::Absent])? }; let _ = v17;
-                if !matches!(v17, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[Value::Int(0), v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v14 = heap.len(p::Collection::List, args[0])?; let _ = v14;
-                let v15 = (natives[0].entry)(&[Value::Int(1), v14])?; let _ = v15;
-                if !matches!(v15, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_METHOD_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.method_callable",
@@ -18672,7 +15771,7 @@ const TS_METHOD_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_method_callable,
-    template: Some(p::HelperTemplate { entry: Some(ts_method_callable_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_method_callable_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e6cbb6ee4b66bfd9d829cf54b6d0a40b57d0946c96ee2c8a88155eb2ccd0b999"), p::function("f7f734e35b83d9fe09d0a5c5ba047ffe907efcc353d213e90fd69b7067eaed7e"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.method_callable`.
@@ -18753,42 +15852,6 @@ fn ts_method_callable(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_method_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[2], Value::Absent])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_method_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Absent] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_CHECKED_PLAN: p::HelperPlan = p::HelperPlan {
@@ -19581,7 +16644,7 @@ const TS_MAP_KEY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_key,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b0439f082903d6067109c8266f7047fdf9fe2939d92398018589ceb3d48b78c2"), ], heap: Some(p::HeapTemplate { entry: ts_map_key_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("b0439f082903d6067109c8266f7047fdf9fe2939d92398018589ceb3d48b78c2"), p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b0439f082903d6067109c8266f7047fdf9fe2939d92398018589ceb3d48b78c2"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("b0439f082903d6067109c8266f7047fdf9fe2939d92398018589ceb3d48b78c2"), p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.key`.
@@ -19606,33 +16669,6 @@ fn ts_map_key(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.literal(3, 2)?;
     ctx.call(3, 0, 3)?;
     Ok(ctx.take(0))
-}
-fn ts_map_key_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0]])?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("key") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(0, &[v0, v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("undefined") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("key") }?)])?; let _ = v0;
-                let v1 = match (natives[0].entry)(&[args[0], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)]) { Some(value) => value, None => heap.call(0, &[args[0], v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("error") }?)])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -19671,7 +16707,7 @@ const TS_MAP_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_map_value_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_value_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.value`.
@@ -19806,32 +16842,6 @@ fn ts_map_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_map_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_map_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -20058,7 +17068,7 @@ const TS_MAP_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_map_is_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.is`.
@@ -20070,40 +17080,6 @@ fn ts_map_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_map_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_map_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -20132,7 +17108,7 @@ const TS_MAP_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_size,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_map_size_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.size`.
@@ -20157,22 +17133,6 @@ fn ts_map_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.call(3, 0, 1)?;
     ctx.call(4, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_map_size_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::Map, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_SET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -20205,7 +17165,7 @@ const TS_MAP_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_set,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_set_heap, depth: 2, writes: true, copy: None, element: None, record_write: None, callees: &[p::function("4df199da2b23e1d053f08ef2b391ccd9dee2b37c243b788ee0ab05430a8545ff"), p::function("14870ad6c7b29d9e1c7d75d818bdb040782c681776c94f1b347eea8ee46cabae"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: true, copy: None, element: None, record_write: None, callees: &[p::function("4df199da2b23e1d053f08ef2b391ccd9dee2b37c243b788ee0ab05430a8545ff"), p::function("14870ad6c7b29d9e1c7d75d818bdb040782c681776c94f1b347eea8ee46cabae"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.set`.
@@ -20243,25 +17203,6 @@ fn ts_map_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_map_set_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Map(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v2;
-                heap.set_index(args[0], v1, v2)?;
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_GET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -20368,7 +17309,7 @@ const TS_MAP_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_has,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_has_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4df199da2b23e1d053f08ef2b391ccd9dee2b37c243b788ee0ab05430a8545ff"), p::function("14870ad6c7b29d9e1c7d75d818bdb040782c681776c94f1b347eea8ee46cabae"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4df199da2b23e1d053f08ef2b391ccd9dee2b37c243b788ee0ab05430a8545ff"), p::function("14870ad6c7b29d9e1c7d75d818bdb040782c681776c94f1b347eea8ee46cabae"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.map.has`.
@@ -20400,24 +17341,6 @@ fn ts_map_has(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.local(2, 1)?;
     ctx.call(5, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_map_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Map(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(0)])?; let _ = v0;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2_entry = heap.lookup(p::Table::Map, args[0], v1)?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MAP_DELETE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -21407,7 +18330,7 @@ const TS_SET_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_set_is_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set.is`.
@@ -21419,32 +18342,6 @@ fn ts_set_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_set_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_set_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_SET_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -22442,7 +19339,7 @@ const TS_SET_CONTAINS_OTHER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_contains_other,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_set_contains_other_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("06cab8bff3b0826a5106507a82d670f4407bf477764046bc5fbac0f1a08c5ce6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("06cab8bff3b0826a5106507a82d670f4407bf477764046bc5fbac0f1a08c5ce6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set.contains_other`.
@@ -22522,41 +19419,6 @@ fn ts_set_contains_other(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_set_contains_other_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "object")?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3_entry = heap.lookup(p::Table::Map, v0, args[1])?; let v3 = Value::Bool(v3_entry.is_some()); let v3_found = v3_entry.unwrap_or(Value::Absent); let _ = (v3, v3_found);
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "object")?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v4 = (natives[0].entry)(&[v0])?; let _ = v4;
-                let v5 = match (natives[1].entry)(&[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("set") }?)]) { Some(value) => value, None => heap.call(0, &[v4, Value::Text(const { lash_kernel_doc::arena::ShortText::new("set") }?)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6_entry = heap.lookup(p::Table::Set, v0, args[1])?; let v6 = Value::Bool(v6_entry.is_some()); let v6_found = v6_entry.unwrap_or(Value::Absent); let _ = (v6, v6_found);
-                Some(v6)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_SET_CLOSE_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.set.close_keys",
@@ -22612,7 +19474,7 @@ const TS_SET_CLOSE_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_close_keys,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_set_close_keys_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.set.close_keys`.
@@ -22704,24 +19566,6 @@ fn ts_set_close_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_set_close_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("return") }?)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_SET_VISIT_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -24321,7 +21165,7 @@ const TS_BOOLEAN_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_convert,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_convert_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("f6df6ed6d839b0136d92d7de63df9422c732fa26c089bb2e2b01952b1e01cb5b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("f6df6ed6d839b0136d92d7de63df9422c732fa26c089bb2e2b01952b1e01cb5b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.boolean.convert`.
@@ -24345,25 +21189,6 @@ fn ts_boolean_convert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.begin()?;
     ctx.local(4, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_boolean_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BOOLEAN_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -24397,7 +21222,7 @@ const TS_BOOLEAN_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_valueof_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.boolean.valueOf`.
@@ -24446,20 +21271,6 @@ fn ts_boolean_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.literal(9, 2)?;
     ctx.call(2, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_boolean_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Bool(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BOOLEAN_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -24565,7 +21376,7 @@ const TS_OBJECT_OWN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_own_keys,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_own_keys_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("0223f193075580add6f2f0193930c5d98af6c0ebf75d7ca04b22dc286352d299"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("0223f193075580add6f2f0193930c5d98af6c0ebf75d7ca04b22dc286352d299"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.object.own_keys`.
@@ -24750,22 +21561,6 @@ fn ts_object_own_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_object_own_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_OBJECT_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.convert",
@@ -24798,7 +21593,7 @@ const TS_OBJECT_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_convert,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_convert_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.object.convert`.
@@ -24843,28 +21638,6 @@ fn ts_object_convert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.local(3, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_object_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = heap.call(2, &[v1])?; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_OBJECT_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -26230,7 +23003,7 @@ const TS_OBJECT_DESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_descriptor,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_object_descriptor_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e009fcfed3d76e4abc815e63f8c0e4cae755aa3455fa27862dde8d3522a29a74"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("bd18173c571add630bc5d3fbfcd2c72af8934b6e6275c90c297c5b82f3e87a6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e009fcfed3d76e4abc815e63f8c0e4cae755aa3455fa27862dde8d3522a29a74"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("bd18173c571add630bc5d3fbfcd2c72af8934b6e6275c90c297c5b82f3e87a6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.object.descriptor`.
@@ -26598,22 +23371,6 @@ fn ts_object_descriptor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_object_descriptor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], args[2]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_OBJECT_GETOWNPROPERTYDESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -27431,7 +24188,7 @@ const TS_REFLECT_IMPL_DESCRIPTOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_reflect_impl_descriptor,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_reflect_impl_descriptor_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("49762c4212972d7ca11dfc6738cbd633cefa90565467fe1a7e4e6860934a984b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("49762c4212972d7ca11dfc6738cbd633cefa90565467fe1a7e4e6860934a984b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.reflect_impl.descriptor`.
@@ -27483,27 +24240,6 @@ fn ts_reflect_impl_descriptor(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_reflect_impl_descriptor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = heap.call(2, &[args[0], v0])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_REFLECT_IMPL_GET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -27787,7 +24523,7 @@ const TS_REFLECT_IMPL_HAS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_reflect_impl_has,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_reflect_impl_has_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("ddf3cadcfc79877c259eacaee291e5e5628e17670265c7b73ca018de9da57a13"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("ddf3cadcfc79877c259eacaee291e5e5628e17670265c7b73ca018de9da57a13"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.reflect_impl.has`.
@@ -27882,31 +24618,6 @@ fn ts_reflect_impl_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_reflect_impl_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = heap.index(v0, Value::Int(1))?; let _ = v3;
-                let v4 = heap.call(2, &[v3])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = heap.index(v0, Value::Int(0))?; let _ = v5;
-                let v6 = heap.call(3, &[v5, v4])?; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REFLECT_IMPL_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.reflect_impl.ownKeys",
@@ -27947,7 +24658,7 @@ const TS_REFLECT_IMPL_OWNKEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_reflect_impl_ownkeys,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_reflect_impl_ownkeys_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("342fbb65eceff23810461275c8864afcf4788ffe788eb5a69b4279af907c3c43"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("342fbb65eceff23810461275c8864afcf4788ffe788eb5a69b4279af907c3c43"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.reflect_impl.ownKeys`.
@@ -27999,27 +24710,6 @@ fn ts_reflect_impl_ownkeys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_reflect_impl_ownkeys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = heap.call(2, &[args[0], v0])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_OBJECT_CREATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -29243,7 +25933,7 @@ const TS_OBJECT_ISPROTOTYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_isprototypeof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_isprototypeof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.object.isPrototypeOf`.
@@ -29327,26 +26017,6 @@ fn ts_object_isprototypeof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.call(5, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
-fn ts_object_isprototypeof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_OBJECT_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.object.valueOf",
@@ -29429,7 +26099,7 @@ const TS_OBJECT_IS_INSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_is_instance,
-    template: Some(p::HelperTemplate { entry: Some(ts_object_is_instance_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_object_is_instance_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.object.is_instance`.
@@ -29471,46 +26141,6 @@ fn ts_object_is_instance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.literal(4, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_object_is_instance_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_object_is_instance_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(1, &[args[0]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = match (natives[0].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)]) { Some(value) => value, None => heap.call(2, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.abs",
@@ -29547,7 +26177,7 @@ const TS_MATH_ABS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_abs,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), ], heap: Some(p::HeapTemplate { entry: ts_math_abs_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("b9ae36426634b80ced7bbc7974c328a477e0c65e7cb51c8d30efac00d8331f34"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.abs`.
@@ -29587,27 +26217,6 @@ fn ts_math_abs(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_abs_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_FLOOR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.floor",
@@ -29644,7 +26253,7 @@ const TS_MATH_FLOOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_floor,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ], heap: Some(p::HeapTemplate { entry: ts_math_floor_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.floor`.
@@ -29684,27 +26293,6 @@ fn ts_math_floor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_floor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_CEIL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.ceil",
@@ -29741,7 +26329,7 @@ const TS_MATH_CEIL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_ceil,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("0953c2a69cf48da39694f93a8370396ac683c344a752b799a4e4980ab18f0c8b"), ], heap: Some(p::HeapTemplate { entry: ts_math_ceil_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("0953c2a69cf48da39694f93a8370396ac683c344a752b799a4e4980ab18f0c8b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("0953c2a69cf48da39694f93a8370396ac683c344a752b799a4e4980ab18f0c8b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("0953c2a69cf48da39694f93a8370396ac683c344a752b799a4e4980ab18f0c8b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.ceil`.
@@ -29781,27 +26369,6 @@ fn ts_math_ceil(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_ceil_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_TRUNC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.trunc",
@@ -29838,7 +26405,7 @@ const TS_MATH_TRUNC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_trunc,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ], heap: Some(p::HeapTemplate { entry: ts_math_trunc_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.trunc`.
@@ -29878,27 +26445,6 @@ fn ts_math_trunc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_trunc_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_SIGN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sign",
@@ -29935,7 +26481,7 @@ const TS_MATH_SIGN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sign,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d9c6cba6b6051ac327fc21bf2b07dd475dd4b45040559abaf5e69c92ab7b66c8"), ], heap: Some(p::HeapTemplate { entry: ts_math_sign_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d9c6cba6b6051ac327fc21bf2b07dd475dd4b45040559abaf5e69c92ab7b66c8"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d9c6cba6b6051ac327fc21bf2b07dd475dd4b45040559abaf5e69c92ab7b66c8"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d9c6cba6b6051ac327fc21bf2b07dd475dd4b45040559abaf5e69c92ab7b66c8"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.sign`.
@@ -29975,27 +26521,6 @@ fn ts_math_sign(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_sign_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ACOS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.acos",
@@ -30032,7 +26557,7 @@ const TS_MATH_ACOS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acos,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4eded3876caabcd338b286db5e5e9fa7434e020ce1d02cbde15deb7475438ef2"), ], heap: Some(p::HeapTemplate { entry: ts_math_acos_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("4eded3876caabcd338b286db5e5e9fa7434e020ce1d02cbde15deb7475438ef2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4eded3876caabcd338b286db5e5e9fa7434e020ce1d02cbde15deb7475438ef2"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("4eded3876caabcd338b286db5e5e9fa7434e020ce1d02cbde15deb7475438ef2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.acos`.
@@ -30072,27 +26597,6 @@ fn ts_math_acos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_acos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ASIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.asin",
@@ -30129,7 +26633,7 @@ const TS_MATH_ASIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asin,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b7a6ddb44817e4504f10866070fa4ee2c50aa4aa8ffd86f733167095a1d89564"), ], heap: Some(p::HeapTemplate { entry: ts_math_asin_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("b7a6ddb44817e4504f10866070fa4ee2c50aa4aa8ffd86f733167095a1d89564"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b7a6ddb44817e4504f10866070fa4ee2c50aa4aa8ffd86f733167095a1d89564"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("b7a6ddb44817e4504f10866070fa4ee2c50aa4aa8ffd86f733167095a1d89564"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.asin`.
@@ -30169,27 +26673,6 @@ fn ts_math_asin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_asin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ACOSH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.acosh",
@@ -30226,7 +26709,7 @@ const TS_MATH_ACOSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acosh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d15fe825c43eb8b500ad213990f7b546304e325f4ba012ffb89e98eeedc6f500"), ], heap: Some(p::HeapTemplate { entry: ts_math_acosh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d15fe825c43eb8b500ad213990f7b546304e325f4ba012ffb89e98eeedc6f500"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d15fe825c43eb8b500ad213990f7b546304e325f4ba012ffb89e98eeedc6f500"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d15fe825c43eb8b500ad213990f7b546304e325f4ba012ffb89e98eeedc6f500"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.acosh`.
@@ -30266,27 +26749,6 @@ fn ts_math_acosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_acosh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ASINH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.asinh",
@@ -30323,7 +26785,7 @@ const TS_MATH_ASINH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asinh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4b11eecf46d23a71903da3ab29644c7a4f9950bd7fb5bfa1deb57fdd3d36821b"), ], heap: Some(p::HeapTemplate { entry: ts_math_asinh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("4b11eecf46d23a71903da3ab29644c7a4f9950bd7fb5bfa1deb57fdd3d36821b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4b11eecf46d23a71903da3ab29644c7a4f9950bd7fb5bfa1deb57fdd3d36821b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("4b11eecf46d23a71903da3ab29644c7a4f9950bd7fb5bfa1deb57fdd3d36821b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.asinh`.
@@ -30363,27 +26825,6 @@ fn ts_math_asinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_asinh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ATAN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.atan",
@@ -30420,7 +26861,7 @@ const TS_MATH_ATAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("dec6865ca4298d654375c64955991e1d0f22c5db000ef591696108773db5022e"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("dec6865ca4298d654375c64955991e1d0f22c5db000ef591696108773db5022e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("dec6865ca4298d654375c64955991e1d0f22c5db000ef591696108773db5022e"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("dec6865ca4298d654375c64955991e1d0f22c5db000ef591696108773db5022e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.atan`.
@@ -30460,27 +26901,6 @@ fn ts_math_atan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_atan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ATANH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.atanh",
@@ -30517,7 +26937,7 @@ const TS_MATH_ATANH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atanh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("f8beeb894a55b65336bd8ce4edef61de8ab5aafe42ee51e102ea2f8ff6eaa29b"), ], heap: Some(p::HeapTemplate { entry: ts_math_atanh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("f8beeb894a55b65336bd8ce4edef61de8ab5aafe42ee51e102ea2f8ff6eaa29b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("f8beeb894a55b65336bd8ce4edef61de8ab5aafe42ee51e102ea2f8ff6eaa29b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("f8beeb894a55b65336bd8ce4edef61de8ab5aafe42ee51e102ea2f8ff6eaa29b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.atanh`.
@@ -30557,27 +26977,6 @@ fn ts_math_atanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_atanh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_CBRT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cbrt",
@@ -30614,7 +27013,7 @@ const TS_MATH_CBRT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cbrt,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("093255aa29c8e15cb5e88c0959fe5d39bae9c7e68a0d634abbe082d63ced91c7"), ], heap: Some(p::HeapTemplate { entry: ts_math_cbrt_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("093255aa29c8e15cb5e88c0959fe5d39bae9c7e68a0d634abbe082d63ced91c7"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("093255aa29c8e15cb5e88c0959fe5d39bae9c7e68a0d634abbe082d63ced91c7"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("093255aa29c8e15cb5e88c0959fe5d39bae9c7e68a0d634abbe082d63ced91c7"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.cbrt`.
@@ -30654,27 +27053,6 @@ fn ts_math_cbrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_cbrt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_COS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cos",
@@ -30711,7 +27089,7 @@ const TS_MATH_COS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cos,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d9d518429bff162b659eeb4572d9131bfb62b5c4a5ff57a89dce188f7af04a17"), ], heap: Some(p::HeapTemplate { entry: ts_math_cos_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d9d518429bff162b659eeb4572d9131bfb62b5c4a5ff57a89dce188f7af04a17"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("d9d518429bff162b659eeb4572d9131bfb62b5c4a5ff57a89dce188f7af04a17"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("d9d518429bff162b659eeb4572d9131bfb62b5c4a5ff57a89dce188f7af04a17"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.cos`.
@@ -30751,27 +27129,6 @@ fn ts_math_cos(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_cos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_COSH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.cosh",
@@ -30808,7 +27165,7 @@ const TS_MATH_COSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cosh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("852c2f6c864bfbe888acb6a91ef3bb082b0f52625acbec66a384073d5b9b3796"), ], heap: Some(p::HeapTemplate { entry: ts_math_cosh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("852c2f6c864bfbe888acb6a91ef3bb082b0f52625acbec66a384073d5b9b3796"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("852c2f6c864bfbe888acb6a91ef3bb082b0f52625acbec66a384073d5b9b3796"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("852c2f6c864bfbe888acb6a91ef3bb082b0f52625acbec66a384073d5b9b3796"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.cosh`.
@@ -30848,27 +27205,6 @@ fn ts_math_cosh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_cosh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_EXP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.exp",
@@ -30905,7 +27241,7 @@ const TS_MATH_EXP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_exp,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("72377c483d44ba479d341397fc4bf2dba3097946ef2208bfc996a41290171a89"), ], heap: Some(p::HeapTemplate { entry: ts_math_exp_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("72377c483d44ba479d341397fc4bf2dba3097946ef2208bfc996a41290171a89"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("72377c483d44ba479d341397fc4bf2dba3097946ef2208bfc996a41290171a89"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("72377c483d44ba479d341397fc4bf2dba3097946ef2208bfc996a41290171a89"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.exp`.
@@ -30945,27 +27281,6 @@ fn ts_math_exp(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_exp_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_EXPM1_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.expm1",
@@ -31002,7 +27317,7 @@ const TS_MATH_EXPM1_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_expm1,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("23e8f1477626bf2ba5e3c430c3193c3b77fee129d2f80c763e0d13cf0f6eef46"), ], heap: Some(p::HeapTemplate { entry: ts_math_expm1_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("23e8f1477626bf2ba5e3c430c3193c3b77fee129d2f80c763e0d13cf0f6eef46"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("23e8f1477626bf2ba5e3c430c3193c3b77fee129d2f80c763e0d13cf0f6eef46"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("23e8f1477626bf2ba5e3c430c3193c3b77fee129d2f80c763e0d13cf0f6eef46"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.expm1`.
@@ -31042,27 +27357,6 @@ fn ts_math_expm1(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_expm1_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_LOG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log",
@@ -31099,7 +27393,7 @@ const TS_MATH_LOG_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("46837c16913f5ec0e9ddab90eb584ac55eedd62bfca626bb7cdd4ac1e069d554"), ], heap: Some(p::HeapTemplate { entry: ts_math_log_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("46837c16913f5ec0e9ddab90eb584ac55eedd62bfca626bb7cdd4ac1e069d554"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("46837c16913f5ec0e9ddab90eb584ac55eedd62bfca626bb7cdd4ac1e069d554"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("46837c16913f5ec0e9ddab90eb584ac55eedd62bfca626bb7cdd4ac1e069d554"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.log`.
@@ -31139,27 +27433,6 @@ fn ts_math_log(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_log_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_LOG1P_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log1p",
@@ -31196,7 +27469,7 @@ const TS_MATH_LOG1P_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log1p,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("5b2cde49c859e18754209898447e046df95b0b8ead7c91402fe2fc3366cd0f2b"), ], heap: Some(p::HeapTemplate { entry: ts_math_log1p_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("5b2cde49c859e18754209898447e046df95b0b8ead7c91402fe2fc3366cd0f2b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("5b2cde49c859e18754209898447e046df95b0b8ead7c91402fe2fc3366cd0f2b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("5b2cde49c859e18754209898447e046df95b0b8ead7c91402fe2fc3366cd0f2b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.log1p`.
@@ -31236,27 +27509,6 @@ fn ts_math_log1p(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_log1p_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_LOG10_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log10",
@@ -31293,7 +27545,7 @@ const TS_MATH_LOG10_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log10,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ad319e691aa7e683c9b386a562b3a4df530cf7f56be7e43657b49e696f5055be"), ], heap: Some(p::HeapTemplate { entry: ts_math_log10_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ad319e691aa7e683c9b386a562b3a4df530cf7f56be7e43657b49e696f5055be"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ad319e691aa7e683c9b386a562b3a4df530cf7f56be7e43657b49e696f5055be"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ad319e691aa7e683c9b386a562b3a4df530cf7f56be7e43657b49e696f5055be"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.log10`.
@@ -31333,27 +27585,6 @@ fn ts_math_log10(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_log10_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_LOG2_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.log2",
@@ -31390,7 +27621,7 @@ const TS_MATH_LOG2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log2,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c99fb41228d13abf84468198675a70a0df7658769804167d8b5964ecb470d0bb"), ], heap: Some(p::HeapTemplate { entry: ts_math_log2_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("c99fb41228d13abf84468198675a70a0df7658769804167d8b5964ecb470d0bb"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c99fb41228d13abf84468198675a70a0df7658769804167d8b5964ecb470d0bb"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("c99fb41228d13abf84468198675a70a0df7658769804167d8b5964ecb470d0bb"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.log2`.
@@ -31430,27 +27661,6 @@ fn ts_math_log2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_log2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_SIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sin",
@@ -31487,7 +27697,7 @@ const TS_MATH_SIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sin,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("19675f77a25b510cb4904fe3ac23cabab34b40678a7d9af56682cafeeea52fb4"), ], heap: Some(p::HeapTemplate { entry: ts_math_sin_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("19675f77a25b510cb4904fe3ac23cabab34b40678a7d9af56682cafeeea52fb4"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("19675f77a25b510cb4904fe3ac23cabab34b40678a7d9af56682cafeeea52fb4"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("19675f77a25b510cb4904fe3ac23cabab34b40678a7d9af56682cafeeea52fb4"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.sin`.
@@ -31527,27 +27737,6 @@ fn ts_math_sin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_sin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_SINH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sinh",
@@ -31584,7 +27773,7 @@ const TS_MATH_SINH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sinh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("58632ec4b689aaa1df9a1d1850183b4295adca0589efdb6aa782a795345d404a"), ], heap: Some(p::HeapTemplate { entry: ts_math_sinh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("58632ec4b689aaa1df9a1d1850183b4295adca0589efdb6aa782a795345d404a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("58632ec4b689aaa1df9a1d1850183b4295adca0589efdb6aa782a795345d404a"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("58632ec4b689aaa1df9a1d1850183b4295adca0589efdb6aa782a795345d404a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.sinh`.
@@ -31624,27 +27813,6 @@ fn ts_math_sinh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_sinh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_TAN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.tan",
@@ -31681,7 +27849,7 @@ const TS_MATH_TAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tan,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e6192825380012a29645f9067ba73b8d37cb41360c26345111903198c975efe9"), ], heap: Some(p::HeapTemplate { entry: ts_math_tan_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("e6192825380012a29645f9067ba73b8d37cb41360c26345111903198c975efe9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e6192825380012a29645f9067ba73b8d37cb41360c26345111903198c975efe9"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("e6192825380012a29645f9067ba73b8d37cb41360c26345111903198c975efe9"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.tan`.
@@ -31721,27 +27889,6 @@ fn ts_math_tan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_tan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_TANH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.tanh",
@@ -31778,7 +27925,7 @@ const TS_MATH_TANH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tanh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("13f5b6813842acb99100d75d852bb238e4f64e294597ae137c36dcab5fe32397"), ], heap: Some(p::HeapTemplate { entry: ts_math_tanh_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("13f5b6813842acb99100d75d852bb238e4f64e294597ae137c36dcab5fe32397"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("13f5b6813842acb99100d75d852bb238e4f64e294597ae137c36dcab5fe32397"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("13f5b6813842acb99100d75d852bb238e4f64e294597ae137c36dcab5fe32397"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.tanh`.
@@ -31818,27 +27965,6 @@ fn ts_math_tanh(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_tanh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_SQRT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.sqrt",
@@ -31875,7 +28001,7 @@ const TS_MATH_SQRT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sqrt,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ddd0f060ce55439ac6ff62eefa8062834a97c3a4ab5295da11f6d93884b5f755"), ], heap: Some(p::HeapTemplate { entry: ts_math_sqrt_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ddd0f060ce55439ac6ff62eefa8062834a97c3a4ab5295da11f6d93884b5f755"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ddd0f060ce55439ac6ff62eefa8062834a97c3a4ab5295da11f6d93884b5f755"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ddd0f060ce55439ac6ff62eefa8062834a97c3a4ab5295da11f6d93884b5f755"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.sqrt`.
@@ -31915,27 +28041,6 @@ fn ts_math_sqrt(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_sqrt_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.round",
@@ -31972,7 +28077,7 @@ const TS_MATH_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_round,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ed5b417f4d1242b43b0b4c20059055fa835bb697e03ca635a45668884271fbb0"), ], heap: Some(p::HeapTemplate { entry: ts_math_round_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ed5b417f4d1242b43b0b4c20059055fa835bb697e03ca635a45668884271fbb0"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("ed5b417f4d1242b43b0b4c20059055fa835bb697e03ca635a45668884271fbb0"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("ed5b417f4d1242b43b0b4c20059055fa835bb697e03ca635a45668884271fbb0"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.round`.
@@ -32011,27 +28116,6 @@ fn ts_math_round(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_math_round_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_ATAN2_PLAN: p::HelperPlan = p::HelperPlan {
@@ -32080,7 +28164,7 @@ const TS_MATH_ATAN2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan2,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e1fa1056e0c5a0ce9ab0b9aabb3808396fc1b882fcb95c7f4967a275bbc2407a"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan2_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("e1fa1056e0c5a0ce9ab0b9aabb3808396fc1b882fcb95c7f4967a275bbc2407a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e1fa1056e0c5a0ce9ab0b9aabb3808396fc1b882fcb95c7f4967a275bbc2407a"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("e1fa1056e0c5a0ce9ab0b9aabb3808396fc1b882fcb95c7f4967a275bbc2407a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.atan2`.
@@ -32134,31 +28218,6 @@ fn ts_math_atan2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_math_atan2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.index(v0, Value::Int(1))?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(1, &[v3])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = match (natives[0].entry)(&[v2, v4]) { Some(value) => value, None => heap.call(2, &[v2, v4])? }; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MATH_POW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.math.pow",
@@ -32196,7 +28255,7 @@ const TS_MATH_POW_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_pow,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_math_pow_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a482ee95b24260adca04595bdece2dc093357365c1c1ac08d4c78560afe2b5be"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a482ee95b24260adca04595bdece2dc093357365c1c1ac08d4c78560afe2b5be"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.math.pow`.
@@ -32242,28 +28301,6 @@ fn ts_math_pow(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_math_pow_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v0, Value::Int(1))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[v1, v2])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_MAX_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33265,7 +29302,7 @@ const TS_MATH_E_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_e,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_e_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.E`.
@@ -33273,18 +29310,6 @@ fn ts_math_e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4613303445314885481))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_LN10_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33303,7 +29328,7 @@ const TS_MATH_LN10_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_ln10,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_ln10_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.LN10`.
@@ -33311,18 +29336,6 @@ fn ts_math_ln10(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_ln10_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4612367379483415830))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_LN2_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33341,7 +29354,7 @@ const TS_MATH_LN2_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_ln2,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_ln2_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.LN2`.
@@ -33349,18 +29362,6 @@ fn ts_math_ln2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_ln2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4604418534313441775))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_LOG10E_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33379,7 +29380,7 @@ const TS_MATH_LOG10E_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_log10e,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_log10e_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.LOG10E`.
@@ -33387,18 +29388,6 @@ fn ts_math_log10e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_log10e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4601495173785380110))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_LOG2E_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33417,7 +29406,7 @@ const TS_MATH_LOG2E_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_log2e,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_log2e_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.LOG2E`.
@@ -33425,18 +29414,6 @@ fn ts_math_log2e(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_log2e_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4609176140021203710))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_PI_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33455,7 +29432,7 @@ const TS_MATH_PI_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_pi,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_pi_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.PI`.
@@ -33463,18 +29440,6 @@ fn ts_math_pi(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_pi_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4614256656552045848))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_SQRT1_2_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33493,7 +29458,7 @@ const TS_MATH_SQRT1_2_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_sqrt1_2,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_sqrt1_2_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.SQRT1_2`.
@@ -33501,18 +29466,6 @@ fn ts_math_sqrt1_2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_sqrt1_2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4604544271217802189))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MATH_SQRT2_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33531,7 +29484,7 @@ const TS_MATH_SQRT2_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_math_sqrt2,
-    template: Some(p::HelperTemplate { entry: Some(ts_math_sqrt2_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.math.SQRT2`.
@@ -33539,18 +29492,6 @@ fn ts_math_sqrt2(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_math_sqrt2_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4609047870845172685))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_CONVERT_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -33604,7 +29545,7 @@ const TS_NUMBER_CONVERT_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_convert_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_convert_value_template), metered: None, depth: 4, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.convert_value`.
@@ -33716,49 +29657,6 @@ fn ts_number_convert_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_number_convert_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_NUMBER_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.convert",
@@ -33797,7 +29695,7 @@ const TS_NUMBER_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_convert,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: ts_number_convert_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("fdd94bcf6c71f60bc38e99a21862891f6723dc07b06ada4d564e9a922a794d9b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("fdd94bcf6c71f60bc38e99a21862891f6723dc07b06ada4d564e9a922a794d9b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.convert`.
@@ -33847,37 +29745,6 @@ fn ts_number_convert(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_number_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.index(v2, Value::Int(0))?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(1, &[v3])?; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_ISFINITE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -34250,7 +30117,7 @@ const TS_NUMBER_PARSEFLOAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parsefloat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parsefloat_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("265e4ba07efb4c2fa3a355877d1159376cf231b90159dae8f8d01bd624c88894"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("265e4ba07efb4c2fa3a355877d1159376cf231b90159dae8f8d01bd624c88894"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.parseFloat`.
@@ -34295,28 +30162,6 @@ fn ts_number_parsefloat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_number_parsefloat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2, Value::Bool(false)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_PARSEINT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -34368,7 +30213,7 @@ const TS_NUMBER_PARSEINT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parseint,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parseint_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("9b0f166d52f035e56239eb8bc2993179f078c1dcfcc0511924a29c86d351f7d2"), p::function("129cc5066c6a672dbd74c00d1c356f320a6b118a7a3560a6f8f8765fba55539d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("9b0f166d52f035e56239eb8bc2993179f078c1dcfcc0511924a29c86d351f7d2"), p::function("129cc5066c6a672dbd74c00d1c356f320a6b118a7a3560a6f8f8765fba55539d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.parseInt`.
@@ -34428,32 +30273,6 @@ fn ts_number_parseint(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_number_parseint_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(2)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.index(v0, Value::Int(1))?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(2, &[v3])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = heap.call(3, &[v2, v4, Value::Bool(false)])?; let _ = v5;
-                heap.bind(v5, None)?;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_NUMBER_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.receiver",
@@ -34488,7 +30307,7 @@ const TS_NUMBER_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_receiver,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_receiver_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_number_receiver_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("90b2f7a0d66ef64613d060ada3b44f9f285bf8e401fd9f10695f56ada8e418e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.receiver`.
@@ -34545,53 +30364,6 @@ fn ts_number_receiver(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.call(4, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
-fn ts_number_receiver_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_number_receiver_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v3 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("builtin") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v3 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("number") }?)])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(2, &[args[0]])?; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_NUMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.valueOf",
@@ -34612,7 +30384,7 @@ const TS_NUMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_valueof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("aa03d6ef6fac3df8d8993c9fe5c70f24c7eb828bdd86651b7a690c374ac42e4a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("aa03d6ef6fac3df8d8993c9fe5c70f24c7eb828bdd86651b7a690c374ac42e4a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.valueOf`.
@@ -34626,22 +30398,6 @@ fn ts_number_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.local(2, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -35981,7 +31737,7 @@ const TS_NUMBER_EPSILON_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_epsilon,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_epsilon_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.EPSILON`.
@@ -35989,18 +31745,6 @@ fn ts_number_epsilon(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_epsilon_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4372995238176751616))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_MAX_SAFE_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36019,7 +31763,7 @@ const TS_NUMBER_MAX_SAFE_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_max_safe_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_max_safe_integer_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.MAX_SAFE_INTEGER`.
@@ -36027,18 +31771,6 @@ fn ts_number_max_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_max_safe_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653695))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_MIN_SAFE_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36057,7 +31789,7 @@ const TS_NUMBER_MIN_SAFE_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_min_safe_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_min_safe_integer_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.MIN_SAFE_INTEGER`.
@@ -36065,18 +31797,6 @@ fn ts_number_min_safe_integer(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_min_safe_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(14069245235905429503))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_MAX_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36095,7 +31815,7 @@ const TS_NUMBER_MAX_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_max_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_max_value_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.MAX_VALUE`.
@@ -36103,18 +31823,6 @@ fn ts_number_max_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_max_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405311))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_MIN_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36133,7 +31841,7 @@ const TS_NUMBER_MIN_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_min_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_min_value_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.MIN_VALUE`.
@@ -36141,18 +31849,6 @@ fn ts_number_min_value(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_min_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(1))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_NAN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36171,7 +31867,7 @@ const TS_NUMBER_NAN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_nan,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_nan_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.NaN`.
@@ -36179,18 +31875,6 @@ fn ts_number_nan(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_nan_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_POSITIVE_INFINITY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36209,7 +31893,7 @@ const TS_NUMBER_POSITIVE_INFINITY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_positive_infinity,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_positive_infinity_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.POSITIVE_INFINITY`.
@@ -36217,18 +31901,6 @@ fn ts_number_positive_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_positive_infinity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_NEGATIVE_INFINITY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36247,7 +31919,7 @@ const TS_NUMBER_NEGATIVE_INFINITY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_negative_infinity,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_negative_infinity_template), metered: None, depth: 1, callees: &[], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.number.NEGATIVE_INFINITY`.
@@ -36255,18 +31927,6 @@ fn ts_number_negative_infinity(ctx: &mut dyn p::PlanContext, _entry: u32) -> Res
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_number_negative_infinity_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120))))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_GLOBAL_ISFINITE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -36304,7 +31964,7 @@ const TS_NUMBER_GLOBAL_ISFINITE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isfinite,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isfinite_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.global_isFinite`.
@@ -36344,27 +32004,6 @@ fn ts_number_global_isfinite(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_number_global_isfinite_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_NUMBER_GLOBAL_ISNAN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.number.global_isNaN",
@@ -36401,7 +32040,7 @@ const TS_NUMBER_GLOBAL_ISNAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isnan,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isnan_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.number.global_isNaN`.
@@ -36440,27 +32079,6 @@ fn ts_number_global_isnan(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_number_global_isnan_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[v2]) { Some(value) => value, None => heap.call(2, &[v2])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_NUMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -37018,7 +32636,7 @@ const TS_BIGINT_COERCE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bigint_coerce,
-    template: Some(p::HelperTemplate { entry: Some(ts_bigint_coerce_template), metered: None, depth: 3, callees: &[p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("1897fe9f50b0951cff1a1a1bd6020492016e4b9bc5f7a53a0cba0f7505ffab65"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.bigint.coerce`.
@@ -37152,35 +32770,6 @@ fn ts_bigint_coerce(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_bigint_coerce_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Bool(_), Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(true)) { return None; }
-                Some(Value::Int(1))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                if !matches!(args[0], Value::Bool(false)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_), Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                if !matches!(args[1], Value::Bool(true)) { return None; }
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                let v1 = (natives[1].entry)(&[args[0]])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_BIGINT_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.bigint.convert",
@@ -37217,7 +32806,7 @@ const TS_BIGINT_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bigint_convert,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_bigint_convert_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("0fa206cfb0c573d826a738b95b73b6d833412c6b13fba4699701cff77212cb82"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("0fa206cfb0c573d826a738b95b73b6d833412c6b13fba4699701cff77212cb82"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.bigint.convert`.
@@ -37258,26 +32847,6 @@ fn ts_bigint_convert(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_bigint_convert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                let v2 = heap.call(1, &[v1, Value::Bool(true)])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("ts.bigint") }?), v2])?; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_BIGINT_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.bigint.valueOf",
@@ -37305,7 +32874,7 @@ const TS_BIGINT_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_bigint_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_bigint_valueof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.bigint.valueOf`.
@@ -37331,24 +32900,6 @@ fn ts_bigint_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(3, 2)?;
     ctx.call(2, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_bigint_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("bigint") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("bigint") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BIGINT_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -37549,7 +33100,7 @@ const TS_BIGINT_BITS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bigint_bits,
-    template: Some(p::HelperTemplate { entry: Some(ts_bigint_bits_template), metered: None, depth: 4, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_bigint_bits_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.bigint.bits`.
@@ -37610,53 +33161,6 @@ fn ts_bigint_bits(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_bigint_bits_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_bigint_bits_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))]) { Some(value) => value, None => heap.call(1, &[v0, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9221120237041090560)))])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0]) { Some(value) => value, None => heap.call(2, &[v0])? }; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[2].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v2]) { Some(value) => value, None => heap.call(3, &[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = match (natives[2].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653695)))]) { Some(value) => value, None => heap.call(3, &[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653695)))])? }; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                let v5 = match (natives[3].entry)(&[v2]) { Some(value) => value, None => heap.call(4, &[v2])? }; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BIGINT_WRAP_PLAN: p::HelperPlan = p::HelperPlan {
@@ -37854,7 +33358,7 @@ const TS_BIGINT_ASINTN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bigint_asintn,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_bigint_asintn_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1c113b114cad559994bf5f81e51724df284ce04f8604e01a21649fe5d5c49333"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1c113b114cad559994bf5f81e51724df284ce04f8604e01a21649fe5d5c49333"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.bigint.asIntN`.
@@ -37881,23 +33385,6 @@ fn ts_bigint_asintn(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_bigint_asintn_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Bool(true)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("ts.bigint") }?), v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BIGINT_ASUINTN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -37931,7 +33418,7 @@ const TS_BIGINT_ASUINTN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bigint_asuintn,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_bigint_asuintn_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1c113b114cad559994bf5f81e51724df284ce04f8604e01a21649fe5d5c49333"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1c113b114cad559994bf5f81e51724df284ce04f8604e01a21649fe5d5c49333"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.bigint.asUintN`.
@@ -37958,23 +33445,6 @@ fn ts_bigint_asuintn(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_bigint_asuintn_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("ts.bigint") }?), v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_BIGINT_INPUT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -38554,7 +34024,7 @@ const TS_DATE_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_construct,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_date_construct_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("fe61855d36ba53bfeb8209f3ac602c9ded624acc49904cc403b051487c8c8666"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("43246e8feae4a7b2fccae525eeeca0da65abd799c54c6854ffe86bedac19a22c"), p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("fe61855d36ba53bfeb8209f3ac602c9ded624acc49904cc403b051487c8c8666"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.construct`.
@@ -38698,31 +34168,6 @@ fn ts_date_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_date_construct_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = heap.len(p::Collection::List, args[1])?; let _ = v2;
-                let v3 = (natives[0].entry)(&[v2, Value::Int(1)])?; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[1], Value::Int(0))?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[1].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[2].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("timestamp") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("timestamp") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_DATE_IS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.is",
@@ -38749,7 +34194,7 @@ const TS_DATE_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_date_is_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_date_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.is`.
@@ -38784,43 +34229,6 @@ fn ts_date_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.literal(5, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_date_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_date_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("date.ecma") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("invalid_date") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(0, &[v0, v1])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_DATE_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.date.require",
@@ -38845,7 +34253,7 @@ const TS_DATE_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_require,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_require_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("940448ec29e4630175ca91828b11a09fc36434796e2abcdb44973cf40abe2235"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("940448ec29e4630175ca91828b11a09fc36434796e2abcdb44973cf40abe2235"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.require`.
@@ -38868,22 +34276,6 @@ fn ts_date_require(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.literal(2, 2)?;
     ctx.call(1, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_date_require_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_CALL_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39091,7 +34483,7 @@ const TS_DATE_UTC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_utc,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_utc_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fe61855d36ba53bfeb8209f3ac602c9ded624acc49904cc403b051487c8c8666"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fe61855d36ba53bfeb8209f3ac602c9ded624acc49904cc403b051487c8c8666"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.UTC`.
@@ -39115,22 +34507,6 @@ fn ts_date_utc(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_date_utc_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_PARTS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39475,7 +34851,7 @@ const TS_DATE_GETUTCFULLYEAR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcfullyear,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcfullyear_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCFullYear`.
@@ -39491,23 +34867,6 @@ fn ts_date_getutcfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcfullyear_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCMONTH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39531,7 +34890,7 @@ const TS_DATE_GETUTCMONTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmonth,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmonth_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCMonth`.
@@ -39547,23 +34906,6 @@ fn ts_date_getutcmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcmonth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(1))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCDATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39587,7 +34929,7 @@ const TS_DATE_GETUTCDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcdate,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcdate_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCDate`.
@@ -39603,23 +34945,6 @@ fn ts_date_getutcdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcdate_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(2))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCDAY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39643,7 +34968,7 @@ const TS_DATE_GETUTCDAY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcday,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcday_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCDay`.
@@ -39659,23 +34984,6 @@ fn ts_date_getutcday(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcday_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(3))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCHOURS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39699,7 +35007,7 @@ const TS_DATE_GETUTCHOURS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutchours,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutchours_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCHours`.
@@ -39715,23 +35023,6 @@ fn ts_date_getutchours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutchours_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(4))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39755,7 +35046,7 @@ const TS_DATE_GETUTCMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcminutes,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcminutes_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCMinutes`.
@@ -39771,23 +35062,6 @@ fn ts_date_getutcminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcminutes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(5))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39811,7 +35085,7 @@ const TS_DATE_GETUTCSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcseconds,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcseconds_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCSeconds`.
@@ -39827,23 +35101,6 @@ fn ts_date_getutcseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(6))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETUTCMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -39867,7 +35124,7 @@ const TS_DATE_GETUTCMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmilliseconds,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmilliseconds_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d8b6768ed20b1d39739bc732083639f86ba34f2307c8c6ac34832a35de51eb5d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getUTCMilliseconds`.
@@ -39883,23 +35140,6 @@ fn ts_date_getutcmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.literal(0, 1)?;
     ctx.index(0)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getutcmilliseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(7))?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_TOISOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40209,7 +35449,7 @@ const TS_DATE_GETFULLYEAR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getfullyear,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getfullyear_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("533328c98a360976ad4d82e8c483745cc82ced51ade24ae3b507388553e6c734"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("533328c98a360976ad4d82e8c483745cc82ced51ade24ae3b507388553e6c734"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getFullYear`.
@@ -40221,21 +35461,6 @@ fn ts_date_getfullyear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getfullyear_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETMONTH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40256,7 +35481,7 @@ const TS_DATE_GETMONTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getmonth,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getmonth_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2813586dc920d409cf87d579fcd63ed92d1152c1c97f092c144f1e098299f2ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2813586dc920d409cf87d579fcd63ed92d1152c1c97f092c144f1e098299f2ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getMonth`.
@@ -40268,21 +35493,6 @@ fn ts_date_getmonth(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getmonth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETDATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40303,7 +35513,7 @@ const TS_DATE_GETDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getdate,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getdate_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fc715cf347e5ac376488049a84d7c62f0b2efd55275a3851138386c68cd8367c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fc715cf347e5ac376488049a84d7c62f0b2efd55275a3851138386c68cd8367c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getDate`.
@@ -40315,21 +35525,6 @@ fn ts_date_getdate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getdate_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETDAY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40350,7 +35545,7 @@ const TS_DATE_GETDAY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getday,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getday_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("19f49dfa5be628398988e667141aba983b9413d5ba01752b5b4ec9187bf4251c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("19f49dfa5be628398988e667141aba983b9413d5ba01752b5b4ec9187bf4251c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getDay`.
@@ -40362,21 +35557,6 @@ fn ts_date_getday(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getday_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETHOURS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40397,7 +35577,7 @@ const TS_DATE_GETHOURS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_gethours,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_gethours_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ba565c282a22ca05bb8f59745494fc2be3f897a91579cec25e1a50b91100bbb2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ba565c282a22ca05bb8f59745494fc2be3f897a91579cec25e1a50b91100bbb2"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getHours`.
@@ -40409,21 +35589,6 @@ fn ts_date_gethours(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_gethours_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40444,7 +35609,7 @@ const TS_DATE_GETMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getminutes,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getminutes_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4d3e1007c127e3ab3c670ed8981107782c32236d054c8910953fc3f2dd8746e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4d3e1007c127e3ab3c670ed8981107782c32236d054c8910953fc3f2dd8746e3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getMinutes`.
@@ -40456,21 +35621,6 @@ fn ts_date_getminutes(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getminutes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40491,7 +35641,7 @@ const TS_DATE_GETSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getseconds,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getseconds_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8e0390b83fcd309627b59285d7f78debd0c4ec72b1c9e0610748e531db47082b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8e0390b83fcd309627b59285d7f78debd0c4ec72b1c9e0610748e531db47082b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getSeconds`.
@@ -40503,21 +35653,6 @@ fn ts_date_getseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_GETMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -40538,7 +35673,7 @@ const TS_DATE_GETMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getmilliseconds,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getmilliseconds_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8adc280217cebb13e2a1217b8819f9901a128c0baaa6e2b01b6090ec8bbccf7c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("8adc280217cebb13e2a1217b8819f9901a128c0baaa6e2b01b6090ec8bbccf7c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.date.getMilliseconds`.
@@ -40550,21 +35685,6 @@ fn ts_date_getmilliseconds(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.local(1, 1)?;
     ctx.call(0, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_date_getmilliseconds_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_DATE_SETTIME_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42029,7 +37149,7 @@ const TS_ERROR_NEW_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_error,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_error_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_Error`.
@@ -42056,22 +37176,6 @@ fn ts_error_new_error(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_new_error_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("Error") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_IS_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.is_Error",
@@ -42095,7 +37199,7 @@ const TS_ERROR_IS_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_error_is_error,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_error_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_error_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_Error`.
@@ -42115,32 +37219,6 @@ fn ts_error_is_error(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_error_is_error_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_error_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_NEW_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42174,7 +37252,7 @@ const TS_ERROR_NEW_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_typeerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_typeerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_TypeError`.
@@ -42200,22 +37278,6 @@ fn ts_error_new_typeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_typeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("TypeError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42255,7 +37317,7 @@ const TS_ERROR_IS_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_typeerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_typeerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_typeerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_TypeError`.
@@ -42318,32 +37380,6 @@ fn ts_error_is_typeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_typeerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_typeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_RangeError",
@@ -42376,7 +37412,7 @@ const TS_ERROR_NEW_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_rangeerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_rangeerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_RangeError`.
@@ -42402,22 +37438,6 @@ fn ts_error_new_rangeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_rangeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("RangeError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42457,7 +37477,7 @@ const TS_ERROR_IS_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_rangeerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_rangeerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_rangeerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_RangeError`.
@@ -42520,32 +37540,6 @@ fn ts_error_is_rangeerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_rangeerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_rangeerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_SyntaxError",
@@ -42578,7 +37572,7 @@ const TS_ERROR_NEW_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_syntaxerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_syntaxerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_SyntaxError`.
@@ -42604,22 +37598,6 @@ fn ts_error_new_syntaxerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_syntaxerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("SyntaxError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42659,7 +37637,7 @@ const TS_ERROR_IS_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_syntaxerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_syntaxerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_syntaxerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_SyntaxError`.
@@ -42722,32 +37700,6 @@ fn ts_error_is_syntaxerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_syntaxerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_syntaxerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_ReferenceError",
@@ -42780,7 +37732,7 @@ const TS_ERROR_NEW_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_referenceerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_referenceerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_ReferenceError`.
@@ -42806,22 +37758,6 @@ fn ts_error_new_referenceerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_referenceerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("ReferenceError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -42861,7 +37797,7 @@ const TS_ERROR_IS_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_referenceerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_referenceerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_referenceerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_ReferenceError`.
@@ -42924,32 +37860,6 @@ fn ts_error_is_referenceerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_referenceerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_referenceerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_URIError",
@@ -42982,7 +37892,7 @@ const TS_ERROR_NEW_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_urierror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_urierror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_URIError`.
@@ -43008,22 +37918,6 @@ fn ts_error_new_urierror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_urierror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("URIError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -43063,7 +37957,7 @@ const TS_ERROR_IS_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_urierror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_urierror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_urierror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_URIError`.
@@ -43126,32 +38020,6 @@ fn ts_error_is_urierror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_urierror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_urierror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_EvalError",
@@ -43184,7 +38052,7 @@ const TS_ERROR_NEW_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_evalerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_evalerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_EvalError`.
@@ -43210,22 +38078,6 @@ fn ts_error_new_evalerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_evalerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("EvalError") }?), args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -43265,7 +38117,7 @@ const TS_ERROR_IS_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_evalerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_evalerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_evalerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_EvalError`.
@@ -43328,32 +38180,6 @@ fn ts_error_is_evalerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_error_is_evalerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_evalerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ERROR_NEW_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.error.new_AggregateError",
@@ -43386,7 +38212,7 @@ const TS_ERROR_NEW_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_aggregateerror,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_aggregateerror_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e5f34ad01929aadc6890da5c3a84a1d0039a4b5c8ae91a2f852a8022d5d52b3f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.new_AggregateError`.
@@ -43412,22 +38238,6 @@ fn ts_error_new_aggregateerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_new_aggregateerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("AggregateError") }?), args[1], Value::Bool(true)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_IS_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -43467,7 +38277,7 @@ const TS_ERROR_IS_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_aggregateerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_aggregateerror_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_aggregateerror_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.error.is_AggregateError`.
@@ -43529,32 +38339,6 @@ fn ts_error_is_aggregateerror(ctx: &mut dyn p::PlanContext, entry: u32) -> Resul
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_error_is_aggregateerror_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_error_is_aggregateerror_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ERROR_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -43840,7 +38624,7 @@ const TS_URL_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_url_is_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_url_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url.is`.
@@ -43864,43 +38648,6 @@ fn ts_url_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     ctx.begin()?;
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_url_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_url_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("url.whatwg") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("url") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(0, &[v0, v1])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_CANPARSE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44093,7 +38840,7 @@ const TS_URL_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tostring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tostring_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url.toString`.
@@ -44105,22 +38852,6 @@ fn ts_url_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
     ctx.field(0, 0)?;
     ctx.field(0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_url_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "state")?; let _ = v0;
-                let v1 = heap.field(v0, "href")?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_TOJSON_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44139,7 +38870,7 @@ const TS_URL_TOJSON_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tojson,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tojson_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url.toJSON`.
@@ -44151,22 +38882,6 @@ fn ts_url_tojson(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.field(0, 0)?;
     ctx.field(0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_url_tojson_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "state")?; let _ = v0;
-                let v1 = heap.field(v0, "href")?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44185,7 +38900,7 @@ const TS_URL_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_valueof_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url.valueOf`.
@@ -44195,20 +38910,6 @@ fn ts_url_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_url_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_SEARCH_PARAMS_REFRESH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44240,7 +38941,7 @@ const TS_URL_SEARCH_PARAMS_REFRESH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_refresh,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_refresh_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url_search_params.refresh`.
@@ -44296,24 +38997,6 @@ fn ts_url_search_params_refresh(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     ctx.begin()?;
     ctx.literal(2, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_url_search_params_refresh_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "owner")?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                let v2 = match (natives[1].entry)(&[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(0, &[v1, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_SEARCH_PARAMS_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44702,7 +39385,7 @@ const TS_URL_SEARCH_PARAMS_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_url_search_params_is_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url_search_params.is`.
@@ -44727,32 +39410,6 @@ fn ts_url_search_params_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_url_search_params_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_url_search_params_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_URL_SEARCH_PARAMS_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.url_search_params.size",
@@ -44772,7 +39429,7 @@ const TS_URL_SEARCH_PARAMS_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_size,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_size_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url_search_params.size`.
@@ -44784,23 +39441,6 @@ fn ts_url_search_params_size(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resul
     ctx.call(0, 0, 1)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_url_search_params_size_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "pairs")?; let _ = v0;
-                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_SEARCH_PARAMS_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -44851,7 +39491,7 @@ const TS_URL_SEARCH_PARAMS_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_valueof_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.url_search_params.valueOf`.
@@ -44861,20 +39501,6 @@ fn ts_url_search_params_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Re
     ctx.begin()?;
     ctx.local(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_url_search_params_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URL_SEARCH_PARAMS_GET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -46960,7 +41586,7 @@ const TS_JSON_PLAIN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_json_plain,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_json_plain_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c150c8d151f1f2833b809a12cf6b3b0a2ce3730753e55448637340a26c302171"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c150c8d151f1f2833b809a12cf6b3b0a2ce3730753e55448637340a26c302171"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.json.plain`.
@@ -47001,45 +41627,6 @@ fn ts_json_plain(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.literal(7, 1)?;
     ctx.call(2, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_json_plain_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Statement);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Construction(2));
-                let v0 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("toJSON") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?)])?; let _ = v0;
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                let v1 = heap.call(0, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)])?; let _ = v1;
-                heap.bill(const { p::function("c150c8d151f1f2833b809a12cf6b3b0a2ce3730753e55448637340a26c302171") }, &[args[0], Value::Int(8), v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("0") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new(":") }?), Value::Bool(false)], v1);
-                heap.bind(v1, None)?;
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Statement);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                let v2 = (natives[0].entry)(&[v1, Value::Int(2)])?; let _ = v2;
-                heap.bill(const { p::function("753c2ed6c170edf64365eea341d06ad166f624491fedac73c7f1425a3232442a") }, &[v1, Value::Int(2)], v2);
-                heap.form(const { p::function("409e4a71427f17db20700d903b3a2163ff866afc81e2ee0181149e84a0fd3d70") }, p::FormCharge::Expression);
-                let v3 = match (natives[1].entry)(&[v2, Value::Int(1)]) { Some(value) => value, None => heap.call(1, &[v2, Value::Int(1)])? }; let _ = v3;
-                heap.bill(const { p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d") }, &[v2, Value::Int(1)], v3);
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_JSON_STRINGIFY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -47668,7 +42255,7 @@ const TS_ARRAY_MATCH_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_match_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_array_match_length_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.match_length`.
@@ -47680,23 +42267,6 @@ fn ts_array_match_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.call(0, 0, 1)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_array_match_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "items")?; let _ = v0;
-                let v1 = heap.len(p::Collection::List, v0)?; let _ = v1;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_SET_PLAN: p::HelperPlan = p::HelperPlan {
@@ -47735,7 +42305,7 @@ const TS_ARRAY_SET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_set,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_set_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.array.set`.
@@ -47796,18 +42366,6 @@ fn ts_array_set(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_set_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[2])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.remove",
@@ -47845,7 +42403,7 @@ const TS_ARRAY_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_remove,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_remove_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.array.remove`.
@@ -47904,18 +42462,6 @@ fn ts_array_remove(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_remove_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.argument",
@@ -47938,7 +42484,7 @@ const TS_ARRAY_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_argument,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: ts_array_argument_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.argument`.
@@ -47960,32 +42506,6 @@ fn ts_array_argument(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.begin()?;
     ctx.literal(0, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_array_argument_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[args[1], v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -48021,7 +42541,7 @@ const TS_ARRAY_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_integer_template), metered: None, depth: 4, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ], heap: Some(p::HeapTemplate { entry: ts_array_integer_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.array.integer`.
@@ -48066,151 +42586,6 @@ fn ts_array_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0]])?; let _ = v0;
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(true)) { return None; }
-                    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(false)) { return None; }
-                    if let Some(value) = (|| {
-                        let v1 = (natives[1].entry)(&[args[0], Value::Int(0)])?; let _ = v1;
-                        if let Some(value) = (|| {
-                            if !matches!(v1, Value::Bool(true)) { return None; }
-                            Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-                        })() { return Some(value); }
-                        if let Some(value) = (|| {
-                            if !matches!(v1, Value::Bool(false)) { return None; }
-                            let v2 = (natives[2].entry)(&[args[0]])?; let _ = v2;
-                            Some(v2)
-                        })() { return Some(value); }
-                        None
-                    })() { return Some(value); }
-                    None
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            if let Some(value) = (|| {
-                let v0 = (|| {
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(true)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408))))
-})() { return Some(value); }
-if let Some(value) = (|| {
-    if !matches!(args[0], Value::Bool(false)) { return None; }
-    Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-})() { return Some(value); }
-None
-})()?;
-let _ = v0;
-
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = (natives[1].entry)(&[v0, Value::Int(0)])?; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = (natives[2].entry)(&[v0])?; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_array_integer_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(3, &[v0])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -48263,7 +42638,7 @@ const TS_ARRAY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.length`.
@@ -48326,22 +42701,6 @@ fn ts_array_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_LENGTH_PROPERTY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.length_property",
@@ -48361,7 +42720,7 @@ const TS_ARRAY_LENGTH_PROPERTY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_length_property,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_property_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.length_property`.
@@ -48372,22 +42731,6 @@ fn ts_array_length_property(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.call(0, 0, 1)?;
     ctx.call(1, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_array_length_property_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_IS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -48416,7 +42759,7 @@ const TS_ARRAY_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_is_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_array_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.is`.
@@ -48462,40 +42805,6 @@ fn ts_array_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     ctx.literal(6, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_array_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_array_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_IS_ARRAY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -48591,7 +42900,7 @@ const TS_ARRAY_CALLBACK_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_callback,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_array_callback_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("36e87764a41f11156cf878871d97539c457a8adb4405dd001d307b7dcd1a4a5c"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.callback`.
@@ -48647,26 +42956,6 @@ fn ts_array_callback(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(7, 2)?;
     ctx.call(4, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_array_callback_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_REUSABLE_CALLBACK_PLAN: p::HelperPlan = p::HelperPlan {
@@ -48876,7 +43165,7 @@ const TS_ARRAY_BOUND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_bound,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_bound_template), metered: None, depth: 5, callees: &[p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: ts_array_bound_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.array.bound`.
@@ -48930,101 +43219,6 @@ fn ts_array_bound(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_bound_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Absent, Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(args[2])
-            })() { return Some(value); }
-            None
-        },
-        [Value::Null, Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[Value::Float(lash_kernel_doc::Float::new(f64::from_bits(0))), args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_) | Value::Text(_), Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_array_bound_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[2])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(0, &[args[0]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = match (natives[5].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v1, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                let v3 = match (natives[6].entry)(&[args[1], v1]) { Some(value) => value, None => heap.call(2, &[args[1], v1])? }; let _ = v3;
-                let v4 = match (natives[7].entry)(&[v3, Value::Int(0)]) { Some(value) => value, None => heap.call(3, &[v3, Value::Int(0)])? }; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[1].entry)(&[args[0], Value::Absent])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(0, &[args[0]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = match (natives[5].entry)(&[v1, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v1, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v5 = match (natives[0].entry)(&[v1, args[1]]) { Some(value) => value, None => heap.call(4, &[v1, args[1]])? }; let _ = v5;
-                Some(v5)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Null, Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[5].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Int(0)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = match (natives[6].entry)(&[args[1], v0]) { Some(value) => value, None => heap.call(2, &[args[1], v0])? }; let _ = v2;
-                let v3 = match (natives[7].entry)(&[v2, Value::Int(0)]) { Some(value) => value, None => heap.call(3, &[v2, Value::Int(0)])? }; let _ = v3;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[5].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Int(0)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v4 = match (natives[0].entry)(&[v0, args[1]]) { Some(value) => value, None => heap.call(4, &[v0, args[1]])? }; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_DENSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.dense",
@@ -49076,7 +43270,7 @@ const TS_ARRAY_DENSE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_dense,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_dense_bulk, depth: 6, writes: false, copy: Some(&TS_ARRAY_DENSE_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: Some(ts_array_dense_bulk), depth: 6, writes: false, copy: Some(&TS_ARRAY_DENSE_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.dense`.
@@ -49203,7 +43397,7 @@ const TS_ARRAY_SPREAD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_spread,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_spread_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2864283042f3b68a8de1b7f1e2e19d6f52618b9defb619c4a1df8610489cb17d"), p::function("5bde732a8e30a52ddef4b4cdfee5513ae6a3ecf2de14a4a6c1079d23ca11ca40"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("2864283042f3b68a8de1b7f1e2e19d6f52618b9defb619c4a1df8610489cb17d"), p::function("5bde732a8e30a52ddef4b4cdfee5513ae6a3ecf2de14a4a6c1079d23ca11ca40"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.spread`.
@@ -49232,24 +43426,6 @@ fn ts_array_spread(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_spread_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -49294,7 +43470,7 @@ const TS_ARRAY_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_construct,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_array_construct_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.construct`.
@@ -49392,42 +43568,6 @@ fn ts_array_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_construct_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(1)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[1], Value::Int(0))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = (natives[1].entry)(&[v2])?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = match (natives[0].entry)(&[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)]) { Some(value) => value, None => heap.call(0, &[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)])? }; let _ = v4;
-                let v5 = match (natives[0].entry)(&[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?)]) { Some(value) => value, None => heap.call(0, &[v3, Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?)])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v6 = heap.call(1, &[args[1]])?; let _ = v6;
-                Some(v6)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(1)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v7 = heap.call(1, &[args[1]])?; let _ = v7;
-                Some(v7)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_OF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.of",
@@ -49447,7 +43587,7 @@ const TS_ARRAY_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_of,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_of_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.of`.
@@ -49458,21 +43598,6 @@ fn ts_array_of(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(1, 0)?;
     ctx.call(0, 0, 1)?;
     Ok(ctx.take(0))
-}
-fn ts_array_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -50289,7 +44414,7 @@ const TS_ARRAY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_slice,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_array_slice_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fc9a9b82ee5cfc4af44291c38f051de07f69e7b5b42ef67edd9c1c84c26d2b52"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7e4093890155165cb9b59b889c5818b9ff79346da20208dd6d11db10f09833f3"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("fc9a9b82ee5cfc4af44291c38f051de07f69e7b5b42ef67edd9c1c84c26d2b52"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7e4093890155165cb9b59b889c5818b9ff79346da20208dd6d11db10f09833f3"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.slice`.
@@ -50512,22 +44637,6 @@ fn ts_array_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.concat",
@@ -50593,7 +44702,7 @@ const TS_ARRAY_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_concat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_concat_bulk, depth: 6, writes: false, copy: Some(&TS_ARRAY_CONCAT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: Some(ts_array_concat_bulk), depth: 6, writes: false, copy: Some(&TS_ARRAY_CONCAT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.concat`.
@@ -51272,7 +45381,7 @@ const TS_ARRAY_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_primitive_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_array_primitive_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.primitive`.
@@ -51324,67 +45433,6 @@ fn ts_array_primitive(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
 }
-fn ts_array_primitive_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Absent])?; let _ = v0;
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(true)) { return None; }
-                    Some(Value::Bool(true))
-                })() { return Some(value); }
-                if let Some(value) = (|| {
-                    if !matches!(v0, Value::Bool(false)) { return None; }
-                    let v1 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v1;
-                    Some(v1)
-                })() { return Some(value); }
-                None
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_array_primitive_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Absent]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Absent])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_SEARCHABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.searchable",
@@ -51424,7 +45472,7 @@ const TS_ARRAY_SEARCHABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_searchable,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_array_searchable_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("afbaf276220be6317776874c8f0ee45f285203f1760202e24115685f52aaa484"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("afbaf276220be6317776874c8f0ee45f285203f1760202e24115685f52aaa484"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.searchable`.
@@ -51530,20 +45578,6 @@ fn ts_array_searchable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.begin()?;
     ctx.literal(6, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_array_searchable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_SEARCH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -51842,7 +45876,7 @@ const TS_ARRAY_GENERIC_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_indexof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_indexof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.generic_indexOf`.
@@ -52045,24 +46079,6 @@ fn ts_array_generic_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_generic_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Int(0)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.indexOf",
@@ -52238,7 +46254,7 @@ const TS_ARRAY_GENERIC_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_lastindexof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.generic_lastIndexOf`.
@@ -52410,24 +46426,6 @@ fn ts_array_generic_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Res
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_generic_lastindexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Int(0)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216))))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -52608,7 +46606,7 @@ const TS_ARRAY_GENERIC_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_includes,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_includes_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("a4a62f8183e64d722ceded57e653d4b76a57d594333a97ba981f604d96682396"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.generic_includes`.
@@ -52795,24 +46793,6 @@ fn ts_array_generic_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_generic_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Int(0)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.includes",
@@ -52960,7 +46940,7 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_map,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_map_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("408d35f25c99656924aed029fdd55bcddc02c1d8fafc293ed919a8cd7fc1f3f9"), p::function("d39efe9e88675e1fb74769aa85966b2efcd057c0719b66c9005b09b587a1f917"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("408d35f25c99656924aed029fdd55bcddc02c1d8fafc293ed919a8cd7fc1f3f9"), p::function("d39efe9e88675e1fb74769aa85966b2efcd057c0719b66c9005b09b587a1f917"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.map`.
@@ -53015,30 +46995,6 @@ fn ts_array_map(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_array_map_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[1], Value::Int(0)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(2, &[v1, args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(3, &[args[0], v0, v3, v2])?; let _ = v4;
-                heap.bind(v4, None)?;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.filter",
@@ -53086,7 +47042,7 @@ const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_filter,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_filter_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("408d35f25c99656924aed029fdd55bcddc02c1d8fafc293ed919a8cd7fc1f3f9"), p::function("af399f8a7ea4177f1429dad78d938f3fa5f710059d83df4ac1013995be826d6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("869948065b5138ec386991c70a0d7e2b7e71234c23e8f0f758cdb28f89a90e7f"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("408d35f25c99656924aed029fdd55bcddc02c1d8fafc293ed919a8cd7fc1f3f9"), p::function("af399f8a7ea4177f1429dad78d938f3fa5f710059d83df4ac1013995be826d6b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.filter`.
@@ -53140,30 +47096,6 @@ fn ts_array_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_filter_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[1], Value::Int(0)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(2, &[v1, args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(3, &[args[0], v0, v3, v2])?; let _ = v4;
-                heap.bind(v4, None)?;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_GENERIC_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -53421,7 +47353,7 @@ const TS_ARRAY_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_join,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_array_join_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3ef20d89b7a0b8ada3ce767a7fa548549f65661e863783f55778df15d2700d1a"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("92483dfbb52fc7e3e73833de3ea8c8e721bdc2a35327172a09c458af57d686ed"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3ef20d89b7a0b8ada3ce767a7fa548549f65661e863783f55778df15d2700d1a"), p::function("c9888b5cce6719604eb7b368a24918b3964c70ac76bcebd29b267df4c9307864"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("92483dfbb52fc7e3e73833de3ea8c8e721bdc2a35327172a09c458af57d686ed"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.join`.
@@ -53510,22 +47442,6 @@ fn ts_array_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -56403,7 +50319,7 @@ const TS_ARRAY_ITERATOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_iterator,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_array_iterator_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("a7cd9970fcaeadc4014d53fc62938f254f5d3b20652295404aead4e39f57bab7"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("a7cd9970fcaeadc4014d53fc62938f254f5d3b20652295404aead4e39f57bab7"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.iterator`.
@@ -56499,24 +50415,6 @@ fn ts_array_iterator(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_array_iterator_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("typescript") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("iterator") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(2, &[v0, v1])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_FOR_OF_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -56816,7 +50714,7 @@ const TS_FOR_OF_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_for_of_item,
-    template: Some(p::HelperTemplate { entry: Some(ts_for_of_item_template), metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_for_of_item_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("06cab8bff3b0826a5106507a82d670f4407bf477764046bc5fbac0f1a08c5ce6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("06cab8bff3b0826a5106507a82d670f4407bf477764046bc5fbac0f1a08c5ce6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.for_of.item`.
@@ -56885,32 +50783,6 @@ fn ts_for_of_item(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.begin()?;
     ctx.local(1, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_for_of_item_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(args[1])
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_for_of_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] | [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Record(_), Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[1])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_ARRAY_FROM_PLAN: p::HelperPlan = p::HelperPlan {
@@ -57476,7 +51348,7 @@ const TS_PROMISE_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_promise_is_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_promise_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.promise.is`.
@@ -57500,43 +51372,6 @@ fn ts_promise_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
     ctx.begin()?;
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_promise_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_promise_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("typescript") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("promise") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(0, &[v0, v1])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_PROMISE_PENDING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -57843,7 +51678,7 @@ const TS_PROMISE_REJECT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_reject,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_promise_reject_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("20364f65bf3e0c2d781cc71d5b1afe66a55043a8ea3984ffd1ffac8d3e3c60df"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("20364f65bf3e0c2d781cc71d5b1afe66a55043a8ea3984ffd1ffac8d3e3c60df"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.promise.reject`.
@@ -57883,26 +51718,6 @@ fn ts_promise_reject(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_promise_reject_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4607182418800017408)))])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1, Value::Bool(true)])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_PROMISE_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.promise.callable",
@@ -57925,7 +51740,7 @@ const TS_PROMISE_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_callable,
-    template: Some(p::HelperTemplate { entry: Some(ts_promise_callable_template), metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_promise_callable_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.promise.callable`.
@@ -57940,35 +51755,6 @@ fn ts_promise_callable(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
     ctx.literal(0, 1)?;
     ctx.call(1, 0, 2)?;
     Ok(ctx.take(0))
-}
-fn ts_promise_callable_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_promise_callable_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("closure") }?)])? }; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_PROMISE_THEN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -59051,7 +52837,7 @@ const TS_ENTRY_RESULT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_entry_result,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_entry_result_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("0e7a2aed4403bac7c56d76692a78523cdaca5fc2faec503f1cb123485eb3bbd3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("d9a0bbf0a046c772bbe340a9bd60a645f7ad6cd344f942221212d077d474a13e"), p::function("0e7a2aed4403bac7c56d76692a78523cdaca5fc2faec503f1cb123485eb3bbd3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.entry_result`.
@@ -59080,24 +52866,6 @@ fn ts_entry_result(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_entry_result_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -59135,7 +52903,7 @@ const TS_STRING_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_integer_template), metered: None, depth: 4, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ], heap: Some(p::HeapTemplate { entry: ts_string_integer_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1dc17a77fe4b16ab922599348564f9a43b58e21030d71c265e3ef7be2635fda8"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.string.integer`.
@@ -59205,98 +52973,6 @@ fn ts_string_integer(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_integer_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_string_integer_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(3, &[v0])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = match (natives[3].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(4, &[v0, Value::Int(0)])? }; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                let v5 = match (natives[4].entry)(&[v0]) { Some(value) => value, None => heap.call(5, &[v0])? }; let _ = v5;
-                let v6 = match (natives[5].entry)(&[v5]) { Some(value) => value, None => heap.call(6, &[v5])? }; let _ = v6;
-                let v7 = match (natives[4].entry)(&[v6]) { Some(value) => value, None => heap.call(5, &[v6])? }; let _ = v7;
-                Some(v7)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(3, &[v0])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = match (natives[3].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(4, &[v0, Value::Int(0)])? }; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v8 = match (natives[5].entry)(&[v0]) { Some(value) => value, None => heap.call(6, &[v0])? }; let _ = v8;
-                Some(v8)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = match (natives[1].entry)(&[v0, Value::Int(0)]) { Some(value) => value, None => heap.call(2, &[v0, Value::Int(0)])? }; let _ = v2;
-                if !matches!(v2, Value::Bool(false)) { return None; }
-                let v3 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(3, &[v0])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(false)) { return None; }
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_CLAMP_PLAN: p::HelperPlan = p::HelperPlan {
@@ -59387,7 +53063,7 @@ const TS_STRING_RELATIVE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_relative,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_relative_template), metered: None, depth: 5, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: None, forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.string.relative`.
@@ -59432,35 +53108,6 @@ fn ts_string_relative(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_relative_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent, Value::Int(_)] => {
-            if let Some(value) = (|| {
-                let v1 = (|| {
-if let Some(value) = (|| {
-    let v0 = (natives[0].entry)(&[Value::Int(0), args[1]])?; let _ = v0;
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(true)) { return None; }
-        Some(Value::Int(0))
-    })() { return Some(value); }
-    if let Some(value) = (|| {
-        if !matches!(v0, Value::Bool(false)) { return None; }
-        Some(args[1])
-    })() { return Some(value); }
-    None
-})() { return Some(value); }
-None
-})()?;
-let _ = v1;
-
-                Some(v1)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_LENGTH_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.length_value",
@@ -59493,7 +53140,7 @@ const TS_STRING_LENGTH_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_length_value_template), metered: None, depth: 5, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_value_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a66e50a69cf95a09dee11f85ef22c49f0a9ab6044471ad22a8dbb8626de36cef"), p::function("13c70189c2bee7e273d7b59bb3f8a67b4e037d19cf3e5cf2a81d0dc7c9f284a6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a66e50a69cf95a09dee11f85ef22c49f0a9ab6044471ad22a8dbb8626de36cef"), p::function("13c70189c2bee7e273d7b59bb3f8a67b4e037d19cf3e5cf2a81d0dc7c9f284a6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.length_value`.
@@ -59523,36 +53170,6 @@ fn ts_string_length_value(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Va
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_length_value_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_string_length_value_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0, Value::Int(9007199254740991)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_UINT32_PLAN: p::HelperPlan = p::HelperPlan {
@@ -59589,7 +53206,7 @@ const TS_STRING_UINT32_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_uint32,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_uint32_template), metered: None, depth: 5, callees: &[p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("7be86e9baeafe30175179cf1dab9184609ab1eca715a98247860cd9ac7e83534"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("89dc289314ba1e06d1e8e97a6d404d7f4beb95b29d8db388cd2eec14c3dc35d3"), ], heap: Some(p::HeapTemplate { entry: ts_string_uint32_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a66e50a69cf95a09dee11f85ef22c49f0a9ab6044471ad22a8dbb8626de36cef"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: None,
 };
 
 /// `ts.string.uint32`.
@@ -59627,49 +53244,6 @@ fn ts_string_uint32(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_uint32_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_string_uint32_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = match (natives[6].entry)(&[v0]) { Some(value) => value, None => heap.call(2, &[v0])? }; let _ = v2;
-                let v3 = (natives[7].entry)(&[v2])?; let _ = v3;
-                let v4 = (natives[8].entry)(&[v3, Value::Int(4294967296)])?; let _ = v4;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[2].entry)(&[v0]) { Some(value) => value, None => heap.call(1, &[v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                Some(Value::Int(0))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -59758,7 +53332,7 @@ const TS_STRING_SLICE_UNITS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_slice_units,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_slice_units_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("edd082afe9d9be04a15e6f2d7e5d60090c68d5817cfa95337f8961dc0ecd697b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("edd082afe9d9be04a15e6f2d7e5d60090c68d5817cfa95337f8961dc0ecd697b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.slice_units`.
@@ -59833,21 +53407,6 @@ fn ts_string_slice_units(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_slice_units_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::Int(_), Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], args[2]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_CREATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.create",
@@ -59883,7 +53442,7 @@ const TS_STRING_CREATE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_create,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: ts_string_create_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.create`.
@@ -59927,36 +53486,6 @@ fn ts_string_create(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_create_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("") }?))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[1])?; let _ = v0;
-                let v1 = (natives[0].entry)(&[v0, Value::Int(0)])?; let _ = v1;
-                if !matches!(v1, Value::Bool(false)) { return None; }
-                let v2 = heap.index(args[1], Value::Int(0))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(0, &[v2])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.length",
@@ -59987,7 +53516,7 @@ const TS_STRING_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.length`.
@@ -60012,24 +53541,6 @@ fn ts_string_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                let v2 = (natives[0].entry)(&[v1])?; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -60063,7 +53574,7 @@ const TS_STRING_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_tostring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tostring_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.toString`.
@@ -60113,20 +53624,6 @@ fn ts_string_tostring(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value
     ctx.call(2, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
 }
-fn ts_string_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.valueOf",
@@ -60159,7 +53656,7 @@ const TS_STRING_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_valueof_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.valueOf`.
@@ -60208,20 +53705,6 @@ fn ts_string_valueof(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(9, 2)?;
     ctx.call(2, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_string_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_AT_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
@@ -60442,7 +53925,7 @@ const TS_STRING_AT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_at,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_string_at_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ec0ab5a878607279dea87dd9cd661a504196bc9f84eccb97fd092a6022a47bd9"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ec0ab5a878607279dea87dd9cd661a504196bc9f84eccb97fd092a6022a47bd9"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.at`.
@@ -60591,22 +54074,6 @@ fn ts_string_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_CHARAT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -61331,7 +54798,7 @@ const TS_STRING_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_slice,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_string_slice_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7e0dd218dc80c547b1fd262da26e1e5d55557c4de715ef4cddf9864144d5e43c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7e0dd218dc80c547b1fd262da26e1e5d55557c4de715ef4cddf9864144d5e43c"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.slice`.
@@ -61552,22 +55019,6 @@ fn ts_string_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_SUBSTRING_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
@@ -61820,7 +55271,7 @@ const TS_STRING_SUBSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_substring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_string_substring_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("52c92d3be96ed65f2d74c90ab7c7acc09859b845ca2fcf07a34a9f2f01480ad9"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("52c92d3be96ed65f2d74c90ab7c7acc09859b845ca2fcf07a34a9f2f01480ad9"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("9b0ae1ff1820df105f12f84651b4092a5e1e17ff4d7baddee3164fb39a4616f2"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.substring`.
@@ -62036,22 +55487,6 @@ fn ts_string_substring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_substring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_INDEXOF_GENERIC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.indexOf_generic",
@@ -62253,7 +55688,7 @@ const TS_STRING_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_indexof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: ts_string_indexof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("0063aacdddb20b75d8f709ff206c6d52043a7d532207dc4bf90a9c757eb38f9d"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("0063aacdddb20b75d8f709ff206c6d52043a7d532207dc4bf90a9c757eb38f9d"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.indexOf`.
@@ -62386,22 +55821,6 @@ fn ts_string_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
@@ -63289,7 +56708,7 @@ const TS_STRING_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_includes,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: ts_string_includes_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3927bd8f9e062d5cb8183c6602f803ada26e9fde15da2786bfb0a9374ab3c8e5"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3927bd8f9e062d5cb8183c6602f803ada26e9fde15da2786bfb0a9374ab3c8e5"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.includes`.
@@ -63424,22 +56843,6 @@ fn ts_string_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.startsWith",
@@ -63493,7 +56896,7 @@ const TS_STRING_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_startswith,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: ts_string_startswith_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("b336d096f83723adc4ddf5e426fc3f3990a536dc6f2bea3ff4bad5e357f906f4"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("b336d096f83723adc4ddf5e426fc3f3990a536dc6f2bea3ff4bad5e357f906f4"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.startsWith`.
@@ -63628,22 +57031,6 @@ fn ts_string_startswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.endsWith",
@@ -63701,7 +57088,7 @@ const TS_STRING_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_endswith,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: ts_string_endswith_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("aba4c56c584f21249e8679b5859aeb4b2aafd32455a4856926e0134be91eafd3"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("0730d06d4fc52641373392499fe529ca0fa15381db0508b4343d8ae746a9da6b"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("aba4c56c584f21249e8679b5859aeb4b2aafd32455a4856926e0134be91eafd3"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("8a7d1afd452e72752f529ae5fae635fc86af809a8c069bba8d01bfa41b25009c"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("8cd8aa5eea537b773e52d6d92933e926ede9a3ea22856f37b02caefe511b2c95"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("595a81fedd362ece3a79516b5311cbb74d18e9401f2f5dda39d71c44d645f3bf"), p::function("122d71a404a0af3c0d479f319cac9deea924aedb88a83d3848758c840a319504"), p::function("330875390696b0e91219a94b294c4ed19fc998156f9dbc26f7ae64a8a16fa78e"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.endsWith`.
@@ -63857,22 +57244,6 @@ fn ts_string_endswith(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -64193,7 +57564,7 @@ const TS_STRING_TOLOWERCASE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_tolowercase,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tolowercase_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("c6bfa1531c01c385d90f38d55d3af34193c184e4e4be27b762f8519aeceb7a52"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("c6bfa1531c01c385d90f38d55d3af34193c184e4e4be27b762f8519aeceb7a52"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.toLowerCase`.
@@ -64218,23 +57589,6 @@ fn ts_string_tolowercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_tolowercase_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_TOUPPERCASE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -64266,7 +57620,7 @@ const TS_STRING_TOUPPERCASE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_touppercase,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_touppercase_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("6014ad5348b9eb46ef9b4886fcca51d9b7573f87252cd69672cfe9852f5f2e44"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("6014ad5348b9eb46ef9b4886fcca51d9b7573f87252cd69672cfe9852f5f2e44"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.toUpperCase`.
@@ -64291,23 +57645,6 @@ fn ts_string_touppercase(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_touppercase_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_TRIM_PLAN: p::HelperPlan = p::HelperPlan {
@@ -64346,7 +57683,7 @@ const TS_STRING_TRIM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trim,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trim_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.trim`.
@@ -64397,34 +57734,6 @@ fn ts_string_trim(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_trim_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0, Value::Bool(true), Value::Bool(true)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], Value::Bool(true), Value::Bool(true)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_TRIMSTART_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trimStart",
@@ -64463,7 +57772,7 @@ const TS_STRING_TRIMSTART_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimstart,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimstart_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.trimStart`.
@@ -64514,34 +57823,6 @@ fn ts_string_trimstart(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_string_trimstart_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0, Value::Bool(true), Value::Bool(false)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], Value::Bool(true), Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_STRING_TRIMEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.string.trimEnd",
@@ -64580,7 +57861,7 @@ const TS_STRING_TRIMEND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimend,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimend_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("4da1f0424c6ce976056a7d9bb67325ac4154a3f1571e64d3e507a002f6a588aa"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.trimEnd`.
@@ -64630,34 +57911,6 @@ fn ts_string_trimend(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_trimend_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[v0, Value::Bool(false), Value::Bool(true)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[0], Value::Bool(false), Value::Bool(true)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_REPEAT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -64713,7 +57966,7 @@ const TS_STRING_REPEAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_repeat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_string_repeat_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a66e50a69cf95a09dee11f85ef22c49f0a9ab6044471ad22a8dbb8626de36cef"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("2149fa8b75e04a6fadce0ff523c499c582c66975b9f3a433f7372e4b4b682a49"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("be00b609f993bcd028938a21d32f18977b6b56ec5b18b988cc630b6ca638ffa9"), p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("a66e50a69cf95a09dee11f85ef22c49f0a9ab6044471ad22a8dbb8626de36cef"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("554c283e0c1484ebdf8b092d4718539ff0a99cc3b767ec9a3aff108fc0195317"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("2149fa8b75e04a6fadce0ff523c499c582c66975b9f3a433f7372e4b4b682a49"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.repeat`.
@@ -64789,35 +58042,6 @@ fn ts_string_repeat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_repeat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.call(1, &[args[1], Value::Int(1)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.index(v1, Value::Int(0))?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2])?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = match (natives[0].entry)(&[v3, Value::Int(0)]) { Some(value) => value, None => heap.call(3, &[v3, Value::Int(0)])? }; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = match (natives[1].entry)(&[v3]) { Some(value) => value, None => heap.call(4, &[v3])? }; let _ = v5;
-                if !matches!(v5, Value::Bool(true)) { return None; }
-                let v6 = match (natives[2].entry)(&[v3]) { Some(value) => value, None => heap.call(5, &[v3])? }; let _ = v6;
-                let v7 = (natives[3].entry)(&[v6])?; let _ = v7;
-                let v8 = heap.call(6, &[v0, v7])?; let _ = v8;
-                Some(v8)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_PADSTART_PLAN: p::HelperPlan = p::HelperPlan {
@@ -65945,7 +59169,7 @@ const TS_STRING_APPLY_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_apply_arguments,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_string_apply_arguments_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("e92af14e80cea1ff348f6d95167fc03c968a1bbb3714872196807c1d85786a3b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a9ad45f6e19f283a1dce3a9f269a73a9581880a9509fb766999ea41ff52da82e"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("e92af14e80cea1ff348f6d95167fc03c968a1bbb3714872196807c1d85786a3b"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.apply_arguments`.
@@ -66067,22 +59291,6 @@ fn ts_string_apply_arguments(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_apply_arguments_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_LOCALE_UNSUPPORTED_PLAN: p::HelperPlan = p::HelperPlan {
@@ -66319,7 +59527,7 @@ const TS_REGEXP_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_is_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_is_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.is`.
@@ -66343,43 +59551,6 @@ fn ts_regexp_is(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     ctx.literal(3, 0)?;
     Ok(ctx.take(0))
-}
-fn ts_regexp_is_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_regexp_is_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.field(args[0], "__lash_brand")?; let _ = v0;
-                let v1 = heap.tuple(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("regex.ecma") }?), Value::Text(const { lash_kernel_doc::arena::ShortText::new("reg_exp") }?)])?; let _ = v1;
-                let v2 = match (natives[0].entry)(&[v0, v1]) { Some(value) => value, None => heap.call(0, &[v0, v1])? }; let _ = v2;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_REGEXP_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -66405,7 +59576,7 @@ const TS_REGEXP_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_require,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_require_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ef0dbb249994409a76bf96ddcd3f71a9c67c8cdd827a24eec7450215674fe5dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ef0dbb249994409a76bf96ddcd3f71a9c67c8cdd827a24eec7450215674fe5dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.require`.
@@ -66428,22 +59599,6 @@ fn ts_regexp_require(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
     ctx.literal(2, 2)?;
     ctx.call(1, 0, 3)?;
     Err(p::PlanExit::Raise(ctx.take(0)))
-}
-fn ts_regexp_require_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_REGEXP_CREATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -66941,7 +60096,7 @@ const TS_REGEXP_MATCH_RECORD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_match_record,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_match_record_template), metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_match_record_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.match_record`.
@@ -67175,60 +60330,6 @@ fn ts_regexp_match_record(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     ctx.local(9, 0)?;
     Ok(ctx.take(0))
 }
-fn ts_regexp_match_record_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null, Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Null)
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_), Value::Text(_)] => {
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Null)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn ts_regexp_match_record_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null, Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_) | Value::Int(_) | Value::Float(_), Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = (natives[0].entry)(&[args[0], Value::Null])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = match (natives[0].entry)(&[args[0], Value::Null]) { Some(value) => value, None => heap.call(0, &[args[0], Value::Null])? }; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(Value::Null)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_NATIVE_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_exec",
@@ -67255,7 +60356,7 @@ const TS_REGEXP_NATIVE_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_exec,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_exec_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("da8e53914344effa1204f823728e7bc312f59442345e421f1c6bd25bc1c7dee7"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("da8e53914344effa1204f823728e7bc312f59442345e421f1c6bd25bc1c7dee7"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.native_exec`.
@@ -67329,21 +60430,6 @@ fn ts_regexp_native_exec(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_regexp_native_exec_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_NATIVE_MATCH_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_match_all",
@@ -67370,7 +60456,7 @@ const TS_REGEXP_NATIVE_MATCH_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_match_all,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_match_all_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("69fae4e2b70f54d29a3ca61596c89c0f4ca3c27cacffb822dd04ec8a9aec40ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("69fae4e2b70f54d29a3ca61596c89c0f4ca3c27cacffb822dd04ec8a9aec40ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.native_match_all`.
@@ -67444,21 +60530,6 @@ fn ts_regexp_native_match_all(ctx: &mut dyn p::PlanContext, _entry: u32) -> Resu
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_regexp_native_match_all_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_NATIVE_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_replace",
@@ -67486,7 +60557,7 @@ const TS_REGEXP_NATIVE_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_replace,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_replace_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7f8aa37b9aaa09668f35a579f816ecccaa6daf874d39359911e51a5df354d112"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7f8aa37b9aaa09668f35a579f816ecccaa6daf874d39359911e51a5df354d112"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.native_replace`.
@@ -67562,21 +60633,6 @@ fn ts_regexp_native_replace(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_regexp_native_replace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], args[2]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_NATIVE_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.native_split",
@@ -67604,7 +60660,7 @@ const TS_REGEXP_NATIVE_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_split,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_split_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c7290cfa848192cd37af3256c35dacd2cd45ab0f66a7c8703932b2161f692e32"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c7290cfa848192cd37af3256c35dacd2cd45ab0f66a7c8703932b2161f692e32"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.native_split`.
@@ -67679,21 +60735,6 @@ fn ts_regexp_native_split(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_regexp_native_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Text(_) | Value::LongText(_), Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], args[2]])?; let _ = v0;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_REGEXP_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
@@ -68529,7 +61570,7 @@ const TS_REGEXP_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_tostring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_tostring_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.toString`.
@@ -68598,33 +61639,6 @@ fn ts_regexp_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_regexp_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("source") }?)])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(2, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(1, &[args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flags") }?)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                let v4 = heap.call(2, &[v3])?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = match (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v4]) { Some(value) => value, None => heap.call(3, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v4])? }; let _ = v5;
-                let v6 = match (natives[0].entry)(&[v2, v5]) { Some(value) => value, None => heap.call(3, &[v2, v5])? }; let _ = v6;
-                let v7 = match (natives[0].entry)(&[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v6]) { Some(value) => value, None => heap.call(3, &[Value::Text(const { lash_kernel_doc::arena::ShortText::new("/") }?), v6])? }; let _ = v7;
-                Some(v7)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_REGEXP_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.regexp.argument",
@@ -68658,7 +61672,7 @@ const TS_REGEXP_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_argument,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_argument_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ef0dbb249994409a76bf96ddcd3f71a9c67c8cdd827a24eec7450215674fe5dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ef0dbb249994409a76bf96ddcd3f71a9c67c8cdd827a24eec7450215674fe5dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.regexp.argument`.
@@ -68703,22 +61717,6 @@ fn ts_regexp_argument(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_regexp_argument_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(args[0])
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_MATCH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -69698,7 +62696,7 @@ const TS_STRING_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_split,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: ts_string_split_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4051eed58e7215e1762a45056851dea9e86e73b8fddd6571d3e7508805193470"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("a1f3d1bba10e5130f8231cd3f79e2ec19bf738b86f153c21b032684d70e27baf"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4051eed58e7215e1762a45056851dea9e86e73b8fddd6571d3e7508805193470"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("1d1902b23fb5a4be7d2c83df949a40152090eacbcadac77fba57cf703d9c9922"), p::function("a1f3d1bba10e5130f8231cd3f79e2ec19bf738b86f153c21b032684d70e27baf"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.split`.
@@ -69828,22 +62826,6 @@ fn ts_string_split(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_split_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_SUBSTITUTE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -70967,7 +63949,7 @@ const TS_STRING_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replace,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replace_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7bd25b3b6b892bb2fccb623fd15d37e9b1f5a2e435b75c1874d15023257c48dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7bd25b3b6b892bb2fccb623fd15d37e9b1f5a2e435b75c1874d15023257c48dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.replace`.
@@ -70993,22 +63975,6 @@ fn ts_string_replace(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_replace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], Value::Bool(false)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_STRING_REPLACEALL_PLAN: p::HelperPlan = p::HelperPlan {
@@ -71041,7 +64007,7 @@ const TS_STRING_REPLACEALL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replaceall,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replaceall_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7bd25b3b6b892bb2fccb623fd15d37e9b1f5a2e435b75c1874d15023257c48dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("7bd25b3b6b892bb2fccb623fd15d37e9b1f5a2e435b75c1874d15023257c48dd"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.string.replaceAll`.
@@ -71067,22 +64033,6 @@ fn ts_string_replaceall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_string_replaceall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0], args[1], Value::Bool(true)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URI_ESCAPE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -71499,7 +64449,7 @@ const TS_URI_FLUSH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_flush,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_flush_heap, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("6c1b4f92902dafd8dd4d2669617a29921b5d7d1ba95005cfe6ecc2d1d9d3ec59"), p::function("7163bf6a69b9ab8b738c6077a8ec35d5685350320b5cad4de9b99a2d281f06a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("6c1b4f92902dafd8dd4d2669617a29921b5d7d1ba95005cfe6ecc2d1d9d3ec59"), p::function("7163bf6a69b9ab8b738c6077a8ec35d5685350320b5cad4de9b99a2d281f06a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.uri.flush`.
@@ -71560,22 +64510,6 @@ fn ts_uri_flush(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_uri_flush_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                let v1 = heap.call(1, &[v0])?; let _ = v1;
-                Some(v1)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_URI_DECODE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -71931,7 +64865,7 @@ const TS_URI_ENCODEURI_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuri,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuri_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("0b676ddf4aa00ee509b90c500a11367d521bf53e326966e00db465dd03d0dbec"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("0b676ddf4aa00ee509b90c500a11367d521bf53e326966e00db465dd03d0dbec"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.uri.encodeURI`.
@@ -71977,28 +64911,6 @@ fn ts_uri_encodeuri(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_uri_encodeuri_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2, Value::Bool(true)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_URI_DECODEURI_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.decodeURI",
@@ -72037,7 +64949,7 @@ const TS_URI_DECODEURI_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuri,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuri_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("4f642d881fd4621bb274fe1bafc04a94c0b8a930380253542b64cfba8e887852"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("4f642d881fd4621bb274fe1bafc04a94c0b8a930380253542b64cfba8e887852"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.uri.decodeURI`.
@@ -72083,28 +64995,6 @@ fn ts_uri_decodeuri(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_uri_decodeuri_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2, Value::Bool(true)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_URI_ENCODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.encodeURIComponent",
@@ -72143,7 +65033,7 @@ const TS_URI_ENCODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuricomponent,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuricomponent_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("0b676ddf4aa00ee509b90c500a11367d521bf53e326966e00db465dd03d0dbec"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("0b676ddf4aa00ee509b90c500a11367d521bf53e326966e00db465dd03d0dbec"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.uri.encodeURIComponent`.
@@ -72189,28 +65079,6 @@ fn ts_uri_encodeuricomponent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_uri_encodeuricomponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2, Value::Bool(false)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_URI_DECODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.uri.decodeURIComponent",
@@ -72249,7 +65117,7 @@ const TS_URI_DECODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuricomponent,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuricomponent_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("4f642d881fd4621bb274fe1bafc04a94c0b8a930380253542b64cfba8e887852"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("f93bf22a12bf2d3155eb8b704d6e4248ddb1be48ae7db4b10515e8c3c35d1d1c"), p::function("522f17641dadaa0e74accd4cdc1804011bdd1dedb7beff96e19b63d60516c7dd"), p::function("4f642d881fd4621bb274fe1bafc04a94c0b8a930380253542b64cfba8e887852"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.uri.decodeURIComponent`.
@@ -72294,28 +65162,6 @@ fn ts_uri_decodeuricomponent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_uri_decodeuricomponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[1], Value::Int(1)])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = heap.index(v0, Value::Int(0))?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(1, &[v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = heap.call(2, &[v2, Value::Bool(false)])?; let _ = v3;
-                heap.bind(v3, None)?;
-                Some(v3)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_READ_PLAN: p::HelperPlan = p::HelperPlan {
@@ -72912,7 +65758,7 @@ const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_in,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_in_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("ddf3cadcfc79877c259eacaee291e5e5628e17670265c7b73ca018de9da57a13"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c94afaa3323e8e18715885987bef9ed5a9171f7c98510bbb41bf105174e64253"), p::function("4522a22dd2cfdcc7379ba5010d9a5bf0416762a1ca56ba25c26e193f68fc243d"), p::function("ddf3cadcfc79877c259eacaee291e5e5628e17670265c7b73ca018de9da57a13"), p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.in`.
@@ -73931,26 +66777,6 @@ fn ts_in(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit>
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_in_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                if !matches!(v0, Value::Bool(false)) { return None; }
-                let v1 = heap.call(1, &[args[1]])?; let _ = v1;
-                heap.bind(v1, None)?;
-                let v2 = heap.call(2, &[args[0], v1])?; let _ = v2;
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(Value::Bool(true))
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_METADATA_READER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -85523,7 +78349,7 @@ const TS_MEMBER_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_append,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_append_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.append`.
@@ -85694,26 +78520,6 @@ fn ts_member_append(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("append") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_APPLY_PLAN: p::HelperPlan = p::HelperPlan {
@@ -87135,7 +79941,7 @@ const TS_MEMBER_AT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_at,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_at_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.at`.
@@ -87386,26 +80192,6 @@ fn ts_member_at(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pl
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_at_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("at") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_ATAN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -88862,7 +81648,7 @@ const TS_MEMBER_CATCH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_catch,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_catch_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.catch`.
@@ -89033,26 +81819,6 @@ fn ts_member_catch(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_catch_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("catch") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_CBRT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -90755,7 +83521,7 @@ const TS_MEMBER_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_concat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_concat_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.concat`.
@@ -91006,26 +83772,6 @@ fn ts_member_concat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_concat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("concat") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_CONSOLE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -91401,7 +84147,7 @@ const TS_MEMBER_CONSTRUCTOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_constructor,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_constructor_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.constructor`.
@@ -92242,26 +84988,6 @@ fn ts_member_constructor(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_constructor_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("constructor") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_COPYWITHIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.copyWithin",
@@ -92330,7 +85056,7 @@ const TS_MEMBER_COPYWITHIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_copywithin,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_copywithin_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.copyWithin`.
@@ -92549,26 +85275,6 @@ fn ts_member_copywithin(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_copywithin_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("copyWithin") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_COS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -94377,7 +87083,7 @@ const TS_MEMBER_DELETE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_delete,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_delete_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.delete`.
@@ -94612,26 +87318,6 @@ fn ts_member_delete(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_delete_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("delete") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -95830,7 +88516,7 @@ const TS_MEMBER_ENTRIES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_entries,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_entries_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.entries`.
@@ -96161,26 +88847,6 @@ fn ts_member_entries(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_entries_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("entries") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_ERROR_2_PLAN: p::HelperPlan = p::HelperPlan {
@@ -96683,7 +89349,7 @@ const TS_MEMBER_EVERY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_every,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_every_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.every`.
@@ -96903,26 +89569,6 @@ fn ts_member_every(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_every_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("every") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.exec",
@@ -96986,7 +89632,7 @@ const TS_MEMBER_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_exec,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_exec_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.exec`.
@@ -97157,26 +89803,6 @@ fn ts_member_exec(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_exec_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("exec") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_EXP_PLAN: p::HelperPlan = p::HelperPlan {
@@ -97680,7 +90306,7 @@ const TS_MEMBER_FILL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fill,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_fill_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.fill`.
@@ -97900,26 +90526,6 @@ fn ts_member_fill(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_fill_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("fill") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.filter",
@@ -97988,7 +90594,7 @@ const TS_MEMBER_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_filter,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_filter_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.filter`.
@@ -98208,26 +90814,6 @@ fn ts_member_filter(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_filter_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("filter") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FINALLY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.finally",
@@ -98291,7 +90877,7 @@ const TS_MEMBER_FINALLY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_finally,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_finally_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.finally`.
@@ -98463,26 +91049,6 @@ fn ts_member_finally(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_finally_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("finally") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.find",
@@ -98551,7 +91117,7 @@ const TS_MEMBER_FIND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_find,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_find_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.find`.
@@ -98771,26 +91337,6 @@ fn ts_member_find(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_find_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("find") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FINDINDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findIndex",
@@ -98859,7 +91405,7 @@ const TS_MEMBER_FINDINDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findindex,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_findindex_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.findIndex`.
@@ -99079,26 +91625,6 @@ fn ts_member_findindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_findindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findIndex") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FINDLAST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findLast",
@@ -99167,7 +91693,7 @@ const TS_MEMBER_FINDLAST_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlast,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlast_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.findLast`.
@@ -99387,26 +91913,6 @@ fn ts_member_findlast(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_findlast_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findLast") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FINDLASTINDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.findLastIndex",
@@ -99475,7 +91981,7 @@ const TS_MEMBER_FINDLASTINDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlastindex,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlastindex_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.findLastIndex`.
@@ -99694,26 +92200,6 @@ fn ts_member_findlastindex(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_findlastindex_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("findLastIndex") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_FLAGS_PLAN: p::HelperPlan = p::HelperPlan {
@@ -99991,7 +92477,7 @@ const TS_MEMBER_FLAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_flat_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.flat`.
@@ -100211,26 +92697,6 @@ fn ts_member_flat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_flat_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flat") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_FLATMAP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.flatMap",
@@ -100299,7 +92765,7 @@ const TS_MEMBER_FLATMAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flatmap,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_flatmap_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.flatMap`.
@@ -100518,26 +92984,6 @@ fn ts_member_flatmap(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_flatmap_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("flatMap") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_FLOOR_PLAN: p::HelperPlan = p::HelperPlan {
@@ -100839,7 +93285,7 @@ const TS_MEMBER_FOREACH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_foreach,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_foreach_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.forEach`.
@@ -101154,26 +93600,6 @@ fn ts_member_foreach(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_foreach_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("forEach") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_FREEZE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -102549,7 +94975,7 @@ const TS_MEMBER_GET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_get,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_get_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.get`.
@@ -102769,26 +95195,6 @@ fn ts_member_get(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("get") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_GETALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.getAll",
@@ -102852,7 +95258,7 @@ const TS_MEMBER_GETALL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getall,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_getall_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.getAll`.
@@ -103023,26 +95429,6 @@ fn ts_member_getall(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_getall_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("getAll") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_GETDATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -109430,7 +101816,7 @@ const TS_MEMBER_HAS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_has,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_has_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.has`.
@@ -109681,26 +102067,6 @@ fn ts_member_has(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_has_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("has") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_HASINDICES_PLAN: p::HelperPlan = p::HelperPlan {
@@ -110214,7 +102580,7 @@ const TS_MEMBER_HASOWNPROPERTY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hasownproperty,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_hasownproperty_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.hasOwnProperty`.
@@ -110602,26 +102968,6 @@ fn ts_member_hasownproperty(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_hasownproperty_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("hasOwnProperty") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_HYPOT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -111338,7 +103684,7 @@ const TS_MEMBER_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_includes,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_includes_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.includes`.
@@ -111590,26 +103936,6 @@ fn ts_member_includes(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_includes_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("includes") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.indexOf",
@@ -111683,7 +104009,7 @@ const TS_MEMBER_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_indexof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_indexof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.indexOf`.
@@ -111934,26 +104260,6 @@ fn ts_member_indexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_indexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("indexOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_INFO_PLAN: p::HelperPlan = p::HelperPlan {
@@ -114284,7 +106590,7 @@ const TS_MEMBER_ISPROTOTYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isprototypeof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_isprototypeof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.isPrototypeOf`.
@@ -114672,26 +106978,6 @@ fn ts_member_isprototypeof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<V
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_isprototypeof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("isPrototypeOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_ISSAFEINTEGER_PLAN: p::HelperPlan = p::HelperPlan {
@@ -115665,7 +107951,7 @@ const TS_MEMBER_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_join,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_join_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.join`.
@@ -115885,26 +108171,6 @@ fn ts_member_join(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_join_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("join") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.keys",
@@ -115993,7 +108259,7 @@ const TS_MEMBER_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_keys,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_keys_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.keys`.
@@ -116325,26 +108591,6 @@ fn ts_member_keys(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("keys") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.lastIndexOf",
@@ -116418,7 +108664,7 @@ const TS_MEMBER_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_lastindexof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.lastIndexOf`.
@@ -116669,26 +108915,6 @@ fn ts_member_lastindexof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_lastindexof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("lastIndexOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -118102,7 +110328,7 @@ const TS_MEMBER_MAP_2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_map_2,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_map_2_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.map`.
@@ -118321,26 +110547,6 @@ fn ts_member_map_2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_map_2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_MATCH_PLAN: p::HelperPlan = p::HelperPlan {
@@ -122175,7 +114381,7 @@ const TS_MEMBER_POP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pop,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_pop_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.pop`.
@@ -122394,26 +114600,6 @@ fn ts_member_pop(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("pop") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_POW_PLAN: p::HelperPlan = p::HelperPlan {
@@ -123947,7 +116133,7 @@ const TS_MEMBER_PUSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_push,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_push_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.push`.
@@ -124166,26 +116352,6 @@ fn ts_member_push(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_push_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("push") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_RACE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -124906,7 +117072,7 @@ const TS_MEMBER_REDUCE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduce,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduce_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.reduce`.
@@ -125126,26 +117292,6 @@ fn ts_member_reduce(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_reduce_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reduce") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_REDUCERIGHT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.reduceRight",
@@ -125214,7 +117360,7 @@ const TS_MEMBER_REDUCERIGHT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduceright,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduceright_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.reduceRight`.
@@ -125433,26 +117579,6 @@ fn ts_member_reduceright(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Val
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_reduceright_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reduceRight") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_REJECT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -126661,7 +118787,7 @@ const TS_MEMBER_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reverse,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_reverse_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.reverse`.
@@ -126880,26 +119006,6 @@ fn ts_member_reverse(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_reverse_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("reverse") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
@@ -127638,7 +119744,7 @@ const TS_MEMBER_SET_2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_set_2,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_set_2_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.set`.
@@ -127841,26 +119947,6 @@ fn ts_member_set_2(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_set_2_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("set") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_SETDATE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -131942,7 +124028,7 @@ const TS_MEMBER_SHIFT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_shift,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_shift_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.shift`.
@@ -132161,26 +124247,6 @@ fn ts_member_shift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_shift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("shift") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_SIGN_PLAN: p::HelperPlan = p::HelperPlan {
@@ -133156,7 +125222,7 @@ const TS_MEMBER_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_slice,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_slice_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.slice`.
@@ -133408,26 +125474,6 @@ fn ts_member_slice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_slice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("slice") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_SOME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.some",
@@ -133496,7 +125542,7 @@ const TS_MEMBER_SOME_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_some,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_some_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.some`.
@@ -133716,26 +125762,6 @@ fn ts_member_some(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_some_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("some") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.sort",
@@ -133810,7 +125836,7 @@ const TS_MEMBER_SORT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sort,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_sort_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.sort`.
@@ -134061,26 +126087,6 @@ fn ts_member_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_sort_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("sort") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_SOURCE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -134359,7 +126365,7 @@ const TS_MEMBER_SPLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_splice,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_splice_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.splice`.
@@ -134578,26 +126584,6 @@ fn ts_member_splice(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_splice_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("splice") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
@@ -136678,7 +128664,7 @@ const TS_MEMBER_TEST_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_test,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_test_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.test`.
@@ -136850,26 +128836,6 @@ fn ts_member_test(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_test_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("test") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_THEN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.then",
@@ -136933,7 +128899,7 @@ const TS_MEMBER_THEN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_then,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_then_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.then`.
@@ -137104,26 +129070,6 @@ fn ts_member_then(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_then_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("then") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_TODATESTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -138972,7 +130918,7 @@ const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocalestring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_tolocalestring_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.toLocaleString`.
@@ -139376,26 +131322,6 @@ fn ts_member_tolocalestring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_tolocalestring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toLocaleString") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_TOLOCALETIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -140423,7 +132349,7 @@ const TS_MEMBER_TOREVERSED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toreversed,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_toreversed_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.toReversed`.
@@ -140643,26 +132569,6 @@ fn ts_member_toreversed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Valu
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_toreversed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toReversed") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_TOSORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toSorted",
@@ -140731,7 +132637,7 @@ const TS_MEMBER_TOSORTED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tosorted,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_tosorted_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.toSorted`.
@@ -140951,26 +132857,6 @@ fn ts_member_tosorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_tosorted_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toSorted") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_TOSPLICED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toSpliced",
@@ -141039,7 +132925,7 @@ const TS_MEMBER_TOSPLICED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tospliced,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_tospliced_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.toSpliced`.
@@ -141259,26 +133145,6 @@ fn ts_member_tospliced(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_tospliced_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toSpliced") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.toString",
@@ -141419,7 +133285,7 @@ const TS_MEMBER_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tostring,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_tostring_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.toString`.
@@ -142102,26 +133968,6 @@ fn ts_member_tostring(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_tostring_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("toString") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_MEMBER_TOTIMESTRING_PLAN: p::HelperPlan = p::HelperPlan {
@@ -144505,7 +136351,7 @@ const TS_MEMBER_UNSHIFT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_unshift,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_unshift_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.unshift`.
@@ -144725,26 +136571,6 @@ fn ts_member_unshift(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_unshift_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("unshift") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.valueOf",
@@ -144860,7 +136686,7 @@ const TS_MEMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_valueof,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_valueof_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.valueOf`.
@@ -145409,26 +137235,6 @@ fn ts_member_valueof(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_valueof_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("valueOf") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.values",
@@ -145516,7 +137322,7 @@ const TS_MEMBER_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_values,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_values_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.values`.
@@ -145848,26 +137654,6 @@ fn ts_member_values(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_member_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("values") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_MEMBER_WARN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.member.warn",
@@ -146153,7 +137939,7 @@ const TS_MEMBER_WITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_with,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: ts_member_with_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.member.with`.
@@ -146372,26 +138158,6 @@ fn ts_member_with(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_member_with_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("with") }?))?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
-                if !matches!(v2, Value::Bool(true)) { return None; }
-                Some(v2_found)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_PROPERTY_DOTALL_PLAN: p::HelperPlan = p::HelperPlan {
@@ -147023,7 +138789,7 @@ const TS_PROPERTY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: ts_property_length_heap, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("cd3577d45e6866924e751da8e2d758933fdad2629c66759d63d812d37651bdfb"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("1ee1b1c502c32b2c336974cf9d783b7e76b5ff76dad02b46791792c9a5aa951b"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("cd3577d45e6866924e751da8e2d758933fdad2629c66759d63d812d37651bdfb"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.property.length`.
@@ -147169,120 +138935,6 @@ fn ts_property_length(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value,
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_property_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Absent] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Bool(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("integer") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Map(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("map") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Null] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("null") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                heap.bind(v0, Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?)))?;
-                let v1 = match (natives[0].entry)(&[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)]) { Some(value) => value, None => heap.call(1, &[v0, Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?)])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(2, &[args[0]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::List(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(2, &[args[0]])?; let _ = v0;
-                heap.bind(v0, None)?;
-                Some(v0)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 const TS_PROPERTY_MULTILINE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -155859,7 +147511,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get_computed,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 3, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("025879985016f1f88d3401b0838df3f01c6f09c1378d878ffda38ffb57059787"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 3, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), p::function("025879985016f1f88d3401b0838df3f01c6f09c1378d878ffda38ffb57059787"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_computed`.
@@ -163553,149 +155205,6 @@ fn ts_get_computed(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     ctx.begin()?;
     Ok(Value::Null)
 }
-fn ts_get_computed_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Map(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216)))])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[Value::Int(0), v0]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(3, &[args[0], args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(3, &[args[0], args[1]])?; let _ = v4;
-                heap.bind(v4, None)?;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::List(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7 = heap.len(p::Collection::Tuple, v4)?; let _ = v7;
-                let v8 = (natives[7].entry)(&[v7, Value::Int(0)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7 = heap.len(p::Collection::Tuple, v4)?; let _ = v7;
-                let v8 = (natives[7].entry)(&[v7, Value::Int(0)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[6].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                heap.bind(v2, Some(Value::Absent))?;
-                let v3 = match (natives[7].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                let v4 = (natives[6].entry)(&[v3])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[6].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                heap.bind(v2, Some(Value::Absent))?;
-                let v3 = match (natives[7].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                let v4 = (natives[6].entry)(&[v3])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[6].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                heap.bind(v2, Some(Value::Absent))?;
-                let v3 = match (natives[7].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                let v4 = (natives[6].entry)(&[v3])?; let _ = v4;
-                if !matches!(v4, Value::Bool(false)) { return None; }
-                let v5 = heap.call(5, &[args[1]])?; let _ = v5;
-                if !matches!(v5, Value::Bool(false)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
-}
 
 const TS_GET_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.get_numeric",
@@ -163795,7 +155304,7 @@ const TS_GET_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get_numeric,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: ts_get_numeric_heap, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 3, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 3, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("f87b36a37fdbcaf6ad8e2c114ba393ed38b5c11472c1ef5f481222236b1ac23e"), p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), p::function("a49dd3f95d67f204e3dfbb42f496378ca53dd31a2d0c99a0a17d3dda463a96a4"), p::function("d9f03d662a636e2b57c261468840f8a759aee8c8dd701a63d44ac25b9586f0a3"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.get_numeric`.
@@ -164082,117 +155591,6 @@ fn ts_get_numeric(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     }
     ctx.begin()?;
     Ok(Value::Null)
-}
-fn ts_get_numeric_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Map(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(1, &[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(13830554455654793216)))])?; let _ = v0;
-                heap.bind(v0, None)?;
-                let v1 = match (natives[0].entry)(&[Value::Int(0), v0]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v0])? }; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.call(3, &[args[0], args[1]])?; let _ = v2;
-                heap.bind(v2, None)?;
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Text(_) | Value::LongText(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.call(3, &[args[0], args[1]])?; let _ = v4;
-                heap.bind(v4, None)?;
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::List(_), Value::Float(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7 = heap.len(p::Collection::Tuple, v4)?; let _ = v7;
-                let v8 = (natives[7].entry)(&[v7, Value::Int(0)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(true)) { return None; }
-                Some(Value::Absent)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(true)) { return None; }
-                let v7 = heap.len(p::Collection::Tuple, v4)?; let _ = v7;
-                let v8 = (natives[7].entry)(&[v7, Value::Int(0)])?; let _ = v8;
-                if !matches!(v8, Value::Bool(false)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            heap.path();
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::List, args[0])?; let _ = v0;
-                let v1 = (natives[4].entry)(&[v0])?; let _ = v1;
-                let v2 = heap.call(1, &[args[1], v1])?; let _ = v2;
-                heap.bind(v2, None)?;
-                let v3 = match (natives[0].entry)(&[Value::Int(0), v2]) { Some(value) => value, None => heap.call(2, &[Value::Int(0), v2])? }; let _ = v3;
-                if !matches!(v3, Value::Bool(true)) { return None; }
-                let v4 = heap.index(args[0], v2)?; let _ = v4;
-                heap.bind(v4, None)?;
-                let v5 = (natives[8].entry)(&[v4])?; let _ = v5;
-                let v6 = match (natives[7].entry)(&[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)]) { Some(value) => value, None => heap.call(0, &[v5, Value::Text(const { lash_kernel_doc::arena::ShortText::new("tuple") }?)])? }; let _ = v6;
-                if !matches!(v6, Value::Bool(false)) { return None; }
-                Some(v4)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        [Value::Record(_), Value::Int(_)] => {
-            let charge_mark = heap.mark();
-            if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                let v1 = (natives[6].entry)(&[v0])?; let _ = v1;
-                if !matches!(v1, Value::Bool(true)) { return None; }
-                let v2 = heap.index(args[0], args[1])?; let _ = v2;
-                heap.bind(v2, Some(Value::Absent))?;
-                let v3 = match (natives[7].entry)(&[v2, Value::Absent]) { Some(value) => value, None => heap.call(0, &[v2, Value::Absent])? }; let _ = v3;
-                let v4 = (natives[6].entry)(&[v3])?; let _ = v4;
-                if !matches!(v4, Value::Bool(true)) { return None; }
-                Some(v2)
-            })() { return Some(value); }
-            heap.rewind(charge_mark);
-            None
-        },
-        _ => None,
-    }
 }
 
 /// Every name a computed read finds among the built-in rows, in code

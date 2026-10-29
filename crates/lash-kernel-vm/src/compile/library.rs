@@ -28,9 +28,64 @@ pub(crate) struct Specialization {
     pub(crate) function: FunctionId,
     pub(crate) prepared: Option<(Entry, Fast)>,
     pub(crate) native: lash_kernel_doc::NativeSpecialization,
+    /// Function-owned scalar facts, shared by every published call site.
+    pub(crate) kernels: std::sync::OnceLock<Kernels>,
+    pub(crate) deepest: std::sync::OnceLock<u32>,
+}
+
+/// Derived once from the canonical entry, signature and formula.
+pub(crate) struct Kernels {
+    pub(crate) pairs: [Option<lash_kernel_doc::scalar::Pair>; 2],
+    pub(crate) texts: Option<lash_kernel_doc::scalar::ScalarOp>,
+    pub(crate) resident: Option<Resident>,
+    pub(crate) append: bool,
+    pub(crate) concat: Option<TextCharge>,
+}
+
+/// The installed native's certified resident answer and canonical formula.
+#[derive(Clone, Copy)]
+pub(crate) enum Resident {
+    Length(lash_kernel_doc::ValueKind, u64),
+    Item(lash_kernel_doc::ValueKind),
+    Member(lash_kernel_doc::plan::Table),
+    TextJoin,
 }
 
 impl Lib {
+    pub(crate) fn kernels(&self, exe: &Executable) -> &Kernels {
+        self.specialization.kernels.get_or_init(|| Kernels {
+            pairs: [
+                super::numeric_pair(self, false),
+                super::numeric_pair(self, true),
+            ],
+            texts: match self.run {
+                LibRun::Native { .. } => self.specialization.native.text_relation,
+                _ => None,
+            },
+            resident: self
+                .collection_length()
+                .map(|(kind, units)| Resident::Length(kind, units))
+                .or_else(|| self.item_read().map(Resident::Item))
+                .or_else(|| self.membership().map(Resident::Member))
+                .or_else(|| self.text_join().then_some(Resident::TextJoin)),
+            append: self.text_append(exe).is_some(),
+            concat: self
+                .text_append(exe)
+                .and_then(|_| self.charge.text_charge()),
+        })
+    }
+
+    pub(crate) fn prepared_depth(&self, exe: &Executable) -> u32 {
+        *self.specialization.deepest.get_or_init(|| {
+            self.specialization
+                .prepared
+                .as_ref()
+                .map_or(0, |(entry, _)| {
+                    entry.deepest(&|id| exe.lib(id), &|id| exe.library_lib(id))
+                })
+        })
+    }
+
     /// Every prepared, metered, typed, scalar, heap and joined-text entry uses
     /// this exact declaration. Inspecting its source is cold and preserves
     /// ordinary preparation's body laziness.

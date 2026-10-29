@@ -81,6 +81,41 @@ pub(in crate::machine) enum Ran {
 }
 
 impl KernelMachine {
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn force_source_execution(&mut self) {
+        self.islands.source_only = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_storage_released(&self) -> bool {
+        self.islands.slab.released()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn trace_slab_placements(&mut self) {
+        self.islands.slab.trace();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_slab_placements(&mut self) -> Vec<super::execute::StackPlacement> {
+        self.islands.slab.take_placements()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_slab_calls(&mut self) -> u64 {
+        self.islands.slab.take_calls()
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn take_packet_counts(&mut self) -> (u64, u64) {
+        self.islands.slab.take_packets()
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn force_generic_packets(&mut self) {
+        self.islands.generic_only = true;
+    }
+
     fn observation_coordinates(
         &mut self,
         task: TaskId,
@@ -163,6 +198,10 @@ impl KernelMachine {
         lib: crate::compile::LibId,
         args: usize,
     ) -> Eval<Option<lash_kernel_doc::Value>> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return Ok(None);
+        }
         let function = exe.lib(lib);
         // This path suppresses native charges under a completion formula.
         // Statement-metered helpers must retain their own body charges.
@@ -229,7 +268,6 @@ impl KernelMachine {
             } else {
                 u64::MAX
             },
-            limiters: None,
         };
         let mut island = open::<false>(
             entry,
@@ -415,6 +453,8 @@ impl KernelMachine {
         // Observations project the common program's facts. Only a source
         // continuation retains this step.
         let open = !self.islands.held;
+        #[cfg(any(test, feature = "testing"))]
+        let open = open && !self.islands.source_only;
         // A law's statement-boundary hook runs between steps: each step
         // runs one statement's work, as a spent slice's does.
         #[cfg(test)]
@@ -552,7 +592,6 @@ impl KernelMachine {
             } else {
                 u64::MAX
             },
-            limiters: None,
         };
         self.islands.open();
         let ran = enter::<OBSERVING>(
@@ -618,6 +657,7 @@ impl KernelMachine {
         self.active_link = self.frame(task)?.link;
         self.islands.held = true;
         let outcome = match run {
+            RunsOn::Statement => self.advance_source(task, host, exe),
             RunsOn::Instruction(stmt, pc, regs) => {
                 for (reg, value) in regs {
                     self.put(reg as usize, value);
@@ -705,6 +745,7 @@ impl KernelMachine {
         let mut pending = None;
         let mut action = None;
         let top = match level.stands {
+            Stands::Statement => Some(RunsOn::Statement),
             Stands::Action { stmt } => {
                 action = Some(stmt);
                 None
@@ -784,6 +825,10 @@ impl KernelMachine {
         exe: &Executable,
         plan: u32,
     ) -> Eval<super::super::Completion> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.islands.source_only {
+            return self.advance_source(task, host, exe);
+        }
         // A protocol walk's header between its hooks runs on.
         if let Some(super::super::Control::For { stmt, header, .. }) =
             self.frame(task)?.control.last()
@@ -794,6 +839,46 @@ impl KernelMachine {
         }
         self.resume_function(task, host, exe, plan)?
             .ok_or_else(|| fault("the register program refused its frame's step").into())
+    }
+
+    fn advance_source(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+    ) -> Eval<super::super::Completion> {
+        self.refresh_charging(task)?;
+        let frame = self.frame(task)?;
+        let (block, next) = match frame.control.last() {
+            Some(super::super::Control::Block { block, next }) => (*block, *next),
+            Some(
+                super::super::Control::While { stmt, .. } | super::super::Control::For { stmt, .. },
+            ) => {
+                let stmt = *stmt;
+                return self.iterate(task, host, exe, stmt);
+            }
+            _ => return self.block_ended(task, host, exe),
+        };
+        let Some(stmt) = exe.block(block).stmts.get(next).copied() else {
+            frame.control.pop();
+            for at in &exe.block(block).declares {
+                frame.set_slot(*at, SlotState::Empty);
+            }
+            return self.block_ended(task, host, exe);
+        };
+        if self.charging {
+            self.charge(1)?;
+        } else if self.paced {
+            self.charged += 1;
+        }
+        let Some(super::super::Control::Block { next, .. }) = self.frame(task)?.control.last_mut()
+        else {
+            return Err(fault("a source statement has no enclosing block").into());
+        };
+        *next += 1;
+        let running = Running::new(task, exe, stmt);
+        let ran = self.run(host, &running, running.stmt.ops.start as usize)?;
+        self.resumed(task, exe, (stmt, ran))
     }
 
     /// A restored or already resident admitted function re-enters the same
@@ -826,7 +911,7 @@ impl KernelMachine {
         let Some(program) = exe.island_plan(plan) else {
             return Ok(None);
         };
-        let Some(compiled) = program.compiled(exe) else {
+        let Some(compiled) = self.islands.compiled(program, exe) else {
             return Ok(None);
         };
         // A spent slice still runs one step's work: the step stops at its
@@ -922,7 +1007,6 @@ impl KernelMachine {
             } else {
                 u64::MAX
             },
-            limiters: gate.charging.then_some(&mut self.limiters),
         };
         let mut executor = open::<OBSERVING>(
             entry,
@@ -953,9 +1037,6 @@ impl KernelMachine {
         let handoff = executor.project_handoff(&mut active, frame, &mut self.regs);
         let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
-        if let Some(limit) = executor.grown {
-            self.bounds.charge_limit = limit;
-        }
         drop(watching);
         let ran = if handoff.is_some() {
             None
@@ -1042,9 +1123,6 @@ struct Entry<'a> {
     sites: &'a mut SiteCaches,
     session: &'a mut Session,
     bound: u64,
-    /// The run's limiters, lent to a resumed frame: its statement's unit
-    /// past the bound asks them as the source charger does.
-    limiters: Option<&'a mut super::super::Limiters>,
 }
 
 /// Runs the call of `target` on `values` as an island in `scratch`, in
@@ -1161,8 +1239,6 @@ fn open<'a, const OBSERVING: bool>(
         accounting: true,
         charged,
         bound: entry.bound,
-        limiters: entry.limiters,
-        grown: None,
         deferred_end: None,
         tight: ground.memory && ground.headroom < ISLAND_ADMITTED,
         slice_end: ground.slice_end,

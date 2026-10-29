@@ -5,30 +5,72 @@ use super::super::compiled::{
     CollectionAppend, CollectionStep, Merge, Placement, ReadSlot, Reduction, Visit,
 };
 use super::*;
+use crate::compile::LibId;
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
+    fn source_primitive(&self, lib: LibId, args: &[Value]) -> Option<Value> {
+        let (crate::compile::Entry::Native(entry), _) =
+            self.exe.lib(lib).specialization.prepared.as_ref()?
+        else {
+            return None;
+        };
+        (entry.entry)(args)
+    }
+
+    fn source_boolean(&self, lib: LibId, args: &[Value]) -> Option<bool> {
+        match self.source_primitive(lib, args)? {
+            Value::Bool(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn source_integer(&self, lib: LibId, args: &[Value]) -> Option<i64> {
+        match self.source_primitive(lib, args)? {
+            Value::Int(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub(super) fn collection_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         step: &CollectionStep,
         tail: bool,
     ) -> Option<Result<Next, Stop>> {
+        #[cfg(any(test, feature = "testing"))]
+        let family = step.family();
         if !self.collection_ready() {
+            #[cfg(any(test, feature = "testing"))]
+            super::super::witness::record(family, super::super::witness::Exit::Guard);
             return None;
         }
-        match step {
+        let answer = match step {
             CollectionStep::Merge(merge) => self.merge_step(frame, merge, tail),
             CollectionStep::Place(place) => self.place_step(frame, place),
             CollectionStep::Visit(visit) => self.visit_step(frame, visit),
             CollectionStep::ReadSlot(read) => self.read_slot_step(frame, read),
             CollectionStep::Reduce(reduction) => self.reduce_step(frame, reduction),
             CollectionStep::Append(append) => self.append_step(frame, append),
+        };
+        #[cfg(any(test, feature = "testing"))]
+        {
+            use super::super::witness::{self, Exit};
+            let exit = match &answer {
+                None => Exit::Guard,
+                Some(Err(_)) => Exit::Boundary,
+                Some(Ok(_)) if matches!(step, CollectionStep::Merge(merge) if !tail && frame.state.pc == merge.callback) => {
+                    Exit::Callback
+                }
+                Some(Ok(_)) => Exit::Commit,
+            };
+            witness::record(family, exit);
         }
+        answer
     }
 
     fn append_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         append: &CollectionAppend,
     ) -> Option<Result<Next, Stop>> {
         let (SlotState::Value(target @ Value::List(list)), SlotState::Value(value)) =
@@ -41,9 +83,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .then_some(())?;
         self.store(None, None, target, Value::Int(length), value)?;
         self.end_statement(frame);
-        frame.control.push(Position::Block(append.body, 1));
-        frame.statement = None;
-        frame.pc = frame.callee.compiled.blocks[append.body].end;
+        frame.state.control.push(Position::Block(append.body, 1));
+        frame.state.statement = None;
+        frame.state.pc = frame.state.callee.compiled.blocks[append.body].end;
         if self.arena.boundary_due() {
             Some(Err(Stop))
         } else {
@@ -53,7 +95,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     fn reduce_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         reduction: &Reduction,
     ) -> Option<Result<Next, Stop>> {
         if !self.depth_fits(reduction.depth) {
@@ -69,9 +111,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             [accumulator, item]
         };
-        let signature = reduction
-            .checked
-            .map(|lib| &self.exe.lib(lib).header.signature);
+        let function = self.exe.lib(reduction.lib);
+        let (entry, _) = function.specialization.prepared.as_ref()?;
+        let signature = reduction.checked.then_some(&function.header.signature);
         if signature.is_some_and(|signature| {
             !signature
                 .params
@@ -81,7 +123,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }) {
             return None;
         }
-        let paired = reduction.pair.and_then(|pair| match values {
+        let paired = entry.pair().and_then(|pair| match values {
             [Value::Int(left), Value::Int(right)] => {
                 lash_kernel_doc::scalar::ints(pair.ints?, left, right)
             }
@@ -90,7 +132,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
             _ => None,
         });
-        let answer = paired.or_else(|| reduction.entry.call(&values))?;
+        let answer = paired.or_else(|| entry.call(&values))?;
         if !matches!(answer, Value::Int(_) | Value::Float(_)) {
             return None;
         }
@@ -101,13 +143,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         self.end_statement(frame);
         frame.slots[reduction.accumulator] = SlotState::Value(answer);
-        frame.control.push(Position::Block(reduction.body, 1));
-        frame.statement = None;
-        frame.pc = frame.callee.compiled.blocks[reduction.body].end;
+        frame.state.control.push(Position::Block(reduction.body, 1));
+        frame.state.statement = None;
+        frame.state.pc = frame.state.callee.compiled.blocks[reduction.body].end;
         Some(Ok(Next::Continue))
     }
 
-    fn visit_step(&mut self, frame: &mut Frame<'e>, visit: &Visit) -> Option<Result<Next, Stop>> {
+    fn visit_step(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        visit: &Visit,
+    ) -> Option<Result<Next, Stop>> {
         let value = |at| match frame.slots[at] {
             SlotState::Value(value) => Some(value),
             _ => None,
@@ -119,7 +165,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         );
         if !matches!(index, Value::Int(_) | Value::Float(_))
             || !matches!(length, Value::Int(_) | Value::Float(_))
-            || index.same(&length)
+            || self.source_boolean(visit.bound, &[index, length])?
         {
             return None;
         }
@@ -133,13 +179,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.empty_tuple()?;
         }
         self.end_statement(frame);
-        frame.control.push(Position::Block(visit.body, 2));
+        frame.state.control.push(Position::Block(visit.body, 2));
         let arm = usize::from(!hole);
         if let Some(block) = visit.arms[arm] {
-            frame.control.push(Position::Block(block, 0));
+            frame.state.control.push(Position::Block(block, 0));
         }
-        frame.statement = None;
-        frame.pc = visit.after[arm];
+        frame.state.statement = None;
+        frame.state.pc = visit.after[arm];
+        #[cfg(test)]
+        super::super::COLLECTION_VISITS.with(|n| n.set(n.get() + 1));
         if self.arena.boundary_due() {
             Some(Err(Stop))
         } else {
@@ -149,7 +197,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     fn read_slot_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         read: &ReadSlot,
     ) -> Option<Result<Next, Stop>> {
         let value = |at| match frame.slots[at] {
@@ -162,7 +210,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let Value::List(list) = value(read.target)? else {
             return None;
         };
-        let at = crate::compile::position(&value(read.index)?)?;
+        let index = value(read.index)?;
+        let length = i64::try_from(self.arena.len(list).ok()?).ok()?;
+        if !self.source_boolean(read.bound, &[index, Value::Int(length)])? {
+            return None;
+        }
+        let at = crate::compile::position(&index)?;
         let item = self.arena.item(list, at).ok()??;
         if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
             return None;
@@ -174,12 +227,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.memory || self.projection().is_some() || matches!(item, Value::Tuple(_)) {
             self.empty_tuple()?;
         }
+        let present = self.source_boolean(read.mark, &[Value::Bool(hole)])?;
         self.end_statement(frame);
         frame.slots[read.value] = SlotState::Value(item);
-        frame.slots[read.present] = SlotState::Value(Value::Bool(!hole));
-        frame.control.push(Position::Block(read.body, 3));
-        frame.statement = None;
-        frame.pc = frame.callee.compiled.blocks[read.body].starts[3];
+        frame.slots[read.present] = SlotState::Value(Value::Bool(present));
+        frame.state.control.push(Position::Block(read.body, 3));
+        frame.state.statement = None;
+        frame.state.pc = frame.state.callee.compiled.blocks[read.body].starts[3];
         if self.arena.boundary_due() {
             Some(Err(Stop))
         } else {
@@ -216,7 +270,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     fn place_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         place: &Placement,
     ) -> Option<Result<Next, Stop>> {
         let value = |at| match frame.slots[at] {
@@ -240,10 +294,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if self.arena.summary_of(&item).depth as usize > self.limits.value_depth() {
             return None;
         }
-        let next = place.advance.call(&[index, place.increment])?;
+        let (advance, _) = self
+            .exe
+            .lib(place.advance)
+            .specialization
+            .prepared
+            .as_ref()?;
+        let next = advance.call(&[index, place.increment])?;
         self.arena.list_set(target, at, item).ok()?;
         frame.slots[place.index] = SlotState::Value(next);
         frame
+            .state
             .control
             .push(Position::Block(place.body, place.statements));
         Some(self.finish_statement(frame, 1, None))
@@ -251,7 +312,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     pub(super) fn merge_step(
         &mut self,
-        frame: &mut Frame<'e>,
+        frame: &mut Values<'_, 'e>,
         merge: &Merge,
         tail: bool,
     ) -> Option<Result<Next, Stop>> {
@@ -284,22 +345,30 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if dest >= n {
             return None;
         }
-        let starts_run = dest == end;
+        let starts_run = self.source_boolean(merge.start, &[Value::Int(dest), Value::Int(end)])?;
         let from_right = {
             if starts_run {
                 let width = number(merge.counters[5])?;
                 if !(0..(1 << 48)).contains(&width) {
                     return None;
                 }
-                mid = (dest + width).min(n);
-                end = (mid + width).min(n);
+                let sum =
+                    self.source_integer(merge.sums[0], &[Value::Int(dest), Value::Int(width)])?;
+                mid = self.source_integer(merge.minimum[0], &[Value::Int(sum), Value::Int(n)])?;
+                let sum =
+                    self.source_integer(merge.sums[1], &[Value::Int(mid), Value::Int(width)])?;
+                end = self.source_integer(merge.minimum[1], &[Value::Int(sum), Value::Int(n)])?;
                 left = dest;
                 right = mid;
             }
             if left > mid || mid > end || right > end || end > n {
                 return None;
             }
-            if left < mid && right < end {
+            let has_left =
+                self.source_boolean(merge.tests[0], &[Value::Int(left), Value::Int(mid)])?;
+            if has_left
+                && self.source_boolean(merge.tests[1], &[Value::Int(right), Value::Int(end)])?
+            {
                 let first = self.arena.item(sorted, left as u64).ok()??;
                 let second = self.arena.item(sorted, right as u64).ok()??;
                 if !self.merge_value_fits(&first) || !self.merge_value_fits(&second) {
@@ -313,16 +382,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 frame.slots[merge.from_right] = SlotState::Value(Value::Bool(false));
                 frame.slots[merge.items[0]] = SlotState::Value(first);
                 frame.slots[merge.items[1]] = SlotState::Value(second);
-                frame.control.extend([
+                frame.state.control.extend([
                     Position::Block(merge.body, 3),
                     Position::Block(merge.compared[0], 1),
                     Position::Block(merge.compared[1], 2),
                 ]);
-                frame.statement = None;
-                frame.pc = merge.callback;
+                frame.state.statement = None;
+                frame.state.pc = merge.callback;
                 return Some(Ok(Next::Continue));
             }
-            left >= mid
+            !has_left
         };
         let index = if from_right { right } else { left };
         if index < 0 || index >= n {
@@ -338,17 +407,23 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if sorted == out {
             return None;
         }
-        // All reads and capacity checks precede the only fallible write.
+        let advanced = self.source_integer(
+            merge.advances[usize::from(!from_right)],
+            &[Value::Int(index), Value::Int(1)],
+        )?;
+        let destination =
+            self.source_integer(merge.advances[2], &[Value::Int(dest), Value::Int(1)])?;
+        // Every fallible primitive is pure; source publication starts here.
         self.arena.list_set(out, dest as u64, item).ok()?;
-        frame.control.push(Position::Block(merge.body, 5));
+        frame.state.control.push(Position::Block(merge.body, 5));
         if from_right {
-            right += 1;
+            right = advanced;
         } else {
-            left += 1;
+            left = advanced;
         }
         for (at, number) in merge.counters[..5]
             .iter()
-            .zip([dest + 1, end, mid, left, right])
+            .zip([destination, end, mid, left, right])
         {
             frame.slots[*at] = SlotState::Value(Value::Int(number));
         }
@@ -356,16 +431,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Some(self.finish_statement(frame, 1, None))
     }
 
-    fn merge_tail(&mut self, frame: &mut Frame<'e>, merge: &Merge) -> Option<Result<Next, Stop>> {
+    fn merge_tail(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        merge: &Merge,
+    ) -> Option<Result<Next, Stop>> {
         let value = |at| match frame.slots[at] {
             SlotState::Value(value) => Some(value),
             _ => None,
         };
-        let from_right = match value(merge.order)? {
-            Value::Int(order) => order > 0,
-            Value::Float(order) => order.get() > 0.0,
-            _ => return None,
-        };
+        let from_right =
+            self.source_boolean(merge.tests[2], &[Value::Int(0), value(merge.order)?])?;
         let selected = merge.counters[if from_right { 4 } else { 3 }];
         let (Value::Int(dest), Value::Int(index)) = (value(merge.counters[0])?, value(selected)?)
         else {
@@ -388,11 +464,17 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !self.merge_value_fits(&item) {
             return None;
         }
+        let advanced = self.source_integer(
+            merge.advances[usize::from(!from_right)],
+            &[Value::Int(index), Value::Int(1)],
+        )?;
+        let destination =
+            self.source_integer(merge.advances[2], &[Value::Int(dest), Value::Int(1)])?;
         self.arena.list_set(out, dest as u64, item).ok()?;
         Self::pop_block(frame);
         Self::pop_block(frame);
-        frame.slots[merge.counters[0]] = SlotState::Value(Value::Int(dest + 1));
-        frame.slots[selected] = SlotState::Value(Value::Int(index + 1));
+        frame.slots[merge.counters[0]] = SlotState::Value(Value::Int(destination));
+        frame.slots[selected] = SlotState::Value(Value::Int(advanced));
         frame.slots[merge.from_right] = SlotState::Value(Value::Bool(from_right));
         Some(self.finish_statement(frame, 1, None))
     }

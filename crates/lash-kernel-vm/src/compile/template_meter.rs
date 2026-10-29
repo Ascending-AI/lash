@@ -16,10 +16,7 @@ pub(crate) struct Measured {
     record: bool,
 }
 
-pub(crate) struct Tape;
-
 pub(crate) type MeteredCharges = SpeculativeCharges<ChargeEvent>;
-pub(crate) type TapedCharges = SpeculativeCharges<lash_kernel_exec::Weight, Tape>;
 
 pub(crate) trait Measurement {
     fn mark(&self) -> ChargeMark;
@@ -52,20 +49,6 @@ impl Measurement for Measured {
     }
     fn recording(&self) -> bool {
         self.record
-    }
-}
-
-impl Measurement for Tape {
-    fn mark(&self) -> ChargeMark {
-        ChargeMark {
-            valid: true,
-            ..ChargeMark::default()
-        }
-    }
-    fn rewind(&mut self, _: ChargeMark) {}
-    fn append(&mut self, _: &mut Self) {}
-    fn recording(&self) -> bool {
-        true
     }
 }
 
@@ -131,25 +114,6 @@ impl SpeculativeCharges<ChargeEvent> {
             Some(units) => self.push(units, Some(function), false),
             None => self.measurement.valid = false,
         }
-    }
-}
-
-impl TapedCharges {
-    pub(crate) fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            measurement: Tape,
-        }
-    }
-    pub(crate) fn push(&mut self, weight: lash_kernel_exec::Weight) {
-        self.events.push(weight);
-    }
-    pub(crate) fn formulas(&mut self, count: usize) -> Vec<lash_kernel_exec::Weight> {
-        let start = self.events.len().saturating_sub(count);
-        self.events.drain(start..).collect()
-    }
-    pub(crate) fn clear(&mut self) {
-        self.events.clear();
     }
 }
 

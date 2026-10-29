@@ -107,6 +107,7 @@ type Guarded = (
     Vec<Datum>,
     Vec<(&'static str, crate::Meters)>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
+    Vec<Request>,
 );
 
 /// A run of [`GUARDED`]; `record` keeps a charge tape, which no guarded
@@ -116,6 +117,24 @@ fn guarded(record: bool, slice: u64, bounds: Bounds) -> Guarded {
 }
 
 fn guarded_run(source: &str, record: bool, slice: u64, bounds: Bounds) -> Guarded {
+    guarded_mode(
+        source,
+        record,
+        slice,
+        bounds,
+        super::ExecutionMode::Specialized,
+        false,
+    )
+}
+
+fn guarded_mode(
+    source: &str,
+    record: bool,
+    slice: u64,
+    bounds: Bounds,
+    mode: super::ExecutionMode,
+    cold: bool,
+) -> Guarded {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -125,12 +144,23 @@ fn guarded_run(source: &str, record: bool, slice: u64, bounds: Bounds) -> Guarde
             ..Setup::default()
         },
     );
+    let tape = crate::ChargeTape::new();
     if record {
-        embedder.machine.record_charges(crate::ChargeTape::new());
+        embedder.machine.record_charges(tape.clone());
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
+    let (mut packets, mut specialized) = (0, 0);
     let end = loop {
+        match mode {
+            super::ExecutionMode::Source => embedder.machine.force_source_execution(),
+            super::ExecutionMode::Generic => embedder.machine.force_generic_packets(),
+            super::ExecutionMode::Specialized => {}
+        }
         let step = embedder.run();
+        let (dispatched, fused) = embedder.machine.take_packet_counts();
+        packets += dispatched;
+        specialized += fused;
+        assert!(embedder.machine.execution_storage_released());
         let kind = match &step {
             Step::Ended(_) => "ended",
             Step::Slice => "slice",
@@ -142,14 +172,40 @@ fn guarded_run(source: &str, record: bool, slice: u64, bounds: Bounds) -> Guarde
                 break format!("finished {:?}", finished.result);
             }
             Step::Ended(other) => break format!("{other:?}"),
-            Step::Slice => {}
+            Step::Slice => {
+                if cold {
+                    checkpoints.push(embedder.machine.semantic_checkpoint());
+                    embedder.reopen(Layout(0), true);
+                    if record {
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
+            }
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
+                if cold {
+                    embedder.reopen(Layout(0), true);
+                    if record {
+                        embedder.machine.record_charges(tape.clone());
+                    }
+                }
                 embedder.deliver_next();
             }
         }
     };
-    (end, embedder.world.printed, stops, checkpoints)
+    if mode == super::ExecutionMode::Source {
+        assert_eq!(packets, 0);
+    }
+    if mode == super::ExecutionMode::Generic {
+        assert_eq!(specialized, 0);
+    }
+    (
+        end,
+        embedder.world.printed,
+        stops,
+        checkpoints,
+        embedder.requests,
+    )
 }
 
 /// K-CHG-001 / K-MACH-008: a guarded read's path gives the values,
@@ -160,6 +216,8 @@ fn guarded_run(source: &str, record: bool, slice: u64, bounds: Bounds) -> Guarde
 /// leaves its instructions to run.
 #[test]
 fn guarded_reads_agree() {
+    use crate::machine::islands::witness::{self, Exit, Family};
+    witness::begin();
     let reads = || crate::machine::islands::GUARDED_READS.with(|n| n.replace(0));
     reads();
     let reference = guarded(true, u64::MAX, super::super::embedder::ROOMY);
@@ -201,6 +259,43 @@ fn guarded_reads_agree() {
     assert!(reads() > 0, "the plain run takes guarded item reads");
     assert!(crate::machine::islands::DIRECT_INDICES.with(|n| n.get()) > 0);
     assert_eq!(natural, reference);
+    for mode in [super::ExecutionMode::Source, super::ExecutionMode::Generic] {
+        assert_eq!(
+            natural,
+            guarded_mode(
+                GUARDED,
+                false,
+                u64::MAX,
+                super::super::embedder::ROOMY,
+                mode,
+                false
+            )
+        );
+    }
+    for slice in [1, 7, 31] {
+        let cold = guarded_mode(
+            GUARDED,
+            false,
+            slice,
+            super::super::embedder::ROOMY,
+            super::ExecutionMode::Specialized,
+            true,
+        );
+        for mode in [super::ExecutionMode::Source, super::ExecutionMode::Generic] {
+            assert_eq!(
+                cold,
+                guarded_mode(
+                    GUARDED,
+                    false,
+                    slice,
+                    super::super::embedder::ROOMY,
+                    mode,
+                    true
+                ),
+                "cold guarded packets at slice {slice}"
+            );
+        }
+    }
     let charged = reference.2.last().unwrap().1.charged.unwrap();
     let mut comparisons = 1;
     for slice in [1, 2, 3, 5, 7, 11, 13, 17, 23, 31] {
@@ -221,6 +316,18 @@ fn guarded_reads_agree() {
         assert_eq!(ended, guarded(true, u64::MAX, bounds), "limit {limit}");
         comparisons += 1;
     }
+    let counts = witness::take();
+    for exit in [Exit::Commit, Exit::Guard, Exit::Partial, Exit::Prefix] {
+        assert!(
+            counts
+                .get(&(Family::GuardedRead, exit))
+                .copied()
+                .unwrap_or(0)
+                > 0,
+            "guarded reads must reach {exit:?}: {counts:?}"
+        );
+    }
+    println!("guarded read exits: {counts:?}");
     println!("guarded reads: {comparisons} paired runs");
 }
 

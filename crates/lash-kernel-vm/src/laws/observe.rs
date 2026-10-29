@@ -447,11 +447,11 @@ fn the_execution_census_counts_statements_across_owner_handoffs() {
         if record {
             embedder.machine.record_charges(tape);
         }
-        crate::machine::islands::TYPED_REPEATED.with(|n| n.set(0));
+        crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));
         embedder.machine.count_execution();
         assert!(matches!(embedder.run_to_end(&[]), End::Finished(_)));
         let census = embedder.machine.take_execution_census();
-        assert!(crate::machine::islands::TYPED_REPEATED.with(|n| n.get()) > 0);
+        assert!(crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.get()) > 0);
         assert_eq!(census.statements.values().sum::<u64>(), 13, "{census:?}");
         assert!(
             census

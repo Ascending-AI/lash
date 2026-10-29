@@ -83,7 +83,7 @@ impl Build<'_> {
                 zero: charge(Value::Int(0))?,
                 nonzero: charge(Value::Int(1))?,
             }),
-            Element::ReadMap => Some(MemberAccess::Map(function.charge.short_text_charge(1)?)),
+            Element::ReadMap => Some(MemberAccess::Map(function.charge.short_text_charge(1))),
             Element::Append(values) => Some(MemberAccess::Append {
                 units: function
                     .charge
@@ -191,13 +191,13 @@ impl Build<'_> {
     ) -> std::collections::BTreeSet<usize> {
         let mut removed = std::collections::BTreeSet::new();
         for at in 0..self.ops.len() {
-            let Op::Heap { site, args } = &self.ops[at].op else {
+            let Op::Heap { site, args, .. } = &self.ops[at].op else {
                 continue;
             };
             if args.len() == 2 {
                 if let Some(units) = self.member_charge(site.lib) {
                     let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
-                    let Op::Heap { site, args } = original else {
+                    let Op::Heap { site, args, .. } = original else {
                         unreachable!()
                     };
                     self.ops[at].op = Op::MemberAccess {
@@ -259,7 +259,7 @@ impl Build<'_> {
             };
             let fold = reads.is_some();
             let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
-            let Op::Heap { site, args } = original else {
+            let Op::Heap { site, args, .. } = original else {
                 unreachable!()
             };
             self.ops[at].op = Op::MemberStore {
@@ -345,16 +345,10 @@ impl Build<'_> {
                     }])
                 )
             {
-                let Op::Write { site: original } =
-                    std::mem::replace(&mut self.ops[head - 1].op, Op::Jump(head))
-                else {
+                let Op::Write { site: init } = &mut self.ops[head - 1].op else {
                     unreachable!()
                 };
-                self.ops[head - 1].op = Op::AccessInit {
-                    head,
-                    original,
-                    held: None,
-                };
+                init.access = Some(AccessStart { head, init: None });
                 if head >= 2
                     && let Op::Write { site: held } = &self.ops[head - 2].op
                     && let Op::Access(site) = &self.ops[head].op
@@ -370,15 +364,10 @@ impl Build<'_> {
                     && !matches!(&site.shape, AccessShape::Index { index: Read::Local { at, .. }, .. } if *at == held.at)
                     && site.consumer.as_ref().is_some_and(|consumer| consumer.reads.iter().any(|read| matches!(read, Read::Local { at, shared: false, .. } if *at == held.at)))
                 {
-                    let held = held.clone();
-                    let Op::AccessInit { original, .. } = &self.ops[head - 1].op else {
+                    let Op::Write { site: held } = &mut self.ops[head - 2].op else {
                         unreachable!()
                     };
-                    self.ops[head - 2].op = Op::AccessInit {
-                        head,
-                        original: original.clone(),
-                        held: Some(held),
-                    };
+                    held.access = Some(AccessStart { head, init: Some(head - 1) });
                 }
             }
         }
@@ -502,12 +491,12 @@ impl Build<'_> {
             return;
         };
         let (operator, reads, write, after) = match &instruction.op {
-            Op::Accumulation {
+            Op::DirectOperator {
                 site: operator,
                 reads,
-                write,
+                to: Destination::Write(write),
                 ..
-            } => (&**operator, reads.as_slice(), &**write, at + 1),
+            } => (&**operator, reads.as_ref(), &**write, at + 1),
             Op::DirectOperator {
                 site: operator,
                 reads,
@@ -562,9 +551,9 @@ impl Build<'_> {
             next: begin.index + 1,
             accumulates: write.accumulates,
             floats: operator
-                .pair
+                .pair(self.exe)
                 .and_then(|pair| pair.floats)
-                .zip(operator.floats),
+                .zip(operator.table(self.exe).units(0)),
         });
         site.after = after;
         site.leaves = write.leaves;
@@ -575,6 +564,9 @@ impl Build<'_> {
     }
 
     pub(super) fn reads(&mut self, args: &[Expr]) -> Option<Box<[Read]>> {
+        if !self.fused {
+            return None;
+        }
         let reads = args
             .iter()
             .map(|arg| match arg.kind {

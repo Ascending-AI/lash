@@ -558,6 +558,8 @@ impl Prepared {
                     resource,
                     prepared,
                     native,
+                    kernels: Default::default(),
+                    deepest: Default::default(),
                 },
             },
             shared_params,

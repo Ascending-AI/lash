@@ -1342,8 +1342,51 @@ pub(crate) fn take_most_visited_frames() -> usize {
     frames::take_most_visited()
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl KernelMachine {
+    /// The shared kernel equality domain at a projection point.
+    pub(crate) fn try_semantic_checkpoint(
+        &mut self,
+    ) -> Result<lash_kernel_state::semantic::Checkpoint, crate::SealError> {
+        let sealed = self
+            .seal(lash_kernel_state::paged::SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })?
+            .ok_or_else(|| crate::SealError::Fault {
+                problem: "an unbounded semantic seal left work".into(),
+            })?;
+        let access = self.heap.pages().clone();
+        struct Source(lash_kernel_state::kernel_internals::tree::Access<'static>);
+        impl lash_kernel_state::paged::PageSource for Source {
+            fn read(
+                &mut self,
+                pages: &[lash_kernel_doc::heap::PageRef],
+            ) -> Result<Vec<Result<lash_kernel_state::paged::PageAnswer, HeapFault>>, HeapFault>
+            {
+                Ok(pages.iter().map(|page| self.0.read(*page)).collect())
+            }
+            fn seal(
+                &mut self,
+                _: lash_kernel_state::paged::PageBody,
+            ) -> Result<lash_kernel_doc::heap::PageRef, HeapFault> {
+                Err(HeapFault::Malformed(
+                    "comparison reader cannot write".into(),
+                ))
+            }
+        }
+        lash_kernel_state::semantic::checkpoint(&sealed.root, Box::new(Source(access)))
+            .map_err(crate::SealError::Heap)
+    }
+}
+
 #[cfg(test)]
 impl KernelMachine {
+    /// The shared kernel equality domain at a test's projection point.
+    pub(crate) fn semantic_checkpoint(&mut self) -> lash_kernel_state::semantic::Checkpoint {
+        self.try_semantic_checkpoint().expect("semantic checkpoint")
+    }
+
     /// Sets `task`'s state as its next publication writes it: what a
     /// continuation law plants for a state the grammar refuses.
     pub(crate) fn tamper_task_state(&mut self, task: TaskId, state: TaskState) -> Result<(), Halt> {
@@ -1365,38 +1408,6 @@ impl KernelMachine {
             })
             .expect("the task rows read");
         delivered
-    }
-
-    /// The shared kernel equality domain at a projection point.
-    pub(crate) fn semantic_checkpoint(&mut self) -> lash_kernel_state::semantic::Checkpoint {
-        let sealed = self
-            .seal(lash_kernel_state::paged::SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .expect("seal")
-            .expect("unbounded seal");
-        let access = self.heap.pages().clone();
-        struct Source(lash_kernel_state::kernel_internals::tree::Access<'static>);
-        impl lash_kernel_state::paged::PageSource for Source {
-            fn read(
-                &mut self,
-                pages: &[lash_kernel_doc::heap::PageRef],
-            ) -> Result<Vec<Result<lash_kernel_state::paged::PageAnswer, HeapFault>>, HeapFault>
-            {
-                Ok(pages.iter().map(|page| self.0.read(*page)).collect())
-            }
-            fn seal(
-                &mut self,
-                _: lash_kernel_state::paged::PageBody,
-            ) -> Result<lash_kernel_doc::heap::PageRef, HeapFault> {
-                Err(HeapFault::Malformed(
-                    "comparison reader cannot write".into(),
-                ))
-            }
-        }
-        lash_kernel_state::semantic::checkpoint(&sealed.root, Box::new(Source(access)))
-            .expect("semantic checkpoint")
     }
 
     /// The phase of every published frame row that stands at a nested

@@ -1,6 +1,7 @@
 //! Immediate partial calls carry a value; buffering and heap work keep
 //! their own physical frames. Source admission and completion are shared.
 use super::super::compiled::CallSite;
+use super::super::execute::Operands;
 use super::*;
 use crate::compile::LibId;
 
@@ -10,7 +11,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         &mut self,
         site: &CallSite,
         (args, inputs): (&[u32], Option<&[Value]>),
-        regs: &mut [Value],
+        regs: &mut Operands<'_>,
         before: u64,
         root_occurrence: Option<usize>,
     ) -> Result<bool, Stop> {
@@ -45,7 +46,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &CallSite,
         library: (LibId, u32),
         args: &[u32],
-        regs: &mut [Value],
+        regs: &mut Operands<'_>,
         edge: (u64, Option<usize>),
     ) -> Result<bool, Stop> {
         let mut values = [Value::Absent; MAX_ARGS];
@@ -62,7 +63,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &CallSite,
         (lib, extra): (LibId, u32),
         args: &[Value],
-        regs: &mut [Value],
+        regs: &mut Operands<'_>,
         edge: (u64, Option<usize>),
     ) -> Result<bool, Stop> {
         if !self.accounting {
@@ -92,7 +93,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &CallSite,
         (lib, extra): (LibId, u32),
         args: &[Value],
-        regs: &mut [Value],
+        regs: &mut Operands<'_>,
         (before, occurrence): (u64, Option<usize>),
     ) -> Result<bool, Stop> {
         let answer = if self.accounting {
@@ -148,7 +149,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     fn finish_call_answer(
         &mut self,
         site: &CallSite,
-        regs: &mut [Value],
+        regs: &mut Operands<'_>,
         (before, occurrence): (u64, Option<usize>),
         finish: impl FnOnce(&mut Self) -> Value,
     ) -> Result<bool, Stop> {

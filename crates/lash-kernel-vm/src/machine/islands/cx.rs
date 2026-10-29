@@ -528,7 +528,7 @@ impl Cx<'_> {
         values: &[Value],
     ) -> Option<(Value, crate::compile::MeteredCharges)> {
         let mut paths = HeapCx::new(self, callees, 0);
-        let value = (heap.entry)(&mut paths, values, natives);
+        let value = (heap.entry?)(&mut paths, values, natives);
         if paths.spoiled || value.is_none() {
             let declined = !paths.built;
             paths.release();
@@ -811,9 +811,6 @@ fn measures_object(plan: &Plan, args: &[Value], result: Option<&Value>) -> bool 
     })
 }
 
-/// The most parameters a heap path's callee takes.
-const HEAP_ARITY: usize = 8;
-
 /// A template's heap paths over a region's context: their general calls
 /// by the template's resolved callees, a body-run helper's answered by its
 /// entry, `level` helpers below the operator's. A form that declines
@@ -888,7 +885,7 @@ impl<'c, 'a> HeapCx<'c, 'a> {
                 let exe = self.cx.exe;
                 let (heap, callees, natives) = entry.heap(&|function| exe.library_lib(function))?;
                 let mut paths = HeapCx::new(self.cx, callees, self.level + 1);
-                let value = (heap.entry)(&mut paths, args, natives);
+                let value = (heap.entry?)(&mut paths, args, natives);
                 self.spoiled |= paths.spoiled;
                 let Some(value) = value else {
                     paths.release();
@@ -934,24 +931,17 @@ impl TemplateHeap for HeapCx<'_, '_> {
         }
         let exe = self.cx.exe;
         let function = exe.lib(*self.callees.get(callee)?);
-        // One argument per parameter, absent past those given; a callee
-        // with more parameters than a heap path passes is the reference's.
-        let mut given = [Value::Absent; HEAP_ARITY];
-        let given = given.get_mut(..function.arity)?;
-        given.get_mut(..args.len())?.copy_from_slice(args);
-        let given = &*given;
+        // Exact operands borrow the generated call's values. Optional filling
+        // belongs to the canonical call packet, so an omitted operand keeps
+        // that source path instead of manufacturing a second padded window.
+        if args.len() != function.arity {
+            return None;
+        }
         let value = self.grown(|paths| match inner(function) {
-            Some(_) => paths.inner(function, given),
-            None => {
-                let cx = &mut *paths.cx;
-                let window = cx.argument_window(given.len())?;
-                for (index, value) in given.iter().enumerate() {
-                    cx.args.put(window.start + index, *value);
-                }
-                let value = cx.answered(function, window.clone());
-                cx.args.release(window.start);
-                value
-            }
+            Some(_) => paths.inner(function, args),
+            None => paths
+                .cx
+                .windowed(args, |cx, window| cx.answered(function, window)),
         });
         self.built |= value.as_ref().and_then(Value::handle).is_some();
         value

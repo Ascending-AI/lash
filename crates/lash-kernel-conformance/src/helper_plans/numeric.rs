@@ -1,12 +1,12 @@
-//! Numeric templates and typed forwards obey PLAN-INDEP and K-CHG-003.
+//! Numeric packet bodies and typed forwards obey PLAN-INDEP and K-CHG-003.
 
 use super::*;
 
 /// PLAN-INDEP / K-CHG-003: generated typed helper paths agree with their
 /// bodies, including the completion tape, raises and depth refusals.
 #[test]
-fn generated_scalar_templates_agree_with_their_bodies() {
-    use lash_kernel_doc::{Float, PreparedNative, Value};
+fn generated_scalar_contracts_agree_with_their_bodies() {
+    use lash_kernel_doc::{Float, Value};
 
     use std::sync::Arc;
     let samples = [
@@ -87,40 +87,62 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 .iter()
                 .find(|(_, registered)| registered.definition().name.as_str() == *name)
                 .unwrap();
-            let template = registered
-                .plan()
-                .unwrap()
-                .template
-                .as_ref()
-                .unwrap_or_else(|| panic!("{name} has no generated scalar path"));
-            let natives: Vec<PreparedNative> = template
-                .callees
-                .iter()
-                .map(|function| {
-                    registry
-                        .get(function)
-                        .unwrap()
-                        .native()
-                        .unwrap()
-                        .prepare()
-                        .unwrap()
-                })
-                .collect();
             let arity = registered.definition().signature.params.len();
-            let args = if dialect == "python" {
-                vec![Value::Int(1); arity]
-            } else {
-                vec![Value::Float(Float::new(1.0)); arity]
-            };
-            assert!(
-                template
-                    .entry
-                    .is_some_and(|entry| entry(&args, &natives).is_some()),
-                "{name}'s numeric path must be exercised"
-            );
+            let domain = registered
+                .plan()
+                .and_then(|plan| plan.template.as_ref())
+                .and_then(|template| {
+                    let native = if dialect == "python" {
+                        template.forwards.ints
+                    } else {
+                        template.forwards.floats
+                    }?;
+                    Some(template.callees[usize::from(native)])
+                });
+            let native = domain
+                .and_then(|id| registry.get(&id))
+                .and_then(|function| function.native())
+                .or_else(|| registered.native())
+                .and_then(|native| native.prepare());
+            if let Some(native) = native {
+                let args = if dialect == "python" {
+                    vec![Value::Int(1); arity]
+                } else {
+                    vec![Value::Float(Float::new(1.0)); arity]
+                };
+                assert!(
+                    (native.entry)(&args).is_some(),
+                    "{name}'s canonical native must answer"
+                );
+            } else if registered.native().is_none() {
+                // A number is ts.to_number's identity arm. Exercise its
+                // conversion so this witness requires a helper body entry.
+                let input = if name == &"ts.to_number" {
+                    "true"
+                } else if dialect == "python" {
+                    "1"
+                } else {
+                    "1.0"
+                };
+                let args = vec![input; arity];
+                let source = format!(
+                    "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
+                    args.join(", ")
+                );
+                let mut document = lash_kernel_doc::parse_document(&source).unwrap();
+                document.library.insert(*function);
+                let program = crate::linked::program(Arc::new(document), base.library.clone());
+                let (_, census) = crate::projection::counted(|| {
+                    run::<0>(&case, &program, &mut Projector::default())
+                });
+                assert!(
+                    census.register_entries > 0,
+                    "{name}'s non-forwarding body must enter the packet stream: {census:?}"
+                );
+            }
             // Every depth near the elided helper frames uses the same
             // refusal point, charge prefix and function name as the body.
-            for call_depth in 0..=template.depth + 2 {
+            for call_depth in 0..=6 {
                 let args = vec![if dialect == "python" { "1" } else { "1.0" }; arity];
                 let source = format!(
                     "kernel 1\nnumbers by_spelling\n# local definition op @{function}\nmain {{ let value = invoke @{function}({}) return value }}",
@@ -191,7 +213,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 );
                 answered += 1;
             }
-            println!("{name}: {answered} template/body cases");
+            println!("{name}: {answered} contract/body cases");
         }
     }
 }
@@ -199,7 +221,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
 /// FIG-6959 / PLAN-INDEP: Python's integer floor operators forward to the
 /// native kernels, and every declined pair (zero and word overflow) keeps
 /// the body's value or Python exception and completion charge. Floats keep
-/// the template, including negative zero and mixed numeric kinds.
+/// the packet body, including negative zero and mixed numeric kinds.
 #[test]
 fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
     use lash_kernel_doc::scalar::ScalarOp;
@@ -266,7 +288,7 @@ fn python_floor_forwards_agree_with_their_bodies_on_edge_pairs() {
         let template = registered.plan().unwrap().template.as_ref().unwrap();
         assert_eq!(
             template.forwards.floats, None,
-            "{name}: floats keep the template"
+            "{name}: floats keep the packet body"
         );
         let native = template.callees
             [usize::from(template.forwards.ints.expect("the integer arm forwards"))];
