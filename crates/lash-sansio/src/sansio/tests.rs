@@ -215,7 +215,11 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
 
-    for actual in [0, 2, 5, 99, u32::MAX] {
+    let mut versions = std::collections::BTreeSet::from([0, 2, 5, 99, u32::MAX]);
+    versions.extend(TURN_CHECKPOINT_SCHEMA_VERSION.checked_sub(1));
+    versions.extend(TURN_CHECKPOINT_SCHEMA_VERSION.checked_add(1));
+    versions.remove(&TURN_CHECKPOINT_SCHEMA_VERSION);
+    for actual in versions {
         let mut incompatible = encoded.clone();
         incompatible["checkpoint"]["schema_version"] = serde_json::json!(actual);
         let checkpoint: SavedTurn =
