@@ -49,3 +49,6 @@ crates/lash-kernel-doc/src/released.rs::empty::EMPTY  # immutable empty helper i
 crates/lash-kernel-doc/src/released.rs::<module>::ADMISSION_EDGES  # per-thread aggregate helper admission edge-visit count; no definitions, identities or guest values; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/perf_witness.rs::<module>::SEAL_DEPTH  # opt-in per-thread diagnostic seal-scope nesting count, restored on drop; no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
 crates/lash-kernel-state/src/paged/checkpoint.rs::<module>::WORK  # opt-in per-thread helper compatibility counts; four aggregate integers only, no guest values or identities; cfg(any(test, feature = "perf-witness")) excludes ordinary builds
+crates/lash-ext-ts-core/src/generated/plans.rs::<module>::TS_ARRAY_DENSE_COPY  # immutable bulk-copy plan derived from the build's fixed helper source; no guest input or retained run state
+crates/lash-ext-ts-core/src/generated/plans.rs::<module>::TS_ARRAY_CONCAT_COPY  # immutable bulk-copy plan derived from the build's fixed helper source; no guest input or retained run state
+crates/lash-kernel-value/src/claims.rs::default::EMPTY  # immutable empty helper-requirement maps; edits use Arc::make_mut and cannot alter the shared empty value
