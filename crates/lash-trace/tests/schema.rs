@@ -493,6 +493,20 @@ fn event_samples() -> Vec<TraceEvent> {
             args: json!({ "path": "README.md" }),
             issuing_node_id: None,
         },
+        TraceEvent::ToolCallReturned {
+            call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
+            provider_call_id: None,
+            name: "read_file".to_string().into(),
+            args: json!({ "path": "README.md" }).into(),
+            output: TraceToolCallOutput {
+                outcome: TraceToolCallOutcome::Success(json!("ok")),
+                control: None,
+            },
+            duration_ms: 3,
+            issuing_node_id: None,
+            attempts: None,
+            span_attributes: Default::default(),
+        },
         TraceEvent::ToolCallCompleted {
             call_id: lash_protocol_types::ToolCallId::fixture("call-1"),
             provider_call_id: None,
