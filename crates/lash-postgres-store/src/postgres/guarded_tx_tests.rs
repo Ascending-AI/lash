@@ -393,3 +393,150 @@ async fn cancelling_a_fenced_begin_leaves_the_pool_ready_for_a_snapshot() {
     snapshot.rollback().await.expect("close the snapshot");
     pool.close().await;
 }
+
+/// Holds one BEGIN's ReadyForQuery after the server entered its transaction,
+/// before SQLx can acknowledge it and increment its transaction depth.
+struct BeginReplyGate {
+    port: u16,
+    armed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reached: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+    relay: tokio::task::JoinHandle<()>,
+}
+
+impl BeginReplyGate {
+    async fn new(database_url: &str) -> Self {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let database: sqlx::postgres::PgConnectOptions =
+            database_url.parse().expect("database URL");
+        let address = (database.get_host().to_owned(), database.get_port());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind BEGIN reply gate");
+        let port = listener.local_addr().expect("gate address").port();
+        let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reached = std::sync::Arc::new(tokio::sync::Notify::new());
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let relay = tokio::spawn({
+            let (armed, reached, release) = (armed.clone(), reached.clone(), release.clone());
+            async move {
+                let (client, _) = listener.accept().await.expect("accept store connection");
+                let server = tokio::net::TcpStream::connect(address)
+                    .await
+                    .expect("connect BEGIN reply gate");
+                let (mut client_read, mut client_write) = client.into_split();
+                let (mut server_read, mut server_write) = server.into_split();
+                tokio::select! {
+                    _ = tokio::io::copy(&mut client_read, &mut server_write) => {}
+                    () = async {
+                        loop {
+                            let mut header = [0; 5];
+                            if server_read.read_exact(&mut header).await.is_err() {
+                                return;
+                            }
+                            let length = u32::from_be_bytes(header[1..].try_into().expect("message length"));
+                            assert!((4..=1_048_576).contains(&length), "bounded test response");
+                            let mut payload = vec![0; length as usize - 4];
+                            server_read.read_exact(&mut payload).await.expect("server response");
+                            if header[0] == b'Z' && payload == b"T"
+                                && armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+                            {
+                                reached.notify_one();
+                                release.notified().await;
+                            }
+                            client_write.write_all(&header).await.expect("forward response header");
+                            client_write.write_all(&payload).await.expect("forward response payload");
+                        }
+                    } => {}
+                }
+            }
+        });
+        Self {
+            port,
+            armed,
+            reached,
+            release,
+            relay,
+        }
+    }
+}
+
+impl Drop for BeginReplyGate {
+    fn drop(&mut self) {
+        self.relay.abort();
+    }
+}
+
+/// FIG-7551: cancelling a history BEGIN before its reply cannot return an
+/// untracked transaction to the catalog lookup preceding an observe snapshot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_history_begin_does_not_poison_the_next_observer_snapshot() {
+    use lash_core_store::store::{SessionHistoryStore as _, WindowSelector};
+    let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("store");
+    let session = SessionId::from("cancelled-history-begin");
+    let mut store = storage.store();
+    store
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session),
+        )
+        .await
+        .expect("create the observed session");
+    let gate = BeginReplyGate::new(database.url()).await;
+    let options = database
+        .url()
+        .parse::<sqlx::postgres::PgConnectOptions>()
+        .expect("database URL")
+        .host("127.0.0.1")
+        .port(gate.port)
+        .ssl_mode(sqlx::postgres::PgSslMode::Disable);
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .connect_with(options)
+        .await
+        .expect("one connection");
+    store.pool = pool.clone();
+    gate.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let reader = tokio::spawn({
+        let (store, session) = (store.clone(), session.clone());
+        async move {
+            store
+                .load_session_window(&session, WindowSelector::Current)
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(30), gate.reached.notified())
+        .await
+        .expect("the server entered BEGIN before cancellation");
+    reader.abort();
+    assert!(
+        reader
+            .await
+            .expect_err("cancel history read")
+            .is_cancelled()
+    );
+    gate.release.notify_one();
+
+    // The host's durable_session_head first looks up the session, then reads
+    // its window. A leaked BEGIN lets that catalog read establish a snapshot
+    // before read_tx tries to set its isolation level.
+    assert!(matches!(
+        store
+            .lookup_session(&session)
+            .await
+            .expect("catalog lookup"),
+        lash_core_store::store::SessionLookup::Live(_)
+    ));
+    let snapshot = store
+        .load_session_window(&session, WindowSelector::Current)
+        .await
+        .expect("cancelled history BEGIN must not poison the next observe snapshot")
+        .expect("the observed session retains its head");
+    assert_eq!(snapshot.session_id, session);
+    assert_eq!(snapshot.head_revision, 0);
+    pool.close().await;
+}

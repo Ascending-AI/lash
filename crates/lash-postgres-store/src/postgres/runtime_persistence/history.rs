@@ -39,9 +39,15 @@ fn corrupt(kind: &'static str, message: impl Into<String>) -> StoreError {
 /// A `REPEATABLE READ READ ONLY` snapshot on `store`'s pool: the one entry
 /// the store's multi-statement reads (history, owner usage) begin through.
 pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", store.pool.begin())
-        .await
-        .map_err(store_sqlx_error)?;
+    // A cancelled BEGIN must finish acknowledging before its connection can
+    // return to the pool, as on the guarded write path. Otherwise SQLx has
+    // depth zero while the server remains inside the read transaction.
+    let mut tx = crate::observed_sql::control("BEGIN", async {
+        let connection = store.pool.acquire().await?;
+        crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()).await
+    })
+    .await
+    .map_err(store_sqlx_error)?;
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read_read_only
