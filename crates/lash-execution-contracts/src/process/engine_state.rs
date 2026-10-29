@@ -456,6 +456,14 @@ pub struct EngineWake {
 /// What an engine asks lash to do next.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineAction {
+    /// Request cancellation of owned admitted tool steps, then apply `next`.
+    /// The actor records each winning decision with this transition before
+    /// starting any step in `next`. Unknown names grant no authority.
+    CancelCalls {
+        steps: Vec<StepName>,
+        cancellation: lash_protocol_types::ToolCancellation,
+        next: Box<EngineAction>,
+    },
     /// Run these steps; non-empty. Each completion is one
     /// [`EngineEvent::StepSettled`]. With a `wake`, the process also sleeps
     /// until that instant while they run, as [`Sleep`](Self::Sleep) does:

@@ -180,7 +180,7 @@ pub enum Progress {
     Complete(Result<Value, CompletionError>),
     Paused {
         calls: Vec<Call>,
-        withdrawn: Vec<CallId>,
+        cancel_requests: Vec<CallId>,
         snapshot: Snapshot,
     },
 }
@@ -409,10 +409,10 @@ impl Engine {
                         pending.push(call.clone());
                         calls.push(call);
                     }
-                    let mut withdrawn = Vec::new();
+                    let mut cancel_requests = Vec::new();
                     pending.retain(|call| {
-                        if park.withdrawn.contains(&call.id.wait) {
-                            withdrawn.push(call.id.clone());
+                        if park.cancel_requests.contains(&call.id.wait) {
+                            cancel_requests.push(call.id.clone());
                             retired.insert(call.id.clone());
                             false
                         } else {
@@ -423,7 +423,7 @@ impl Engine {
                     let output_bytes = program.limits.output_bytes - host.remaining;
                     Progress::Paused {
                         calls,
-                        withdrawn,
+                        cancel_requests,
                         snapshot: Snapshot {
                             inner: Box::new(Continuation {
                                 program,

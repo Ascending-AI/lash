@@ -192,7 +192,7 @@ fn step_settled(
         .find(|(_, wait)| matches!(wait, Wait::Step { step: named, .. } if named == step))
         .map(|(wait, _)| *wait)
     else {
-        // A step the saved run no longer waits on: its wait was withdrawn.
+        // A step the saved run no longer waits on: its owning task cancelled its call.
         return Ok(standing(state));
     };
     let Some(outcome) = effect_outcome(&outcome) else {
@@ -215,7 +215,7 @@ fn step_settled(
 /// failure it reported is an error the guest may catch, carrying the
 /// failure as its data.
 pub(super) fn effect_outcome(output: &SettledOutput) -> Option<lash_kernel_vm::Outcome> {
-    use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, datum_from_json, outcome_of};
+    use lash_vm_broker::kernel::{EFFECT_RESULT, datum_from_json, outcome_of};
     let generic = outcome_of(output)?;
     let payload = match output {
         SettledOutput::Completed(material) => material.payload(),
@@ -249,11 +249,12 @@ pub(super) fn effect_outcome(output: &SettledOutput) -> Option<lash_kernel_vm::O
             datum_from_json(&failure.to_json_value().to_string())
                 .unwrap_or(lash_kernel_doc::Datum::Null),
         ),
-        lash_core::ToolCallOutcome::Cancelled(cancelled) => failed(
-            EFFECT_CANCELLED,
-            cancelled.message.clone(),
-            lash_kernel_doc::Datum::Null,
-        ),
+        lash_core::ToolCallOutcome::Cancelled(cancellation) => {
+            return lash_vm_broker::kernel::store::outcome_of(&SettledOutput::Cancelled {
+                cancellation: cancellation.clone(),
+                evidence: lash_core_store::tool_run::AvailableEvidence::default(),
+            });
+        }
     })
 }
 
@@ -324,7 +325,7 @@ fn run_settled(
             read_count,
             state: parked,
             issued,
-            withdrawn,
+            cancel_requests,
             requirements,
             ..
         } => {
@@ -337,8 +338,12 @@ fn run_settled(
             });
             state.requirements = *requirements;
             state.phase = Phase::Parked;
-            for wait in withdrawn {
-                state.waits.remove(&wait);
+            let explicit_cancel = !cancel_requests.is_empty();
+            let mut cancelled = Vec::new();
+            for wait in cancel_requests {
+                if let Some(Wait::Step { step, .. }) = state.waits.remove(&wait) {
+                    cancelled.push(step);
+                }
             }
             let mut steps = Vec::new();
             for issued in issued {
@@ -399,6 +404,17 @@ fn run_settled(
                 .chain(state.settled.iter().map(|delivery| delivery.wait))
                 .collect();
             state.admissions.retain(|wait, _| held.contains(wait));
+            if explicit_cancel {
+                let next = run(state, steps)?;
+                return Ok(EngineAction::CancelCalls {
+                    steps: cancelled,
+                    cancellation: lash_protocol_types::ToolCancellation::runtime(
+                        "the guest task cancelled its call",
+                    )
+                    .with_origin(lash_protocol_types::CancelOrigin::ModelRequested),
+                    next: Box::new(next),
+                });
+            }
             if !state.settled.is_empty() {
                 return run(state, steps);
             }

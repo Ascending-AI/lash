@@ -73,6 +73,7 @@ pub struct RoundMember {
     attempts: BTreeMap<u32, (SettledOutput, Option<u64>)>,
     /// When its final outcome's commit retained it.
     ended_at_ms: Option<u64>,
+    cancellation: Option<lash_protocol_types::ToolCancellation>,
 }
 
 impl RoundMember {
@@ -118,6 +119,13 @@ impl RoundMember {
     #[must_use]
     pub fn ended_at_ms(&self) -> Option<u64> {
         self.ended_at_ms
+    }
+
+    /// The immutable cancellation decision, including its source, if cancel won.
+    /// Its final outcome remains absent until cancellation has been discharged.
+    #[must_use]
+    pub fn cancellation(&self) -> Option<&lash_protocol_types::ToolCancellation> {
+        self.cancellation.as_ref()
     }
 
     /// Its final outcome, once it has one.
@@ -571,12 +579,13 @@ fn fold_run(
                             committed_state: Vec::new(),
                             attempts: BTreeMap::new(),
                             ended_at_ms: None,
+                            cancellation: None,
                         });
                     }
                     Some(member)
                         if matches!(
                             member.state,
-                            MemberState::RetryDue { attempt, .. } if attempt + 1 == start.attempt
+                            MemberState::RetryDue { attempt, .. } if member.cancellation.is_none() && attempt + 1 == start.attempt
                         ) =>
                     {
                         member.starts.push(row.ordinal);
@@ -593,6 +602,9 @@ fn fold_run(
                     return Err(out_of_order(row));
                 };
                 let member = open_attempt(&mut members, row, parked.start)?;
+                if member.cancellation.is_some() {
+                    return Err(out_of_order(row));
+                }
                 // A park settles only a started attempt, once.
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
@@ -608,6 +620,11 @@ fn fold_run(
                     return Err(out_of_order(row));
                 }
                 let member = open_attempt(&mut members, row, settled.start)?;
+                if let Some(cancellation) = &member.cancellation
+                    && !matches!(&settled.output, SettledOutput::Cancelled { cancellation: actual, .. } if actual == cancellation)
+                {
+                    return Err(out_of_order(row));
+                }
                 let attempt = member.current_start().1;
                 member
                     .attempts
@@ -624,6 +641,9 @@ fn fold_run(
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
+                if member.cancellation.is_some() {
+                    return Err(out_of_order(row));
+                }
                 // Only a bounded retry writes one, within its bound.
                 let Some(bounded) = member.draft.policy().retry() else {
                     return Err(out_of_order(row));
@@ -645,6 +665,15 @@ fn fold_run(
                     outcome: retry.output.clone(),
                     due: DurableInstant(retry.due_at_ms),
                 };
+            }
+            Record::Cancel {
+                start,
+                cancellation,
+            } => {
+                let member = open_attempt(&mut members, row, *start)?;
+                if member.cancellation.replace(cancellation.clone()).is_some() {
+                    return Err(out_of_order(row));
+                }
             }
             Record::Present(reads) => {
                 if reads.len() != body.reads.len() {
@@ -718,20 +747,24 @@ fn open_attempt<'m>(
         .find(|member| member.call() == call)
         .ok_or_else(|| out_of_order(row))?;
     match member.state {
-        MemberState::Final { .. } if row.kind == RunFactKind::XOutcome => {
+        MemberState::Final { .. }
+            if matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
+        {
             Err(FoldRefusal::SecondFinal(call.clone()))
         }
         MemberState::Started { start: open, .. } if open.0 == start => Ok(member),
         // A call whose retry is due may end without its next attempt: a
         // cancel or a veto settles it at the attempt that failed.
         MemberState::RetryDue { start: failed, .. }
-            if failed.0 == start && row.kind == RunFactKind::XOutcome =>
+            if failed.0 == start
+                && matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
         {
             Ok(member)
         }
         // A parked call ends at the attempt that parked it.
         MemberState::Waiting { start: parked, .. }
-            if parked.0 == start && row.kind == RunFactKind::XOutcome =>
+            if parked.0 == start
+                && matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
         {
             Ok(member)
         }

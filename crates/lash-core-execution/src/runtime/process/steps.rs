@@ -788,6 +788,39 @@ pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> Settled
     replace_payload(process, settled, output)
 }
 
+pub(crate) fn discharge_tool_step<'a>(
+    runtime: &'a StepRuntime,
+    execution: &'a AdmittedExecution,
+    parked: &'a Material<CompletionSource>,
+    cancelled: bool,
+) -> crate::runtime::actor::round::Discharge<'a> {
+    Box::pin(async move {
+        let corrupt = |message: String| PluginError::StoredDataCorrupt {
+            record_kind: "parked process tool call".to_owned(),
+            message,
+        };
+        let retained: ParkedProcessToolCall =
+            serde_json::from_str(parked.payload()).map_err(|error| corrupt(error.to_string()))?;
+        if retained.call.call_id != *execution.call() {
+            return Err(corrupt(
+                "the parked call names another admitted call".to_owned(),
+            ));
+        }
+        let SettledOutput::Waiting(parked) = retained.parked else {
+            return Err(corrupt(
+                "the retained call has no parked obligation".to_owned(),
+            ));
+        };
+        let tools = runtime
+            .built_tools()
+            .ok_or_else(|| corrupt("the activation prepared no step tools".to_owned()))?;
+        tools
+            .tools
+            .discharge(&retained.call, execution, &parked, cancelled)
+            .await
+    })
+}
+
 /// A parked process call's retained ToolCallRecord, rebuilt from its pinned
 /// request and the resolution of its completion wait.
 #[must_use]

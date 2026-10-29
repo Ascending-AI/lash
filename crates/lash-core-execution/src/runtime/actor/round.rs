@@ -118,6 +118,7 @@ pub use records::StagedRecord;
 
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 
+pub use rounds::cancel_call;
 pub use rounds::{
     PinnedRound, PresentRecord, admit_model_round, admit_round, pin_round, present, presentation,
     settle_retry, start_retry,
@@ -1100,7 +1101,9 @@ pub(crate) async fn run_bounded(
         (remaining, LimitCause::ExecutionTotal)
     };
     cx.probe().body_entered(admitted.id());
-    let token = cx.cancel().child_token();
+    // The actor's committed call decision reaches the body's token directly,
+    // including while the attempt's future has not been polled again.
+    let token = member_cancel.child_token();
     let mut running = body(token.clone());
     let stopped = tokio::select! {
         output = &mut running => return Ok(output),

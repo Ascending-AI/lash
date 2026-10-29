@@ -11,9 +11,9 @@
 //! alone, so a restore answers the same way without entering a settled body
 //! again.
 //!
-//! A member outlives the wait that admitted it when its task was cancelled
-//! or a `join` answered without it: the ledger keeps its reference, and it
-//! settles on its own, at a later pass or when the run ends.
+//! A member outlives an observer or a `join` that answered without it.
+//! Explicit task cancellation instead records a call decision with the guest
+//! state; the member remains reachable until that cancellation is discharged.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -293,6 +293,15 @@ impl Members {
         }
     }
 
+    pub(crate) async fn activate(&mut self) -> Result<(), Undriven> {
+        loop {
+            let folded = self.fold().await?;
+            if self.act(&folded).await?.is_some() {
+                return Ok(());
+            }
+        }
+    }
+
     /// Run the members of every admission until `decide` answers from the
     /// owner's folded records, or until nothing runs and the execution
     /// stayed hot for `idle_evict`; `quiet` is notified when that hot wait
@@ -319,10 +328,15 @@ impl Members {
         let mut quiet_since: Option<std::time::Instant> = None;
         loop {
             let cancelled = cancel.is_cancelled();
-            if cancelled {
-                self.lifecycle()?.cancel_runs_before(RunSeq(u64::MAX));
-            }
             let folded = self.fold().await?;
+            if cancelled {
+                self.lifecycle()?.request_cancels_before(
+                    &folded,
+                    RunSeq(u64::MAX),
+                    lash_protocol_types::ToolCancellation::runtime("the owning turn stopped")
+                        .with_origin(lash_protocol_types::CancelOrigin::TurnStopped),
+                );
+            }
             let Some(idle) = self.act(&folded).await? else {
                 quiet_since = None;
                 continue;
@@ -388,9 +402,16 @@ impl Members {
         if let Some(bodies) = &self.bodies {
             bodies.closing();
         }
-        self.lifecycle()?.cancel_runs_before(RunSeq(u64::MAX));
         loop {
             let folded = self.fold().await?;
+            self.lifecycle()?.request_cancels_before(
+                &folded,
+                RunSeq(u64::MAX),
+                lash_protocol_types::ToolCancellation::runtime(
+                    "the owning Run closed before the call ended",
+                )
+                .with_origin(lash_protocol_types::CancelOrigin::RunClosing),
+            );
             let Some(idle) = self.act(&folded).await? else {
                 continue;
             };

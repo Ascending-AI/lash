@@ -164,6 +164,9 @@ pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> Sett
     let (completed, failure) = match end {
         MemberEnd::Cancelled => {
             return SettledOutput::Cancelled {
+                cancellation: lash_protocol_types::ToolCancellation::runtime(
+                    "the call was cancelled",
+                ),
                 evidence: AvailableEvidence::default(),
             };
         }
@@ -720,48 +723,34 @@ pub(super) async fn present_resolved(
 /// [`CancelHint::CancelExternalWork`](crate::CancelHint) cancels it, and the
 /// call's hold on it is released, so a later redrive finds the launch
 /// receipt its park recorded and the row may be pruned. Both are idempotent
-/// registry writes; a failure is logged and leaves the hold to the owning
-/// scope's close.
+/// registry writes; a failure retains the call's durable obligation for recovery.
 pub(super) async fn discharge_member(
     context: &RuntimeExecutionContext<'static>,
     call_id: &crate::ToolCallId,
     parked: &Material<CompletionSource>,
     cancelled: bool,
-) {
-    let Ok(parked) = serde_json::from_str::<ParkedCall>(parked.payload()) else {
-        return;
-    };
+) -> Result<(), lash_execution_contracts::PluginError> {
+    let parked = serde_json::from_str::<ParkedCall>(parked.payload()).map_err(|error| {
+        lash_execution_contracts::PluginError::Session(format!(
+            "a parked call's cancellation obligation is unreadable: {error}"
+        ))
+    })?;
     let Some(process_id) = parked
         .launch
         .as_ref()
         .and_then(|launch| launch.process_id.as_ref())
     else {
-        return;
+        return Ok(());
     };
     let processes = &context.dispatch().processes;
-    if cancelled
-        && parked.completion.on_cancel == crate::CancelHint::CancelExternalWork
-        && let Err(error) = processes
+    if cancelled && parked.completion.on_cancel == crate::CancelHint::CancelExternalWork {
+        processes
             .cancel_bound(process_id, context.process_scope(None))
-            .await
-    {
-        tracing::warn!(
-            process_id = %process_id,
-            error = %error,
-            "a cancelled parked call could not cancel the child it launched"
-        );
-        return;
+            .await?;
     }
-    if let Err(error) = processes
+    processes
         .release_consumer_hold(process_id, &super::super::call_run::start_hold_key(call_id))
         .await
-    {
-        tracing::warn!(
-            process_id = %process_id,
-            error = %error,
-            "a parked call could not release its hold on the child it launched"
-        );
-    }
 }
 
 /// The answer the member `call` settled with as `output`.

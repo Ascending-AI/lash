@@ -72,6 +72,10 @@ pub(super) enum Record {
     Wait(OutcomeBody),
     Outcome(OutcomeBody),
     Retry(RetryBody),
+    Cancel {
+        start: u64,
+        cancellation: lash_protocol_types::ToolCancellation,
+    },
     Present(Vec<NodeId>),
     CellReport(NodeId),
 }
@@ -84,6 +88,7 @@ impl Record {
             Self::Wait(_) => RunFactKind::XWait,
             Self::Outcome(_) => RunFactKind::XOutcome,
             Self::Retry(_) => RunFactKind::Retry,
+            Self::Cancel { .. } => RunFactKind::XCancel,
             Self::Present(_) => RunFactKind::Present,
             Self::CellReport(_) => RunFactKind::CellReport,
         }
@@ -206,6 +211,16 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
                 held,
             )
         }
+        Record::Cancel {
+            start,
+            cancellation,
+        } => (
+            RoundFact::Cancel {
+                start: *start,
+                cancellation: cancellation.clone(),
+            },
+            true,
+        ),
         Record::Present(reads) => (
             RoundFact::Present {
                 reads: reads.clone(),
@@ -305,6 +320,13 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             output: output?,
             due_at_ms,
         }),
+        RoundFact::Cancel {
+            start,
+            cancellation,
+        } => Record::Cancel {
+            start,
+            cancellation,
+        },
         RoundFact::Present { reads } => Record::Present(reads),
         RoundFact::CellReport { report } => Record::CellReport(report),
     })

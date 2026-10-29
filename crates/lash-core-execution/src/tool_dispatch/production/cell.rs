@@ -273,15 +273,6 @@ fn cell_answer(
     call: &crate::sansio::PendingToolCall,
     output: &SettledOutput,
 ) -> crate::runtime::actor::round::CompletedCall {
-    if matches!(output, SettledOutput::Cancelled { .. }) {
-        return super::round::answered(
-            call,
-            ToolCallOutput::cancelled(
-                crate::ToolCancellation::runtime("the owning Run closed before the call ended")
-                    .with_origin(crate::CancelOrigin::RunClosing),
-            ),
-        );
-    }
     completed_answer(call, output)
 }
 

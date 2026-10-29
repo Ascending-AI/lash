@@ -34,13 +34,12 @@
 //! # Settlement (ADR 0065, over tasks)
 //!
 //! Every effect is its own admitted execution with its own start and
-//! outcome rows. A list `join` that answers early leaves its other members'
-//! effects live under the run, and so does a task's cancellation: the
-//! effect a cancelled task stood on is released, not awaited, and settles
-//! on its own. Only the run's end closes: it cancels every execution still
-//! open and commits once each has settled, so none outlives the checkpoint
-//! that records the end. Losing the worker closes nothing; another node
-//! resumes the run from its rows.
+//! outcome rows. Aggregate losers and observers retain their live calls.
+//! Explicit task cancellation saves its targeted call identity with the guest
+//! state and the actor's cancel decision. The call stays reachable until its
+//! cancellation obligation is discharged. A run's end closes every call still
+//! open. Losing a worker records no call decision; another node resumes from
+//! the committed guest state and call records.
 //!
 //! # The end
 //!
@@ -306,10 +305,10 @@ pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
             format!("the effect ran past its limit: {cause:?}"),
             Datum::Null,
         ),
-        SettledOutput::Cancelled { .. } => failed(
+        SettledOutput::Cancelled { cancellation, .. } => failed(
             EFFECT_CANCELLED,
-            "the effect was cancelled".to_owned(),
-            Datum::Null,
+            cancellation.message.clone(),
+            datum_from_json(&cancellation.to_json_value().to_string()).unwrap_or_else(|_| Datum::Text(cancellation.to_json_value().to_string())),
         ),
         SettledOutput::Waiting(_) => return None,
     })
@@ -394,7 +393,7 @@ fn ledger_of(
     resolved: &BTreeMap<EffectId, ResolvedAdmission>,
 ) -> Result<EffectLedger, QuietPointRefusal> {
     let mut pending = BTreeMap::new();
-    let mut released = Vec::new();
+    let mut cancelling = Vec::new();
     for entry in &membership.entries {
         let admitted = resolved
             .get(&entry.effect)
@@ -407,8 +406,8 @@ fn ledger_of(
             Disposition::Refused => None,
         };
         let standing = match (entry.status, execution, &admitted.request) {
-            (MemberStatus::Released, Some(execution), _) => {
-                released.push(execution);
+            (MemberStatus::Cancelling, Some(execution), _) => {
+                cancelling.push(execution);
                 continue;
             }
             (MemberStatus::Pending, Some(execution), _) => Standing::Admitted(execution),
@@ -430,7 +429,7 @@ fn ledger_of(
             },
         );
     }
-    EffectLedger::restored(pending, released, membership.next_park, membership.growth)
+    EffectLedger::restored(pending, cancelling, membership.next_park, membership.growth)
         .map_err(refused)
 }
 
@@ -554,7 +553,7 @@ impl DurableSnapshotStore {
     /// that finds the root resumes from it, is answered the same committed
     /// outcomes and runs the final stretch again.
     ///
-    /// `None` when the ledger still names a wait or a released execution.
+    /// `None` when the ledger still names a wait or a cancelling execution.
     /// Closing an execution is a commit of its own, and a successor that
     /// resumed from the parked root would read the closing's cancel as the
     /// execution's own outcome; a sleep still pending could be over by
@@ -568,7 +567,7 @@ impl DurableSnapshotStore {
         &self,
         ledger: &EffectLedger,
     ) -> Result<Option<HeldRoot>, QuietPointRefusal> {
-        if ledger.pending().next().is_some() || !ledger.released().is_empty() {
+        if ledger.pending().next().is_some() || !ledger.cancelling().is_empty() {
             return Ok(None);
         }
         self.revision()
@@ -614,10 +613,11 @@ impl DurableSnapshotStore {
             }
             ledger.close();
         }
-        // A released execution whose outcome committed is no longer open.
-        if !ledger.released().is_empty() {
+        // A cancelling execution whose outcome committed is no longer open.
+        if !ledger.cancelling().is_empty() {
             let folded = members.fold().await.map_err(refused)?;
-            ledger.drop_released(|admitted| final_output(&folded, &self.exec, admitted).is_some());
+            ledger
+                .drop_cancelling(|admitted| final_output(&folded, &self.exec, admitted).is_some());
         }
         struct Requested {
             identity: EffectId,
@@ -670,6 +670,29 @@ impl DurableSnapshotStore {
             tx.end_execution(execution);
         }
 
+        // Guest state and target identities commit together. No cleanup body
+        // can be entered until the owner observes these decisions committed.
+        if !ledger.cancelling().is_empty() {
+            let folded = members.fold().await.map_err(refused)?;
+            for cancelled in ledger.cancelling() {
+                for view in folded.rounds() {
+                    if let Some(member) = view.members().iter().find(|member| {
+                        member.call() == &cancelled.call
+                            && member.outcome().is_none()
+                            && member.cancellation().is_none()
+                    }) {
+                        let _ = round::cancel_call(
+                            &mut tx,
+                            &view.execution(member),
+                            lash_protocol_types::ToolCancellation::runtime(
+                                "the guest task cancelled its call",
+                            )
+                            .with_origin(lash_protocol_types::CancelOrigin::ModelRequested),
+                        );
+                    }
+                }
+            }
+        }
         // The response the turn held commits first, as `model.done` would
         // have, in this transaction: unless the turn stops at once.
         if let Some(response) = response {
@@ -1217,14 +1240,20 @@ impl DurableSnapshotStore {
             });
         pending
             .filter_map(|(identity, admitted)| Some((admitted, book.request(&identity)?.clone())))
-            .chain(ledger.released().iter().filter_map(|admitted| {
+            .chain(ledger.cancelling().iter().filter_map(|admitted| {
                 Some((
                     admitted.clone(),
-                    book.released_request(admitted.operation)?.clone(),
+                    book.cancelling_request(admitted.operation)?.clone(),
                 ))
             }))
             .collect()
     }
+    /// Observe the saved cancellation decisions and signal their bodies before
+    /// the guest is allowed to run its cleanup stretch.
+    pub async fn apply_cancellations(&self) -> Result<(), QuietPointRefusal> {
+        self.members.lock().await.activate().await.map_err(refused)
+    }
+
     /// Every wait `ledger` stands on whose outcome is committed now: read
     /// from the run records, so a restore answers the same ones again.
     ///

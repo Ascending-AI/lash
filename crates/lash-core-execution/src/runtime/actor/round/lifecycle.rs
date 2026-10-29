@@ -71,7 +71,7 @@
 //! label its outcomes commit under. Each pass it folds its rows, calls
 //! [`Lifecycle::act`], and reads each member's final outcome from the fold:
 //! a round presents them, a process hands each to its engine as
-//! `StepSettled`. [`Lifecycle::cancel_runs_before`] cancels what it admitted
+//! `StepSettled`. [`Lifecycle::request_cancels_before`] cancels what it admitted
 //! so far.
 //!
 //! [`GroupCommit`]: lash_durable::GroupCommit
@@ -285,7 +285,7 @@ pub trait MemberBodies: Send + Sync {
         _parked: &'a Material<CompletionSource>,
         _cancelled: bool,
     ) -> Discharge<'a> {
-        Box::pin(async {})
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -293,7 +293,8 @@ pub trait MemberBodies: Send + Sync {
 pub type Presented<'a> = Pin<Box<dyn Future<Output = SettledOutput> + Send + 'a>>;
 
 /// A park's discharge: see [`MemberBodies::discharge`].
-pub type Discharge<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+pub type Discharge<'a> =
+    Pin<Box<dyn Future<Output = Result<(), lash_execution_contracts::PluginError>> + Send + 'a>>;
 
 /// What one [`Lifecycle::act`] did.
 #[derive(Debug)]
@@ -375,13 +376,12 @@ pub struct Lifecycle {
     /// The label the outcomes it settles without a body (an interrupted
     /// start, a cancel, a timeout) commit under.
     settlement_label: CommitLabel,
-    /// Members of runs before this one are cancelled.
-    cancelled_before: RunSeq,
+    cancel_requests: BTreeMap<crate::ToolCallId, crate::ToolCancellation>,
     /// The owner's stop, read in the transaction that commits finished
     /// answers.
     fence: Option<Fence>,
-    /// Each run's member cancel, handed to its running bodies.
-    tokens: BTreeMap<RunSeq, CancellationToken>,
+    /// Only a committed call decision may signal this call's body.
+    tokens: BTreeMap<crate::ToolCallId, CancellationToken>,
     fresh: BTreeSet<AdmittedId>,
     /// The attempts running, each a task; dropped with the lifecycle, it
     /// aborts every one still running.
@@ -432,7 +432,7 @@ impl Lifecycle {
             bodies,
             outcome_label,
             settlement_label: outcome_label,
-            cancelled_before: RunSeq(0),
+            cancel_requests: BTreeMap::new(),
             fence: None,
             tokens: BTreeMap::new(),
             fresh: BTreeSet::new(),
@@ -497,18 +497,79 @@ impl Lifecycle {
         self.policies = policies;
     }
 
-    /// Cancel every member of the runs before `bound`: a running body gets
-    /// its token cancelled and the stop grace; a member not running records
-    /// `Cancelled` at once, and none is retried. Members of later runs are
-    /// untouched.
-    pub fn cancel_runs_before(&mut self, bound: RunSeq) {
-        if bound <= self.cancelled_before {
-            return;
+    /// Submit an explicit request. The owner's next act resolves the call
+    /// through its durable membership and commits the winning decision before
+    /// signalling its token. An unknown call has no effect.
+    pub fn request_cancel(
+        &mut self,
+        call: crate::ToolCallId,
+        cancellation: crate::ToolCancellation,
+    ) {
+        self.cancel_requests.entry(call).or_insert(cancellation);
+    }
+
+    /// Submit the same per-call request for every outstanding member selected
+    /// from the committed fold. A run stop and cell closing use this path too.
+    pub fn request_cancels_before(
+        &mut self,
+        folded: &RunFold,
+        bound: RunSeq,
+        cancellation: crate::ToolCancellation,
+    ) {
+        for view in folded.rounds().filter(|view| view.run() < bound) {
+            for member in view
+                .members()
+                .iter()
+                .filter(|member| member.outcome().is_none())
+            {
+                self.request_cancel(member.call().clone(), cancellation.clone());
+            }
         }
-        self.cancelled_before = bound;
-        for (_, token) in self.tokens.range(..bound) {
-            token.cancel();
+    }
+
+    async fn commit_cancels(
+        &mut self,
+        folded: &RunFold,
+        attempt: Option<&lash_durable::ActorTx>,
+    ) -> Result<Option<Act>, RoundError> {
+        if self.cancel_requests.is_empty() && self.fence.is_none() {
+            return Ok(None);
         }
+        let mut tx = match attempt {
+            Some(tx) => tx.clone(),
+            None => self.cx.begin().await?,
+        };
+        if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
+            self.request_cancels_before(
+                folded,
+                RunSeq(u64::MAX),
+                crate::ToolCancellation::runtime("the owning turn stopped")
+                    .with_origin(crate::CancelOrigin::TurnStopped),
+            );
+        }
+        let mut staged = Vec::new();
+        for view in folded.rounds() {
+            for member in view.members() {
+                let Some(cancellation) = self.cancel_requests.get(member.call()) else {
+                    continue;
+                };
+                if member.outcome().is_none() && member.cancellation().is_none() {
+                    let execution = view.execution(member);
+                    staged.extend(super::rounds::cancel_call(
+                        &mut tx,
+                        &execution,
+                        cancellation.clone(),
+                    ));
+                }
+            }
+        }
+        if staged.is_empty() {
+            self.cancel_requests.clear();
+            return Ok(None);
+        }
+        self.commit(tx, CommitLabel::CALL_CANCEL, staged)
+            .await
+            .map(Some)
     }
 
     /// The attempt is running here, or its outcome awaits this owner's commit.
@@ -534,22 +595,8 @@ impl Lifecycle {
         self.batch_opened = None;
     }
 
-    fn cancelled(&self, run: RunSeq) -> bool {
-        run < self.cancelled_before
-    }
-
-    fn token(&mut self, run: RunSeq) -> CancellationToken {
-        let cancelled = self.cancelled(run);
-        self.tokens
-            .entry(run)
-            .or_insert_with(|| {
-                let token = CancellationToken::new();
-                if cancelled {
-                    token.cancel();
-                }
-                token
-            })
-            .clone()
+    fn token(&mut self, call: &crate::ToolCallId) -> CancellationToken {
+        self.tokens.entry(call.clone()).or_default().clone()
     }
 
     /// Decide from `folded`, the owner's committed records, as of `now`,
@@ -651,15 +698,49 @@ impl Lifecycle {
         if self.finished.is_empty() {
             self.batch_opened = None;
         }
+        if let Some(act) = self.commit_cancels(folded, attempt).await? {
+            return Ok(act);
+        }
+        // A lost acknowledgement is resolved by this same fold on recovery.
+        // Never signal from an unacknowledged or merely requested decision.
+        let mut abandoned = Vec::new();
+        for view in folded.rounds() {
+            for member in view.members() {
+                if let Some(cancellation) = member.cancellation() {
+                    if let Some(token) = self.tokens.get(member.call()) {
+                        token.cancel();
+                    }
+                    let id = view.id_of(member);
+                    if let Some(result) = self.finished.get_mut(&id) {
+                        if let Ok(outcome) = result {
+                            abandoned.extend(outcome.candidate.take());
+                        }
+                        discard_answer(result);
+                        if let Ok(outcome) = result {
+                            outcome.output = cancelled_with(cancellation.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for candidate in abandoned {
+            candidate.0.abandoned().await;
+        }
         let mut settlements = Vec::new();
         let mut due_starts = Vec::new();
         let mut parked: Vec<Parked> = Vec::new();
         let mut next_due: Option<DurableInstant> = None;
         if starting {
             for view in folded.rounds() {
-                let cancelled = self.cancelled(view.run());
                 for member in view.members() {
                     let id = view.id_of(member);
+                    let cancelled = member.cancellation().is_some();
+                    let cancel_output = || {
+                        member
+                            .cancellation()
+                            .cloned()
+                            .map_or_else(cancelled_outcome, cancelled_with)
+                    };
                     if self.in_flight.contains(&id) || self.finished.contains_key(&id) {
                         continue;
                     }
@@ -685,18 +766,21 @@ impl Lifecycle {
                         Recovery::Interrupt => settlements.push((
                             execution,
                             if cancelled {
-                                cancelled_outcome()
+                                cancel_output()
                             } else {
                                 SettledOutput::Interrupted
                             },
                         )),
                         Recovery::RerunAtOrdinal(_) if cancelled => {
-                            settlements.push((execution, cancelled_outcome()));
+                            settlements.push((execution, cancel_output()));
                         }
                         Recovery::RerunAtOrdinal(_) => self.spawn(execution),
+                        Recovery::Vetoed(_) if cancelled => {
+                            settlements.push((execution, cancel_output()))
+                        }
                         Recovery::Vetoed(outcome) => settlements.push((execution, outcome)),
                         Recovery::RetryDue { .. } if cancelled => {
-                            settlements.push((execution, cancelled_outcome()));
+                            settlements.push((execution, cancel_output()));
                         }
                         Recovery::RetryDue { at, .. } => {
                             let observed = match now {
@@ -714,8 +798,11 @@ impl Lifecycle {
                             }
                         }
                         Recovery::Waiting(source) if cancelled => {
-                            self.bodies.discharge(&execution, &source, true).await;
-                            settlements.push((execution, cancelled_outcome()));
+                            self.bodies
+                                .discharge(&execution, &source, true)
+                                .await
+                                .map_err(|error| RoundError::Discharge(Box::new(error)))?;
+                            settlements.push((execution, cancel_output()));
                         }
                         Recovery::Waiting(source) => {
                             for wait in source_waits(&execution, source.named())? {
@@ -743,7 +830,7 @@ impl Lifecycle {
                     return Ok(Act::Refused);
                 }
                 if let Some(won) = winner {
-                    self.parked_ended(won, &parked).await;
+                    self.parked_ended(won, &parked).await?;
                     parked.clear();
                 }
             }
@@ -790,11 +877,20 @@ impl Lifecycle {
             };
             let now = tx.opened_at();
             let fenced = self.fence.as_ref().is_some_and(|fence| fence(&tx));
-            if fenced {
-                self.cancel_runs_before(RunSeq(u64::MAX));
-                for result in self.finished.values_mut() {
-                    discard_answer(result);
-                }
+            if fenced
+                && folded.rounds().any(|view| {
+                    view.members()
+                        .iter()
+                        .any(|member| member.outcome().is_none() && member.cancellation().is_none())
+                })
+            {
+                self.request_cancels_before(
+                    folded,
+                    RunSeq(u64::MAX),
+                    crate::ToolCancellation::runtime("the owning turn stopped")
+                        .with_origin(crate::CancelOrigin::TurnStopped),
+                );
+                return Ok(Some(Act::Refused));
             }
             // One transaction publishes at most one candidate: a second
             // paged completion waits for the next batch.
@@ -826,8 +922,16 @@ impl Lifecycle {
                     execution.id().run,
                     execution.cursor().peek(),
                 );
+                let result = folded
+                    .round(id.run)
+                    .and_then(|view| view.member_started_at(id.ordinal))
+                    .and_then(super::RoundMember::cancellation)
+                    .map_or_else(
+                        || result.clone(),
+                        |cancellation| Ok(cancelled_with(cancellation.clone()).into()),
+                    );
                 let (recorded, candidate, record) =
-                    self.record_finished(&mut tx, &execution, result.clone(), now)?;
+                    self.record_finished(&mut tx, &execution, result, now)?;
                 staged.push(record);
                 match recorded {
                     Recorded::Retry => retried = true,
@@ -1006,7 +1110,7 @@ impl Lifecycle {
         let racing: Vec<WaitRef> = idle.parked.iter().map(|(wait, ..)| *wait).collect();
         tokio::select! {
             won = waits::race(&self.cx, &racing), if !racing.is_empty() => {
-                self.parked_ended(won?, &idle.parked).await;
+                self.parked_ended(won?, &idle.parked).await?;
             }
             Some(joined) = self.running.join_next(), if !self.running.is_empty() => {
                 self.collect(joined, group.max_members)?;
@@ -1113,7 +1217,7 @@ impl Lifecycle {
     /// after discharging what each park launched: the member whose wait
     /// resolved or timed out, or every parked member when the awaiter was
     /// cancelled or the scope revoked its waits.
-    async fn parked_ended(&mut self, won: RaceWinner, parked: &[Parked]) {
+    async fn parked_ended(&mut self, won: RaceWinner, parked: &[Parked]) -> Result<(), RoundError> {
         let member_of = |wait: &WaitRef| parked.iter().find(|(parked, ..)| parked == wait);
         let mut ends: Vec<(&Parked, SettledOutput)> = Vec::new();
         match won {
@@ -1137,28 +1241,36 @@ impl Lifecycle {
                 }
             }
             RaceWinner::Cancelled => {
-                for entry @ (_, execution, source) in parked {
-                    if ends
-                        .iter()
-                        .all(|((_, end, ..), _)| end.id() != execution.id())
-                    {
-                        let output = self
-                            .bodies
-                            .resolved(execution, source, Resolution::Cancelled);
-                        ends.push((entry, output));
-                    }
+                for (_, execution, _) in parked {
+                    self.request_cancel(
+                        execution.call().clone(),
+                        crate::ToolCancellation::runtime("the call's wait scope closed")
+                            .with_origin(crate::CancelOrigin::ParentEnded),
+                    );
                 }
+                return Ok(());
             }
         }
         let opened = self.cx.clock().now();
         for ((_, execution, source), output) in ends {
             let output = self.bodies.present(execution, output).await;
             let cancelled = matches!(output, SettledOutput::Cancelled { .. });
-            self.bodies.discharge(execution, source, cancelled).await;
+            if cancelled {
+                self.request_cancel(
+                    execution.call().clone(),
+                    crate::ToolCancellation::runtime("the call was cancelled"),
+                );
+                continue;
+            }
+            self.bodies
+                .discharge(execution, source, false)
+                .await
+                .map_err(|error| RoundError::Discharge(Box::new(error)))?;
             self.finished
                 .insert(execution.id().clone(), Ok(output.into()));
             self.batch_opened.get_or_insert(opened);
         }
+        Ok(())
     }
 
     /// Commit `tx`, which staged `staged`, under `label`: the rows it
@@ -1299,7 +1411,7 @@ impl Lifecycle {
         let body = self.bodies.body(&execution);
         let stop_grace = self.bodies.stop_grace();
         let cx = self.cx.clone();
-        let cancel = self.token(execution.id().run);
+        let cancel = self.token(execution.call());
         // Only a step that may run again from its committed start can drop
         // an attempt: a capacity verdict from any other records the
         // attempt's `Interrupted`.
@@ -1464,7 +1576,10 @@ impl Lifecycle {
         now: DurableInstant,
     ) -> Option<DurableInstant> {
         let pinned = execution.policy();
-        if self.cancelled(execution.id().run)
+        if self
+            .tokens
+            .get(execution.call())
+            .is_some_and(CancellationToken::is_cancelled)
             || !outcome.may_repeat()
             || !self
                 .policies
@@ -1502,8 +1617,13 @@ enum Recorded {
 pub type Fence = Arc<dyn Fn(&lash_durable::ActorTx) -> bool + Send + Sync>;
 
 fn cancelled_outcome() -> SettledOutput {
+    cancelled_with(crate::ToolCancellation::runtime("the call was cancelled"))
+}
+
+fn cancelled_with(cancellation: crate::ToolCancellation) -> SettledOutput {
     SettledOutput::Cancelled {
         evidence: AvailableEvidence::default(),
+        cancellation,
     }
 }
 

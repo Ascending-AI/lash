@@ -443,7 +443,7 @@ pub(crate) struct Embedder {
     pub(crate) requests: Vec<Request>,
     /// The requests handed out and not yet answered.
     pub(crate) pending: Vec<Request>,
-    pub(crate) withdrawn: Vec<WaitId>,
+    pub(crate) cancel_requests: Vec<WaitId>,
     slice: u64,
     pub(crate) bounds: Bounds,
     probes: Option<Probes>,
@@ -591,7 +591,7 @@ impl Embedder {
             document,
             requests: Vec::new(),
             pending: Vec::new(),
-            withdrawn: Vec::new(),
+            cancel_requests: Vec::new(),
             slice: setup.slice,
             bounds: setup.bounds,
             probes: setup.probes,
@@ -616,7 +616,8 @@ impl Embedder {
         if let Step::Parked(park) = &step {
             self.requests.extend(park.requests.iter().cloned());
             self.pending.extend(park.requests.iter().cloned());
-            self.withdrawn.extend(park.withdrawn.iter().copied());
+            self.cancel_requests
+                .extend(park.cancel_requests.iter().copied());
         }
         step
     }

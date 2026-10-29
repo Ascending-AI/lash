@@ -494,7 +494,7 @@ pub enum RequestWire {
 #[serde(deny_unknown_fields)]
 pub struct ParkWire {
     pub requests: Vec<RequestWire>,
-    pub withdrawn: Vec<WaitId>,
+    pub cancel_requests: Vec<WaitId>,
     pub outstanding: u64,
     pub live: u64,
 }
@@ -516,7 +516,7 @@ impl From<Park> for ParkWire {
                     },
                 })
                 .collect(),
-            withdrawn: park.withdrawn,
+            cancel_requests: park.cancel_requests,
             outstanding: park.outstanding,
             live: park.live,
         }
@@ -549,7 +549,7 @@ impl TryFrom<ParkWire> for MachinePark {
                     })),
                 })
                 .collect::<Result<_, PoolError>>()?,
-            withdrawn: wire.withdrawn,
+            cancel_requests: wire.cancel_requests,
             outstanding: wire.outstanding,
             live: wire.live,
         })

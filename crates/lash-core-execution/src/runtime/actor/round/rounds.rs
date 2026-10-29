@@ -307,3 +307,34 @@ pub fn admit_model_round(
     )?;
     Ok(AdmittedRound::admitted(pinned.run, members))
 }
+
+/// Stage the selected call's immutable cancellation decision. The caller must
+/// select an undecided member from its coherent fold under this actor epoch.
+/// Discharge and signalling follow only once this record is observed committed.
+pub fn cancel_call(
+    tx: &mut ActorTx,
+    execution: &AdmittedExecution,
+    cancellation: crate::ToolCancellation,
+) -> Option<StagedRecord> {
+    let id = execution.id();
+    if tx.domain().iter().any(|write| {
+        matches!(write,
+            lash_durable::DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append {
+                owner, run, kind: lash_durable::domain::RunFactKind::XCancel, call: Some(call), ..
+            }) if owner == &id.owner && *run == id.run && call == execution.call()
+        )
+    }) {
+        return None;
+    }
+    Some(append_staged(
+        tx,
+        &id.owner,
+        id.run,
+        execution.cursor().take(),
+        Some(execution.call()),
+        Record::Cancel {
+            start: id.ordinal.0,
+            cancellation,
+        },
+    ))
+}

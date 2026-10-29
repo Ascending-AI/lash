@@ -223,6 +223,7 @@ pub enum RunFactKind {
     XStart,
     XOutcome,
     XWait,
+    XCancel,
     Present,
     Retry,
     /// A cell's report: a reference-only fact naming the original
@@ -231,11 +232,12 @@ pub enum RunFactKind {
 }
 
 impl RunFactKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Admit,
         Self::XStart,
         Self::XOutcome,
         Self::XWait,
+        Self::XCancel,
         Self::Present,
         Self::Retry,
         Self::CellReport,
@@ -249,6 +251,7 @@ impl RunFactKind {
             Self::XStart => "x_start",
             Self::XOutcome => "x_outcome",
             Self::XWait => "x_wait",
+            Self::XCancel => "x_cancel",
             Self::Present => "present",
             Self::Retry => "retry",
             Self::CellReport => "cell_report",
@@ -268,6 +271,7 @@ impl RunFactKind {
             Self::Present => 5,
             Self::XOutcome => 6,
             Self::CellReport => 7,
+            Self::XCancel => 8,
         }
     }
 

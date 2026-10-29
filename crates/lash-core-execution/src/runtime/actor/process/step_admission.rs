@@ -540,7 +540,8 @@ impl ProcessActivation {
         process: &ProcessId,
         record: &ProcessRecord,
         driver: &mut Driver,
-        action: EngineAction,
+        mut action: EngineAction,
+        fold: &crate::runtime::actor::round::RunFold,
         ending: Ending,
         now: DurableInstant,
         fresh: &mut Vec<AdmittedExecution>,
@@ -548,10 +549,38 @@ impl ProcessActivation {
         let ProcessInput::Engine { .. } = record.input.as_ref() else {
             return Err(corrupt("an advanced process", "it runs no engine"));
         };
+        while let EngineAction::CancelCalls {
+            steps,
+            cancellation,
+            next,
+        } = action
+        {
+            for step in steps {
+                if let Some(held) = driver.steps.get(&step) {
+                    for view in fold.rounds() {
+                        if let Some(member) = view.members().iter().find(|member| {
+                            member.call() == &held.call
+                                && member.outcome().is_none()
+                                && member.cancellation().is_none()
+                        }) {
+                            let _ = crate::runtime::actor::round::cancel_call(
+                                tx,
+                                &view.execution(member),
+                                cancellation.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+            action = *next;
+        }
         // An engine wait is bounded by the engine's own bound, fixed now.
         let deadline = |bound| ParkDeadline::admitted(bound, now).deadline();
         driver.blocked = None;
         match action {
+            EngineAction::CancelCalls { .. } => {
+                return Err(corrupt("an engine action", "cancellation was not reduced"));
+            }
             EngineAction::Steps {
                 steps: requests,
                 wake,

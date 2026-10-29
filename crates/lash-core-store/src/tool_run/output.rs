@@ -354,6 +354,8 @@ pub enum SettledOutput {
     },
     /// It was cancelled.
     Cancelled {
+        /// The immutable decision's attributed cancellation.
+        cancellation: lash_protocol_types::ToolCancellation,
         /// What it retained before it stopped.
         evidence: AvailableEvidence,
     },
@@ -409,7 +411,16 @@ impl SettledOutput {
             (AttemptOutcome::TimedOut { cause, evidence }, None) => {
                 Ok(Self::TimedOut { cause, evidence })
             }
-            (AttemptOutcome::Cancelled { evidence }, None) => Ok(Self::Cancelled { evidence }),
+            (
+                AttemptOutcome::Cancelled {
+                    evidence,
+                    cancellation,
+                },
+                None,
+            ) => Ok(Self::Cancelled {
+                evidence,
+                cancellation,
+            }),
         }
     }
 
@@ -425,8 +436,12 @@ impl SettledOutput {
                 cause: *cause,
                 evidence: evidence.clone(),
             },
-            Self::Cancelled { evidence } => AttemptOutcome::Cancelled {
+            Self::Cancelled {
+                evidence,
+                cancellation,
+            } => AttemptOutcome::Cancelled {
                 evidence: evidence.clone(),
+                cancellation: cancellation.clone(),
             },
         }
     }
@@ -506,8 +521,8 @@ impl SettledOutput {
                 )
                 .with_cause(lash_protocol_types::ToolFailureCause::ExecutionLimit { cause: *cause }),
             ),
-            Self::Cancelled { .. } => lash_protocol_types::ToolCallOutput::cancelled(
-                lash_protocol_types::ToolCancellation::runtime("the call was cancelled"),
+            Self::Cancelled { cancellation, .. } => lash_protocol_types::ToolCallOutput::cancelled(
+                cancellation.clone(),
             ),
             Self::Completed(_) | Self::Failed(_) | Self::Waiting(_) => return None,
         })

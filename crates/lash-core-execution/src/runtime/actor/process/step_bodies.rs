@@ -73,6 +73,7 @@ impl StepBodies {
 
 fn unknown_step() -> SettledOutput {
     SettledOutput::Cancelled {
+        cancellation: lash_protocol_types::ToolCancellation::runtime("the call was cancelled"),
         evidence: AvailableEvidence::default(),
     }
 }
@@ -178,6 +179,25 @@ impl MemberBodies for StepBodies {
                 .steps
                 .resolved(&record, &step, execution, parked, resolution),
             None => unknown_step(),
+        }
+    }
+
+    fn discharge<'a>(
+        &'a self,
+        execution: &'a AdmittedExecution,
+        parked: &'a Material<CompletionSource>,
+        cancelled: bool,
+    ) -> round::Discharge<'a> {
+        match self.step(execution.call()) {
+            Some((_, StepRequest::Tool { .. })) => {
+                crate::runtime::process::steps::discharge_tool_step(
+                    &self.runtime,
+                    execution,
+                    parked,
+                    cancelled,
+                )
+            }
+            _ => Box::pin(async { Ok(()) }),
         }
     }
 

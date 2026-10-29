@@ -167,6 +167,7 @@ enum Cell {
     Repeatable,
     /// A race of a fast call against a slow one.
     Race,
+    ExplicitCancel(CancelSource),
     /// A `processes.await` of a host process.
     AwaitProcess,
     /// A granted call, a durable sleep of [`SLEEP_MS`], and the granted
@@ -177,6 +178,12 @@ enum Cell {
     CancelledBeforeSave,
     /// A first stretch of many slices, then one `Once` call.
     LongStretch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CancelSource {
+    Python,
+    TypeScript,
 }
 
 impl Cell {
@@ -192,6 +199,35 @@ impl Cell {
             }
             Self::Race => "const w = await Promise.race([tools.extFast({ x: 1 }), \
                  tools.extSlow({ x: 2 })]);\nconsole.log(w);"
+                .to_owned(),
+            Self::ExplicitCancel(CancelSource::Python) => r#"import asyncio
+async def selected():
+    try:
+        await tools.ext_slow({"x": 1})
+    finally:
+        await tools.ext_write({"x": 3})
+a = asyncio.create_task(selected())
+b = asyncio.create_task(tools.ext_slow({"x": 2}))
+await tools.ext_fast({})
+a.cancel()
+try:
+    await a
+except asyncio.CancelledError:
+    pass
+await asyncio.sleep(60)
+print("cell stayed alive")"#
+                .to_owned(),
+            Self::ExplicitCancel(CancelSource::TypeScript) => r#"const c = new AbortController();
+const a = tools.extSlow({ x: 1 }, { signal: c.signal });
+const b = tools.extSlow({ x: 2 });
+await tools.extFast({});
+c.abort();
+try { await a; } catch (e) {
+    if (e.name !== "AbortError") { throw e; }
+    await tools.extWrite({ x: 3 });
+}
+await sleep(60000);
+console.log("cell stayed alive");"#
                 .to_owned(),
             Self::AwaitProcess => "const h = await tools.extHandle({});\n\
                  const r = await processes.await({ handle: h });\n\
@@ -247,6 +283,8 @@ struct ExternalWorld {
     binding: Mutex<Option<lash_kernel_value::providers::FormatVersion>>,
     /// How many `ext_slow` bodies were told of their call's cancel.
     cancelled: std::sync::atomic::AtomicUsize,
+    signalled: Mutex<Vec<i64>>,
+    cleanup_signals: Mutex<Option<Vec<i64>>>,
 }
 
 impl ExternalWorld {
@@ -283,9 +321,18 @@ impl StaticToolExecute for ExtTools {
                     None => std::future::pending().await,
                 }
                 self.world
+                    .signalled
+                    .lock_recover()
+                    .push(written_x(call.args).unwrap());
+                self.world
                     .cancelled
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 ToolOutcome::err_fmt("ext_slow was cancelled").into()
+            }
+            WRITE if written_x(call.args) == Some(3) => {
+                *self.world.cleanup_signals.lock_recover() =
+                    Some(self.world.signalled.lock_recover().clone());
+                ToolOutcome::ok(json!({ "cleanup": true })).into()
             }
             HANDLE => {
                 let process = self
@@ -925,7 +972,11 @@ impl CellTurn {
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
-                    lash::rlm::CellDialect::typescript(),
+                    if self.cell == Cell::ExplicitCancel(CancelSource::Python) {
+                        lash::rlm::CellDialect::python()
+                    } else {
+                        lash::rlm::CellDialect::typescript()
+                    },
                 )
                 .with_worker_service(if self.cell == Cell::LongStretch {
                     sliced_workers(&clock, STRETCH_SLICE)
@@ -1416,6 +1467,14 @@ impl Scenario for CellTurn {
         let mut violations = match self.cell {
             Cell::Repeatable => self.repeatable_laws(nodes).await,
             Cell::Race => self.race_laws(nodes, cut).await,
+            Cell::ExplicitCancel(_) => {
+                let mut violations = turn_ended(nodes).await;
+                let signals = self.world.cleanup_signals.lock_recover().clone();
+                if signals.as_deref() != Some(&[1]) {
+                    violations.push(format!("the selected call must be signalled before cleanup, while its sibling stays live; observed {signals:?}; model saw {}", self.last_request()));
+                }
+                violations
+            }
             Cell::Identity | Cell::Sleep | Cell::AwaitProcess | Cell::Deferred => {
                 self.identity_laws(nodes, cut).await
             }
@@ -2375,4 +2434,28 @@ async fn a_parked_cells_committed_match_is_required_on_sqlite_file() {
 #[tokio::test]
 async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory() {
     after_step_during_a_process_await(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn explicit_call_cancel_is_durable_and_selective_before_cell_end() {
+    let mut violations = Vec::new();
+    for source in [CancelSource::Python, CancelSource::TypeScript] {
+        let result = tokio::spawn(async move {
+            Matrix::new()
+                .faults(&[])
+                .horizon(Duration::from_secs(600))
+                .run_test(|| {
+                    CellTurn::new(Cell::ExplicitCancel(source), Dialect::SqliteMemory, None)
+                })
+                .await
+                .assert_held();
+        })
+        .await;
+        if result.is_err() {
+            violations.push(format!("{source:?}: explicit cancellation law failed"));
+        } else {
+            eprintln!("{source:?}: explicit cancellation before cleanup held");
+        }
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }

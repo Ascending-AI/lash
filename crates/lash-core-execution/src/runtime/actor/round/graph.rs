@@ -130,6 +130,21 @@ fn decode_call_id(input: &mut TokenReader<'_>) -> Result<ToolCallId, TokenError>
     ToolCallId::parse(input.text()?).map_err(|error| invalid(error.to_string()))
 }
 
+fn decode_cancellation(
+    input: &mut TokenReader<'_>,
+) -> Result<lash_protocol_types::ToolCancellation, TokenError> {
+    let tree = decode_json(input)?;
+    let cancellation =
+        serde::Deserialize::deserialize(&tree).map_err(|error| invalid(error.to_string()))?;
+    if !lash_vocabulary::matches_json(
+        &lash_protocol_types::durable_serde::Durable(&cancellation),
+        &tree,
+    ) {
+        return Err(invalid("a cancellation is not its canonical spelling"));
+    }
+    Ok(cancellation)
+}
+
 // --- Material references -------------------------------------------------
 
 /// Material owners: Run 0 (its opener as a tree), Process 1, Source 2 (its
@@ -295,9 +310,16 @@ fn encode_attempt(outcome: &AttemptOutcome, out: &mut TokenWriter) {
             out.sum(limit_cause(*cause), 0);
             encode_evidence(evidence, out);
         }
-        AttemptOutcome::Cancelled { evidence } => {
-            out.sum(5, 1);
+        AttemptOutcome::Cancelled {
+            evidence,
+            cancellation,
+        } => {
+            out.sum(5, 2);
             encode_evidence(evidence, out);
+            encode_tree(
+                &lash_protocol_types::durable_serde::Durable(cancellation),
+                out,
+            );
         }
     }
 }
@@ -347,9 +369,10 @@ fn decode_attempt(input: &mut TokenReader<'_>) -> Result<AttemptOutcome, TokenEr
             }
         }
         5 => {
-            expect(1)?;
+            expect(2)?;
             AttemptOutcome::Cancelled {
                 evidence: decode_evidence(input)?,
+                cancellation: decode_cancellation(input)?,
             }
         }
         other => return Err(unsupported(other)),
@@ -1128,6 +1151,12 @@ pub enum RoundFact {
         ended_at_ms: Option<u64>,
         pages: Option<NodeId>,
     },
+    /// 8: the immutable cancel winner, before its body is signalled or its
+    /// parked work is discharged. The final outcome completes this obligation.
+    Cancel {
+        start: u64,
+        cancellation: lash_protocol_types::ToolCancellation,
+    },
     /// 7: a cell's report: a reference to its ReportView over the
     /// original outcomes, never a re-admission or a re-settlement.
     CellReport { report: NodeId },
@@ -1145,6 +1174,7 @@ impl RoundFact {
             Self::Present { .. } => RunFactKind::Present,
             Self::Outcome { .. } => RunFactKind::XOutcome,
             Self::CellReport { .. } => RunFactKind::CellReport,
+            Self::Cancel { .. } => RunFactKind::XCancel,
         }
     }
 
@@ -1244,7 +1274,7 @@ impl RoundFact {
                     decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
                 }
             }
-            Self::Start { .. } => {}
+            Self::Start { .. } | Self::Cancel { .. } => {}
         }
         Ok(())
     }
@@ -1307,6 +1337,17 @@ impl TokenCodec for RoundFact {
                 if let Some(ended_at_ms) = ended_at_ms {
                     out.unsigned(*ended_at_ms);
                 }
+            }
+            Self::Cancel {
+                start,
+                cancellation,
+            } => {
+                out.sum(variant, 2);
+                out.unsigned(*start);
+                encode_tree(
+                    &lash_protocol_types::durable_serde::Durable(cancellation),
+                    out,
+                );
             }
             Self::CellReport { report } => {
                 out.sum(variant, 1);
@@ -1371,6 +1412,13 @@ impl TokenCodec for RoundFact {
                     state: decode_tree(input)?,
                     pages: Option::decode(input)?,
                     ended_at_ms: if ended { Some(input.unsigned()?) } else { None },
+                }
+            }
+            RunFactKind::XCancel => {
+                expect(2)?;
+                Self::Cancel {
+                    start: input.unsigned()?,
+                    cancellation: decode_cancellation(input)?,
                 }
             }
             RunFactKind::CellReport => {

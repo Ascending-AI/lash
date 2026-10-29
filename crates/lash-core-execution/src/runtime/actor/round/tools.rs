@@ -254,6 +254,9 @@ pub trait RoundTools: Send + Sync {
         Box::new(|_| {
             Box::pin(async {
                 SettledOutput::Cancelled {
+                    cancellation: lash_protocol_types::ToolCancellation::runtime(
+                        "the call was cancelled",
+                    ),
                     evidence: lash_core_store::tool_run::AvailableEvidence::default(),
                 }
                 .into()
@@ -295,7 +298,7 @@ pub trait RoundTools: Send + Sync {
         _parked: &'a Material<CompletionSource>,
         _cancelled: bool,
     ) -> super::lifecycle::Discharge<'a> {
-        Box::pin(async {})
+        Box::pin(async { Ok(()) })
     }
 
     /// What the machine is answered with for `call`: a pure function of its
@@ -488,6 +491,9 @@ impl MemberBodies for RoundCalls {
         match self.calls.get(execution.call()) {
             Some(call) => self.tools.resolved(call, execution, parked, resolution),
             None => SettledOutput::Cancelled {
+                cancellation: lash_protocol_types::ToolCancellation::runtime(
+                    "the call was cancelled",
+                ),
                 evidence: AvailableEvidence::default(),
             },
         }
@@ -512,7 +518,7 @@ impl MemberBodies for RoundCalls {
     ) -> super::lifecycle::Discharge<'a> {
         match self.calls.get(execution.call()) {
             Some(call) => self.tools.discharge(call, execution, parked, cancelled),
-            None => Box::pin(async {}),
+            None => Box::pin(async { Ok(()) }),
         }
     }
 
@@ -531,6 +537,9 @@ impl MemberBodies for RoundCalls {
             None => Box::new(|_| {
                 Box::pin(async {
                     SettledOutput::Cancelled {
+                        cancellation: lash_protocol_types::ToolCancellation::runtime(
+                            "the call was cancelled",
+                        ),
                         evidence: AvailableEvidence::default(),
                     }
                     .into()
@@ -586,6 +595,9 @@ pub async fn settle_cancelled(
             tx,
             execution,
             SettledOutput::Cancelled {
+                cancellation: lash_protocol_types::ToolCancellation::runtime(
+                    "the call was cancelled",
+                ),
                 evidence: AvailableEvidence::default(),
             },
             Vec::new(),

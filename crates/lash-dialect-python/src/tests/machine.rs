@@ -722,7 +722,7 @@ fn run_cell(
             let wait = match request {
                 Request::Effect(effect) => effect.wait,
             };
-            !park.withdrawn.contains(&wait)
+            !park.cancel_requests.contains(&wait)
         });
         epochs.push(Epoch {
             delivered: std::mem::take(&mut delivered),

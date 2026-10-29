@@ -63,14 +63,17 @@ fn admitted(identity: EffectId) -> Admission {
     })
 }
 
-fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_kernel_value::sites::WaitId>) -> SettledOutput {
+fn parked(
+    issued: Vec<Issued>,
+    cancel_requests: Vec<lash_kernel_value::sites::WaitId>,
+) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             read_facts: Vec::new(),
             read_count: 0,
             state: sealed(),
             issued,
-            withdrawn,
+            cancel_requests,
             ran: Default::default(),
             caught: Vec::new(),
             reads: None,
@@ -329,7 +332,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     );
 }
 
-/// An effect the boundary refuses and a withdrawn wait dispatch nothing:
+/// An effect the boundary refuses and a cancel_requests wait dispatch nothing:
 /// the refusal is raised at its `perform` by the next run, a `sleep` is a
 /// timer the process wakes for, and the step of a wait the machine
 /// withdrew settles into nothing.
@@ -390,51 +393,6 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             .is_err()
         );
     }
-}
-
-/// A withdrawn operation wait never receives the later step's outcome.
-#[test]
-fn withdrawn_operation_waits_drop_late_outcomes() {
-    let (state, run) = started();
-    let (state, action) = settle(
-        state,
-        &run,
-        parked(
-            vec![
-                effect(1, element(0)),
-                effect(2, element(1)),
-                effect(3, element(2)),
-            ],
-            vec![],
-        ),
-    );
-    assert_eq!(state.pages, Some(sealed().root));
-    let EngineAction::Steps { steps, .. } = action else {
-        panic!("operation steps");
-    };
-    let late = steps[0].step().clone();
-    let live = steps[1].step().clone();
-    let pending = steps[2].step().clone();
-    let (state, action) = settle(state, &live, completed("null".into()));
-    let (run, _, _) = run_of(&action);
-    let (state, action) = settle(
-        state,
-        &run,
-        parked(vec![], vec![lash_kernel_value::sites::testkit::wait_id(1)]),
-    );
-    assert!(matches!(action, EngineAction::Idle));
-    assert_eq!(state.pages, Some(sealed().root));
-    let (state, action) = settle(state, &late, completed("null".into()));
-    assert!(matches!(action, EngineAction::Idle));
-    assert_eq!(state.pages, Some(sealed().root));
-    let (_, action) = settle(state, &pending, completed("null".into()));
-    let (_, input, effects) = run_of(&action);
-    assert!(effects.is_empty());
-    assert_eq!(input.deliver.len(), 1);
-    assert_eq!(
-        input.deliver[0].wait,
-        lash_kernel_value::sites::testkit::wait_id(3)
-    );
 }
 
 /// FIG-7505: an escaped helper uses its defining Link's fill for reads and

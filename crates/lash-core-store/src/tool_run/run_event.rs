@@ -84,6 +84,8 @@ pub enum AttemptOutcome {
     },
     Cancelled {
         evidence: AvailableEvidence,
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
+        cancellation: lash_protocol_types::ToolCancellation,
     },
 }
 
@@ -172,7 +174,7 @@ impl AttemptOutcome {
         match self {
             Self::Completed(output) => Some(output),
             Self::Failed(failure) => Some(&failure.output),
-            Self::TimedOut { evidence, .. } | Self::Cancelled { evidence } => {
+            Self::TimedOut { evidence, .. } | Self::Cancelled { evidence, .. } => {
                 evidence.retained.as_ref()
             }
             Self::Waiting(_) | Self::Interrupted => None,

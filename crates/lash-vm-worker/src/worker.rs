@@ -1151,15 +1151,16 @@ impl<'embedding> Server<'embedding> {
     }
 }
 
-/// Whether a park requests an effect or a sleep it has not withdrawn: a
-/// park the parent saves.
+/// Whether a park admits work or submits explicit cancellation: both must
+/// save the guest state before it runs another stretch.
 fn requests_something(park: &lash_kernel_vm::Park) -> bool {
-    park.requests.iter().any(|request| {
-        let wait = match request {
-            lash_kernel_vm::Request::Effect(effect) => effect.wait,
-        };
-        !park.withdrawn.contains(&wait)
-    })
+    !park.cancel_requests.is_empty()
+        || park.requests.iter().any(|request| {
+            let wait = match request {
+                lash_kernel_vm::Request::Effect(effect) => effect.wait,
+            };
+            !park.cancel_requests.contains(&wait)
+        })
 }
 
 pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {

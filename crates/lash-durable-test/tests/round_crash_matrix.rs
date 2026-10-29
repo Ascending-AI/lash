@@ -580,6 +580,7 @@ impl From<round::RoundError> for Pass {
             round::RoundError::Fold(_)
             | round::RoundError::Settle(_)
             | round::RoundError::StatePublication(_)
+            | round::RoundError::Discharge(_)
             | round::RoundError::NotAdmitted(_) => Self::Again,
         }
     }

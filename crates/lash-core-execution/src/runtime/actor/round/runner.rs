@@ -142,6 +142,10 @@ pub enum RoundError {
     /// namespace from durable state.
     #[error("a committed outcome's plugin state does not publish: {0}")]
     StatePublication(crate::RuntimeEffectControllerError),
+    /// A cancellation obligation could not be discharged. Its decision stays
+    /// open in the journal for the next activation to retry.
+    #[error("call discharge failed: {0}")]
+    Discharge(Box<lash_execution_contracts::PluginError>),
     /// The owner has no admission under this run.
     #[error("run {0:?} is not admitted")]
     NotAdmitted(RunSeq),
@@ -286,10 +290,15 @@ impl RoundRunner {
         let mut quiet_since: Option<std::time::Instant> = None;
         loop {
             let cancelled = self.cancel.is_cancelled();
-            if cancelled {
-                self.lifecycle.cancel_runs_before(RunSeq(self.run.0 + 1));
-            }
             let folded = rows.fold(&self.policies, &waits)?;
+            if cancelled {
+                self.lifecycle.request_cancels_before(
+                    &folded,
+                    RunSeq(self.run.0 + 1),
+                    crate::ToolCancellation::runtime("the owning turn stopped")
+                        .with_origin(crate::CancelOrigin::TurnStopped),
+                );
+            }
             let settled = folded
                 .round(self.run)
                 .ok_or(RoundError::NotAdmitted(self.run))?

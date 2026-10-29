@@ -207,7 +207,7 @@ impl InProcessMachine {
                             .map(|step| match step {
                                 Step::Parked(park) => MachineStep::Parked(MachinePark {
                                     requests: park.requests,
-                                    withdrawn: park.withdrawn,
+                                    cancel_requests: park.cancel_requests,
                                     outstanding: park.outstanding,
                                     live: park.live,
                                 }),

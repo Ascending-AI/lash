@@ -77,6 +77,7 @@ impl CommitLabel {
 
     // Tool rounds (V0, then L4).
     /// `round.outcome`: A batch of finished members' outcomes and their store-local effects (C5).
+    pub const CALL_CANCEL: Self = Self::new("call.cancel");
     pub const ROUND_OUTCOME: Self = Self::new("round.outcome");
     /// `round.retry`: A retry record with its due time, of a round member or
     /// a process step (their admitted-execution lifecycle is one).
@@ -183,7 +184,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 51] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -206,6 +207,7 @@ impl CommitLabel {
         Self::SESSION_RELEASE,
         Self::SESSION_COMMAND,
         Self::ROUND_OUTCOME,
+        Self::CALL_CANCEL,
         Self::ROUND_RETRY,
         Self::ROUND_START,
         Self::TOOL_EFFECT,

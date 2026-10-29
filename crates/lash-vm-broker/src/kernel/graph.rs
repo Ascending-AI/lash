@@ -14,7 +14,7 @@
 //!   authority for the request: the broker's membership, the host's call
 //!   summary and the call's outcome all refer to it, none copies it.
 //! - **EffectMembership** (kind 17): the waits a parked state stands on and
-//!   the released executions still open, each by its admission, with the
+//!   the cancelling executions still open, each by its admission, with the
 //!   number the next admitting park takes. No request bytes.
 //!
 //! A restore resolves each effect identity the kernel saved through the
@@ -450,12 +450,12 @@ impl Admission {
 
 // --- Effect membership ---------------------------------------------------
 
-/// Whether a member is a wait the state stands on (0) or a released
+/// Whether a member is a wait the state stands on (0) or a cancelling
 /// execution still open (1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemberStatus {
     Pending,
-    Released,
+    Cancelling,
 }
 
 /// One effect the membership names.
@@ -468,7 +468,7 @@ pub struct MemberEntry {
     pub status: MemberStatus,
 }
 
-/// Kind 17: the effects a parked state stands on or has released.
+/// Kind 17: the effects a parked state stands on or is cancelling.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EffectMembership {
     pub next_park: u64,
@@ -493,7 +493,7 @@ impl TokenCodec for EffectMembership {
             out.sum(
                 match entry.status {
                     MemberStatus::Pending => 0,
-                    MemberStatus::Released => 1,
+                    MemberStatus::Cancelling => 1,
                 },
                 0,
             );
@@ -518,7 +518,7 @@ impl TokenCodec for EffectMembership {
             TokenReader::expect_fields(fields, 0)?;
             let status = match variant {
                 0 => MemberStatus::Pending,
-                1 => MemberStatus::Released,
+                1 => MemberStatus::Cancelling,
                 other => return Err(unsupported(other)),
             };
             entries.push(MemberEntry {
@@ -700,9 +700,9 @@ impl AdmissionBook {
     }
 
     /// The frozen request of the admission that minted execution
-    /// `operation`: a released execution's, whose wait is gone.
+    /// `operation`: a cancelling execution's, whose wait is gone.
     #[must_use]
-    pub fn released_request(&self, operation: OperationId) -> Option<&FrozenRequest> {
+    pub fn cancelling_request(&self, operation: OperationId) -> Option<&FrozenRequest> {
         self.admitted.values().find_map(|admitted| {
             matches!(&admitted.admission.disposition,
                 Disposition::Execution { operation: minted, .. } if *minted == operation)
@@ -789,12 +789,12 @@ impl AdmissionBook {
     }
 
     /// The membership `ledger` stands on: each wait by its admission, and
-    /// each released execution by the admission that minted it.
+    /// each cancelling execution by the admission that minted it.
     ///
     /// # Errors
     ///
     /// [`GraphRefusal::AdmissionMissing`] for a wait no admission here
-    /// names, [`GraphRefusal::InvalidBody`] for such a released execution, [`GraphRefusal::AdmissionMismatch`] for one on
+    /// names, [`GraphRefusal::InvalidBody`] for such a cancelling execution, [`GraphRefusal::AdmissionMismatch`] for one on
     /// another wait.
     pub fn membership(
         &self,
@@ -818,32 +818,32 @@ impl AdmissionBook {
                 status: MemberStatus::Pending,
             });
         }
-        for released in ledger.released() {
+        for cancelled in ledger.cancelling() {
             let (effect, Admitted { node, admission, .. }) = self
                 .admitted
                 .iter()
                 .find(|(_, admitted)| {
                     matches!(&admitted.admission.disposition,
-                        Disposition::Execution { operation, .. } if *operation == released.operation)
+                        Disposition::Execution { operation, .. } if *operation == cancelled.operation)
                 })
                 .ok_or_else(|| {
                     body(
                         NodeKind::EFFECT_MEMBERSHIP,
-                        "a released execution no admission minted",
+                        "a cancelling execution no admission minted",
                     )
                 })?;
             entries.push(MemberEntry {
                 effect: effect.clone(),
                 wait: admission.wait,
                 admission: *node,
-                status: MemberStatus::Released,
+                status: MemberStatus::Cancelling,
             });
         }
         EffectMembership::new(ledger.next_park(), ledger.growth(), entries)
     }
 
     /// Forgets every admission `membership` no longer names, and returns
-    /// the rows that remove their lookups: no live wait or released
+    /// the rows that remove their lookups: no live wait or cancelling
     /// execution needs them. Their outcomes and summaries keep the
     /// historical request through their own references.
     pub fn retire_unnamed(

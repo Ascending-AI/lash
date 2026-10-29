@@ -97,7 +97,7 @@ pub trait KernelEffects: Projections + Send + Sync {
     }
 
     /// The run resumed from its latest park: each execution its ledger
-    /// names, awaited or released, with the request its admission froze.
+    /// names, awaited or cancelling, with the request its admission froze.
     ///
     /// # Errors
     ///
@@ -889,13 +889,16 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
         self.machines.bounds()
     }
 
-    fn withdrawn(&mut self, waits: &[WaitId]) {
+    fn cancel_requests(&mut self, waits: &[WaitId]) {
         for wait in waits {
-            self.ledger.withdraw(*wait);
+            self.ledger.cancel_call(*wait);
         }
     }
 
     async fn next(&mut self) -> Result<MachineStep, KernelFailure> {
+        if !self.ledger.cancelling().is_empty() {
+            self.broker.store.apply_cancellations().await?;
+        }
         if self.machine.is_none() {
             let state = self.resting.take().ok_or(KernelFailure::EmptyCheckpoint)?;
             let previous = std::mem::replace(
@@ -938,10 +941,11 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
     async fn park(&mut self, park: MachinePark) -> Result<Option<CellStop>, KernelFailure> {
         let machines = self.machines;
         let cancel = self.cancel;
+        let cancels = !park.cancel_requests.is_empty();
         let requests = park.requests;
         let outstanding = park.outstanding;
         let live = park.live;
-        if !requests.is_empty() {
+        if !requests.is_empty() || cancels {
             let running = self
                 .machine
                 .as_mut()
@@ -1007,6 +1011,11 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
             self.saved = true;
             self.ledger = committed.ledger;
             self.resting = Some(self.broker.resting(committed.root, state, &self.ledger)?);
+        }
+        if cancels {
+            self.broker.store.apply_cancellations().await?;
+            self.resting = None;
+            return Ok(None);
         }
         if self.ledger.pending().next().is_none() {
             return Err(KernelFailure::Stalled);

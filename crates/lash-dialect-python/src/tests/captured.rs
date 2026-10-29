@@ -157,7 +157,7 @@ fn on_the_kernel(source: &str, script: &Script) -> Capture {
         super::pages::Session::default(),
         |_, park, text_| {
             assert!(
-                park.withdrawn.is_empty(),
+                park.cancel_requests.is_empty(),
                 "the capture script delivers every call"
             );
             let mut outcomes = Vec::new();

@@ -406,7 +406,7 @@ impl Issued {
 pub(crate) enum KernelRunOutput {
     /// The run parked: the page it sealed, which the step's outcome
     /// published and owns, the waits it asked for since its last park and
-    /// the waits it withdrew.
+    /// the explicit call cancellations it requested.
     Parked {
         read_facts: Vec<lash_protocol_types::ReadFact>,
         read_count: u64,
@@ -414,7 +414,7 @@ pub(crate) enum KernelRunOutput {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        withdrawn: Vec<lash_kernel_value::sites::WaitId>,
+        cancel_requests: Vec<lash_kernel_value::sites::WaitId>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).
         #[serde(

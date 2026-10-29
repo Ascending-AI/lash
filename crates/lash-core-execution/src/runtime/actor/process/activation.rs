@@ -1003,7 +1003,23 @@ impl ProcessActivation {
         if matches!(event, EngineEvent::Cancelled { .. }) {
             // Steps admitted before the cancel see their token; any the
             // engine asks for now run within the grace.
-            live.lifecycle.cancel_runs_before(RunSeq(driver.next_run));
+            for view in fold
+                .rounds()
+                .filter(|view| view.run() < RunSeq(driver.next_run))
+            {
+                for member in view
+                    .members()
+                    .iter()
+                    .filter(|member| member.outcome().is_none() && member.cancellation().is_none())
+                {
+                    let _ = super::super::round::cancel_call(
+                        &mut tx,
+                        &view.execution(member),
+                        crate::ToolCancellation::runtime("the owning process was cancelled")
+                            .with_origin(crate::CancelOrigin::ParentEnded),
+                    );
+                }
+            }
         }
         // A tool panic is a host terminal, not an event the engine may
         // recover from by resuming its guest or scheduling another step.
@@ -1067,6 +1083,7 @@ impl ProcessActivation {
                 &record,
                 &mut driver,
                 action,
+                &fold,
                 ending,
                 now,
                 &mut fresh,

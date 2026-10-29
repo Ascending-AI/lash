@@ -16,7 +16,7 @@
 //! but the saved one still names it until the next save, so after a crash
 //! the outcome is delivered again from its record. A park's run records
 //! therefore stay until a saved ledger names none of its effects, neither
-//! awaited nor [released](EffectLedger::released): the save that drops the
+//! awaited nor [cancelling](EffectLedger::cancelling): the save that drops the
 //! last of them prunes the records in its own transaction
 //! ([`EffectLedger::oldest_reachable`]).
 
@@ -80,11 +80,8 @@ pub struct Growth {
 pub struct EffectLedger {
     /// The waits the state stands on, by effect identity.
     pending: BTreeMap<EffectId, PendingEffect>,
-    /// Admitted executions the run no longer waits on (their task was
-    /// cancelled) that are not known to have settled. They stay live under
-    /// the run, as a join's losers do (ADR 0065), and the run's end settles
-    /// each one.
-    released: Vec<AdmittedEffect>,
+    /// Explicitly cancelled calls, retained until their decision is discharged.
+    cancelling: Vec<AdmittedEffect>,
     /// The number the next park that admits takes.
     next_park: u64,
     /// What the run's saves appended so far.
@@ -119,13 +116,13 @@ impl EffectLedger {
     /// [`LedgerRefusal`].
     pub fn restored(
         pending: BTreeMap<EffectId, PendingEffect>,
-        released: Vec<AdmittedEffect>,
+        cancelling: Vec<AdmittedEffect>,
         next_park: u64,
         growth: Growth,
     ) -> Result<Self, LedgerRefusal> {
         let ledger = Self {
             pending,
-            released,
+            cancelling,
             next_park,
             growth,
         };
@@ -165,7 +162,7 @@ impl EffectLedger {
         }
         Ok(Self {
             pending,
-            released: self.released.clone(),
+            cancelling: self.cancelling.clone(),
             next_park: self.next_park,
             growth: self.growth,
         })
@@ -178,11 +175,6 @@ impl EffectLedger {
 
     pub fn get(&self, identity: &EffectId) -> Option<&PendingEffect> {
         self.pending.get(identity)
-    }
-
-    /// The executions the run no longer waits on, still open.
-    pub fn released(&self) -> &[AdmittedEffect] {
-        &self.released
     }
 
     /// The number the next park that admits takes.
@@ -200,7 +192,7 @@ impl EffectLedger {
         self.growth = growth;
     }
 
-    /// Every admitted execution the ledger names, awaited or released.
+    /// Every admitted execution the ledger names, awaited or cancelling.
     pub fn executions(&self) -> impl Iterator<Item = &AdmittedEffect> {
         self.pending
             .values()
@@ -208,15 +200,17 @@ impl EffectLedger {
                 Standing::Admitted(admitted) => Some(admitted),
                 Standing::Refused(_) => None,
             })
-            .chain(&self.released)
+            .chain(&self.cancelling)
     }
 
     /// Whether the state waits on an admitted execution: what a cancel
     /// settles. Without one, a cancelled run stands on sleeps alone.
     pub fn awaits_execution(&self) -> bool {
-        self.pending
-            .values()
-            .any(|entry| matches!(entry.standing, Standing::Admitted(_)))
+        !self.cancelling.is_empty()
+            || self
+                .pending
+                .values()
+                .any(|entry| matches!(entry.standing, Standing::Admitted(_)))
     }
 
     /// The oldest park whose run records a state saved with this ledger can
@@ -255,11 +249,9 @@ impl EffectLedger {
         self.pending.remove(identity)
     }
 
-    /// The machine withdrew `wait` (its task was cancelled, or the run
-    /// moved past it): the run stops waiting on it. An admitted execution
-    /// is released, live until it settles; a sleep or a refusal is gone.
-    /// `false` when the ledger stands on no such wait.
-    pub fn withdraw(&mut self, wait: WaitId) -> bool {
+    /// The owning task explicitly cancelled this admitted call. Keep the
+    /// identity until its durable cancellation has been discharged.
+    pub fn cancel_call(&mut self, wait: WaitId) -> bool {
         let Some(identity) = self
             .pending
             .iter()
@@ -273,21 +265,25 @@ impl EffectLedger {
             ..
         }) = self.pending.remove(&identity)
         {
-            self.released.push(admitted);
+            self.cancelling.push(admitted);
         }
         true
+    }
+
+    pub fn cancelling(&self) -> &[AdmittedEffect] {
+        &self.cancelling
     }
 
     /// The run ended and every execution it admitted has settled: the
     /// ledger names nothing.
     pub(crate) fn close(&mut self) {
         self.pending.clear();
-        self.released.clear();
+        self.cancelling.clear();
     }
 
-    /// Forgets every released execution `settled` answers for: its outcome
+    /// Forgets every cancelling execution `settled` answers for: its outcome
     /// committed, and nothing waits for it.
-    pub(crate) fn drop_released(&mut self, mut settled: impl FnMut(&AdmittedEffect) -> bool) {
-        self.released.retain(|admitted| !settled(admitted));
+    pub(crate) fn drop_cancelling(&mut self, mut settled: impl FnMut(&AdmittedEffect) -> bool) {
+        self.cancelling.retain(|admitted| !settled(admitted));
     }
 }

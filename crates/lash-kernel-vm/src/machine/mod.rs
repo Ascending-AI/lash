@@ -1148,7 +1148,7 @@ impl KernelMachine {
         if host.cancel_requested() {
             return Ok(self.finish_with(End::Cancelled));
         }
-        if self.waits.is_empty() {
+        if self.waits.is_empty() && self.withdrawn.is_empty() {
             let mut waiting = Vec::new();
             self.task_table()
                 .and_then(|tasks| {
@@ -1181,7 +1181,7 @@ impl KernelMachine {
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,
-            withdrawn,
+            cancel_requests: withdrawn,
             outstanding,
             live,
         }))
@@ -1206,6 +1206,12 @@ impl KernelMachine {
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {
+            // Cancelling an admitted call is a host-visible operation. Stop
+            // before cleanup or any other task can perform a later operation.
+            if !self.withdrawn.is_empty() {
+                self.publish_holdings().map_err(machine_error)?;
+                return self.park(host);
+            }
             if let Some(end) = self.end.take() {
                 if let Err(halt) = self.publish_holdings() {
                     return self.ended_by(halt);

@@ -663,12 +663,13 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let withdrawn: Vec<lash_kernel_value::sites::WaitId> = park.withdrawn.clone();
+            let cancel_requests: Vec<lash_kernel_value::sites::WaitId> =
+                park.cancel_requests.clone();
             let issued = park
                 .requests
                 .into_iter()
                 .filter(|request| {
-                    !withdrawn.contains(&match request {
+                    !cancel_requests.contains(&match request {
                         Request::Effect(effect) => effect.wait,
                     })
                 })
@@ -690,7 +691,7 @@ async fn kernel_run(
                     read_count: host.read_ordinal.load(std::sync::atomic::Ordering::Relaxed),
                     state,
                     issued,
-                    withdrawn,
+                    cancel_requests,
                     ran,
                     caught,
                     reads,

@@ -619,7 +619,7 @@ main {{
     assert_eq!(park.live, 1);
     let end = embedder.run_to_end(&["a"]);
     assert_eq!(result(end), text("a"));
-    assert!(embedder.withdrawn.is_empty());
+    assert!(embedder.cancel_requests.is_empty());
     assert_eq!(
         embedder.world.printed[2..],
         [
@@ -671,45 +671,6 @@ const CLEANS_UP: &str = r#"
 definition "function cleans_up() -> Any\nkernel 1\nmetering statements\nbody { \n  try {\n    do perform 0(\"slow\") as Any\n    print \"not reached\"\n  } catch e {\n    print (\"caught\", e.kind)\n    do perform 0(\"cleanup\") as Any\n    print \"cleaned\"\n    throw e\n  } finally {\n    print \"finally\"\n  }\n }"
 
 "#;
-
-/// `K-TASK-017`: `cancel` raises `cancelled` at the target's wait; its
-/// `catch` and `finally` blocks run and may wait; the withdrawn wait is
-/// reported at the next park and its outcome is dropped.
-#[test]
-fn cancel_raises_at_the_wait_and_cleanup_runs_and_may_wait() {
-    let mut embedder = Embedder::new(&format!(
-        r#"{CLEANS_UP}
-main {{
-  let h = spawn call cleans_up()
-  do perform 0("gate") as Any
-  do cancel h
-  print "cancelled"
-  let kind = null
-  try {{ do join h }} catch e {{ set kind = e.kind }}
-  do cancel h
-  return kind
-}}"#
-    ));
-    assert!(matches!(embedder.run(), Step::Parked(_)));
-    assert_eq!(embedder.asked(), ["slow", "gate"]);
-    embedder.deliver("gate");
-    let Step::Parked(park) = embedder.run() else {
-        panic!("the cleanup waits");
-    };
-    assert_eq!(park.withdrawn, [WAIT_0]);
-    assert_eq!(park.requests.len(), 1);
-    assert_eq!(embedder.deliver("slow"), Delivered::Dropped);
-    assert_eq!(result(embedder.run_to_end(&["cleanup"])), text("cancelled"));
-    assert_eq!(
-        embedder.world.printed,
-        [
-            text("cancelled"),
-            pair("caught", "cancelled"),
-            text("cleaned"),
-            text("finally"),
-        ]
-    );
-}
 
 /// `K-TASK-017`: a ready task is cancelled in place of the result it was
 /// resuming with; the running task's own `cancel` raises; a task

@@ -119,8 +119,8 @@ fn embedder_fan_out_parks_and_resumes() {
     facade_delivery_contract();
 }
 
-/// The facade must retain run identity, reject duplicate batches before delivery,
-/// and remove withdrawn calls from its host-facing pending ledger (K-MACH-004).
+/// The facade retains run identity and rejects duplicate batches before
+/// delivery (K-MACH-004).
 fn facade_delivery_contract() {
     use lash_kernel_engine::{Answer, Dialect, Engine, External, Fault, Limits, Progress, Value};
     use lash_kernel_value::{ContractId, Name, Param, Signature, Type};
@@ -248,98 +248,6 @@ fn facade_delivery_contract() {
         ),
         Err(Fault::UnknownAnswer)
     ));
-
-    // Reuse the existing withdrawal corpus input; the extra oracle is the
-    // facade's pending/withdrawn ledger, which the machine corpus cannot see.
-    let corpus: serde_json::Value =
-        serde_json::from_str(include_str!("../corpus/mach/K-MACH-004.json")).unwrap();
-    let document =
-        lash_kernel_doc::parse_document(corpus["cases"][1]["document"].as_str().unwrap()).unwrap();
-    let fills = document
-        .imports
-        .iter()
-        .map(|(slot, import)| {
-            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
-                panic!("operation fixture");
-            };
-            (
-                *slot,
-                lash_kernel_value::Fill::Operation(lash_kernel_value::OperationRequirement::new(
-                    signature.clone(),
-                    ContractId::new("test"),
-                )),
-            )
-        })
-        .collect();
-    let link = lash_kernel_value::Link {
-        helper_fills: Default::default(),
-        document: document.identity(),
-        fills,
-    };
-    let content = lash_kernel_package::LinkedContent {
-        documents: std::collections::BTreeMap::from([(
-            document.identity(),
-            std::sync::Arc::new(document),
-        )]),
-        links: std::collections::BTreeMap::from([(link.identity(), link.clone())]),
-        packages: Default::default(),
-    };
-    let program = engine
-        .prepare(link.identity(), &content, lash_kernel_vm::Target::Main)
-        .unwrap();
-    let Progress::Paused {
-        calls, snapshot, ..
-    } = engine.run(&program, vec![]).unwrap().state
-    else {
-        panic!("initial park");
-    };
-    assert_eq!(calls.len(), 2);
-    let slow = calls[0].id.clone();
-    let turn = engine
-        .resume(
-            snapshot,
-            vec![Answer {
-                id: calls[1].id.clone(),
-                result: Ok(value(2)),
-            }],
-        )
-        .unwrap();
-    let Progress::Paused {
-        calls,
-        withdrawn,
-        snapshot,
-    } = turn.state
-    else {
-        panic!("cancelled wait and next call");
-    };
-    assert_eq!(withdrawn, vec![slow.clone()]);
-    assert_eq!(
-        snapshot
-            .pending()
-            .iter()
-            .map(|call| &call.id)
-            .collect::<Vec<_>>(),
-        vec![&calls[0].id]
-    );
-    let turn = engine
-        .resume(
-            snapshot,
-            vec![
-                Answer {
-                    id: slow,
-                    result: Ok(value(999)),
-                },
-                Answer {
-                    id: calls[0].id.clone(),
-                    result: Ok(value(3)),
-                },
-            ],
-        )
-        .unwrap();
-    let Progress::Complete(Ok(result)) = turn.state else {
-        panic!("withdrawn answer must be dropped");
-    };
-    assert_eq!(result.data(), &Datum::Text("cancelled".into()));
 }
 
 fn case(name: &str) -> Case {

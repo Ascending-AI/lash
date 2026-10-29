@@ -676,11 +676,11 @@ impl KernelProcessEngine {
                 KernelRunOutput::Parked {
                     state,
                     issued,
-                    withdrawn,
+                    cancel_requests,
                     ..
                 },
             ) => {
-                let replayed: Vec<lash_kernel_value::sites::WaitId> = park.withdrawn.clone();
+                let replayed: Vec<lash_kernel_value::sites::WaitId> = park.cancel_requests.clone();
                 let asked: Vec<(lash_kernel_value::sites::WaitId, Admission)> = park
                     .requests
                     .iter()
@@ -692,7 +692,7 @@ impl KernelProcessEngine {
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();
                 driven.parked.as_ref().map(|(page, _)| page) == Some(state)
-                    && replayed == *withdrawn
+                    && replayed == *cancel_requests
                     && asked == recorded_asks
             }
             (MachineStep::Ended(end), KernelRunOutput::Ended { outcome, .. }) => {

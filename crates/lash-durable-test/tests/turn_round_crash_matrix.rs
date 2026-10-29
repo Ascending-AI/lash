@@ -959,6 +959,9 @@ impl RoundTools for Catalog {
                         services.request_cancel(TurnCancelMode::Immediate).await;
                         token.cancelled().await;
                         return MemberOutcome::from(SettledOutput::Cancelled {
+                            cancellation: lash_protocol_types::ToolCancellation::runtime(
+                                "the call was cancelled",
+                            ),
                             evidence: Default::default(),
                         });
                     }
