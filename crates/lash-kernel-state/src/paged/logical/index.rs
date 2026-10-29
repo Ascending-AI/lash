@@ -15,8 +15,7 @@ enum Node<T: Cell> {
     },
     Branch {
         bit: Bit,
-        left: Rc<Self>,
-        right: Rc<Self>,
+        children: [Option<Rc<Self>>; 4],
     },
 }
 
@@ -31,7 +30,11 @@ impl Bit {
         Self {
             at,
             byte: at / 9,
-            mask: if at % 9 == 0 { 0 } else { 1 << (8 - at % 9) },
+            mask: if at.is_multiple_of(9) {
+                0
+            } else {
+                1 << (8 - at % 9)
+            },
         }
     }
     fn test(self, key: &[u8]) -> bool {
@@ -40,6 +43,18 @@ impl Bit {
         } else {
             key.get(self.byte).is_some_and(|byte| byte & self.mask != 0)
         }
+    }
+    fn digit(self, key: &[u8]) -> usize {
+        let next = Self {
+            at: self.at + 1,
+            byte: self.byte + usize::from(self.mask == 1),
+            mask: match self.mask {
+                0 => 128,
+                1 => 0,
+                mask => mask >> 1,
+            },
+        };
+        usize::from(self.test(key)) * 2 + usize::from(next.test(key))
     }
 }
 
@@ -56,82 +71,80 @@ fn leaf<'a, T: Cell>(mut node: &'a Node<T>, key: &[u8]) -> (&'a [u8], &'a Option
     loop {
         match node {
             Node::Leaf { key, value } => return (key, value),
-            Node::Branch {
-                bit: at,
-                left,
-                right,
-            } => node = if at.test(key) { right } else { left },
+            Node::Branch { bit, children } => {
+                node = children[bit.digit(key)]
+                    .as_ref()
+                    .or_else(|| children.iter().flatten().next())
+                    .unwrap_or_else(|| unreachable!("radix branch has children"));
+            }
         }
     }
 }
 
 fn put<T: Cell>(root: &mut Rc<Node<T>>, key: &[u8], value: Option<T>) {
     let (old, _) = leaf(root, key);
-    let split = (old != key).then(|| difference(old, key));
+    let split = (old != key).then(|| difference(old, key) & !1);
     fn insert<T: Cell>(node: &mut Rc<Node<T>>, key: &[u8], value: Option<T>, split: Option<usize>) {
         if let Some(split) = split {
-            let above = !matches!(node.as_ref(), Node::Branch { bit, .. } if bit.at < split);
+            let above = !matches!(node.as_ref(), Node::Branch { bit, .. } if bit.at <= split);
             if above {
-                let new = Rc::new(Node::Leaf {
+                let bit = Bit::new(split);
+                let old_digit = bit.digit(leaf(node, key).0);
+                let new_digit = bit.digit(key);
+                let mut children = std::array::from_fn(|_| None);
+                children[old_digit] = Some(Rc::clone(node));
+                children[new_digit] = Some(Rc::new(Node::Leaf {
                     key: key.into(),
                     value,
-                });
-                let old = Rc::clone(node);
-                let (left, right) = if Bit::new(split).test(key) {
-                    (old, new)
-                } else {
-                    (new, old)
-                };
-                *node = Rc::new(Node::Branch {
-                    bit: Bit::new(split),
-                    left,
-                    right,
-                });
+                }));
+                *node = Rc::new(Node::Branch { bit, children });
                 return;
             }
         }
         match Rc::make_mut(node) {
             Node::Leaf { value: old, .. } => *old = value,
-            Node::Branch {
-                bit: at,
-                left,
-                right,
-            } => insert(if at.test(key) { right } else { left }, key, value, split),
+            Node::Branch { bit, children } => {
+                let child = &mut children[bit.digit(key)];
+                if let Some(child) = child {
+                    insert(child, key, value, split);
+                } else {
+                    *child = Some(Rc::new(Node::Leaf {
+                        key: key.into(),
+                        value,
+                    }));
+                }
+            }
         }
     }
     insert(root, key, value, split);
 }
 
-fn erase<T: Cell>(mut root: Rc<Node<T>>, key: &[u8]) -> Option<Rc<Node<T>>> {
-    match Rc::make_mut(&mut root) {
-        Node::Leaf { key: old, .. } => {
-            if old.as_ref() == key {
-                return None;
+fn erase<T: Cell>(root: &mut Rc<Node<T>>, key: &[u8]) -> bool {
+    match Rc::make_mut(root) {
+        Node::Leaf { key: old, .. } => old.as_ref() == key,
+        Node::Branch { bit, children } => {
+            let digit = bit.digit(key);
+            if let Some(child) = &mut children[digit]
+                && erase(child, key)
+            {
+                children[digit] = None;
             }
-        }
-        Node::Branch {
-            bit: at,
-            left,
-            right,
-        } => {
-            let (chosen, other) = if at.test(key) {
-                (right, left)
-            } else {
-                (left, right)
-            };
-            match erase(Rc::clone(chosen), key) {
-                Some(next) => *chosen = next,
-                None => return Some(Rc::clone(other)),
+            let mut remaining = children.iter().flatten();
+            let first = remaining
+                .next()
+                .unwrap_or_else(|| unreachable!("radix deletion keeps a child"));
+            if remaining.next().is_none() {
+                *root = Rc::clone(first);
             }
+            false
         }
     }
-    Some(root)
 }
 
 fn walk<T: Cell>(node: &Node<T>, visit: &mut dyn FnMut(&[u8], &Option<T>) -> bool) -> bool {
     match node {
         Node::Leaf { key, value } => visit(key, value),
-        Node::Branch { left, right, .. } => walk(left, visit) && walk(right, visit),
+        Node::Branch { children, .. } => children.iter().flatten().all(|child| walk(child, visit)),
     }
 }
 
@@ -174,6 +187,7 @@ pub(super) struct Index<T: Cell> {
     totals: Totals,
     known: bool,
     revision: u64,
+    nested_pages: bool,
 }
 
 impl<T: Cell> Index<T> {
@@ -202,6 +216,7 @@ impl<T: Cell> Index<T> {
             totals,
             known,
             revision: 0,
+            nested_pages: false,
         }
     }
     fn ready(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
@@ -221,11 +236,19 @@ impl<T: Cell> Index<T> {
             .ok_or_else(|| invalid("source index revision overflow"))?;
         self.totals = totals;
         self.revision = revision;
+        self.nested_pages = false;
         Ok(())
     }
     fn hot(&self, key: &[u8]) -> Option<&Option<T>> {
-        let (found, value) = leaf(self.hot.as_ref()?, key);
-        (found == key).then_some(value)
+        let mut node = self.hot.as_deref()?;
+        loop {
+            match node {
+                Node::Leaf { key: found, value } => {
+                    return (found.as_ref() == key).then_some(value);
+                }
+                Node::Branch { bit, children } => node = children[bit.digit(key)].as_deref()?,
+            }
+        }
     }
     fn insert(&mut self, key: &[u8], value: Option<T>) {
         match &mut self.hot {
@@ -278,11 +301,13 @@ impl<T: Cell> Index<T> {
             update: impl FnOnce(&mut T) -> Result<bool, HeapFault>,
         ) -> Result<Option<(Totals, Totals)>, HeapFault> {
             match Rc::make_mut(node) {
-                Node::Branch {
-                    bit: at,
-                    left,
-                    right,
-                } => edit(if at.test(key) { right } else { left }, key, update),
+                Node::Branch { bit, children } => edit(
+                    children[bit.digit(key)]
+                        .as_mut()
+                        .ok_or_else(|| invalid("source index lost a row"))?,
+                    key,
+                    update,
+                ),
                 Node::Leaf { value, .. } => {
                     let value = value
                         .as_mut()
@@ -320,16 +345,15 @@ impl<T: Cell> Index<T> {
         self.changed(Totals::row(&value), Totals::default(), access)?;
         if self.base.get_with(key, access, |v| v.is_some())? {
             self.insert(key, None);
-        } else if let Some(root) = self.hot.take() {
-            self.hot = erase(root, key);
+        } else if let Some(root) = &mut self.hot
+            && erase(root, key)
+        {
+            self.hot = None;
         }
         Ok(Some(value))
     }
     pub fn len(&self) -> u64 {
         self.totals.len
-    }
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
     pub fn cost(&self) -> u64 {
         self.totals.cost
@@ -362,9 +386,10 @@ impl<T: Cell> Index<T> {
         fn collect<'a, T: Cell>(node: &'a Node<T>, out: &mut Vec<(&'a [u8], &'a Option<T>)>) {
             match node {
                 Node::Leaf { key, value } => out.push((key, value)),
-                Node::Branch { left, right, .. } => {
-                    collect(left, out);
-                    collect(right, out);
+                Node::Branch { children, .. } => {
+                    for child in children.iter().flatten() {
+                        collect(child, out);
+                    }
                 }
             }
         }
@@ -413,19 +438,25 @@ impl<T: Cell> Index<T> {
                         None
                     }
                 }
-                Node::Branch { left, right, .. } => {
-                    let mut last = left.as_ref();
-                    while let Node::Branch { right, .. } = last {
-                        last = right;
+                Node::Branch { children, .. } => {
+                    let mut last = node;
+                    while let Node::Branch { children, .. } = last {
+                        last = children
+                            .iter()
+                            .flatten()
+                            .next_back()
+                            .unwrap_or_else(|| unreachable!("radix child"));
                     }
                     let Node::Leaf { key, .. } = last else {
                         unreachable!()
                     };
-                    if cursor.is_none_or(|c| key.as_ref() > c) {
-                        next(left, cursor).or_else(|| next(right, cursor))
-                    } else {
-                        next(right, cursor)
+                    if cursor.is_some_and(|c| key.as_ref() <= c) {
+                        return None;
                     }
+                    children
+                        .iter()
+                        .flatten()
+                        .find_map(|child| next(child, cursor))
                 }
             }
         }
@@ -449,8 +480,12 @@ impl<T: Cell> Index<T> {
     fn flush(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
         while let Some(root) = &self.hot {
             let mut first = root.as_ref();
-            while let Node::Branch { left, .. } = first {
-                first = left;
+            while let Node::Branch { children, .. } = first {
+                first = children
+                    .iter()
+                    .flatten()
+                    .next()
+                    .unwrap_or_else(|| unreachable!("radix child"));
             }
             let Node::Leaf { key, value } = first else {
                 unreachable!()
@@ -466,7 +501,11 @@ impl<T: Cell> Index<T> {
             } else {
                 self.base.remove(&key, access)?;
             }
-            self.hot = self.hot.take().and_then(|root| erase(root, &key));
+            if let Some(root) = &mut self.hot
+                && erase(root, &key)
+            {
+                self.hot = None;
+            }
         }
         Ok(true)
     }
@@ -475,16 +514,6 @@ impl<T: Cell> Index<T> {
             return Ok(false);
         }
         self.base.seal(access, work)
-    }
-    pub fn seal_nested(
-        &mut self,
-        access: &Access<'_>,
-        work: &mut SealWork,
-    ) -> Result<bool, HeapFault> {
-        if !self.flush(access, work)? {
-            return Ok(false);
-        }
-        self.base.seal_nested(access, work)
     }
     pub fn keyed_root(&self) -> Result<KeyedRoot, HeapFault> {
         if self.hot.is_some() {
@@ -506,6 +535,28 @@ impl<T: Cell> Index<T> {
     }
     pub fn grants(&mut self, children: &[lash_kernel_doc::heap::PageRef]) -> Result<(), HeapFault> {
         self.base.grants(children)
+    }
+}
+
+impl Index<super::Edge> {
+    pub fn seal_nested(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+    ) -> Result<bool, HeapFault> {
+        if !self.flush(access, work)? {
+            return Ok(false);
+        }
+        // Edge cells need no preparation. A yielded nested seal has therefore
+        // already chosen pages. Resume those pages without flattening a small
+        // partial index and discarding its completed chunks on every retry.
+        let sealed = if self.nested_pages {
+            self.base.seal(access, work)?
+        } else {
+            self.base.seal_nested(access, work)?
+        };
+        self.nested_pages = !sealed;
+        Ok(sealed)
     }
 }
 

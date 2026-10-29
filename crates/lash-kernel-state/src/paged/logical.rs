@@ -568,7 +568,7 @@ impl Ledger {
                     {
                         continue;
                     }
-                    edit.state.entities.update(&key, access, |record| {
+                    edit.state.entities.update(key, access, |record| {
                         record.body.replace_members(&remove, &add, access)?;
                         Ok(true)
                     })?;
@@ -701,7 +701,7 @@ impl Edit<'_, '_> {
         for edge in edges {
             if let Identity::Object(entity) = edge.target {
                 let key = entity_key(entity);
-                self.state.entities.update(&key, self.access, |record| {
+                self.state.entities.update(key, self.access, |record| {
                     record.incoming = record
                         .incoming
                         .checked_add(edge.count)
@@ -725,7 +725,7 @@ impl Edit<'_, '_> {
                     continue;
                 }
                 let mut last = false;
-                self.state.entities.update(&key, self.access, |record| {
+                self.state.entities.update(key, self.access, |record| {
                     record.incoming = record
                         .incoming
                         .checked_sub(edge.count)
@@ -873,7 +873,7 @@ impl Edit<'_, '_> {
                 })??
             } else {
                 let mut incoming = 0;
-                self.state.entities.update(&key, self.access, |record| {
+                self.state.entities.update(key, self.access, |record| {
                     incoming = next(record.incoming)?;
                     record.incoming = incoming;
                     Ok(true)
