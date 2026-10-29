@@ -808,7 +808,8 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         assert_eq!(
             (statements, loops, entry_cleanup, deferred_calls),
             expected,
-            "{name}: pinned per-case shape"
+            "{name}: pinned per-case shape\n{}",
+            lash_kernel_doc::print_document(document)
         );
         if statements > author.statements || loops != author.loops {
             failures.push(format!("{name}: {statements} statements / {loops} loops for {} author statements / {} loops\n{}", author.statements, author.loops, lash_kernel_doc::print_document(document)));

@@ -7,7 +7,7 @@ scope function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3 
 scope function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0/1 ordinal=4 depth=1 Then
 scope function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0/2 ordinal=6 depth=1 Else
 action function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1/0 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
-action function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1/0/0 Some(Effect(OperationUse { link: LinkId(9ca3d0f7a09d), slot: Import(ImportSlot(0)) }))
+action function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/1/0/0 Some(Effect(OperationUse { link: LinkId(6f7ee0c49c0f), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3 "Echo a value unless it is negative"
 caption node 0 site=function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0 "Check for a negative value"
 caption node 0 site=function db7f186865c95e6fb8d7754193b7c207caf26090f4a8f397fb765242018c09a3/0/1/0 "Stop and report that it is negative"

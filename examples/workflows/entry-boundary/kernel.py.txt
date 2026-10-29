@@ -6,7 +6,7 @@ library @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec
 library @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851
 export arrow "{\"kind\":\"function\",\"value\":{\"function\":\"d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d\",\"signature\":{\"params\":[{\"name\":\"value\",\"ty\":\"int\"}],\"result\":\"int\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
 export declared "{\"kind\":\"function\",\"value\":{\"function\":\"e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"direct\"},\"asynchronous\":true,\"rest\":false}}"
-definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nbody {\n  return if(if(same(list.len(positional1), 0), same(map.len(keywords1), 0), false), \"block\", let(t1 = invoke py.bind(\"local\", (), positional1, keywords1, false), \"block\"))\n}\n"
+definition "function local.function(positional1: Any, keywords1: Any, active1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse map.len = @e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851\nuse py.bind = @ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nbody {\n  return let(bound1 = if(if(same(list.len(positional1), 0), same(map.len(keywords1), 0), false), positional1, invoke py.bind(\"local\", (), positional1, keywords1, false)), \"block\")\n}\n"
 definition "function local.function(value: Any) -> Any\nkernel 1\nmetering statements\nbody {\n  return value\n}\n"
 definition "function local.function() -> Any\nkernel 1\nmetering statements\nbody {\n  return \"top\"\n}\n"
 main {
@@ -14,7 +14,7 @@ main {
   let arrow = &@d6ac8437c671b9a2003f060b9265106322b9aa0be8e6e10f18bd5d098d77a82d
   let declared = &@e47e8c97a32bbc4288506221ff8c48ebb3ed4471a07f998698c1914cfa3f4bf4
   if true {
-    set local = let(t2 = fn @9d17fbe2ef49a6fadd524e3b0127116a49fcc24c0d19aa93100d9a3547729c28 presentation() -> Any token("py.function", 1) py_args(0), ("py.function", t2, (), "local", ("py.callable", true)))
+    set local = let(t1 = fn @35c1ba0c71e0931a5c2de7c8cfa72d158e4554511723f21e9537fbbd6ce2fc06 presentation() -> Any token("py.function", 1) py_args(0), ("py.function", t1, (), "local", ("py.callable", true)))
   }
 }
 

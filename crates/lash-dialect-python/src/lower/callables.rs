@@ -186,14 +186,15 @@ impl Lowerer<'_> {
                     r#else: Box::new(Expr::Literal(Literal::Bool(false))),
                 };
                 if let Some(value) = this.branch_expression(&Buf::default(), value) {
-                    this.emit(Stmt::Let {
+                    let value = Expr::Let {
                         name: slots,
-                        value: Rhs::Expr(Expr::If {
+                        value: Box::new(Expr::If {
                             cond: Box::new(condition),
                             then: Box::new(Expr::Variable(positional.clone())),
                             r#else: Box::new(binding.expr.clone()),
                         }),
-                    });
+                        body: Box::new(value),
+                    };
                     this.buf.extend(Buf::one(
                         Stmt::Return { value },
                         body.notes().next().cloned().unwrap_or_default(),

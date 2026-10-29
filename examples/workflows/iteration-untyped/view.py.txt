@@ -6,7 +6,7 @@ statement function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360
 scope function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268 ordinal=2 depth=0 Entry
 scope function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/1/1 ordinal=5 depth=1 For
 action function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/1/1/0/2 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
-action function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/1/1/0/2/0 Some(Effect(OperationUse { link: LinkId(a3d72e862b25), slot: Import(ImportSlot(0)) }))
+action function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/1/1/0/2/0 Some(Effect(OperationUse { link: LinkId(8589309ba9f1), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268 "Echo every item"
 caption node 0 site=function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/0 "Start an empty list of replies"
 caption node 1 site=function 006916034dc9d15489021e0407d9a4c0056cd8a438357d702781cb0974360268/1 "Go through each item"

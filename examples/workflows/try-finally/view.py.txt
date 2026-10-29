@@ -14,10 +14,10 @@ scope function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/
 scope function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/1/0/2 ordinal=11 depth=2 Else
 scope function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/2 ordinal=13 depth=1 Finally
 action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/0/0/0 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
-action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/0/0/0/0 Some(Effect(OperationUse { link: LinkId(92156951d0db), slot: Import(ImportSlot(0)) }))
+action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/0/0/0/0 Some(Effect(OperationUse { link: LinkId(1a7b9b7e9802), slot: Import(ImportSlot(0)) }))
 action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/1/0/0 library id=bc668669065eb5c629e00734c528a78cc5bc9cc79281efa7c483e2686fd17c92 name=py.exc.is_exception exports=[]
 action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/2/0/0 library id=f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7 name=py.reply exports=[]
-action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/2/0/0/0 Some(Effect(OperationUse { link: LinkId(92156951d0db), slot: Import(ImportSlot(0)) }))
+action function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1/2/0/0/0 Some(Effect(OperationUse { link: LinkId(1a7b9b7e9802), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198 "Try a step, and always finish up"
 caption node 0 site=function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/0 "Start with a placeholder result"
 caption node 1 site=function b53b28056b198d2dafd1ce42cc0cee28e066452f166db3e8e4428d2e29202198/1 "Try the echo"

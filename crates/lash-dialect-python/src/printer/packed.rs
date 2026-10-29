@@ -71,13 +71,16 @@ impl Renderer<'_> {
         let positional = &definition.signature.params[0].name;
         let keywords = &definition.signature.params[1].name;
         if let [
-            k::Stmt::Let {
-                name: slots,
-                value: k::Rhs::Expr(value),
+            k::Stmt::Return {
+                value:
+                    k::Expr::Let {
+                        name: slots,
+                        value,
+                        body,
+                    },
             },
-            k::Stmt::Return { value: body },
         ] = stored.as_slice()
-            && let k::Expr::If { cond, then, r#else } = value
+            && let k::Expr::If { cond, then, r#else } = value.as_ref()
             && then.as_ref() == &k::Expr::Variable(positional.clone())
             && let k::Expr::Act(binding) = r#else.as_ref()
             && let k::ActKind::Call(target) = &binding.kind
@@ -109,7 +112,7 @@ impl Renderer<'_> {
                     value: value.clone(),
                 }],
                 closure.function,
-                1,
+                0,
             );
         }
         let mut expression_fallback = Vec::new();

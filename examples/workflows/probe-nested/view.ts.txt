@@ -67,11 +67,11 @@ scope function 9f87ab307817d5eb3078ba0a1528489546f9bbc0217d3255797737a71b794703/
 scope function 9f87ab307817d5eb3078ba0a1528489546f9bbc0217d3255797737a71b794703/8/1 ordinal=40 depth=4 Then
 scope function f13f35819bed9f39380cff2a218c86dedc3946df594004608dce18dab4991623 ordinal=68 depth=5 Closure
 scope function 9f87ab307817d5eb3078ba0a1528489546f9bbc0217d3255797737a71b794703/8/2 ordinal=43 depth=4 Else
-action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/0/0 Some(Effect(OperationUse { link: LinkId(20d2dc48a581), slot: Import(ImportSlot(0)) }))
+action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/0/0 Some(Effect(OperationUse { link: LinkId(78c0c542478c), slot: Import(ImportSlot(0)) }))
 action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/0/0/0 library id=a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586 name=ts.copy_boundary exports=[]
 action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/3/1/0/1/1/1/0/2/0/0 library id=fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7 name=ts.read exports=[]
 action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/3/1/0/1/1/2/0/0 library id=fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7 name=ts.read exports=[]
-action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/3/1/0/1/2/0 Some(Effect(OperationUse { link: LinkId(20d2dc48a581), slot: Import(ImportSlot(1)) }))
+action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/3/1/0/1/2/0 Some(Effect(OperationUse { link: LinkId(78c0c542478c), slot: Import(ImportSlot(1)) }))
 action function a8544d32c28d71d9cfc26415f89d50b5b584c6ccd5e075dec943884e6549e0c7/3/1/0/1/2/0/0 library id=a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586 name=ts.copy_boundary exports=[]
 action function 1ade41762243cd3365f10656a248b67b7b3a6587a618f80b9f4fad37afcf3965/0/0 library id=9b53cc162923b9663378508c62bfe49e1efdfe2eb4299a693cdf183993aaa01c name=ts.builtin_call exports=[]
 action function 716b4028534625acbfbc3502495e60bff0404017173eb084f40f16c12fc640af/0/0 library id=9b53cc162923b9663378508c62bfe49e1efdfe2eb4299a693cdf183993aaa01c name=ts.builtin_call exports=[]
