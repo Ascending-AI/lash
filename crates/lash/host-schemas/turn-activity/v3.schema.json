@@ -16470,7 +16470,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/turn-activity/v2",
+  "$id": "https://lash.dev/schemas/turn-activity/v3",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "App-facing semantic activity emitted during a turn.\n\n`id` is unique per emitted activity event. `correlation_id` groups related\nevents in the same logical activity, such as code start/completion, tool\nstart/completion, or text deltas from one output block.",
   "oneOf": [
@@ -17051,6 +17051,6 @@
   ],
   "title": "TurnActivity",
   "type": "object",
-  "x-lash-schema-version": 2,
+  "x-lash-schema-version": 3,
   "x-lash-version-constant": "TURN_ACTIVITY_SCHEMA_VERSION"
 }
