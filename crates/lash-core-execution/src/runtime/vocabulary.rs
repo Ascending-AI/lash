@@ -154,6 +154,75 @@ impl TurnActivity {
     }
 }
 
+/// The caller of an unrecorded tool read. This is observation identity only.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolReadCaller {
+    CodeBlock { graph_key: String },
+    Process { process_id: crate::ProcessId },
+}
+
+/// Whether tool-call activity describes a recorded call or an unrecorded read.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallExecution {
+    #[default]
+    Recorded,
+    Read,
+}
+
+impl ToolCallExecution {
+    fn is_recorded(&self) -> bool {
+        *self == Self::Recorded
+    }
+}
+
+/// Read-specific observation metadata, reusable if a save later retains reads.
+/// This build keeps it only on live tool-call activity (ADR 0144 §5).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct ToolReadMetadata {
+    pub caller: ToolReadCaller,
+    pub provider: crate::ProviderKey,
+    /// One-based ordinal among the caller's attempted reads, retained at saves.
+    pub ordinal: u64,
+    pub site: String,
+    pub origin: String,
+    pub elapsed_us: u64,
+    /// JSON byte sizes; zero when input or answer was unavailable.
+    pub args_bytes: usize,
+    pub answer_bytes: usize,
+}
+
+impl ToolReadMetadata {
+    /// Cheap, deterministic observation identity, with no call admission.
+    pub fn call_id(&self) -> crate::ToolCallId {
+        let caller = match &self.caller {
+            ToolReadCaller::CodeBlock { graph_key } => format!("cell:{graph_key}"),
+            ToolReadCaller::Process { process_id } => format!("process:{process_id}"),
+        };
+        crate::ToolCallId::unrecorded_read(&caller, self.ordinal)
+    }
+
+    pub(crate) fn graph_key(&self) -> Option<String> {
+        match &self.caller {
+            ToolReadCaller::CodeBlock { graph_key } => Some(graph_key.clone()),
+            ToolReadCaller::Process { .. } => None,
+        }
+    }
+}
+
 /// App-facing semantic event payload for a turn activity.
 ///
 /// Unlike [`SessionStreamEvent`], these events are stable application signals rather
@@ -258,6 +327,10 @@ pub enum TurnEvent {
         graph_key: Option<String>,
     },
     ToolCallStarted {
+        #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
+        execution: ToolCallExecution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read: Option<ToolReadMetadata>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
@@ -272,6 +345,10 @@ pub enum TurnEvent {
     },
     /// The live tool return. Retractable until its outcome commits (ADR 0122).
     ToolCallReturned {
+        #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
+        execution: ToolCallExecution,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read: Option<ToolReadMetadata>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.

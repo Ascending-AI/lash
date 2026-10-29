@@ -583,6 +583,7 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
             };
             match item? {
                 ProcessObservationStreamItem::Event(event) => match &event.payload {
+                    ProcessObservationEventPayload::Activity { .. } => {}
                     ProcessObservationEventPayload::LanguageExecution(observation) => {
                         if let TraceLanguageExecutionPayload::Node {
                             fact: lash::tracing::TraceNodeFact::ChildStarted { child },

@@ -348,7 +348,8 @@ pub(crate) async fn observe(
                     event.fact,
                     ProcessLifecycleFact::Ran(_) | ProcessLifecycleFact::Terminal { .. }
                 ),
-                ProcessObservationEventPayload::StepBodyStarted(_) => false,
+                ProcessObservationEventPayload::Activity { .. }
+                | ProcessObservationEventPayload::StepBodyStarted(_) => false,
             },
             ProcessObservationStreamItem::Gap { .. } => false,
         };
@@ -357,6 +358,7 @@ pub(crate) async fn observe(
         }
         (events, terminal) = match item {
             ProcessObservationStreamItem::Event(event) => match &event.payload {
+                ProcessObservationEventPayload::Activity { .. } => (Vec::new(), false),
                 ProcessObservationEventPayload::LanguageExecution(observation) => {
                     (overlay.language_observation(observation)?, false)
                 }

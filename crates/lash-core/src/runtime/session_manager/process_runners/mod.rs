@@ -96,9 +96,12 @@ impl RuntimeSessionServices {
             catalog,
             environment,
             resolutions: Arc::clone(&engine.resolutions),
-            reads: engine
-                .composition
-                .effect_reads(Arc::clone(&engine.env), Arc::clone(&core.clock)),
+            reads: engine.composition.effect_reads(
+                Arc::clone(&engine.env),
+                Arc::clone(&core.clock),
+                process.id.clone(),
+                core.tool_read_observer.clone(),
+            ),
             tools,
             context: Arc::new(self.clone()),
         })

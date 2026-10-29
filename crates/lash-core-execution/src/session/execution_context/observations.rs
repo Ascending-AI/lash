@@ -321,7 +321,7 @@ impl RuntimeExecutionContext<'_> {
 
     /// Graph key of the enclosing code block for tool calls run from this
     /// context, or `None` when no code block is executing.
-    pub(in crate::session) fn code_block_graph_key(&self) -> Option<String> {
+    pub fn code_block_graph_key(&self) -> Option<String> {
         self.code_block_graph_key.clone()
     }
 }
@@ -330,5 +330,37 @@ impl RuntimeExecutionContext<'_> {
     pub fn with_tool_live(mut self, lane: Arc<crate::ToolLive>) -> Self {
         self.tool_live = lane;
         self
+    }
+}
+
+impl RuntimeExecutionContext<'_> {
+    /// Live-only tool-call activity for unrecorded reads on the existing lane.
+    pub fn tool_read_observer(&self) -> Arc<dyn Fn(crate::TurnEvent) + Send + Sync> {
+        let observer = Arc::clone(&self.dispatch.observer);
+        // Recomputed reads may answer differently. Keep call identity stable,
+        // but give each activation a fresh publication lane for bounded replay.
+        let base = format!(
+            "{}:{}",
+            self.call_observation_key("tool-read"),
+            uuid::Uuid::new_v4()
+        );
+        Arc::new(move |event| {
+            let (call_id, phase) = match &event {
+                crate::TurnEvent::ToolCallStarted { call_id, .. } => (call_id, "start"),
+                crate::TurnEvent::ToolCallReturned { call_id, .. } => (call_id, "return"),
+                _ => return,
+            };
+            let key = format!("{base}:{call_id}:{phase}");
+            let correlation_id = crate::session::tool_execution::tool_activity_id(call_id);
+            let mut cursor =
+                crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(key));
+            cursor.observe(
+                observer.as_ref(),
+                crate::engine::ObservedEvent::Activity {
+                    correlation_id: Some(correlation_id),
+                    event,
+                },
+            );
+        })
     }
 }

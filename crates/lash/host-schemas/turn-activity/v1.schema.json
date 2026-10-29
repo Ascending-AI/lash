@@ -11806,6 +11806,14 @@
         }
       ]
     },
+    "ToolCallExecution": {
+      "description": "Whether tool-call activity describes a recorded call or an unrecorded read.",
+      "enum": [
+        "recorded",
+        "read"
+      ],
+      "type": "string"
+    },
     "ToolCallLimitExceeded": {
       "additionalProperties": false,
       "description": "A tool call refused by the session's [`MaxToolCalls`]: the program asked\nfor more tool calls than its recorded limit admits.\n\nIt is the program's failure, never the host's: the limit is recorded\nconfig and the count is a fact of the program's own history, so a replay\nor a redrive refuses the same call. Nothing of the refused calls is\njournaled or dispatched.",
@@ -15055,6 +15063,93 @@
       ],
       "type": "object"
     },
+    "ToolReadCaller": {
+      "description": "The caller of an unrecorded tool read. This is observation identity only.",
+      "oneOf": [
+        {
+          "properties": {
+            "graph_key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "code_block",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "graph_key"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolReadMetadata": {
+      "description": "Read-specific observation metadata, reusable if a save later retains reads.\nThis build keeps it only on live tool-call activity (ADR 0144 \u00a75).",
+      "properties": {
+        "answer_bytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "args_bytes": {
+          "description": "JSON byte sizes; zero when input or answer was unavailable.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "caller": {
+          "$ref": "#/$defs/ToolReadCaller"
+        },
+        "elapsed_us": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ordinal": {
+          "description": "One-based ordinal among the caller's attempted reads, retained at saves.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/ToolProviderHandle"
+        },
+        "site": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "provider",
+        "ordinal",
+        "site",
+        "origin",
+        "elapsed_us",
+        "args_bytes",
+        "answer_bytes"
+      ],
+      "type": "object"
+    },
     "ToolView": {
       "additionalProperties": false,
       "properties": {
@@ -16483,6 +16578,9 @@
           "description": "Lash's identity for the call (ADR 0117).",
           "type": "string"
         },
+        "execution": {
+          "$ref": "#/$defs/ToolCallExecution"
+        },
         "graph_key": {
           "description": "Graph key of the enclosing code block, when this tool call ran\ninside one. `None` when the call did not run inside a code block.",
           "type": [
@@ -16498,6 +16596,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "read": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolReadMetadata"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "type": {
@@ -16530,6 +16638,9 @@
             "null"
           ]
         },
+        "execution": {
+          "$ref": "#/$defs/ToolCallExecution"
+        },
         "graph_key": {
           "description": "Graph key of the enclosing code block, when this tool call ran\ninside one. `None` when the call did not run inside a code block.",
           "type": [
@@ -16548,6 +16659,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "read": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolReadMetadata"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "type": {

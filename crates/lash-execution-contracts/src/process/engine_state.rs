@@ -200,6 +200,13 @@ impl EngineStepKind {
     }
 }
 
+/// Identity of a process read within its saved execution.
+pub struct EngineReadSite<'a> {
+    pub ordinal: u64,
+    pub site: &'a lash_kernel_value::sites::PositionLabel,
+    pub origin: &'a lash_kernel_value::sites::Site,
+}
+
 /// Answers a process's read-mode operations from its recorded environment.
 /// Reads admit no step and are repeated when an uncommitted run is retried.
 #[async_trait::async_trait]
@@ -215,6 +222,7 @@ pub trait EngineEffectReads: Send + Sync {
         &self,
         use_: &lash_kernel_value::names::OperationUse,
         input: Result<serde_json::Value, String>,
+        at: EngineReadSite<'_>,
         cancel: &tokio_util::sync::CancellationToken,
         deadline: std::time::Instant,
     ) -> Result<Result<serde_json::Value, EngineReadError>, crate::plugin_error::PluginError>;

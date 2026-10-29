@@ -1,7 +1,7 @@
 //! A cell's planned reads (ADR 0144): the `perform`s its read plan binds,
 //! answered inside the statement that makes them.
 //!
-//! A read is no admitted execution. It mints no call identity and no wait,
+//! A read is no admitted execution. Its call identity is observational; it mints no wait,
 //! commits nothing, and runs no hook: the machine asks its host, the host
 //! asks the reader the plan's provider registered, and the answer goes
 //! straight back into the statement. What survives of it is what the
@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_kernel_doc::{Datum, ErrorDatum};
 
@@ -46,15 +46,17 @@ pub(super) struct CellReads {
     pub ledgers: Arc<Mutex<CellHostLedgers>>,
     pub limit: lash_core::MaxToolCalls,
     /// The cell, as its observations name it.
-    pub cell: String,
+    pub caller: lash_core::ToolReadCaller,
+    pub observe: Arc<dyn Fn(lash_core::TurnEvent) + Send + Sync>,
 }
 
 impl CellReads {
     /// Counts one read against `max_tool_calls`: its ordinal among the
     /// cell's reads, or the refusal its `perform` raises.
-    fn count(&self) -> Result<u64, ErrorDatum> {
+    fn count(&self) -> (u64, Result<(), ErrorDatum>) {
         let mut ledgers = self.ledgers.lock_recover();
         let counted = ledgers.counted();
+        ledgers.reads += 1;
         if counted.saturating_add(1) > self.limit.get() {
             let exceeded = lash_core::ToolCallLimitExceeded {
                 scope: lash_core::ToolCallLimitScope::Cell,
@@ -63,34 +65,12 @@ impl CellReads {
                 requested: 1,
             };
             ledgers.tool_call_limit.get_or_insert(exceeded);
-            return Err(refused(TOOL_CALL_LIMIT, exceeded.to_string()));
+            return (
+                ledgers.reads,
+                Err(refused(TOOL_CALL_LIMIT, exceeded.to_string())),
+            );
         }
-        ledgers.reads += 1;
-        Ok(ledgers.reads)
-    }
-
-    /// The read's arguments, validated against its tool's input schema.
-    fn args(
-        &self,
-        effect: &OperationUse,
-        route: &lash_core::ReadRoute,
-        args: &[Datum],
-    ) -> Result<serde_json::Value, ErrorDatum> {
-        let args = CellArgs::Direct
-            .args(args)
-            .map_err(|refusal| refusal.error(effect))?;
-        lash_vocabulary::tool_contract::validate_tool_input(&route.definition.contract, &args)
-            .map_err(|error| {
-                tool_failed(
-                    &lash_core::ToolFailure::runtime(
-                        lash_core::ToolFailureClass::InvalidRequest,
-                        "invalid_tool_args",
-                        error.to_string(),
-                    )
-                    .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: error }),
-                )
-            })?;
-        Ok(args)
+        (ledgers.reads, Ok(()))
     }
 
     async fn answer(
@@ -98,7 +78,7 @@ impl CellReads {
         effect: &OperationUse,
         route: &lash_core::ReadRoute,
         args: &serde_json::Value,
-    ) -> Result<(Datum, usize), ErrorDatum> {
+    ) -> Result<(Datum, serde_json::Value), ErrorDatum> {
         let bound = route.definition.manifest.execution().min(self.parent_wait);
         let deadline = self.clock.now() + bound;
         let read = route.read(
@@ -130,18 +110,17 @@ impl CellReads {
             message: error.message,
             data: datum_from_json(&error.data.to_string()).unwrap_or(Datum::Null),
         })?;
-        let text = value.to_string();
         let signature = lash_kernel_value::json_schema::tool_signature(
             &route.definition.contract.input_schema.canonical,
             &route.definition.contract.output_schema.canonical,
         );
-        let value = lash_vm_broker::kernel::value::datum_from_tool_json(&value, &signature.result)
+        let datum = lash_vm_broker::kernel::value::datum_from_tool_json(&value, &signature.result)
             .map_err(|refusal| {
                 refusal
                     .error_datum()
                     .unwrap_or_else(|error| refused("diagnostic_encoding", error.to_string()))
             })?;
-        Ok((value, text.len()))
+        Ok((datum, value))
     }
 }
 
@@ -161,37 +140,71 @@ impl EffectReads for CellReads {
                 "the cell performs `{effect}` as a read it did not plan"
             ))
         })?;
-        let started = Instant::now();
-        let ordinal = match self.count() {
-            Ok(ordinal) => ordinal,
-            Err(refusal) => return Ok(Err(refusal)),
+        let (ordinal, count) = self.count();
+        let projected = CellArgs::Direct
+            .args(args)
+            .map_err(|refusal| refusal.error(effect));
+        let args = projected
+            .as_ref()
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let args_bytes = projected.as_ref().map_or(0, |args| args.to_string().len());
+        let read = lash_core::ToolReadMetadata {
+            caller: self.caller.clone(),
+            provider: route.provider.clone(),
+            ordinal,
+            site: site.to_string(),
+            origin: origin.to_string(),
+            elapsed_us: 0,
+            args_bytes,
+            answer_bytes: 0,
         };
-        // A tool served under another contract than the run pinned raises
-        // `operation_contract_changed` at the `perform`: nothing is read.
-        if let Some(failure) = route.contract_changed() {
-            return Ok(Err(tool_failed(failure)));
-        }
-        let answer = match self.args(effect, route, args) {
-            Ok(args) => {
-                let answer = self.answer(effect, route, &args).await;
-                tracing::debug!(
-                    target: "lash::cell::read",
-                    cell = %self.cell,
-                    provider = %route.provider,
-                    tool = %route.definition.manifest.id,
-                    site = %site,
-                    origin = %origin,
-                    seq = ordinal,
-                    elapsed_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
-                    args_bytes = args.to_string().len(),
-                    answer_bytes = answer.as_ref().map_or(0, |(_, bytes)| *bytes),
-                    answered = answer.is_ok(),
-                    "cell read"
-                );
-                answer.map(|(value, _)| value)
-            }
-            Err(refusal) => Err(refusal),
-        };
-        Ok(answer)
+        let answer = lash_core::observe_tool_read(
+            Some(self.observe.as_ref()),
+            read,
+            route.definition.manifest.id.to_string(),
+            args,
+            async {
+                count?;
+                if let Some(failure) = route.contract_changed() {
+                    return Err(tool_failed(failure));
+                }
+                let args = projected?;
+                lash_vocabulary::tool_contract::validate_tool_input(
+                    &route.definition.contract,
+                    &args,
+                )
+                .map_err(|error| {
+                    tool_failed(
+                        &lash_core::ToolFailure::runtime(
+                            lash_core::ToolFailureClass::InvalidRequest,
+                            "invalid_tool_args",
+                            error.to_string(),
+                        )
+                        .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: error }),
+                    )
+                })?;
+                self.answer(effect, route, &args).await
+            },
+            |answer| match answer {
+                Ok((_, value)) => (
+                    lash_core::ToolCallOutput::success(value.clone()),
+                    value.to_string().len(),
+                ),
+                Err(error) => {
+                    let mut failure =
+                        lash_core::ToolFailure::new(&error.kind, error.message.clone());
+                    if let Ok(text) = lash_vm_broker::kernel::datum_to_json(&error.data)
+                        && let Ok(data) = serde_json::from_str::<serde_json::Value>(&text)
+                        && !data.is_null()
+                    {
+                        failure = failure.with_raw(lash_core::ToolValue::untrusted_json(data));
+                    }
+                    (lash_core::ToolCallOutput::failure(failure), 0)
+                }
+            },
+        )
+        .await;
+        Ok(answer.map(|(value, _)| value))
     }
 }

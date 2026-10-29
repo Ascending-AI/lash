@@ -312,6 +312,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options present)",
             TurnEvent::ToolCallStarted {
+                execution: lash_core::ToolCallExecution::Recorded, read: None,
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
@@ -330,6 +331,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options absent)",
             TurnEvent::ToolCallStarted {
+                execution: lash_core::ToolCallExecution::Recorded, read: None,
                 call_id: lash_core::ToolCallId::fixture("call-2"),
                 provider_call_id: None,
                 name: "read_file".to_string(),
@@ -346,6 +348,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_returned (all options present, success)",
             TurnEvent::ToolCallReturned {
+                execution: lash_core::ToolCallExecution::Recorded, read: None,
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),

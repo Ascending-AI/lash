@@ -607,7 +607,12 @@ async fn run_linked_cell(
         parent_wait: services.workers.config().tuning.parent_wait,
         ledgers: Arc::clone(&ledgers),
         limit: ctx.max_tool_calls(),
-        cell: "cell".to_owned(),
+        caller: lash_core::ToolReadCaller::CodeBlock {
+            graph_key: ctx
+                .code_block_graph_key()
+                .unwrap_or_else(|| execution.0.clone()),
+        },
+        observe: ctx.tool_read_observer(),
     });
     let host = CellHost {
         plans_reads,

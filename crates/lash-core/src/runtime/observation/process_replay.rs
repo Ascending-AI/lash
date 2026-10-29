@@ -327,10 +327,15 @@ impl ProcessObservationEvent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 // justification: the enclosing replay event is already Arc-owned, so another allocation would not bound retained event storage.
 #[allow(clippy::large_enum_variant)]
 pub enum ProcessObservationEventPayload {
+    /// Ordinary tool-call activity, provisional and retained only in bounded replay.
+    Activity {
+        event_key: String,
+        event: crate::TurnEvent,
+    },
     /// Provisional evidence of what a language execution reported. It never
     /// proves a durable advance, and an `ExecutionFinished` in it does not
     /// settle the process: only a committed terminal fact or a terminal
@@ -348,10 +353,32 @@ pub enum ProcessObservationEventPayload {
     Committed { event: ObservedProcessEvent },
 }
 
+impl PartialEq for ProcessObservationEventPayload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Activity {
+                    event_key: left, ..
+                },
+                Self::Activity {
+                    event_key: right, ..
+                },
+            ) => left == right && self.same_fact(other),
+            (Self::LanguageExecution(left), Self::LanguageExecution(right)) => left == right,
+            (Self::StepBodyStarted(left), Self::StepBodyStarted(right)) => left == right,
+            (Self::Committed { event: left }, Self::Committed { event: right }) => left == right,
+            _ => false,
+        }
+    }
+}
+
 impl ProcessObservationEventPayload {
     /// The identity a redelivery of this payload repeats.
     pub fn identity(&self) -> ProcessObservationIdentity {
         match self {
+            Self::Activity { event_key, .. } => ProcessObservationIdentity::Activity {
+                event_key: event_key.clone(),
+            },
             Self::LanguageExecution(observation) => ProcessObservationIdentity::LanguageExecution {
                 event_key: observation.execution.event_key.clone(),
             },
@@ -368,6 +395,12 @@ impl ProcessObservationEventPayload {
     /// time is not part of a provisional fact.
     pub fn same_fact(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Activity { event: left, .. }, Self::Activity { event: right, .. }) => {
+                match (serde_json::to_value(left), serde_json::to_value(right)) {
+                    (Ok(left), Ok(right)) => left == right,
+                    _ => false,
+                }
+            }
             (Self::LanguageExecution(left), Self::LanguageExecution(right)) => {
                 left.same_fact(right)
             }
@@ -384,6 +417,7 @@ impl ProcessObservationEventPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProcessObservationIdentity {
+    Activity { event_key: String },
     Committed { sequence: ProcessSequence },
     LanguageExecution { event_key: String },
     StepBodyStarted { event_key: String },
@@ -392,6 +426,7 @@ pub enum ProcessObservationIdentity {
 impl fmt::Display for ProcessObservationIdentity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Activity { event_key } => write!(f, "activity `{event_key}`"),
             Self::Committed { sequence } => write!(f, "committed sequence {}", sequence.0),
             Self::LanguageExecution { event_key } => {
                 write!(f, "language execution `{event_key}`")
@@ -507,6 +542,14 @@ pub struct ProcessReplayEventDraft {
 }
 
 impl ProcessReplayEventDraft {
+    /// Ordinary tool-call activity on the existing process replay lane.
+    pub fn activity(sequence: ProcessSequence, event_key: String, event: crate::TurnEvent) -> Self {
+        Self {
+            sequence,
+            payload: ProcessObservationEventPayload::Activity { event_key, event },
+        }
+    }
+
     /// A provisional observation, stamped with the durable sequence its
     /// publisher knows. A stamp behind the process's sequence is legal: it
     /// moves a consumer's position, never its durable state.

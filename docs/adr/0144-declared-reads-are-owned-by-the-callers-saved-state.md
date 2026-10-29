@@ -100,9 +100,36 @@ A read has no admission, wait, `x_start`, `x_outcome` or `round.traced`. It
 counts against the cell's `max_tool_calls` with its calls, in the count the
 cell's saved state holds. It is bounded by the sooner of its tool's
 execution bound and how long the worker waits on its parent's answer, and is
-cancelled with the cell's run. It is never retried. Each read emits an
-advisory observation (cell, provider, tool, site, its ordinal among the
-cell's reads, elapsed time, argument and answer sizes) that is not a record.
+cancelled with the cell's run. It is never retried. Each read emits
+the ordinary `ToolCallStarted` followed by `ToolCallReturned`, marked
+`execution: read`. No new semantic event type is introduced. Both readers call
+`lash_core_execution::observe_tool_read`, the sole emitter of this pair; cell
+and process execution remain separate. Model-round reads keep their existing
+recorded execution path.
+
+Each pair carries a `ToolCallId`, derived with one BLAKE3 hash from its caller
+and one-based read ordinal, with a separate identity form from admitted calls.
+Cell reads carry the enclosing code block's `graph_key`, exactly as recorded
+cell calls do. Process reads travel on their existing process observation feed
+in an `Activity` envelope. Read metadata names the caller, provider, ordinal,
+site and origin; the events carry the tool id and projected arguments. The
+return carries the ordinary success or failure output, including the read's
+failure message, contract changes, input refusals, cancellation and timeout.
+It also carries elapsed microseconds and JSON argument/answer byte sizes.
+Unavailable arguments are null with size zero; an unavailable answer has size
+zero. Hosts render these with their ordinary tool-call rows.
+
+A read never emits `ToolCallCompleted`: nothing commits that call. Its events
+are live and provisional (ADR 0122), never a durable record, transcript entry,
+admission or commit. Existing bounded replay windows may retain them for
+reconnect. After a crash between saves, an unsaved stretch runs again and its
+read events can repeat under the same caller, ordinal and call id with a new
+answer. A host can see events from a stretch that never commits. Correlate by
+caller plus ordinal and reset provisional rows on a replay gap. Saved state
+retains the read count, including across process parks; it retains no list of
+read activities. Whether the next save should retain such a list awaits Sam's
+ruling. The shared metadata and outcome pair can be collected at that save
+boundary without changing either reader's event contract.
 
 ## Consequences
 

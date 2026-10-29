@@ -79,6 +79,9 @@ fn fixture_label(site: &lash_kernel_value::sites::PositionLabel) -> String {
 /// event, or a description of any other payload.
 pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> String {
     match &event.payload {
+        crate::ProcessObservationEventPayload::Activity { event_key, .. } => {
+            format!("activity:{event_key}")
+        }
         crate::ProcessObservationEventPayload::LanguageExecution(observation) => {
             match &observation.execution.payload {
                 lash_trace::TraceLanguageExecutionPayload::Node {

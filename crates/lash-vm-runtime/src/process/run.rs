@@ -125,6 +125,7 @@ struct StepHost {
     trace: Option<super::trace::ProcessTrace>,
     observe: lash_kernel_value::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
+    read_ordinal: std::sync::atomic::AtomicU64,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
     cancel: CancellationToken,
@@ -212,7 +213,20 @@ impl RunHost for StepHost {
         let answer = super::reads::answer(
             &requirement.signature.result,
             self.effect_reads
-                .read(effect, input, &self.cancel, deadline)
+                .read(
+                    effect,
+                    input,
+                    lash_execution_contracts::process::EngineReadSite {
+                        ordinal: self
+                            .read_ordinal
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            + 1,
+                        site,
+                        origin,
+                    },
+                    &self.cancel,
+                    deadline,
+                )
                 .await
                 .map_err(|error| ParentFault(error.to_string()))?,
         );
@@ -468,6 +482,9 @@ async fn kernel_run(
                 .collect(),
             ..HostReads::default()
         }),
+        read_ordinal: std::sync::atomic::AtomicU64::new(
+            input.parked.as_ref().map_or(0, |parked| parked.read_count),
+        ),
         effect_reads: Arc::clone(&run.reads),
         environment: Arc::clone(&run.environment),
         cancel: stop.clone(),
@@ -599,6 +616,7 @@ async fn kernel_run(
             }
             Ok((
                 KernelRunOutput::Parked {
+                    read_count: host.read_ordinal.load(std::sync::atomic::Ordering::Relaxed),
                     state,
                     issued,
                     withdrawn,

@@ -20,6 +20,10 @@ use lash_vocabulary::identity::ProcessId;
 #[derive(serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredPayload {
+    Activity {
+        event_key: String,
+        event: Box<lash_core::TurnEvent>,
+    },
     LanguageExecution {
         observation: Box<LanguageExecutionObservation>,
     },
@@ -37,6 +41,10 @@ enum StoredPayload {
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredPayloadView<'a> {
+    Activity {
+        event_key: &'a str,
+        event: &'a lash_core::TurnEvent,
+    },
     LanguageExecution {
         observation: &'a LanguageExecutionObservation,
     },
@@ -52,6 +60,9 @@ enum StoredPayloadView<'a> {
 impl<'a> StoredPayloadView<'a> {
     fn of(payload: &'a ProcessObservationEventPayload) -> Self {
         match payload {
+            ProcessObservationEventPayload::Activity { event_key, event } => {
+                Self::Activity { event_key, event }
+            }
             ProcessObservationEventPayload::LanguageExecution(observation) => {
                 Self::LanguageExecution { observation }
             }
@@ -95,6 +106,7 @@ const ROW_CHARGE: u64 = 192;
 /// sequence, a provisional observation by its producer's event key.
 fn identity_key(identity: &ProcessObservationIdentity) -> String {
     match identity {
+        ProcessObservationIdentity::Activity { event_key } => format!("r:{event_key}"),
         ProcessObservationIdentity::Committed { sequence } => format!("c:{}", sequence.as_u64()),
         ProcessObservationIdentity::LanguageExecution { event_key } => format!("l:{event_key}"),
         ProcessObservationIdentity::StepBodyStarted { event_key } => format!("s:{event_key}"),
@@ -130,6 +142,10 @@ pub(super) fn decode_payload(
     let stored: StoredPayload =
         serde_json::from_slice(payload).map_err(|error| codec_error("decode", error))?;
     Ok(match stored {
+        StoredPayload::Activity { event_key, event } => ProcessObservationEventPayload::Activity {
+            event_key,
+            event: *event,
+        },
         StoredPayload::LanguageExecution { observation } => {
             ProcessObservationEventPayload::LanguageExecution(*observation)
         }

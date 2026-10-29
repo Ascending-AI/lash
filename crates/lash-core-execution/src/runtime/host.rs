@@ -35,6 +35,8 @@ impl RuntimeDataLimits {
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
     pub tool_live: Arc<crate::ToolLive>,
+    /// Provisional process reads, forwarded to the host's existing live feed.
+    pub tool_read_observer: Option<Arc<dyn Fn(crate::TurnEvent) + Send + Sync>>,
     pub data_limits: RuntimeDataLimits,
     /// Working budgets shared by this host's observation surfaces.
     pub observation_work_limits: lash_trace::ObservationWorkLimits,
@@ -403,6 +405,7 @@ impl RuntimeHostConfig {
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
             tool_live: Arc::new(crate::ToolLive::default()),
+            tool_read_observer: None,
             observation_work_limits: lash_trace::ObservationWorkLimits::standard(),
             clock,
         })

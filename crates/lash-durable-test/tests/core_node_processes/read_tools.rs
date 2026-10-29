@@ -1,6 +1,7 @@
 //! A sessionless workflow reads through its recorded component routes.
 
 use super::*;
+use lash::observe::Stream as _;
 
 /// The component that contributes `tools.lookup`.
 const KNOWLEDGE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
@@ -425,4 +426,136 @@ async fn a_resumed_process_renews_its_page_lease_during_a_long_host_read_on_sqli
         assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
         core.shutdown().await.unwrap();
     })).await.expect("the process reaches both parks without wall-clock lease waits");
+}
+
+/// PROCESS-READ-LIVE: read-mode performs reach the process feed as settled,
+/// provisional tool events, with ordinals continuing across a committed park.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
+    let answered = Arc::new(Answered::default());
+    let (_, core) =
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-live", |backend| {
+            let workers = lash::vm::WorkerService::default();
+            let bounds = workers.config().run_bounds;
+            lash::LashCore::standard_builder(backend.clone())
+                .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                    workers,
+                    "typescript",
+                    bounds,
+                )))
+                .process_component(knowledge_component(&answered), KNOWLEDGE)
+        });
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(KNOWLEDGE, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let source = LOOKUP.replace("  return got", "  do perform 1(1) as Null then yield\n  let again = perform 0({topic: \"second\"}) as Any\n  return [got, again]");
+    let (payload, env) = kernel_process::publish(&core, &source, &env).await;
+    let process = start_under(
+        &core,
+        &env,
+        lash_vm_runtime::LASH_VM_ENGINE_KIND,
+        payload,
+        |mut request| {
+            if let lash_execution_contracts::process::ProcessStartTarget::Input(
+                lash_execution_contracts::process::ProcessInput::Engine { launch, .. },
+            ) = &mut request.input
+            {
+                let settings = lash_vm_runtime::KernelRecordedSettings::from_engine_settings(
+                    launch.settings.as_ref().unwrap(),
+                )
+                .unwrap();
+                launch.settings = Some(
+                    settings
+                        .observing(lash_kernel_value::observation::RunObservation::Counts)
+                        .into_engine_settings(),
+                );
+            }
+            request
+        },
+    )
+    .await;
+    let observed = core.processes().observe(&process);
+    let snapshot = observed.snapshot().await.unwrap();
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let activities = tokio::time::timeout(Duration::from_secs(60), async {
+        let mut activities = Vec::new();
+        while activities.len() < 4 {
+            match std::future::poll_fn(|cx| std::pin::Pin::new(&mut feed).poll_next(cx))
+                .await
+                .unwrap()
+                .unwrap()
+            {
+                lash::process::ProcessObservationStreamItem::Event(event) => {
+                    if let lash::process::ProcessObservationEventPayload::Activity {
+                        event, ..
+                    } = &event.payload
+                    {
+                        activities.push(serde_json::to_value(event).unwrap());
+                    }
+                }
+                gap => panic!("read feed lost continuity: {gap:?}"),
+            }
+        }
+        activities
+    })
+    .await
+    .expect("both read start/return pairs reach the process feed");
+    let facts: Vec<_> = activities
+        .iter()
+        .map(|event| {
+            serde_json::json!({
+                "type":event["type"], "execution":event["execution"],
+                "caller":event["read"]["caller"], "ordinal":event["read"]["ordinal"],
+                "name":event["name"], "provider":event["read"]["provider"],
+                "args":event["args"], "outcome":event["output"]["outcome"]["status"],
+            })
+        })
+        .collect();
+    let mut expected = Vec::new();
+    for (ordinal, topic) in [(1, "lash"), (2, "second")] {
+        for (kind, outcome) in [
+            ("tool_call_started", serde_json::Value::Null),
+            ("tool_call_returned", serde_json::json!("success")),
+        ] {
+            expected.push(serde_json::json!({
+                "type":kind, "execution":"read", "caller":{"kind":"process", "process_id":process},
+                "ordinal":ordinal, "name":LOOKUP_TOOL,
+                "provider":{"registry":"process", "owner":KNOWLEDGE.component(), "key":"tools"},
+                "args":{"topic":topic}, "outcome":outcome,
+            }));
+        }
+    }
+    assert_eq!(facts, expected);
+    assert_eq!(activities[0]["call_id"], activities[1]["call_id"]);
+    assert_eq!(activities[2]["call_id"], activities[3]["call_id"]);
+    assert_ne!(activities[0]["call_id"], activities[2]["call_id"]);
+    assert_eq!(
+        success(&ended(&core, &process).await),
+        serde_json::json!([
+            {"topic":"lash", "draw":1}, {"topic":"second", "draw":2}
+        ])
+    );
+    let replayed = core
+        .processes()
+        .replay(&process, lash::workflow::ReplaySegments::All)
+        .await
+        .unwrap();
+    assert_eq!(replayed.len(), 2, "both sides of the park replay");
+    assert!(
+        replayed.iter().all(|segment| matches!(
+            segment.answer,
+            lash::workflow::SegmentAnswer::Verified { .. }
+        )),
+        "{replayed:?}"
+    );
+    assert_eq!(
+        answered.reads.load(Ordering::SeqCst),
+        2,
+        "replay consumes its tape without calling a reader"
+    );
+    assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
+    core.shutdown().await.unwrap();
 }

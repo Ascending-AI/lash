@@ -440,7 +440,9 @@ pub use lash_execution_contracts::process::StepPublication;
 pub use lash_execution_contracts::process::StepRequest;
 pub use lash_execution_contracts::process::SuccessionError;
 pub use lash_execution_contracts::process::SuccessorCarry;
-pub use lash_execution_contracts::process::{EngineEffectReads, EngineReadError, EngineStepRun};
+pub use lash_execution_contracts::process::{
+    EngineEffectReads, EngineReadError, EngineReadSite, EngineStepRun,
+};
 pub use lash_execution_contracts::session_types::PluginOwned;
 pub use lash_execution_contracts::state_commands::StateCommands;
 pub use lash_plugin_standard_compaction::{

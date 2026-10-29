@@ -88,6 +88,7 @@ export type TurnActivity = (({
    * Lash's identity for the call (ADR 0117).
    */
   "call_id": string;
+  "execution"?: ToolCallExecution;
   /**
    * Graph key of the enclosing code block, when this tool call ran
    * inside one. `None` when the call did not run inside a code block.
@@ -98,6 +99,7 @@ export type TurnActivity = (({
    * The model provider's id for the call, when a model issued it.
    */
   "provider_call_id"?: (string | null);
+  "read"?: (ToolReadMetadata | null);
   "type": "tool_call_started";
   [key: string]: unknown;
 } | {
@@ -110,6 +112,7 @@ export type TurnActivity = (({
    * The observed call window, absent when unmeasured.
    */
   "duration_ms"?: (number | null);
+  "execution"?: ToolCallExecution;
   /**
    * Graph key of the enclosing code block, when this tool call ran
    * inside one. `None` when the call did not run inside a code block.
@@ -121,6 +124,7 @@ export type TurnActivity = (({
    * The model provider's id for the call, when a model issued it.
    */
   "provider_call_id"?: (string | null);
+  "read"?: (ToolReadMetadata | null);
   "type": "tool_call_returned";
   [key: string]: unknown;
 } | {
@@ -3691,6 +3695,11 @@ export type TextProjectionMetadata = {
 export type ToolBound = ("execution" | "park");
 
 /**
+ * Whether tool-call activity describes a recorded call or an unrecorded read.
+ */
+export type ToolCallExecution = ("recorded" | "read");
+
+/**
  * A tool call refused by the session's [`MaxToolCalls`]: the program asked
  * for more tool calls than its recorded limit admits.
  *
@@ -4487,6 +4496,41 @@ export type ToolProviderHandle = {
   "key": string;
   "owner": string;
   "registry": RegistryKind;
+};
+
+/**
+ * The caller of an unrecorded tool read. This is observation identity only.
+ */
+export type ToolReadCaller = ({
+  "graph_key": string;
+  "kind": "code_block";
+  [key: string]: unknown;
+} | {
+  "kind": "process";
+  "process_id": string;
+  [key: string]: unknown;
+});
+
+/**
+ * Read-specific observation metadata, reusable if a save later retains reads.
+ * This build keeps it only on live tool-call activity (ADR 0144 §5).
+ */
+export type ToolReadMetadata = {
+  "answer_bytes": number;
+  /**
+   * JSON byte sizes; zero when input or answer was unavailable.
+   */
+  "args_bytes": number;
+  "caller": ToolReadCaller;
+  "elapsed_us": number;
+  /**
+   * One-based ordinal among the caller's attempted reads, retained at saves.
+   */
+  "ordinal": number;
+  "origin": string;
+  "provider": ToolProviderHandle;
+  "site": string;
+  [key: string]: unknown;
 };
 
 export type ToolView = {

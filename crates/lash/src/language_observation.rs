@@ -41,6 +41,34 @@ pub(crate) struct LanguageObservationPublisher {
 }
 
 impl LanguageObservationPublisher {
+    /// Tool activity uses the process's existing bounded queue and gap policy.
+    pub(crate) fn enqueue_tool_read(&self, event: lash_core::TurnEvent) {
+        if self.closed.load(Ordering::Acquire) {
+            return;
+        }
+        let read = match &event {
+            lash_core::TurnEvent::ToolCallStarted {
+                read: Some(read), ..
+            }
+            | lash_core::TurnEvent::ToolCallReturned {
+                read: Some(read), ..
+            } => read,
+            _ => return,
+        };
+        let lash_core::ToolReadCaller::Process { process_id } = &read.caller else {
+            return;
+        };
+        let process_id = process_id.clone();
+        let charge = self.charge(&event);
+        self.enqueue_process(&process_id, charge, None, || {
+            ProcessReplayEventDraft::activity(
+                ProcessSequence(0),
+                uuid::Uuid::new_v4().to_string(),
+                event,
+            )
+        });
+    }
+
     pub(crate) fn new(
         process_store: Arc<dyn ProcessReplayStore>,
         session_store: Arc<dyn LiveReplayStore>,

@@ -766,6 +766,9 @@ fn event_bytes(
         limit,
     };
     let counted = match &event.payload {
+        super::ProcessObservationEventPayload::Activity { event_key, event } => {
+            serde_json::to_writer(&mut counter, &(event_key, event))
+        }
         super::ProcessObservationEventPayload::LanguageExecution(observation) => {
             serde_json::to_writer(&mut counter, observation)
         }

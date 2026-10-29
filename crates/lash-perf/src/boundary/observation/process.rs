@@ -118,6 +118,7 @@ async fn follow(
         );
         match item {
             ProcessObservationStreamItem::Event(event) => match &event.payload {
+                ProcessObservationEventPayload::Activity { .. } => {}
                 ProcessObservationEventPayload::LanguageExecution(_) => delivered.language += 1,
                 ProcessObservationEventPayload::StepBodyStarted(_) => delivered.step_body += 1,
                 ProcessObservationEventPayload::Committed { event } => {

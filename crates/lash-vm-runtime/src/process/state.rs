@@ -108,6 +108,8 @@ pub(crate) struct ParkedPage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ParkedRun {
+    /// Attempted reads through this save; unsaved attempts repeat their ordinal.
+    pub(crate) read_count: u64,
     pub(crate) page: ParkedPage,
     pub(crate) by: u64,
 }
@@ -406,6 +408,7 @@ pub(crate) enum KernelRunOutput {
     /// published and owns, the waits it asked for since its last park and
     /// the waits it withdrew.
     Parked {
+        read_count: u64,
         state: ParkedPage,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,

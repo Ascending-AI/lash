@@ -222,6 +222,8 @@ impl RuntimeExecutionContext<'_> {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(activity_id),
                 event: TurnEvent::ToolCallStarted {
+                    execution: crate::ToolCallExecution::Recorded,
+                    read: None,
                     call_id: ids.call_id.clone(),
                     provider_call_id: ids.provider_call_id.clone(),
                     name: name.to_string(),
@@ -456,6 +458,8 @@ impl RuntimeExecutionContext<'_> {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(tool_activity_id(&record.call_id)),
                 event: TurnEvent::ToolCallReturned {
+                    execution: crate::ToolCallExecution::Recorded,
+                    read: None,
                     call_id: record.call_id.clone(),
                     provider_call_id: record.provider_call_id.clone(),
                     name: record.tool.clone(),

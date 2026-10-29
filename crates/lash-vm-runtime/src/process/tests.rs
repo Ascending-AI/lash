@@ -66,6 +66,7 @@ fn admitted(identity: EffectId) -> Admission {
 fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_kernel_value::sites::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
+            read_count: 0,
             state: sealed(),
             issued,
             withdrawn,

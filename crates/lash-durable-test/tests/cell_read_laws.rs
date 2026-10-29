@@ -100,6 +100,8 @@ enum Cell {
     Reads(u32),
     /// A read, then a durable sleep of [`SLEEP_MS`].
     ReadThenSleep,
+    /// A loop, a taken branch, an untaken branch, and a failed read.
+    ReadActivity,
 }
 
 impl Cell {
@@ -115,6 +117,12 @@ impl Cell {
                  for (let i = 0; i < {n}; i++) {{ const r = await reads.extRead({{ x: i }}); s = s + r.v; }}\n\
                  console.log(s);"
             ),
+            Self::ReadActivity => "for (let i = 1; i <= 3; i++) {
+                const r = await reads.extRead({ x: i });
+                if (i === 1) { await reads.extRead({ x: 10 }); }
+                if (i === 9) { await reads.extRead({ x: 99 }); }
+                }"
+            .to_owned(),
             Self::ReadThenSleep => format!(
                 "const a = await reads.extRead({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
@@ -172,8 +180,7 @@ impl ExternalWorld {
     }
 }
 
-/// The `x` a call was made with. A cell's numbers are its dialect's: a
-/// TypeScript `1` reaches the tool as the number it is, written `1.0`.
+/// The integral `x` a call was made with, across integer and float JSON operands.
 fn written_x(args: &Value) -> Option<i64> {
     let x = args["x"].as_f64()?;
     (x.fract() == 0.0).then_some(x as i64)
@@ -199,6 +206,7 @@ impl StaticToolExecute for ExtTools {
 /// The reader of `ext_read`: each read answers the next number.
 struct WorldReads {
     world: Arc<ExternalWorld>,
+    fail_third: bool,
 }
 
 #[async_trait::async_trait]
@@ -213,6 +221,9 @@ impl lash::tools::ToolReads for WorldReads {
         let mut reads = self.world.reads.lock_recover();
         let answer = i64::try_from(reads.len()).unwrap() + 1;
         reads.push((x, answer));
+        if self.fail_third && x == 3 {
+            return Err(lash::tools::ReadError::new("page unavailable"));
+        }
         Ok(json!({ "v": answer }))
     }
 }
@@ -422,6 +433,7 @@ impl ReadTurn {
                                 lash::tool_provider_key!("reads"),
                                 lash::tools::ToolProviderRegistration::new(reads.clone())
                                     .with_reads(Arc::new(WorldReads {
+                                        fail_third: self.cell == Cell::ReadActivity,
                                         world: Arc::clone(&self.world),
                                     })),
                             )
@@ -623,7 +635,7 @@ impl Scenario for ReadTurn {
                 }
                 violations
             }
-            Cell::ReadThenSleep => Vec::new(),
+            Cell::ReadThenSleep | Cell::ReadActivity => Vec::new(),
         };
         violations.extend(turn_ended(nodes).await);
         violations
@@ -899,4 +911,131 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
         [(1, 1)],
         "the saved read is not made again on the node that takes the cell over"
     );
+}
+
+/// READ-LIVE-ACTUAL: a loop and its taken branch emit the four settled
+/// reads, including the failing third loop read. An untaken branch emits none.
+#[tokio::test]
+async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memory() {
+    let turn = ReadTurn::new(Cell::ReadActivity, Law::Counted);
+    let clock = SimClock::new();
+    let database = turn.database(Arc::clone(&clock)).await;
+    let nodes = SimNodes::new(
+        database,
+        clock,
+        Script::new(),
+        turn.config(),
+        turn.activation(),
+    );
+    let session = turn
+        .core()
+        .session(session())
+        .create(lash::SessionCreation::root(lash::SessionSpec::new(
+            MODEL,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(64),
+            lash_core::NoProgressBudget::bounded(12),
+        )))
+        .await
+        .unwrap();
+    let handle = session
+        .send(lash::TurnInput::text("run the cell"))
+        .await
+        .unwrap();
+    nodes.start("a");
+    let (output, ()) = tokio::join!(handle.output(), async {
+        while !turn.done(&nodes).await {
+            assert!(nodes.step().await.is_some(), "the turn must finish");
+        }
+        nodes.quiesce().await;
+    });
+    let output = output.unwrap();
+    let events: Vec<Value> = output
+        .activities
+        .iter()
+        .map(|activity| serde_json::to_value(&activity.event).unwrap())
+        .collect();
+    let caller = events
+        .iter()
+        .find(|event| event["type"] == "code_block_started")
+        .expect("the code block started")["graph_key"]
+        .clone();
+    assert!(
+        caller.is_string(),
+        "the enclosing code block has a graph key"
+    );
+    let reads: Vec<_> = events
+        .iter()
+        .filter(|event| event["execution"] == "read")
+        .map(|event| {
+            json!({
+                "type": event["type"], "graph_key": event["graph_key"],
+                "caller": event["read"]["caller"], "ordinal": event["read"]["ordinal"],
+                "name": event["name"], "provider": event["read"]["provider"], "args": event["args"],
+                "outcome": event["output"]["outcome"]["status"],
+            })
+        })
+        .collect();
+    let mut expected = Vec::new();
+    for (ordinal, x, answered) in [(1, 1, true), (2, 10, true), (3, 2, true), (4, 3, false)] {
+        for (kind, outcome) in [
+            ("tool_call_started", Value::Null),
+            (
+                "tool_call_returned",
+                json!(if answered { "success" } else { "failure" }),
+            ),
+        ] {
+            expected.push(json!({
+                "type": kind, "graph_key": caller,
+                "caller": {"kind":"code_block", "graph_key":caller},
+                "ordinal":ordinal, "name":READ,
+                "provider":{"registry":"session", "owner":READER, "key":"reads"},
+                "args":{"x":x}, "outcome":outcome,
+            }));
+        }
+    }
+    assert_eq!(
+        reads, expected,
+        "actual reads use the ordinary start/return family"
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    let read_events: Vec<_> = events
+        .iter()
+        .filter(|event| event["execution"] == "read")
+        .collect();
+    for pair in read_events.chunks_exact(2) {
+        let id = pair[0]["call_id"].as_str().unwrap();
+        assert_eq!(pair[0]["call_id"], pair[1]["call_id"]);
+        assert!(ids.insert(id));
+        assert!(
+            !events
+                .iter()
+                .any(|event| event["type"] == "tool_call_completed" && event["call_id"] == id)
+        );
+        lash::ToolCallId::parse(id).expect("a read has a valid ToolCallId");
+    }
+    let returned: Vec<_> = read_events.iter().skip(1).step_by(2).collect();
+    assert_eq!(
+        returned
+            .iter()
+            .map(|event| event["read"]["args_bytes"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [7, 8, 7, 7]
+    );
+    assert_eq!(
+        returned
+            .iter()
+            .map(|event| event["read"]["answer_bytes"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [7, 7, 7, 0]
+    );
+    assert_eq!(returned[0]["read"]["site"], returned[2]["read"]["site"]);
+    assert_eq!(returned[0]["read"]["site"], returned[3]["read"]["site"]);
+    assert_ne!(returned[0]["read"]["site"], returned[1]["read"]["site"]);
+    let last = read_events.last().unwrap();
+    assert_eq!(
+        last["output"]["outcome"]["payload"]["message"],
+        "page unavailable"
+    );
+    assert_eq!(turn.world.reads(), [(1, 1), (10, 2), (2, 3), (3, 4)]);
 }

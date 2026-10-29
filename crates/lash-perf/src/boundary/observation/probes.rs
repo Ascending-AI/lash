@@ -153,6 +153,7 @@ impl ProcessReplayStore for ProcessReplayProbe {
         let mut observed = Vec::new();
         for event in &events {
             match event.payload() {
+                ProcessObservationEventPayload::Activity { .. } => {}
                 ProcessObservationEventPayload::Committed { .. } => cells.committed_drafts.add(1),
                 ProcessObservationEventPayload::LanguageExecution(observation) => {
                     cells.language_drafts.add(1);

@@ -321,6 +321,7 @@ fn run_settled(
             Ok(EngineAction::Terminal(*outcome))
         }
         KernelRunOutput::Parked {
+            read_count,
             state: parked,
             issued,
             withdrawn,
@@ -330,6 +331,7 @@ fn run_settled(
             // Runs are sequential: the one settling is the last asked for.
             let settling = state.runs.saturating_sub(1);
             state.parked = Some(ParkedRun {
+                read_count,
                 page: parked,
                 by: settling,
             });

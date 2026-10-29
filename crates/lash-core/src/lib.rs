@@ -1043,6 +1043,7 @@ pub use runtime::StagedProcessStart;
 
 pub use runtime::StartKey;
 
+pub use lash_core_execution::{ToolCallExecution, ToolReadCaller, ToolReadMetadata};
 pub use runtime::StoredDataCorruption;
 pub use runtime::SubmittedBody;
 pub use runtime::Target;
@@ -1245,3 +1246,5 @@ pub use lash_core_execution::LinkedExecution;
 
 /// Host-selected working-copy limits for durable owners.
 pub use lash_durable::OwnerRetentionSettings;
+
+pub use lash_core_execution::observe_tool_read;

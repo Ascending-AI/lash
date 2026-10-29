@@ -572,6 +572,7 @@ impl ProcessWorkflowOverlayAccumulator {
         event: &ProcessObservationEventPayload,
     ) -> Result<(), ProcessWorkflowFoldError> {
         match event {
+            ProcessObservationEventPayload::Activity { .. } => {}
             ProcessObservationEventPayload::Committed { event } => self.committed(event),
             ProcessObservationEventPayload::StepBodyStarted(observation) => {
                 if observation.step.process_id != self.process_id {

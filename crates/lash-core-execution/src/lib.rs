@@ -1021,6 +1021,7 @@ pub use runtime::TurnFailureSettlement;
 pub use runtime::TurnLaneAdmissionPolicy;
 pub use runtime::TurnPrelude;
 pub use runtime::{OwnerRevisionConflict, RuntimeErrorCause};
+pub use runtime::{ToolCallExecution, ToolReadCaller, ToolReadMetadata};
 
 pub use runtime::WatchedRegistry;
 pub use runtime::WeakProcessEngineRegistry;
@@ -1193,3 +1194,5 @@ pub use session::LinkedExecution;
 
 /// Host-selected working-copy limits for durable owners.
 pub use lash_durable::OwnerRetentionSettings;
+
+pub use tool_reads::observe_tool_read;

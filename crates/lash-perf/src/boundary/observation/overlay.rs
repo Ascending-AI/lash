@@ -84,7 +84,8 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
                     overlay.step_body_started(observation)?;
                     meter.operation("overlay.fold.step_body", format!("process:{process}/event:{}", event.cursor.as_str()), "ok", start);
                 }
-                ProcessObservationEventPayload::Committed { .. } => continue,
+                ProcessObservationEventPayload::Activity { .. }
+                | ProcessObservationEventPayload::Committed { .. } => continue,
             }
             folded += 1;
             // A host reads the overlay after each observation it folds.

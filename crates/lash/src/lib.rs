@@ -418,6 +418,7 @@ pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
 };
+pub use lash_core::{ToolCallExecution, ToolReadCaller, ToolReadMetadata};
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
 /// validated at compile time.
 pub use lash_core::{hook_key, tool_provider_key};

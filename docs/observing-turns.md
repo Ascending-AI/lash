@@ -45,6 +45,30 @@ available when bounded publication ingress loses continuity for more subjects
 than it can remember individually. It discards live evidence; durable history
 remains authoritative.
 
+## Unrecorded tool reads
+
+An unrecorded read emits the ordinary `ToolCallStarted` followed by
+`ToolCallReturned`, with `execution: read` on both. Recorded calls omit that
+field, which defaults to `recorded`. Hosts use their existing tool-call row
+renderer. A read never emits `ToolCallCompleted` because nothing commits it.
+
+Both events share a valid `ToolCallId`, derived from caller plus read ordinal
+with one BLAKE3 hash. For a cell, `graph_key` matches `CodeBlockStarted.graph_key`
+and the enclosing recorded tool calls' graph key. Optional `read` metadata
+contains the typed caller, provider, one-based ordinal, site and origin.
+The return has the usual typed `output`, plus elapsed microseconds and JSON
+argument/answer sizes in `read`. Unavailable input is null with size zero;
+unavailable answers have size zero. No new opt-in is required.
+
+Loops emit one pair per actual read and untaken branches emit none. Contract
+changes and refusals still emit failed returns. These events remain
+provisional and absent from committed entries and transcripts. A crash before
+a save can repeat an ordinal and call id with a different outcome, and an
+observed unsaved stretch can disappear entirely. Correlate by caller plus
+ordinal and clear provisional rows on gaps. A save retains no activity list;
+that decision awaits Sam. A direct model call of a Read tool stays recorded
+and keeps its existing event and completion behavior.
+
 ## Language execution evidence
 
 `LanguageExecution` carries the language, its canonical execution identity and

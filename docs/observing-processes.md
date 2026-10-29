@@ -324,8 +324,18 @@ evidence the window holds. Completion does not shorten the window.
 
 ### The feed
 
-A feed yields three kinds of event.
+A feed yields four kinds of event.
 
+- `Activity { event_key, event }` carries the same ordinary `ToolCallStarted`
+  and `ToolCallReturned` events as a turn. Reads mark both `execution: read`,
+  with a `Process { process_id }` caller in their `read` metadata and a
+  `ToolCallId` derived from caller plus ordinal. They never emit
+  `ToolCallCompleted`. Ordinals continue across committed parks. Unsaved
+  stretches can repeat an ordinal and id after a crash with a different
+  answer. The fresh `event_key` identifies a publication for feed redelivery;
+  caller plus ordinal correlates the host's provisional tool row. These
+  activities use the existing bounded queue and gap policy. No new opt-in
+  is required, and no list of reads is saved.
 - `StepBodyStarted` is provisional: the admitted body of one step started,
   at its site, under its call and attempt.
 - `LanguageExecution` is provisional: what a language execution reported

@@ -1254,6 +1254,8 @@ impl LashCoreBuilder {
         );
         // Product observers are additive: the language publisher observes
         // beside any the host configured.
+        let publisher = Arc::clone(&language_observation_publisher);
+        core.tool_read_observer = Some(Arc::new(move |read| publisher.enqueue_tool_read(read)));
         let core = core.with_process_observation_sink(language_observation_publisher.clone());
         // Appends through this core tick the other nodes' process change
         // hubs, and theirs tick this core's, through the backend's node hints.

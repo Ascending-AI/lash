@@ -800,6 +800,7 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
                     .ok_or_else(|| anyhow!("the process feed ended"))??;
                 let (record, terminal) = match item {
                     ProcessObservationStreamItem::Event(event) => match &event.payload {
+                        lash::process::ProcessObservationEventPayload::Activity { .. } => continue,
                         lash::process::ProcessObservationEventPayload::LanguageExecution(
                             observation,
                         ) => {

@@ -20,9 +20,10 @@ use lash_vocabulary::identity::ProcessId;
 pub const TOOL_CALL_ID_PREFIX: &str = "tc_";
 const DIGEST_HEX_LEN: usize = 64;
 
-/// Permanent form registry: 1 admitted derivation, 2 batch-member extension.
+/// Permanent form registry: 1 admitted derivation, 2 batch-member extension, 3 unrecorded read.
 const FORM_ADMITTED: u8 = 1;
 const FORM_BATCH_MEMBER: u8 = 2;
+const FORM_READ: u8 = 3;
 
 /// Permanent root tag registry: 1 turn, 2 host submission, 3 process.
 const ROOT_TURN: u8 = 1;
@@ -285,6 +286,16 @@ impl fmt::Display for InvalidToolCallId {
 impl std::error::Error for InvalidToolCallId {}
 
 impl ToolCallId {
+    /// Live-only identity of an unrecorded read, derived from its caller and
+    /// saved ordinal. It admits no execution and survives no unsaved history.
+    pub fn unrecorded_read(caller: &str, ordinal: u64) -> Self {
+        let mut digest = Blake3DomainHasher::new(LASH_TOOL_CALL_ID_DOMAIN_VERSION);
+        digest.update([FORM_READ]);
+        encode_bytes(&mut digest, caller);
+        digest.update(ordinal.to_be_bytes());
+        Self::from_digest(digest)
+    }
+
     /// Exact byte width of every issued id: its prefix and BLAKE3 hex digest.
     pub const ENCODED_BYTES: usize = TOOL_CALL_ID_PREFIX.len() + DIGEST_HEX_LEN;
 

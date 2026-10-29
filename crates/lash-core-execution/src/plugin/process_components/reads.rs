@@ -13,6 +13,8 @@ struct ProcessReads {
     composition: Arc<ProcessComposition>,
     env: Arc<ProcessEnv>,
     clock: Arc<dyn crate::Clock>,
+    process: crate::ProcessId,
+    observe: Option<Arc<dyn Fn(crate::TurnEvent) + Send + Sync>>,
 }
 
 impl ProcessComposition {
@@ -22,18 +24,21 @@ impl ProcessComposition {
         &self,
         env: Arc<ProcessEnv>,
         clock: Arc<dyn crate::Clock>,
+        process: crate::ProcessId,
+        observe: Option<Arc<dyn Fn(crate::TurnEvent) + Send + Sync>>,
     ) -> Arc<dyn EngineEffectReads> {
         Arc::new(ProcessReads {
             composition: Arc::new(self.clone()),
             env,
             clock,
+            process,
+            observe,
         })
     }
 }
 
-#[async_trait::async_trait]
-impl EngineEffectReads for ProcessReads {
-    async fn read(
+impl ProcessReads {
+    async fn answer(
         &self,
         use_: &OperationUse,
         input: Result<serde_json::Value, String>,
@@ -126,5 +131,82 @@ impl EngineEffectReads for ProcessReads {
                 message: error.message, data: error.data,
             }),
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl EngineEffectReads for ProcessReads {
+    async fn read(
+        &self,
+        use_: &OperationUse,
+        input: Result<serde_json::Value, String>,
+        at: lash_execution_contracts::process::EngineReadSite<'_>,
+        cancel: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<Result<serde_json::Value, EngineReadError>, PluginError> {
+        let Some(fixed) = self.env.execution().fixed(use_) else {
+            return self.answer(use_, input, cancel, deadline).await;
+        };
+        let args_bytes = input.as_ref().map_or(0, |args| args.to_string().len());
+        let args = input.as_ref().cloned().unwrap_or(serde_json::Value::Null);
+        let read = crate::ToolReadMetadata {
+            caller: crate::ToolReadCaller::Process {
+                process_id: self.process.clone(),
+            },
+            provider: fixed.route.provider.clone(),
+            ordinal: at.ordinal,
+            site: at.site.to_string(),
+            origin: at.origin.to_string(),
+            elapsed_us: 0,
+            args_bytes,
+            answer_bytes: 0,
+        };
+        crate::observe_tool_read(
+            self.observe.as_deref(),
+            read,
+            fixed.route.tool.to_string(),
+            args,
+            self.answer(use_, input, cancel, deadline),
+            |answer| match answer {
+                Ok(Ok(value)) => (
+                    crate::ToolCallOutput::success(value.clone()),
+                    value.to_string().len(),
+                ),
+                Ok(Err(error)) => {
+                    let failure = match error {
+                        EngineReadError::Tool(failure) => (**failure).clone(),
+                        EngineReadError::Arguments(message) => crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::InvalidRequest,
+                            "read_arguments",
+                            message.clone(),
+                        ),
+                        EngineReadError::Reader { message, data } => {
+                            crate::ToolFailure::new("read_failed", message.clone())
+                                .with_raw(crate::ToolValue::untrusted_json(data.clone()))
+                        }
+                        EngineReadError::Cancelled => crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Execution,
+                            "read_cancelled",
+                            "the read was stopped with the process",
+                        ),
+                        EngineReadError::TimedOut => crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Timeout,
+                            "read_timed_out",
+                            "the read exceeded its tool or parent deadline",
+                        ),
+                    };
+                    (crate::ToolCallOutput::failure(failure), 0)
+                }
+                Err(error) => (
+                    crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                        crate::ToolFailureClass::Internal,
+                        "read_unavailable",
+                        error.to_string(),
+                    )),
+                    0,
+                ),
+            },
+        )
+        .await
     }
 }

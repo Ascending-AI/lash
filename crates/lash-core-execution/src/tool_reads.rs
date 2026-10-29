@@ -12,8 +12,8 @@
 //! again, and the answer may differ.
 //!
 //! The reader is a narrow interface on purpose: it gets no attempt context,
-//! no completion client, no intents and no call identity, since a read has
-//! none of them. A provider whose call needs any of them declares its tool
+//! no completion client, no intents and no admitted call identity. Its
+//! live activity has only an observation identity derived from caller and ordinal. A provider whose call needs any of them declares its tool
 //! `Once` or `Repeatable`.
 
 use std::sync::Arc;
@@ -180,4 +180,49 @@ impl ReadRoute {
             })
             .await
     }
+}
+
+/// Observe an unrecorded read on the ordinary tool-call activity lane.
+/// Cells and processes keep their own execution and error mapping; this
+/// function alone emits their read start/return pair, never a completion.
+/// `project` borrows the answer only for observation and does not change it.
+pub async fn observe_tool_read<T>(
+    observe: Option<&(dyn Fn(crate::TurnEvent) + Send + Sync)>,
+    mut read: crate::ToolReadMetadata,
+    name: String,
+    args: serde_json::Value,
+    answer: impl std::future::Future<Output = T>,
+    project: impl FnOnce(&T) -> (crate::ToolCallOutput, usize),
+) -> T {
+    let started = Instant::now();
+    let call_id = read.call_id();
+    if let Some(observe) = observe {
+        observe(crate::TurnEvent::ToolCallStarted {
+            execution: crate::ToolCallExecution::Read,
+            read: Some(read.clone()),
+            call_id: call_id.clone(),
+            provider_call_id: None,
+            name: name.clone(),
+            args: args.clone(),
+            graph_key: read.graph_key(),
+        });
+    }
+    let result = answer.await;
+    if let Some(observe) = observe {
+        let (output, answer_bytes) = project(&result);
+        read.elapsed_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        read.answer_bytes = answer_bytes;
+        observe(crate::TurnEvent::ToolCallReturned {
+            execution: crate::ToolCallExecution::Read,
+            call_id,
+            provider_call_id: None,
+            name,
+            args,
+            output,
+            duration_ms: Some(read.elapsed_us / 1000),
+            graph_key: read.graph_key(),
+            read: Some(read),
+        });
+    }
+    result
 }

@@ -199,6 +199,8 @@ fn emit_started(context: &RuntimeExecutionContext<'_>, material: &str, sink: &Ob
         crate::engine::ObservedEvent::Activity {
             correlation_id: None,
             event: crate::TurnEvent::ToolCallStarted {
+                execution: crate::ToolCallExecution::Recorded,
+                read: None,
                 call_id: crate::ToolCallId::fixture(material),
                 provider_call_id: None,
                 name: "tool".to_string(),
