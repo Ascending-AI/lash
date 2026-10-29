@@ -73,6 +73,7 @@ impl KernelMachine {
     ) -> Status {
         let super::exec::Invocation {
             args,
+            owners,
             count,
             awaiting,
             ..
@@ -84,6 +85,7 @@ impl KernelMachine {
                 exe,
                 (lib, link),
                 super::exec::Invocation::new(args, count)
+                    .with_owners(owners)
                     .awaited_by(awaiting)
                     .with_boundary(Some(descriptor.into())),
             )?,
@@ -92,6 +94,7 @@ impl KernelMachine {
                     task,
                     exe,
                     Call::new(code, args, count)
+                        .with_owners(owners)
                         .in_link(link)
                         .sharing(&captures)
                         .awaited_by(awaiting)

@@ -380,13 +380,16 @@ impl KernelMachine {
                 exe,
                 callable,
                 &descriptor,
-                super::exec::Invocation::new(args, count).awaited_by(awaiting),
+                super::exec::Invocation::new(args, count)
+                    .with_owners(super::exec::ArgumentOwners::Control)
+                    .awaited_by(awaiting),
             ),
             Target::Library(lib, link) => self.call_lib_linked(
                 task,
                 exe,
                 (lib, link),
                 super::exec::Invocation::new(args, count)
+                    .with_owners(super::exec::ArgumentOwners::Control)
                     .awaited_by(awaiting)
                     .with_boundary(None),
             ),
@@ -395,6 +398,7 @@ impl KernelMachine {
                     task,
                     exe,
                     Call::new(code, args, count)
+                        .with_owners(super::exec::ArgumentOwners::Control)
                         .in_link(link)
                         .sharing(&captures)
                         .awaited_by(awaiting),

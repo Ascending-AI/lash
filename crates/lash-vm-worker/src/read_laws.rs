@@ -11,12 +11,15 @@
     reason = "a law fails on a broken fixture assumption"
 )]
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::NodeId;
-use lash_kernel_doc::heap::PageId;
+use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
 use lash_kernel_doc::{Datum, ErrorDatum, Integer};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 
 use lash_kernel_value::names::EffectName;
 use lash_kernel_vm::{
@@ -68,11 +71,23 @@ impl CommittedPages for Uncommitted {
     }
 }
 
+#[derive(Clone)]
+struct SharedPages(Rc<RefCell<LocalPages<Uncommitted>>>);
+impl PageSource for SharedPages {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+        self.0.borrow_mut().read(pages)
+    }
+    fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
+        self.0.borrow_mut().seal(page)
+    }
+}
+
 /// How a run ended, what it printed, what it was charged and how often it
 /// parked.
 #[derive(Debug, PartialEq)]
 struct Ran {
     end: End,
+    carry: Option<lash_kernel_state::semantic::Checkpoint>,
     prints: Vec<Datum>,
     charged: u64,
     parks: usize,
@@ -138,15 +153,16 @@ fn run_in(
         requests_per_park: 16,
         join_members: 16,
     };
+    let pages = SharedPages(Rc::new(RefCell::new(LocalPages::new(
+        Uncommitted,
+        Box::new(spools.spool(next_stage_lease()).expect("spool")),
+    ))));
     let mut machine = lash_kernel_vm::testing::start(
         program.clone(),
         bounds,
         start,
         strategy,
-        Box::new(LocalPages::new(
-            Uncommitted,
-            Box::new(spools.spool(next_stage_lease()).expect("spool")),
-        )),
+        Box::new(pages.clone()),
     )
     .expect("the cell starts");
     let mut host = Answering {
@@ -159,8 +175,16 @@ fn run_in(
         match machine.run(&mut host, u64::MAX).expect("the run steps") {
             Step::Slice => {}
             Step::Ended(end) => {
+                let carry = match &end {
+                    End::Finished(finished) => finished.carry.as_ref().map(|root| {
+                        lash_kernel_state::semantic::session(root, Box::new(pages.clone()))
+                            .expect("the carried session projects")
+                    }),
+                    _ => None,
+                };
                 return Ran {
                     end,
+                    carry,
                     prints: host.prints,
                     charged: machine.meters().charged.expect("exact charge"),
                     parks,
@@ -351,7 +375,18 @@ if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki'
                 recorded.charged
             )
         );
-        let observation = (read.end, read.prints, read.calls, read.charged);
+        let End::Finished(finished) = read.end else {
+            panic!("the read loop finishes")
+        };
+        let observation = (
+            finished.result,
+            finished.finish,
+            finished.not_carried,
+            read.carry,
+            read.prints,
+            read.calls,
+            read.charged,
+        );
         if let Some(baseline) = &baseline {
             assert_eq!(&observation, baseline, "register and reference cells agree");
         } else {

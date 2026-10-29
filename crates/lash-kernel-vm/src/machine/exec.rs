@@ -35,10 +35,19 @@ impl<'a> From<&'a lash_kernel_doc::FunctionExport> for ExportBoundary<'a> {
     }
 }
 
+/// Hook arguments come from control state, even when their ABI registers
+/// overlap the active statement's source operands.
+#[derive(Clone, Copy)]
+pub(super) enum ArgumentOwners {
+    Operands,
+    Control,
+}
+
 /// Arguments and the continuation owned by one call activation.
 #[derive(Clone, Copy)]
 pub(super) struct Invocation<'a> {
     pub(super) args: Reg,
+    pub(super) owners: ArgumentOwners,
     pub(super) count: usize,
     pub(super) awaiting: Option<StmtId>,
     pub(super) export: Option<ExportBoundary<'a>>,
@@ -48,10 +57,15 @@ impl<'a> Invocation<'a> {
     pub(super) fn new(args: Reg, count: usize) -> Self {
         Self {
             args,
+            owners: ArgumentOwners::Operands,
             count,
             awaiting: None,
             export: None,
         }
+    }
+    pub(super) fn with_owners(mut self, owners: ArgumentOwners) -> Self {
+        self.owners = owners;
+        self
     }
     pub(super) fn awaited_by(mut self, awaiting: Option<StmtId>) -> Self {
         self.awaiting = awaiting;
@@ -69,6 +83,7 @@ pub(super) struct Call<'a> {
     pub(super) link: Option<lash_kernel_value::content_ids::LinkId>,
     /// The register the call's arguments start at.
     pub(super) args: Reg,
+    pub(super) owners: ArgumentOwners,
     /// How many arguments there are.
     pub(super) count: usize,
     /// The cells of the variables a closure shares, in its code's order.
@@ -87,12 +102,18 @@ impl<'a> Call<'a> {
             code,
             link: None,
             args,
+            owners: ArgumentOwners::Operands,
             count,
             captures: &[],
             library: None,
             awaited_by: None,
             export: None,
         }
+    }
+
+    pub(super) fn with_owners(mut self, owners: ArgumentOwners) -> Self {
+        self.owners = owners;
+        self
     }
 
     pub(super) fn exported(mut self, export: Option<&'a lash_kernel_doc::FunctionExport>) -> Self {
@@ -884,6 +905,7 @@ impl KernelMachine {
             link,
             code: code_id,
             args: base,
+            owners,
             count: given,
             captures,
             awaited_by,
@@ -984,7 +1006,10 @@ impl KernelMachine {
                 self.bind(task, param.at, param.shared, value)?;
             }
         }
-        let inputs = self.regs.take_source_arguments(base, given);
+        let inputs = match owners {
+            ArgumentOwners::Operands => self.regs.take_source_arguments(base, given),
+            ArgumentOwners::Control => Vec::new(),
+        };
         self.logical_enter_frame(task, exe, code_id, &inputs)?;
         Ok(())
     }

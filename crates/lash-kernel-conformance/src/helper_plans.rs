@@ -232,7 +232,10 @@ fn run_with_options<const L: u64>(
     };
     let mut requests = Vec::new();
     let end = loop {
-        match machine.run(&mut world, u64::MAX).unwrap() {
+        match machine
+            .run(&mut world, u64::MAX)
+            .unwrap_or_else(|error| panic!("{} in layout {L}: {error}", case.id))
+        {
             Step::Slice => panic!("an unbounded helper run yielded"),
             Step::Parked(park) => {
                 projector
@@ -245,6 +248,24 @@ fn run_with_options<const L: u64>(
                     let (wait, outcome) = match &request {
                         Request::Effect(effect) => {
                             let operation = crate::linked::operation(&effect.use_);
+                            if operation.as_str() == "cenote.read_document" {
+                                let path = document_path(&effect.args);
+                                let outcome = if path == "archive" {
+                                    Outcome::Failed(ErrorDatum {
+                                        kind: "tool_failed".into(),
+                                        message: "page unavailable".into(),
+                                        data: Datum::Null,
+                                    })
+                                } else {
+                                    Outcome::Completed(Datum::Record(vec![(
+                                        "text".into(),
+                                        Datum::Text("Pricing is per seat, billed monthly.".into()),
+                                    )]))
+                                };
+                                machine.deliver(effect.wait, outcome).unwrap();
+                                requests.push(request);
+                                continue;
+                            }
                             let answer = if operation.as_str() == "host.echo" {
                                 effect.args.first().cloned().expect("echo argument")
                             } else {
@@ -1280,6 +1301,16 @@ result = build()
         ),
     ];
     let typescript = [
+        // FIG-7513: a protocol hook's ABI must not consume the ForIn operand.
+        (
+            "Cenote read loop",
+            r#"const pages = ['plans', 'seats', 'archive'];
+for (const [i, path] of pages.entries()) {
+  if (i === 0) await cenote.readDocument({ document: { collection: 'wiki', path: 'pricing' } });
+  try { await cenote.readDocument({ document: { collection: 'wiki', path } }); } catch {}
+}
+if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki', path: 'never' } });"#,
+        ),
         (
             "bitwise boundaries and indexed writes",
             r#"const values = [NaN, Infinity, -Infinity, -0, 2147483647, 2147483648, 4294967295, 4294967296, 4294967297, -2147483649, -4294967297, 3.9, -3.9, 1e100, {valueOf() { return 4294967297; }}];
@@ -1491,6 +1522,20 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
         let recorded = std::mem::take(&mut reference.tape);
         assert_eq!(quiet, reference, "{} without a charge observer", case.id);
         reference.tape = recorded;
+        if case.id.ends_with("Cenote read loop") {
+            assert!(matches!(planned.end, crate::ExpectedEnd::Finished(_)));
+            assert_eq!(
+                planned
+                    .requests
+                    .iter()
+                    .map(|request| {
+                        let Request::Effect(effect) = request;
+                        document_path(&effect.args)
+                    })
+                    .collect::<Vec<_>>(),
+                ["pricing", "plans", "seats", "archive"],
+            );
+        }
         if case.id.ends_with("compact access invalidation") {
             let Request::Effect(effect) = &planned.requests[0];
             assert_eq!(effect.args, vec![Datum::Text("[105,8,9,99,4,8,45]".into())]);
@@ -1532,4 +1577,18 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
             )]);
         }
     }
+}
+
+fn document_path(args: &[Datum]) -> &str {
+    let Datum::Record(fields) = &args[0] else {
+        panic!("read argument")
+    };
+    let Datum::Record(document) = &fields.iter().find(|(key, _)| key == "document").unwrap().1
+    else {
+        panic!("document argument")
+    };
+    let Datum::Text(path) = &document.iter().find(|(key, _)| key == "path").unwrap().1 else {
+        panic!("document path")
+    };
+    path
 }

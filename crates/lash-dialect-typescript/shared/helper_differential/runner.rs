@@ -276,6 +276,17 @@ impl Runner {
                 }),
             },
         );
+        effects.insert(
+            EffectName::new("cenote.read_document").map_err(|e| e.to_string())?,
+            Signature {
+                params: vec![Param {
+                    name: Name::new("document"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+        );
         let env_namespaces =
             crate::linked::namespaces(&effects, &Default::default()).map_err(|e| e.to_string())?;
         let env = Environment::new(&self.library, &env_namespaces);

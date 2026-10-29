@@ -600,6 +600,7 @@ impl KernelMachine {
     ) -> Status {
         let super::exec::Invocation {
             args,
+            owners,
             awaiting,
             export,
             ..
@@ -609,6 +610,7 @@ impl KernelMachine {
         // An argument the call leaves out is absent: the body binds every
         // parameter.
         let call = Call::new(code, args, function.arity)
+            .with_owners(owners)
             .in_link(self.current_link())
             .of_library(lib)
             .with_boundary(export);

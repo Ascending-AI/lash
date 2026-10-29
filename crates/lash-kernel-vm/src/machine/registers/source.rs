@@ -217,17 +217,21 @@ impl Operands {
             | Op::Nested { args: items, .. } => Some(items),
             _ => None,
         };
+        let missing_input = |reg| {
+            invalid(&format!(
+                "source input has no owner: op {op:?}, pc {pc}, register {reg:?}, source {:?}",
+                stream.source_sites.get(pc as usize),
+            ))
+        };
         match range {
             Some(range) => {
                 for reg in range.regs() {
-                    self.remove(reg)
-                        .ok_or_else(|| invalid("source input has no owner"))?;
+                    self.remove(reg).ok_or_else(|| missing_input(reg))?;
                 }
             }
             None => {
                 for reg in op.reads() {
-                    self.remove(reg)
-                        .ok_or_else(|| invalid("source input has no owner"))?;
+                    self.remove(reg).ok_or_else(|| missing_input(reg))?;
                 }
             }
         }
