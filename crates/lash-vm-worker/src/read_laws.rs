@@ -12,7 +12,7 @@
 )]
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -117,6 +117,16 @@ fn run_in(
     answer: &Result<Datum, ErrorDatum>,
     strategy: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> Ran {
+    run_scripted(program, effect, read, answer, strategy, &BTreeMap::new())
+}
+fn run_scripted(
+    program: &Program,
+    effect: &EffectName,
+    read: bool,
+    answer: &Result<Datum, ErrorDatum>,
+    strategy: lash_kernel_vm::testing::ExecutionStrategy,
+    replies: &BTreeMap<EffectName, Result<Datum, ErrorDatum>>,
+) -> Ran {
     let instance = &program.instances[&program.link];
     let slot = program
         .document
@@ -128,6 +138,23 @@ fn run_in(
         lash_kernel_vm::PreparedSlot::Operation(use_) => *use_,
         _ => panic!("operation slot"),
     };
+    let scripted: Vec<_> = replies
+        .iter()
+        .map(|(name, reply)| {
+            let slot = program
+                .document
+                .imports
+                .iter()
+                .find_map(|(slot, import)| {
+                    (import.name.to_string() == name.as_str()).then_some(*slot)
+                })
+                .expect("scripted tool import");
+            let lash_kernel_vm::PreparedSlot::Operation(use_) = instance.slots[&slot] else {
+                panic!("scripted operation slot")
+            };
+            (use_, reply)
+        })
+        .collect();
     let modes = if read {
         [(use_, lash_kernel_value::OperationMode::Read)].into()
     } else {
@@ -195,9 +222,18 @@ fn run_in(
                 parks += 1;
                 for request in park.requests {
                     let Request::Effect(request) = request;
-                    assert_eq!(request.use_, use_, "the cell performs only its tool");
                     host.calls.push(request.args.clone());
-                    let outcome = match answer_at(&request.args, answer) {
+                    let reply = if request.use_ == use_ {
+                        answer_at(&request.args, answer)
+                    } else {
+                        scripted
+                            .iter()
+                            .find(|(use_, _)| *use_ == request.use_)
+                            .expect("the cell performs only a declared scripted tool")
+                            .1
+                            .clone()
+                    };
+                    let outcome = match reply {
                         Ok(value) => Outcome::Completed(value),
                         Err(error) => Outcome::Failed(error),
                     };
@@ -228,7 +264,6 @@ fn lowered_with_schemas(
     input: serde_json::Value,
     output: serde_json::Value,
 ) -> Program {
-    let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
         lash_kernel_value::json_schema::tool_signature(
@@ -236,6 +271,15 @@ fn lowered_with_schemas(
             &lash_kernel_value::JsonSchema::admit(output).expect("an admissible result schema"),
         ),
     )]);
+    lowered_against(dialect, source, &effects, &BTreeMap::new())
+}
+fn lowered_against(
+    dialect: &str,
+    source: &str,
+    effects: &BTreeMap<EffectName, lash_kernel_value::Signature>,
+    controls: &BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+) -> Program {
+    let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let library = embedding.library();
     let lowered = embedding
         .lower(
@@ -243,7 +287,7 @@ fn lowered_with_schemas(
             source,
             &lash_kernel_dialect::Environment::new(
                 library,
-                &crate::embedding::tests::namespaces(&effects, &Default::default())
+                &crate::embedding::tests::namespaces(effects, controls)
                     .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
@@ -261,6 +305,7 @@ fn lowered_with_schemas(
 #[test]
 fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
     cenote_read_loop();
+    figments_workflow_loop();
     let typescript = (
         "typescript",
         "let r = 0;\n\
@@ -417,4 +462,117 @@ fn answer_at(args: &[Datum], answer: &Result<Datum, ErrorDatum>) -> Result<Datum
     } else {
         answer.clone()
     }
+}
+
+// FIG-7513: a member of an awaited result becomes the loop's iterable; its
+// commands must run once each after the read, before the explicit finish.
+fn figments_workflow_loop() {
+    const SOURCE: &str = r#"const w = await workflows.read({workflow_id:'9e4adc8b-c31c-4f9d-9a60-6548bc0621b3'});
+for (const trigger of w.triggers) {
+  await workflows.removeTrigger({workflow_id:'9e4adc8b-c31c-4f9d-9a60-6548bc0621b3',trigger_id:trigger.trigger_id});
+}
+await control.finish("WORKFLOW_CHECK_PASSED");"#;
+    let read = EffectName::new("workflows.read").expect("read operation");
+    let remove = EffectName::new("workflows.remove_trigger").expect("remove operation");
+    let signature = |input, output| {
+        lash_kernel_value::json_schema::tool_signature(
+            &lash_kernel_value::JsonSchema::admit(input).expect("input schema"),
+            &lash_kernel_value::JsonSchema::admit(output).expect("output schema"),
+        )
+    };
+    let mut effects = BTreeMap::from([
+        (
+            read.clone(),
+            signature(
+                serde_json::json!({"type":"object", "properties":{"workflow_id":{"type":"string"}}, "required":["workflow_id"]}),
+                serde_json::json!({"type":"object", "properties":{"triggers":{"type":"array", "items":{"type":"object", "properties":{"trigger_id":{"type":"string"}}, "required":["trigger_id"]}}}, "required":["triggers"]}),
+            ),
+        ),
+        (
+            remove.clone(),
+            signature(
+                serde_json::json!({"type":"object", "properties":{"workflow_id":{"type":"string"}, "trigger_id":{"type":"string"}}, "required":["workflow_id","trigger_id"]}),
+                serde_json::json!({"type":"null"}),
+            ),
+        ),
+    ]);
+    let finish = EffectName::new("control.finish").expect("finish operation");
+    effects.insert(
+        finish.clone(),
+        signature(serde_json::json!({}), serde_json::json!({})),
+    );
+    let controls = BTreeMap::from([(
+        finish.clone(),
+        BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+    )]);
+    let program = lowered_against("typescript", SOURCE, &effects, &controls);
+    let workflow = Ok(Datum::Record(vec![(
+        "triggers".into(),
+        Datum::List(
+            ["schedule-1", "schedule-2"]
+                .into_iter()
+                .map(|id| Datum::Record(vec![("trigger_id".into(), Datum::Text(id.into()))]))
+                .collect(),
+        ),
+    )]));
+    let replies = BTreeMap::from([(remove, Ok(Datum::Null)), (finish, Ok(Datum::Null))]);
+    let mut baseline = None;
+    for strategy in [
+        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
+        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+    ] {
+        let mut program = program.clone();
+        program.library = lash_kernel_vm::testing::library(&program.library, strategy);
+        for as_read in [true, false] {
+            let ran = run_scripted(&program, &read, as_read, &workflow, strategy, &replies);
+            let End::Finished(finished) = ran.end else {
+                panic!("{strategy:?}, read={as_read}: {:?}", ran.end)
+            };
+            assert_eq!(finished.result, Datum::Null);
+            assert!(finished.finish);
+            assert_eq!(ran.parks, if as_read { 3 } else { 4 });
+            assert_eq!(ran.calls.len(), 4);
+            assert_eq!(ran.calls[3], [Datum::Text("WORKFLOW_CHECK_PASSED".into())]);
+            assert_eq!(
+                ran.calls[..3]
+                    .iter()
+                    .map(|args| (
+                        argument_text(args, "workflow_id").expect("workflow id"),
+                        argument_text(args, "trigger_id"),
+                    ))
+                    .collect::<Vec<_>>(),
+                [
+                    ("9e4adc8b-c31c-4f9d-9a60-6548bc0621b3", None),
+                    ("9e4adc8b-c31c-4f9d-9a60-6548bc0621b3", Some("schedule-1")),
+                    ("9e4adc8b-c31c-4f9d-9a60-6548bc0621b3", Some("schedule-2")),
+                ]
+            );
+            let observation = (
+                finished.result,
+                finished.finish,
+                finished.not_carried,
+                ran.carry,
+                ran.prints,
+                ran.calls,
+                ran.charged,
+            );
+            if let Some(baseline) = &baseline {
+                assert_eq!(
+                    &observation, baseline,
+                    "workflow loop strategies and read modes agree"
+                );
+            } else {
+                baseline = Some(observation);
+            }
+        }
+    }
+}
+fn argument_text<'a>(args: &'a [Datum], name: &str) -> Option<&'a str> {
+    let Datum::Record(fields) = args.first()? else {
+        return None;
+    };
+    let Datum::Text(value) = &fields.iter().find(|(key, _)| key == name)?.1 else {
+        return None;
+    };
+    Some(value)
 }
