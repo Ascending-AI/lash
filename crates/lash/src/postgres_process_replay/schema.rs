@@ -342,7 +342,9 @@ pub(super) async fn install(
     pool: &PgPool,
     schema: &str,
 ) -> Result<PostgresProcessReplaySchemaReport, ProcessReplayStoreError> {
-    let mut tx = pool.begin().await.map_err(db_error("install"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("install"))?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
         .bind(lock_key(schema))
         .execute(&mut *tx)
@@ -372,7 +374,9 @@ pub(super) async fn verify(
     pool: &PgPool,
     schema: &str,
 ) -> Result<PostgresProcessReplaySchemaReport, ProcessReplayStoreError> {
-    let mut tx = pool.begin().await.map_err(db_error("verify schema"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("verify schema"))?;
     sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtext($1))")
         .bind(lock_key(schema))
         .execute(&mut *tx)
@@ -418,7 +422,9 @@ pub(super) async fn rotate(
     let schema = &sql.schema;
     let table = |name: &str| format!("\"{schema}\".process_replay_{name}");
     let inc = table("incarnation");
-    let mut tx = pool.begin().await.map_err(db_error("rotate"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("rotate"))?;
     // The row may not exist yet, so the table's lock serialises rotations.
     sqlx::query(&format!("LOCK TABLE {inc} IN SHARE ROW EXCLUSIVE MODE"))
         .execute(&mut *tx)
@@ -624,7 +630,9 @@ pub(super) async fn invalidate(
     let process = process_id.to_string();
     let processes = vec![process.clone()];
     for _ in 0..4 {
-        let mut tx = pool.begin().await.map_err(db_error("invalidate"))?;
+        let mut tx = crate::postgres::begin_unfenced(pool)
+            .await
+            .map_err(db_error("invalidate"))?;
         let invalidated = sqlx::query(&sql.invalidate_head)
             .bind(&process)
             .fetch_optional(&mut *tx)

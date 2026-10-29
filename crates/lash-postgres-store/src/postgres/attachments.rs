@@ -387,7 +387,7 @@ fn sweep_liveness_key(catalog_id: &str, generation: i64) -> String {
 /// A live sweep pass's dedicated connection. Dropping it closes the
 /// connection, and the server releases the pass's liveness key with it.
 struct PostgresSweepLiveness {
-    _connection: std::sync::Mutex<sqlx::PgConnection>,
+    _connection: std::sync::Mutex<crate::guarded_tx::DedicatedConnection>,
     /// The pass's place among `maintenance.max_sweep_sessions`.
     _session: tokio::sync::OwnedSemaphorePermit,
 }
@@ -408,12 +408,14 @@ pub(crate) async fn begin_attachment_sweep(
     .await
     .map_err(|_| StoreError::Contended)?
     .map_err(|_| StoreError::Backend("the sweep session limit is closed".into()))?;
-    let mut connection = pools
-        .session
-        .acquire()
-        .await
-        .map_err(store_sqlx_error)?
-        .detach();
+    let mut connection = crate::guarded_tx::DedicatedConnection::from_detached(
+        pools
+            .session
+            .acquire()
+            .await
+            .map_err(store_sqlx_error)?
+            .detach(),
+    );
     let attempts = pools.maintenance.sweep_mint_attempts;
     for _ in 0..attempts {
         let mut tx = crate::begin_guarded(&mut connection, fence).await?;
@@ -431,7 +433,7 @@ pub(crate) async fn begin_attachment_sweep(
         )
         .bind(ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE)
         .bind(sweep_liveness_key(catalog_id, generation))
-        .fetch_one(crate::observed_sql::executor(&mut connection))
+        .fetch_one(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)?;
         if held {
@@ -469,7 +471,7 @@ async fn sweep_pass_is_dead(
     catalog_id: &str,
     generation: i64,
 ) -> Result<bool, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+    let mut tx = crate::host::begin_unfenced(pool)
         .await
         .map_err(store_sqlx_error)?;
     crate::observed_sql::query(

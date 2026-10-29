@@ -86,7 +86,7 @@ pub(crate) async fn ensure_schema_with_release(
     writable: lash_core_store::compat::VersionRange,
     build_release: &str,
 ) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+    let mut tx = crate::host::begin_unfenced(pool)
         .await
         .map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
@@ -292,11 +292,13 @@ pub(crate) async fn verify_schema_under_advisory_lock(
 ) -> Result<SchemaReport, StoreError> {
     let mut connection = schema_observation_connection(pool).await?;
     let verified = verify_within_repeatable_read(&mut connection).await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     verified
 }
 
-async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnection, StoreError> {
+async fn schema_observation_connection(
+    pool: &PgPool,
+) -> Result<crate::guarded_tx::DedicatedConnection, StoreError> {
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
     // Detached rather than borrowed from the pool, because the lock this takes is
     // *session*-scoped: a future cancelled between the lock and the unlock would
@@ -304,11 +306,13 @@ async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnecti
     // later exclusive holder for that connection's lifetime. An owned connection is
     // closed when it drops — on the error and cancellation paths as much as the
     // happy one — and the backend releases the session lock with it.
-    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    let mut connection = crate::guarded_tx::DedicatedConnection::from_detached(
+        pool.acquire().await.map_err(store_sqlx_error)?.detach(),
+    );
     crate::observed_sql::query("SELECT pg_advisory_lock_shared($1, $2)")
         .bind(lock_namespace)
         .bind(lock_key)
-        .execute(crate::observed_sql::executor(&mut connection))
+        .execute(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)?;
     Ok(connection)
@@ -330,18 +334,18 @@ pub(crate) async fn observe_schema(
 ) -> Result<SchemaObservation, StoreError> {
     let mut connection = schema_observation_connection(pool).await?;
     let observed = observe_within_repeatable_read(&mut connection, descriptor).await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     observed
 }
 
 async fn observe_within_repeatable_read(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
     descriptor: &lash_core_store::compat::CompatDescriptor,
 ) -> Result<SchemaObservation, StoreError> {
     use lash_core_store::compat::CompatAdmission;
     use lash_core_store::compat::StampRead;
 
-    let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
+    let mut tx = crate::observed_sql::control("BEGIN", connection.transaction(None))
         .await
         .map_err(store_sqlx_error)?;
     crate::observed_sql::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -353,9 +357,10 @@ async fn observe_within_repeatable_read(
     let stamp = if report.schema.is_some() {
         // A malformed compatibility relation must yield Unreadable without
         // aborting the snapshot needed by the remaining probes.
-        let mut probe = crate::observed_sql::control("SAVEPOINT", sqlx::Acquire::begin(&mut tx))
-            .await
-            .map_err(store_sqlx_error)?;
+        let mut probe =
+            crate::observed_sql::control("SAVEPOINT", crate::guarded_tx::savepoint(&mut tx))
+                .await
+                .map_err(store_sqlx_error)?;
         let stamp = read_compat_stamp(&mut *probe, true).await;
         crate::observed_sql::control("ROLLBACK TO SAVEPOINT", probe.rollback())
             .await
@@ -395,9 +400,9 @@ async fn observe_within_repeatable_read(
 
 /// Reads the schema inside one `REPEATABLE READ` transaction.
 async fn verify_within_repeatable_read(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
 ) -> Result<SchemaReport, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
+    let mut tx = crate::observed_sql::control("BEGIN", connection.transaction(None))
         .await
         .map_err(store_sqlx_error)?;
     // Must precede every other statement in the transaction: PostgreSQL rejects the

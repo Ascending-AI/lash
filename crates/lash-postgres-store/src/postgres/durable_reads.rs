@@ -62,19 +62,13 @@ impl DurableReads for PostgresDurableStore {
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
         // The rows and the graphs they root are several statements: one
         // snapshot, so a peel beside the read never leaves it half a graph.
-        self.read(|connection| {
-            Box::pin(async move {
-                let mut snapshot = super::snapshot(connection).await?;
-                let namespaces = turns::turn_namespaces(
-                    &mut snapshot,
-                    session,
-                    run,
-                    self.pools.graph_reads.owner(),
-                )
-                .await?;
-                snapshot.rollback().await.map_err(super::sqlx_failure)?;
-                Ok(namespaces)
-            })
+        self.read_snapshot(|snapshot| {
+            Box::pin(turns::turn_namespaces(
+                snapshot,
+                session,
+                run,
+                self.pools.graph_reads.owner(),
+            ))
         })
         .await
     }
@@ -249,6 +243,44 @@ impl DerefMut for ReadConnection<'_> {
 }
 
 impl PostgresDurableStore {
+    /// Run a multi-statement read in one owned snapshot, under the same
+    /// admission, deadline and single dead-connection retry as plain reads.
+    pub(super) async fn read_snapshot<'a, T>(
+        &self,
+        body: impl for<'c> Fn(&'c mut sqlx::Transaction<'a, Postgres>) -> ReadBody<'c, T> + Send + Sync,
+    ) -> Result<T, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            for attempt in 0..2 {
+                let connection = if attempt == 0 {
+                    self.reader().await?
+                } else {
+                    crate::observed_sql::verified(&self.pools.work)
+                        .await
+                        .map_err(sqlx_failure)?
+                };
+                let mut snapshot = match super::snapshot(connection).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) if attempt == 0 && connection_failed(&error) => continue,
+                    Err(error) => return Err(sqlx_failure(error)),
+                };
+                match body(&mut snapshot).await {
+                    Ok(value) => match snapshot.rollback().await {
+                        Ok(()) => return Ok(value),
+                        Err(error) if attempt == 0 && connection_failed(&error) => continue,
+                        Err(error) => return Err(sqlx_failure(error)),
+                    },
+                    Err(failure) => {
+                        if attempt != 0 || sqlx::Connection::ping(&mut *snapshot).await.is_ok() {
+                            return Err(failure);
+                        }
+                    }
+                }
+            }
+            unreachable!("the second read attempt returns its result")
+        })
+        .await
+    }
+
     /// Run `body`, an unfenced read, on a work connection under the work
     /// capacity's admission and deadline.
     ///
@@ -285,5 +317,25 @@ impl PostgresDurableStore {
             body(&mut connection).await
         })
         .await
+    }
+}
+
+// BEGIN owns its checkout, so a failed driver handshake cannot be pinged by
+// the caller after transfer. Only transport failures admit the existing retry.
+fn connection_failed(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::Io(_)
+        | sqlx::Error::Tls(_)
+        | sqlx::Error::Protocol(_)
+        | sqlx::Error::WorkerCrashed => true,
+        sqlx::Error::Database(error) => error
+            .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+            .is_some_and(|error| {
+                matches!(
+                    error.severity(),
+                    sqlx::postgres::PgSeverity::Fatal | sqlx::postgres::PgSeverity::Panic
+                )
+            }),
+        _ => false,
     }
 }

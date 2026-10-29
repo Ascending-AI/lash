@@ -282,7 +282,9 @@ pub(super) async fn install(
     pool: &PgPool,
     schema: &str,
 ) -> Result<PostgresLiveReplaySchemaReport, LiveReplayStoreError> {
-    let mut tx = pool.begin().await.map_err(db_error("install"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("install"))?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
         .bind(lock_key(schema))
         .execute(&mut *tx)
@@ -312,7 +314,9 @@ pub(super) async fn verify(
     pool: &PgPool,
     schema: &str,
 ) -> Result<PostgresLiveReplaySchemaReport, LiveReplayStoreError> {
-    let mut tx = pool.begin().await.map_err(db_error("verify schema"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("verify schema"))?;
     sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtext($1))")
         .bind(lock_key(schema))
         .execute(&mut *tx)
@@ -335,7 +339,9 @@ pub(super) async fn ensure_incarnation(
     if let Some(incarnation) = current_incarnation(pool, sql).await? {
         return Ok(incarnation);
     }
-    let mut tx = pool.begin().await.map_err(db_error("rotate"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("rotate"))?;
     let rotated = rotate(&mut tx, sql, false).await?;
     tx.commit().await.map_err(db_error("rotate commit"))?;
     Ok(rotated)
@@ -347,7 +353,9 @@ pub(super) async fn invalidate_all(
     pool: &PgPool,
     sql: &Statements,
 ) -> Result<Incarnation, LiveReplayStoreError> {
-    let mut tx = pool.begin().await.map_err(db_error("invalidate all"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("invalidate all"))?;
     let incarnation = rotate(&mut tx, sql, true).await?;
     tx.commit()
         .await
@@ -479,7 +487,9 @@ pub(super) async fn invalidate(
     session_id: &SessionId,
 ) -> Result<Vec<Doorbell>, LiveReplayStoreError> {
     let session = session_id.to_string();
-    let mut tx = pool.begin().await.map_err(db_error("invalidate"))?;
+    let mut tx = crate::postgres::begin_unfenced(pool)
+        .await
+        .map_err(db_error("invalidate"))?;
     let mut floor = None;
     for _ in 0..4 {
         for statement in [&sql.invalidate_head, &sql.create_invalidated_head] {

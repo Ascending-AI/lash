@@ -348,7 +348,7 @@ async fn retained_revision(
 
 /// A read transaction that sees one snapshot across its statements.
 async fn begin_snapshot(pool: &PgPool) -> Result<Tx<'_>, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+    let mut tx = crate::host::begin_unfenced(pool)
         .await
         .map_err(store_sqlx_error)?;
     crate::observed_sql::query(

@@ -203,7 +203,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             return Err(missing(reference));
         }
         let referrer = holder.referrer();
-        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+        let mut tx = crate::host::begin_unfenced(&self.pool)
             .await
             .map_err(store_sqlx_error)?;
         if holder_ended_tx(&mut tx, &referrer).await? {

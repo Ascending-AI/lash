@@ -1348,16 +1348,14 @@ impl PostgresDurableStore {
             logical_bytes: limits.logical_bytes.min(policy.logical_bytes),
             depth: limits.depth.min(policy.depth),
         };
-        self.read(|connection| {
+        self.read_snapshot(|snapshot| {
             Box::pin(async move {
-                let mut snapshot = super::snapshot(connection).await?;
-                let rows =
-                    super::run_records::read_limited(&mut snapshot, owner, run, max_rows).await?;
+                let rows = super::run_records::read_limited(snapshot, owner, run, max_rows).await?;
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
-                let nodes = walk_within(&mut snapshot, &roots, &limits, None)
+                let nodes = walk_within(snapshot, &roots, &limits, None)
                     .await
                     .map_err(DurableError::Graph)?;
-                snapshot.rollback().await.map_err(sqlx_failure)?;
+
                 Ok(lash_durable::domain::RunFacts {
                     rows,
                     nodes,

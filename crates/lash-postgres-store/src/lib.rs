@@ -102,7 +102,7 @@ use lash_execution_contracts::process::registry_transitions;
 use lash_protocol_types::attachment::AttachmentId;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgRow};
-use sqlx::{Acquire, Postgres, Row};
+use sqlx::{Postgres, Row};
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 
@@ -499,7 +499,7 @@ impl PostgresStorage {
                 .ok_or_else(|| {
                     StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
                 })?;
-        let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+        let mut tx = crate::host::begin_unfenced(&pool)
             .await
             .map_err(store_sqlx_error)?;
         let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;

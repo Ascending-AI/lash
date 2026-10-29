@@ -61,7 +61,7 @@ use lash_core_store::store::plugin_writers::PluginPublication;
 use lash_core_store::store::plugin_writers::PluginWriterRanges;
 use lash_core_store::store::plugin_writers::PluginWriterRegistration;
 use sqlx::pool::PoolConnection;
-use sqlx::{Acquire, PgConnection, PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 
 use crate::change_feed::TurnChange;
 use crate::host::{RetryPolicies, RetryPolicy, TransactionPrelude};
@@ -557,6 +557,50 @@ impl DerefMut for GuardedTx<'_> {
     }
 }
 
+/// An owned PostgreSQL session detached from any pool. Cancellation closes
+/// the session, including its session-scoped migration or sweep locks.
+pub(crate) struct DedicatedConnection {
+    connection: PgConnection,
+}
+
+impl DedicatedConnection {
+    pub(crate) fn from_detached(connection: PgConnection) -> Self {
+        Self { connection }
+    }
+
+    pub(crate) async fn transaction(
+        &mut self,
+        statement: Option<String>,
+    ) -> Result<Transaction<'_, Postgres>, sqlx::Error> {
+        Transaction::begin(&mut self.connection, statement.map(Into::into)).await
+    }
+
+    pub(crate) async fn close(self) -> Result<(), sqlx::Error> {
+        sqlx::Connection::close(self.connection).await
+    }
+}
+
+impl Deref for DedicatedConnection {
+    type Target = PgConnection;
+    fn deref(&self) -> &PgConnection {
+        &self.connection
+    }
+}
+
+impl DerefMut for DedicatedConnection {
+    fn deref_mut(&mut self) -> &mut PgConnection {
+        &mut self.connection
+    }
+}
+
+/// A savepoint borrows an already acknowledged transaction; it is not a
+/// pooled BEGIN and cannot return an untracked session to a pool.
+pub(crate) async fn savepoint<'t, 'c>(
+    tx: &'t mut Transaction<'c, Postgres>,
+) -> Result<Transaction<'t, Postgres>, sqlx::Error> {
+    sqlx::Acquire::begin(tx).await
+}
+
 /// Where a guarded transaction begins: the pool, or a connection the caller
 /// already checked out.
 pub(crate) enum GuardedEntry<'c, 'p> {
@@ -564,7 +608,7 @@ pub(crate) enum GuardedEntry<'c, 'p> {
     /// borrow of the pool.
     Pool(&'p PgPool),
     Pooled(PoolConnection<Postgres>),
-    Connection(&'c mut PgConnection),
+    Connection(&'c mut DedicatedConnection),
 }
 
 impl<'p> From<&'p PgPool> for GuardedEntry<'_, 'p> {
@@ -573,8 +617,8 @@ impl<'p> From<&'p PgPool> for GuardedEntry<'_, 'p> {
     }
 }
 
-impl<'c> From<&'c mut PgConnection> for GuardedEntry<'c, 'c> {
-    fn from(connection: &'c mut PgConnection) -> Self {
+impl<'c> From<&'c mut DedicatedConnection> for GuardedEntry<'c, 'c> {
+    fn from(connection: &'c mut DedicatedConnection) -> Self {
         Self::Connection(connection)
     }
 }
@@ -608,15 +652,16 @@ pub(crate) async fn begin_pooled(
 
 impl<'c> GuardedEntry<'c, '_> {
     /// Begin with `statement`, the prelude's fenced `BEGIN`.
-    async fn begin_with(self, statement: String) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
+    async fn transaction(
+        self,
+        statement: String,
+    ) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
         let shape = statement.clone();
         crate::observed_sql::control(&shape, async {
             match self {
                 Self::Pool(pool) => begin_pooled(pool.acquire().await?, statement).await,
                 Self::Pooled(connection) => begin_pooled(connection, statement).await,
-                Self::Connection(connection) => {
-                    sqlx::Connection::begin_with(connection, statement).await
-                }
+                Self::Connection(connection) => connection.transaction(Some(statement)).await,
             }
         })
         .await
@@ -656,7 +701,7 @@ pub(crate) async fn begin_guarded<'c, 'p>(
 ) -> Result<GuardedTx<'c>, StoreError> {
     let tx = entry
         .into()
-        .begin_with(fence.state.prelude.fenced().to_owned())
+        .transaction(fence.state.prelude.fenced().to_owned())
         .await
         .map_err(|error| fence.refused(store_sqlx_error(error)))?;
     let mut locked = Locked { tx };
@@ -695,10 +740,10 @@ pub(crate) async fn begin_durable(
 /// first open. No release can have finalized either, so the step proceeds
 /// under this build's own epoch.
 pub(crate) async fn begin_migration<'c>(
-    connection: &'c mut PgConnection,
+    connection: &'c mut DedicatedConnection,
     fence: &WriterFence,
 ) -> Result<GuardedTx<'c>, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", Acquire::begin(connection))
+    let mut tx = crate::observed_sql::control("BEGIN", connection.transaction(None))
         .await
         .map_err(store_sqlx_error)?;
     let recordable: bool =
@@ -763,7 +808,7 @@ pub(crate) async fn begin_fleet_row(
     pool: &PgPool,
     fence: &WriterFence,
 ) -> Result<FleetRowTx, StoreError> {
-    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+    let mut tx = crate::host::begin_unfenced(pool)
         .await
         .map_err(store_sqlx_error)?;
     crate::observed_sql::query(

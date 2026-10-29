@@ -46,7 +46,7 @@ impl lash_execution_contracts::process::ProcessQuery for PostgresProcessRegistry
         &self,
         start_key: &lash_core_store::process_identity::StartKey,
     ) -> Result<Option<ProcessRecord>, PluginError> {
-        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+        let mut tx = crate::host::begin_unfenced(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
         let record = load_process_by_start_key_tx(&mut tx, start_key).await?;
@@ -107,7 +107,7 @@ impl lash_execution_contracts::process::ProcessQuery for PostgresProcessRegistry
         )
         .await
         .map_err(plugin_store_error)?;
-        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+        let mut tx = crate::host::begin_unfenced(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
         let horizon = process_change_horizon_tx(&mut tx).await?;
@@ -536,7 +536,7 @@ impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegis
         let through_sequence = i64::try_from(through_sequence).map_err(|_| {
             PluginError::Session("process event sequence exceeds the SQL cursor range".into())
         })?;
-        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+        let mut tx = crate::host::begin_unfenced(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
         match require_process_tx(&mut tx, process_id).await {
@@ -599,7 +599,7 @@ impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegis
         >,
         PluginError,
     > {
-        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+        let mut tx = crate::host::begin_unfenced(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
         match require_process_tx(&mut tx, process_id).await {

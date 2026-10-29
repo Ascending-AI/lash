@@ -38,7 +38,7 @@ pub(super) async fn bounds(
     registry: &PostgresProcessRegistry,
 ) -> Result<ProcessChangeBounds, PluginError> {
     sequence(registry).await?;
-    let mut tx = crate::observed_sql::control("BEGIN", registry.pool.begin())
+    let mut tx = crate::host::begin_unfenced(&registry.pool)
         .await
         .map_err(plugin_sqlx_error)?;
     let bounds = bounds_tx(&mut tx).await?;
@@ -59,7 +59,7 @@ pub(super) async fn page(
         .get()
         .min(lash_execution_contracts::process::MAX_PROCESS_ROSTER_PAGE_SIZE);
     let store = format!("postgres:{}", registry.catalog_id);
-    let mut tx = crate::observed_sql::control("BEGIN", registry.pool.begin())
+    let mut tx = crate::host::begin_unfenced(&registry.pool)
         .await
         .map_err(plugin_sqlx_error)?;
     // This share lock keeps compaction and sequencing behind the page. Saves

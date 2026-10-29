@@ -9,6 +9,12 @@ a transaction opened anywhere else, or a mutating statement run outside any
 transaction, fails the check unless `scripts/guarded-transaction-readonly.txt`
 lists its site with the reason it only reads.
 
+Pooled BEGIN ownership (FIG-7551) is a separate, non-exemptible rule over the
+PostgreSQL store and facade. Every pooled begin goes through begin_pooled;
+owned detached sessions and nested savepoints have typed entries. Run only
+this rule with --pooled-begins. The default invocation always runs it too;
+read-only allowlist entries never suppress an ownership violation.
+
 Allowlist lines are `<backend> <path>::<fn>  # <why it only reads>`, keyed by
 the enclosing function so the exemption names the code it justifies. An entry
 that no longer matches a flagged site fails the check too.
@@ -19,6 +25,7 @@ crate's test modules) is not production and is not checked.
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -522,7 +529,7 @@ def _line_start(text: str, position: int) -> int:
     return text.rfind("\n", 0, position) + 1
 
 
-def test_only_module_files(crate_src: Path) -> set[Path]:
+def test_only_module_files(crate_src: Path, *, include_testing: bool = True) -> set[Path]:
     """Files a test- or `testing`-gated `mod name;` declares, transitively."""
 
     excluded: set[Path] = set()
@@ -543,7 +550,10 @@ def test_only_module_files(crate_src: Path) -> set[Path]:
             else:
                 candidate = directory / f"{match.group(1)}.rs"
                 target = candidate if candidate.exists() else directory / match.group(1) / "mod.rs"
-            if _TEST_CFG.search(attributes) or path.resolve() in excluded:
+            test_cfg = _TEST_CFG.search(attributes) if include_testing else re.search(
+                r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]", attributes
+            )
+            if test_cfg or path.resolve() in excluded:
                 excluded.add(target.resolve())
             pending.append(target)
     # A module file's own children are declared relative to it.
@@ -785,15 +795,103 @@ def _function_start(text: str, position: int) -> int:
     return best
 
 
+# FIG-7551: these driver calls can put a pooled connection inside a server
+# transaction before SQLx records its depth. Read-only exemptions cannot make
+# cancellation safe. Check the completion owner itself as well as its callers.
+_DIRECT_BEGIN = r"\.\s*begin\s*\(\s*\)|\.\s*begin_with\s*\("
+
+
+def direct_begin_pattern(code: str) -> re.Pattern[str]:
+    names = {"Connection", "Acquire", "Transaction", "PgConnection", "PgPool", "Pool",
+             "PoolConnection", "TransactionManager", "PgTransactionManager"}
+    while True:
+        previous = set(names)
+        for original, alias in re.findall(r"\b(\w+)\s+as\s+(\w+)", code):
+            if original in names:
+                names.add(alias)
+        for alias, original in re.findall(r"\btype\s+(\w+)[^=;]*=\s*(?:[\w]+::)*(\w+)", code):
+            if original in names:
+                names.add(alias)
+        if names == previous:
+            break
+    return re.compile(_DIRECT_BEGIN + r"|\b(?:" + "|".join(sorted(names))
+                      + r")(?:\s*::\s*<[^;{}()]*>)?\s*::\s*begin(?:_with)?\s*\("
+                      + r"|>\s*::\s*begin(?:_with)?\s*\(")
+
+
+def check_pooled_begins(root: Path = ROOT) -> list[Site]:
+    findings = []
+    for crate in (POSTGRES_SRC, "crates/lash/src"):
+        base = root / crate
+        excluded = test_only_module_files(base, include_testing=False)
+        for path in sorted(base.rglob("*.rs")):
+            if path.resolve() in excluded:
+                continue
+            relative = path.relative_to(root).as_posix()
+            src = source(relative, path.read_text())
+            spans = []
+            for fn in FN_HEADER.finditer(src.code):
+                brace = src.code.find("{", fn.end())
+                end = src.pairs.get(brace)
+                if end is not None:
+                    spans.append((fn.start(), brace, end, fn.group(1)))
+            for call in direct_begin_pattern(src.code).finditer(src.code):
+                enclosing = [span for span in spans if span[1] < call.start() < span[2]]
+                start, brace, _, name = max(enclosing, default=(0, 0, 0, "<module>"))
+                header = src.code[start:brace]
+                if relative == POSTGRES_GUARD:
+                    # Owned PoolConnection is retained by this one spawned BEGIN.
+                    arguments = src.code[call.end():]
+                    if name == "begin_pooled" and re.search(
+                        r"connection\s*:\s*PoolConnection\s*<", header
+                    ) and re.match(r"connection\s*,", arguments):
+                        continue
+                    # DedicatedConnection owns a detached PgConnection; it never
+                    # returns that session or its locks to a pool on cancellation.
+                    dedicated = [
+                        match for match in re.finditer(r"\bimpl\s+DedicatedConnection\s*\{", src.code)
+                        if match.end() < call.start() < src.pairs.get(match.end() - 1, 0)
+                    ]
+                    owns_session = re.search(
+                        r"struct\s+DedicatedConnection\s*\{\s*connection\s*:\s*PgConnection\s*,", src.code
+                    )
+                    if (dedicated and name == "transaction" and owns_session
+                            and re.match(r"&mut\s+self\.connection\s*,", arguments)):
+                        continue
+                    # This is a nested savepoint on an already tracked Transaction.
+                    if name == "savepoint" and re.search(
+                        r"tx\s*:\s*&\s*'?[\w]*\s*mut\s+Transaction\s*<", header
+                    ) and re.match(r"tx\s*\)", arguments):
+                        continue
+                findings.append(Site(
+                    relative, name, line_of(src.code, call.start()),
+                    "direct BEGIN bypasses begin_pooled; transfer pooled ownership, "
+                    "or use the owned dedicated-session/savepoint entry",
+                ))
+    return findings
+
+
 SECTIONS = {
     "sqlite": check_sqlite,
     "postgres": check_postgres,
 }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pooled-begins", action="store_true",
+                        help="check only the non-exemptible pooled BEGIN ownership rule")
+    args = parser.parse_args(argv or [])
+    problems = [f"{site.path}:{site.line}: {site.function}: {site.what}"
+                for site in check_pooled_begins()]
+    if args.pooled_begins:
+        if problems:
+            print("pooled BEGIN ownership violations:", file=sys.stderr)
+            print("\n".join(f"  {problem}" for problem in problems), file=sys.stderr)
+            return 1
+        print("pooled BEGIN ownership: every pooled BEGIN uses the completion owner")
+        return 0
     allowlist = load_allowlist()
-    problems = []
     for backend, check in SECTIONS.items():
         allowed = allowlist.get(backend, {})
         flagged = check()
@@ -819,4 +917,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

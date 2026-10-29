@@ -290,6 +290,18 @@ fn guard_settings(guards: &TransactionGuards) -> Vec<(&'static str, String)> {
 /// ([`PoolPolicy::test_before_acquire`]).
 pub(crate) const STALE_IDLE: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Begin a pooled transaction with the connection's existing settings.
+/// Cancellation cannot return the connection before BEGIN is acknowledged.
+///
+/// # Errors
+/// The driver's checkout or BEGIN failure.
+pub async fn begin_unfenced(pool: &PgPool) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    crate::observed_sql::control("BEGIN", async {
+        crate::guarded_tx::begin_pooled(pool.acquire().await?, "BEGIN".to_owned()).await
+    })
+    .await
+}
+
 /// A transaction's guard profile, sent with its `BEGIN` in one simple query:
 /// the limits are in force before the transaction's first lock or data
 /// statement, on any connection, whether lash or the host built its pool.
@@ -390,18 +402,19 @@ impl TransactionPrelude {
         .await
     }
 
-    /// Begin a guarded transaction on a connection the caller holds.
+    /// Begin a guarded transaction by taking the caller's pooled connection.
+    /// Its ownership stays with BEGIN until acknowledgement, even on cancellation.
     ///
     /// # Errors
     ///
     /// The driver's error when `BEGIN` fails.
-    pub async fn begin_on<'c>(
+    pub async fn begin_on(
         &self,
-        connection: &'c mut sqlx::PgConnection,
-    ) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
+        connection: sqlx::pool::PoolConnection<Postgres>,
+    ) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
         crate::observed_sql::control(
             &self.begin,
-            sqlx::Connection::begin_with(connection, self.begin.to_string()),
+            crate::guarded_tx::begin_pooled(connection, self.begin.to_string()),
         )
         .await
     }

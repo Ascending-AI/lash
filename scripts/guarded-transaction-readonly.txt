@@ -20,20 +20,7 @@ sqlite crates/lash-sqlite-store/src/triggers/subscription_changes.rs::snapshot  
 sqlite crates/lash-sqlite-store/src/blobs.rs::raw_checkpoint_from_path_for_testing  # testing-only raw connection that decodes one checkpoint
 
 # --- PostgreSQL (lane L2) ---
-postgres crates/lash-postgres-store/src/postgres/attachments.rs::sweep_pass_is_dead  # probes a pass's liveness key under a local lock timeout; takes a transaction-scoped advisory lock, writes no row
-postgres crates/lash-postgres-store/src/postgres/schema.rs::ensure_schema  # the open's admission transaction: it admits F itself against the writable range (§2.1), refusing before commit, and its only write is the release-stamp evidence; a SELECT-only role must be able to open, so it cannot take the row lock
-postgres crates/lash-postgres-store/src/postgres/schema.rs::verify_within_repeatable_read  # reads the catalog shape in one REPEATABLE READ snapshot
-postgres crates/lash-postgres-store/src/postgres/schema.rs::observe_within_repeatable_read  # reads schema, compatibility, release and fleet facts in a REPEATABLE READ READ ONLY transaction; nested probes are rolled-back savepoints
-postgres crates/lash-postgres-store/src/postgres/fleet_format.rs::read_state_in_tx  # reads the fleet format in a savepoint of the read-only schema observation, then rolls the savepoint back
-postgres crates/lash-postgres-store/src/postgres/release_stamp.rs::read_state_in_tx  # reads the release stamp in a savepoint of the read-only schema observation, then rolls the savepoint back
-postgres crates/lash-postgres-store/src/postgres/migrate.rs::lock_connection  # bounds the advisory-lock wait with SET LOCAL and takes the session-scoped schema advisory lock; writes no row
-postgres crates/lash-postgres-store/src/postgres/migrate.rs::read_state_under_lock  # reads the migration stamp, ledger and release stamp in one REPEATABLE READ snapshot
-postgres crates/lash-postgres-store/src/postgres/migrate.rs::verify_changed_catalog  # the synthetic-next shape verification after a run: it reads the catalog and rolls back; each step begins at `begin_migration`
-postgres crates/lash-postgres-store/src/preflight/walk.rs::read_only_snapshot  # opens a REPEATABLE READ READ ONLY snapshot for the durable walk
 postgres crates/lash-postgres-store/src/postgres/process_registry/park_feed.rs::process_park_feed  # reads a page of the process park feed under a share-locked horizon
-postgres crates/lash-postgres-store/src/postgres/process_registry.rs::get_process_by_start_key  # reads the process a start key names
-postgres crates/lash-postgres-store/src/postgres/process_registry.rs::processes_changed_since  # reads a page of process changes under the compaction horizon
-postgres crates/lash-postgres-store/src/postgres/process_registry.rs::event_page_after  # reads a page of process events
 postgres crates/lash-postgres-store/src/postgres/process_registry/parent_end.rs::children  # lists the children a parent's end names, a SELECT chosen by scope kind
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::list_queued_work_pg  # reads the queued work of one session
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::pending_session_work_ordering_pg  # reads the order of a session's pending work
@@ -47,7 +34,6 @@ postgres crates/lash-postgres-store/src/postgres/runtime_persistence/turn_cancel
 postgres crates/lash-postgres-store/src/postgres/session_meta.rs::load_session_meta  # reads a session's relation under share locks
 postgres crates/lash-postgres-store/src/postgres/session_factory.rs::count_unsettled_turns  # counts unsettled turns in one REPEATABLE READ snapshot
 postgres crates/lash-postgres-store/src/postgres/session_factory.rs::turn_park_feed  # reads a page of the turn park feed under a share-locked horizon
-postgres crates/lash-postgres-store/src/postgres/revisions.rs::begin_snapshot  # one REPEATABLE READ snapshot for the retained-revision reads; its callers write nothing
 postgres crates/lash-postgres-store/src/postgres/ingress_obligation.rs::peek_due  # runs a table's `obligation_peek_due` SELECT
 postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_subscriptions  # a subscription listing, the SELECT its filter's shape names
 postgres crates/lash-postgres-store/src/postgres/trigger_store.rs::list_occurrences  # an occurrence listing, the SELECT its filter's shape names

@@ -691,7 +691,7 @@ async fn record_step(
 /// component-stamp move to `to_version`, the ledger row, and the release stamp
 /// all commit or roll back together.
 async fn apply_step(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
     fence: &WriterFence,
     installation: Option<&Installation>,
     step: &PlannedStep<'_>,
@@ -805,7 +805,7 @@ pub(crate) async fn expand_for_testing(
 ///
 /// [`FleetFormat::seed`]: lash_core_store::store::FleetFormat::seed
 async fn seed_fleet_format(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
     fence: &WriterFence,
 ) -> Result<(), StoreError> {
     let mut tx = crate::guarded_tx::begin_migration(connection, fence).await?;
@@ -845,11 +845,13 @@ async fn lock_connection(
     pool: &PgPool,
     shared: bool,
     limits: MigrationLimits,
-) -> Result<sqlx::PgConnection, StoreError> {
+) -> Result<crate::guarded_tx::DedicatedConnection, StoreError> {
     let (lock_namespace, lock_key) = SCHEMA_ADVISORY_LOCK_KEY;
-    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    let mut connection = crate::guarded_tx::DedicatedConnection::from_detached(
+        pool.acquire().await.map_err(store_sqlx_error)?.detach(),
+    );
     let locked = async {
-        let begin = sqlx::Connection::begin(&mut connection);
+        let begin = connection.transaction(None);
         let mut tx = crate::observed_sql::control("BEGIN", begin)
             .await
             .map_err(store_sqlx_error)?;
@@ -879,7 +881,7 @@ async fn lock_connection(
             crate::host::ServerTimeout::Limit(limit) => limit.as_millis(),
         };
         sqlx::raw_sql(&format!("SET statement_timeout = {statement_timeout}"))
-            .execute(crate::observed_sql::executor(&mut connection))
+            .execute(crate::observed_sql::executor(&mut *connection))
             .await
             .map_err(store_sqlx_error)
             .map(|_| ())
@@ -888,7 +890,7 @@ async fn lock_connection(
     match locked {
         Ok(()) => Ok(connection),
         Err(error) => {
-            let _ = sqlx::Connection::close(connection).await;
+            let _ = connection.close().await;
             Err(error)
         }
     }
@@ -898,9 +900,9 @@ async fn lock_connection(
 /// caller holds is session-scoped, so the transaction must start only after
 /// the lock landed — otherwise the snapshot would predate it.
 async fn read_state_under_lock(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
 ) -> Result<MigrationState, StoreError> {
-    let begin = sqlx::Connection::begin(&mut *connection);
+    let begin = connection.transaction(None);
     let mut tx = crate::observed_sql::control("BEGIN", begin)
         .await
         .map_err(store_sqlx_error)?;
@@ -1067,7 +1069,7 @@ pub(crate) async fn plan_on(
         Ok(planned_report)
     }
     .await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     result
 }
 
@@ -1126,7 +1128,7 @@ async fn expand_on(
         Ok(result)
     }
     .await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     result
 }
 
@@ -1135,7 +1137,7 @@ async fn expand_on(
 /// database that cannot open fails here, not at the first worker's startup.
 /// The verification also resolves the namespace a bootstrap just installed.
 async fn verify_changed_catalog(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
     steps: usize,
 ) -> Result<Option<String>, StoreError> {
     let verification = verify_schema_shape(&mut *connection).await?;
@@ -1150,7 +1152,7 @@ async fn verify_changed_catalog(
     };
     #[cfg(feature = "synthetic-next")]
     let findings = {
-        let begin = sqlx::Connection::begin(&mut *connection);
+        let begin = connection.transaction(None);
         let mut tx = crate::observed_sql::control("BEGIN", begin)
             .await
             .map_err(store_sqlx_error)?;
@@ -1250,7 +1252,7 @@ pub(crate) async fn start_backfill(
         Ok(())
     }
     .await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     result
 }
 
@@ -1394,7 +1396,7 @@ async fn backfill_on(
     let state = {
         let mut connection = lock_connection(pool, true, limits).await?;
         let state = read_state_under_lock(&mut connection).await;
-        let _ = sqlx::Connection::close(connection).await;
+        let _ = connection.close().await;
         state?
     };
     if state.installation.is_none() {
@@ -1439,7 +1441,7 @@ async fn contract_on(
         Ok(result)
     }
     .await;
-    let _ = sqlx::Connection::close(connection).await;
+    let _ = connection.close().await;
     result
 }
 
@@ -1447,7 +1449,7 @@ async fn contract_on(
 /// fence read and the ledger rows it locks are the ones the step commits
 /// against.
 async fn apply_contract(
-    connection: &mut sqlx::PgConnection,
+    connection: &mut crate::guarded_tx::DedicatedConnection,
     fence: &WriterFence,
     contract: &ContractMigration,
 ) -> Result<MigrationStep, MigrateError> {

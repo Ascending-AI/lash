@@ -62,7 +62,9 @@ impl ToolClass {
         .map_err(db)?;
         // Idle heads and their rows are reclaimed together; recreating a head
         // mints a new class incarnation, so old cursors report Unavailable.
-        let mut tx = self.pool.begin().await.map_err(db)?;
+        let mut tx = crate::postgres::begin_unfenced(&self.pool)
+            .await
+            .map_err(db)?;
         let removed = sqlx::query(&format!("DELETE FROM {} WHERE owner IN (SELECT owner FROM {} ORDER BY touched_at DESC OFFSET $1) OR touched_at < clock_timestamp() - $2 * interval '1 microsecond' RETURNING owner", self.head, self.head))
             .bind(i64::try_from(retention.owners()).unwrap_or(i64::MAX)).bind(micros(retention))
             .fetch_all(&mut *tx).await.map_err(db)?;
@@ -90,7 +92,9 @@ impl ToolClass {
         let key = key(owner)?;
         let retention = *self.retention.lock_recover();
         self.ensure(&key).await?;
-        let mut tx = self.pool.begin().await.map_err(db)?;
+        let mut tx = crate::postgres::begin_unfenced(&self.pool)
+            .await
+            .map_err(db)?;
         // A shared head lock makes the head and retained rows one window:
         // publication/cleanup cannot trim between these two reads.
         let row = sqlx::query(&format!(
@@ -183,7 +187,9 @@ impl ToolLiveReplay for ToolClass {
         let key = key(owner)?;
         self.ensure(&key).await?;
         let retention = *self.retention.lock_recover();
-        let mut tx = self.pool.begin().await.map_err(db)?;
+        let mut tx = crate::postgres::begin_unfenced(&self.pool)
+            .await
+            .map_err(db)?;
         let row = sqlx::query(&format!(
             "SELECT tail FROM {} WHERE owner=$1 FOR UPDATE",
             self.head

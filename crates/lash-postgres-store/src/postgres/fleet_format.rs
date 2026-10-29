@@ -133,7 +133,8 @@ where
 pub(crate) async fn read_state_in_tx(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<FleetFormatState, sqlx::Error> {
-    let mut probe = crate::observed_sql::control("SAVEPOINT", sqlx::Acquire::begin(tx)).await?;
+    let mut probe =
+        crate::observed_sql::control("SAVEPOINT", crate::guarded_tx::savepoint(tx)).await?;
     let state = read(&mut *probe).await;
     crate::observed_sql::control("ROLLBACK TO SAVEPOINT", probe.rollback()).await?;
     Ok(state)

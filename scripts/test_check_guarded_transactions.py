@@ -43,8 +43,11 @@ mod widget_tests;
 """
 
 GUARD = """\
+pub(crate) async fn begin_pooled(connection: PoolConnection<Postgres>, statement: String) -> Tx {
+    tokio::spawn(async move { Transaction::begin(connection, Some(statement.into())).await }).await
+}
 pub(crate) async fn begin_guarded(pool: &PgPool) -> Tx {
-    pool.begin().await
+    begin_pooled(pool.acquire().await?, "BEGIN".into()).await
 }
 """
 
@@ -190,8 +193,66 @@ class CheckTests(unittest.TestCase):
         )
         self.assertEqual(self.check(), [])
 
+    def test_pooled_begin_forms_cannot_use_readonly_exemptions(self) -> None:
+        # FIG-7551: spelling changes and an exemption cannot bypass the owner.
+        for call in (
+            "pool.begin()", "connection.begin()", "connection.begin_with(sql)",
+            "sqlx::Connection::begin(connection)", "Acquire::begin(connection)",
+            "Transaction::begin(connection, None)", "PgTx::<Postgres>::begin(connection, None)",
+            "Pool::<Postgres>::begin(pool)", "PgTransactionManager::begin(connection, None)",
+            "<PgConnection as sqlx::Connection>::begin(connection)",
+        ):
+            with self.subTest(call=call):
+                self.widgets(f"use sqlx::Transaction as PgTx;\nasync fn reader(pool: &PgPool) {{ {call}.await; }}")
+                self.write("scripts/guarded-transaction-readonly.txt",
+                           f"postgres {SRC}/postgres/widgets.rs::reader # only reads\n")
+                problems = gate.check_pooled_begins(self.repo)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("bypasses begin_pooled", problems[0].what)
+
+    def test_owner_file_is_not_an_exemption(self) -> None:
+        self.write(f"{SRC}/postgres/guarded_tx.rs", GUARD + "\nasync fn migration(connection: &mut PgConnection) { Connection::begin(connection).await; }\n")
+        problems = gate.check_pooled_begins(self.repo)
+        self.assertEqual([p.function for p in problems], ["migration"])
+
+    def test_owned_dedicated_sessions_and_typed_savepoints_are_separate(self) -> None:
+        self.write(f"{SRC}/postgres/guarded_tx.rs", GUARD + """
+            struct DedicatedConnection { connection: PgConnection, }
+            impl DedicatedConnection {
+                async fn transaction(&mut self, statement: Option<String>) {
+                    Transaction::begin(&mut self.connection, statement).await;
+                }
+            }
+            async fn savepoint<'t, 'c>(tx: &'t mut Transaction<'c, Postgres>) {
+                Acquire::begin(tx).await;
+            }
+        """)
+        self.assertEqual(gate.check_pooled_begins(self.repo), [])
+        # Merely naming a pooled wrapper DedicatedConnection is insufficient.
+        path = self.repo / SRC / "postgres/guarded_tx.rs"
+        path.write_text(path.read_text().replace("connection: PgConnection,", "connection: PoolConnection<Postgres>,"))
+        self.assertEqual(len(gate.check_pooled_begins(self.repo)), 1)
+
+    def test_new_ownership_rule_covers_facade_replay_and_testing_features(self) -> None:
+        self.write("crates/lash/src/lib.rs", "#[path = \"postgres_replay.rs\"] mod replay;\n")
+        self.write("crates/lash/src/postgres_replay.rs", "async fn read(pool: &PgPool) { pool.begin().await; }\n")
+        self.widgets('#[cfg(feature = "testing")]\nasync fn fixture(pool: &PgPool) { pool.begin().await; }\n')
+        self.assertEqual(len(gate.check_pooled_begins(self.repo)), 2)
+
+    def test_pooled_begin_rule_ignores_test_modules_comments_and_literals(self) -> None:
+        self.widgets('''
+            // pool.begin() is forbidden in production, not in this comment.
+            fn text() { let text = "pool.begin()"; }
+            #[cfg(test)]
+            mod tests { async fn test(pool: &PgPool) { pool.begin().await; } }
+        ''')
+        self.assertEqual(gate.check_pooled_begins(self.repo), [])
+
 
 class TreeTests(unittest.TestCase):
+    def test_pooled_begin_ownership(self) -> None:
+        self.assertEqual(gate.check_pooled_begins(), [])
+
     def test_the_tree_passes_every_section(self) -> None:
         self.assertEqual(gate.main(), 0)
 

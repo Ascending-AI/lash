@@ -159,22 +159,21 @@ impl super::PostgresDurableStore {
         use lash_core_store::{checkpoint_graph::GraphDecoder, model_calls::ModelCallFact};
         use lash_durable::domain::RunFacts;
         let limits = self.pools.graph_reads.owner();
-        self.read(|connection| {
+        self.read_snapshot(|snapshot| {
             Box::pin(async move {
-                let mut snapshot = super::snapshot(connection).await?;
                 let rows: Vec<(String, crate::keys::Key, i64)> =
                     crate::observed_sql::query_as(SQL.read.sql())
                         .bind(session.as_str())
                         .bind(owner)
-                        .fetch_all(crate::observed_sql::executor(&mut *snapshot))
+                        .fetch_all(crate::observed_sql::executor(&mut **snapshot))
                         .await
                         .map_err(sqlx_failure)?;
                 let roots = rows
                     .iter()
                     .map(|(_, root, _)| super::node_ref(root))
                     .collect::<Result<Vec<_>, _>>()?;
-                let nodes = super::graph::walk_within(&mut snapshot, &roots, &limits, None).await?;
-                snapshot.rollback().await.map_err(sqlx_failure)?;
+                let nodes = super::graph::walk_within(snapshot, &roots, &limits, None).await?;
+
                 let graph = RunFacts {
                     nodes,
                     read_limits: limits,

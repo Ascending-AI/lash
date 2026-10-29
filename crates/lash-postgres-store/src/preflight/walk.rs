@@ -374,12 +374,13 @@ async fn fetch_blobs(
 /// snapshot: under read-committed, a concurrent GC between the two statements
 /// would make a perfectly healthy store report a dangling reference.
 async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, StoreError> {
-    let mut transaction = crate::observed_sql::control("BEGIN", pool.begin())
-        .await
-        .map_err(|error| StoreError::StorageFailure {
-            backend: "postgres",
-            message: error.to_string(),
-        })?;
+    let mut transaction =
+        crate::host::begin_unfenced(pool)
+            .await
+            .map_err(|error| StoreError::StorageFailure {
+                backend: "postgres",
+                message: error.to_string(),
+            })?;
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read_read_only
