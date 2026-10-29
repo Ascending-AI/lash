@@ -59,6 +59,13 @@ pub enum HttpFailureContext {
     },
 }
 
+/// Adapter-owned classification and rejection details stay off the inline error path.
+#[derive(Debug, Clone, Default)]
+struct AdapterFailureEvidence {
+    retry_verdict_classified: bool,
+    rejected_slots: Vec<usize>,
+}
+
 /// Failure crossing the host-configurable HTTP transport boundary.
 ///
 /// The richer diagnostic fields cross the HTTP seam that is also the wire
@@ -73,8 +80,7 @@ pub struct LlmTransportError {
     pub context: Box<HttpFailureContext>,
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
-    retry_verdict_classified: bool,
-    rejected_slots: Option<Box<Vec<usize>>>,
+    adapter_evidence: Option<Box<AdapterFailureEvidence>>,
     /// The HTTP status, when the failure observed one. Also retained in
     /// `stream_evidence` when a provider observed HTTP progress; `code` never mirrors it.
     pub http_status: Option<u16>,
@@ -107,8 +113,7 @@ impl LlmTransportError {
             context: Box::new(HttpFailureContext::Other),
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
-            retry_verdict_classified: false,
-            rejected_slots: None,
+            adapter_evidence: None,
             http_status: None,
             raw: None,
             code: None,
@@ -145,13 +150,19 @@ impl LlmTransportError {
     }
 
     pub fn with_rejected_slots(mut self, slots: Vec<usize>) -> Self {
-        self.rejected_slots = (!slots.is_empty()).then(|| Box::new(slots));
+        if !slots.is_empty() || self.adapter_evidence.is_some() {
+            self.adapter_evidence
+                .get_or_insert_with(Box::default)
+                .rejected_slots = slots;
+        }
         self
     }
     /// Delivered slots identified by structured provider rejection evidence.
     /// Empty means no delivered resource was identified; prose cannot fill it.
     pub fn rejected_slots(&self) -> &[usize] {
-        self.rejected_slots.as_deref().map_or(&[], Vec::as_slice)
+        self.adapter_evidence
+            .as_deref()
+            .map_or(&[], |evidence| evidence.rejected_slots.as_slice())
     }
 
     pub fn with_kind(mut self, kind: ProviderFailureKind) -> Self {
@@ -161,12 +172,16 @@ impl LlmTransportError {
 
     pub fn with_retry_verdict(mut self, retry_verdict: TransportRetryVerdict) -> Self {
         self.retry_verdict = retry_verdict;
-        self.retry_verdict_classified = true;
+        self.adapter_evidence
+            .get_or_insert_with(Box::default)
+            .retry_verdict_classified = true;
         self
     }
 
     pub fn retry_verdict_is_classified(&self) -> bool {
-        self.retry_verdict_classified
+        self.adapter_evidence
+            .as_ref()
+            .is_some_and(|evidence| evidence.retry_verdict_classified)
     }
 
     pub const fn is_retryable(&self) -> bool {
@@ -179,7 +194,7 @@ impl LlmTransportError {
 
     pub fn with_http_status(mut self, status: u16) -> Self {
         self.http_status = Some(status);
-        if !self.retry_verdict_classified {
+        if !self.retry_verdict_is_classified() {
             self.retry_verdict =
                 retry_verdict_for_status(status, retry_after_from_headers(self.headers.as_slice()));
         }
