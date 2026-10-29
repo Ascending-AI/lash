@@ -14,9 +14,20 @@ fn slot_parts(slot: Slot) -> (u8, u32) {
         Slot::Capture(n) => (8, n),
     }
 }
+pub(super) fn invocation_key(task: TaskId, invocation: u64) -> Vec<u8> {
+    [
+        vec![0],
+        task.0.to_be_bytes().to_vec(),
+        invocation.to_be_bytes().to_vec(),
+    ]
+    .concat()
+}
 pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
     match owner {
-        Owner::Frame { task, depth } | Owner::Value { task, depth, .. } => {
+        Owner::Frame { task, invocation }
+        | Owner::Value {
+            task, invocation, ..
+        } => {
             let (kind, index) = match owner {
                 Owner::Value { slot, .. } => slot_parts(slot),
                 _ => (0, 0),
@@ -24,7 +35,7 @@ pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
             [
                 vec![0],
                 task.0.to_be_bytes().to_vec(),
-                depth.to_be_bytes().to_vec(),
+                invocation.to_be_bytes().to_vec(),
                 vec![kind],
                 index.to_be_bytes().to_vec(),
             ]
@@ -61,15 +72,19 @@ impl TokenCodec for Slot {
 impl TokenCodec for Owner {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Frame { task, depth } => {
+            Self::Frame { task, invocation } => {
                 out.sum(0, 2);
                 task.encode(out);
-                depth.encode(out);
+                invocation.encode(out);
             }
-            Self::Value { task, depth, slot } => {
+            Self::Value {
+                task,
+                invocation,
+                slot,
+            } => {
                 out.sum(1, 3);
                 task.encode(out);
-                depth.encode(out);
+                invocation.encode(out);
                 slot.encode(out);
             }
             Self::Session(key) => {
@@ -98,11 +113,11 @@ impl TokenCodec for Owner {
         Ok(match tag {
             0 => Self::Frame {
                 task: TaskId::decode(input)?,
-                depth: input.unsigned()?,
+                invocation: input.unsigned()?,
             },
             1 => Self::Value {
                 task: TaskId::decode(input)?,
-                depth: input.unsigned()?,
+                invocation: input.unsigned()?,
                 slot: Slot::decode(input)?,
             },
             2 => {
@@ -286,19 +301,21 @@ impl Cell for EntityHolding {
 }
 impl TokenCodec for LedgerRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(5);
         self.owners.encode(out);
         self.ended.encode(out);
         self.entities.encode(out);
         self.refinements.encode(out);
+        self.next_invocation.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        input.expect_struct(5)?;
         Ok(Self {
             owners: KeyedRoot::decode(input)?,
             ended: KeyedRoot::decode(input)?,
             entities: KeyedRoot::decode(input)?,
             refinements: input.unsigned()?,
+            next_invocation: input.unsigned()?,
         })
     }
 }

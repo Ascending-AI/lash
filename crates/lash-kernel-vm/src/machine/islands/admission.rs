@@ -76,11 +76,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         close: Option<Close>,
         strict: bool,
     ) -> Option<Accepted> {
-        if occurrence.is_some_and(|at| !self.counters.can_advance(&[at])) {
-            return None;
-        }
-        self.admission_window()
-            .admit((), before, units, close, strict)
+        let occurrences = occurrence.map(|at| [at]);
+        self.admission_window().admit_counted(
+            &*self.counters,
+            (),
+            &crate::admission::Requirements {
+                occurrences: occurrences.as_ref().map_or(&[], |one| one.as_slice()),
+                before,
+                units,
+                close,
+                strict,
+            },
+        )
     }
 
     #[inline(always)]

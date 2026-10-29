@@ -16,7 +16,9 @@ mod derive;
 mod evaluate;
 mod interval;
 mod root_owners;
-pub(crate) use interval::{CompiledInterval, Selection};
+pub(crate) use interval::CompiledInterval;
+#[cfg(test)]
+pub(crate) use interval::Selection;
 mod verify;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -450,7 +452,7 @@ impl Source {
         let binding = self.bindings.get(index as usize)?;
         (binding.index == index).then_some(Root::Value {
             task,
-            depth: invocation,
+            invocation,
             slot: if binding.borrowed {
                 Slot::Capture(index)
             } else {

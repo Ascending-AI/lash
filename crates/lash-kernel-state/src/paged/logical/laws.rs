@@ -16,14 +16,14 @@ fn id(n: u64) -> EntityId {
 fn owner(n: u32) -> Owner {
     Owner::Value {
         task: TaskId::MAIN,
-        depth: 0,
+        invocation: 0,
         slot: Slot::Binding(n),
     }
 }
 fn frame() -> Owner {
     Owner::Frame {
         task: TaskId::MAIN,
-        depth: 0,
+        invocation: 0,
     }
 }
 fn value(bytes: u64, entities: &[u64], access: &Access<'_>) -> Holding {
@@ -238,7 +238,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     // another value occurrence for every physical capture slot.
     let capture = Owner::Value {
         task: TaskId::MAIN,
-        depth: 0,
+        invocation: 0,
         slot: Slot::Capture(0),
     };
     let cell = arena.new_cell(lash_kernel_doc::Value::Int(7));
@@ -283,7 +283,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
                 &[(
                     Owner::Value {
                         task: TaskId::MAIN,
-                        depth: 0,
+                        invocation: 0,
                         slot: Slot::Capture(1)
                     },
                     RootValue::Capture(child_handle)
@@ -330,24 +330,28 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         lash_kernel_doc::Value::Int(1),
         lash_kernel_doc::Value::Int(2),
     ]);
-    let mut registration = arena.registration().unwrap();
-    let prepared = cold
-        .prepare_ownership(
-            registration.arena(),
-            &access,
-            &[],
-            &[(owner(4), RootValue::Value(&computed))],
-        )
-        .unwrap();
-    assert_eq!(prepared.balance().unwrap().entity_local_bytes, 66);
-    let prepared = prepared
-        .admit(145)
-        .err()
-        .expect("65 bytes of entity headroom is insufficient");
-    let accepted = prepared
-        .admit(146)
-        .unwrap_or_else(|_| panic!("66-byte entity must fit its exact event"));
-    cold.publish(accepted, || registration.commit()).unwrap();
+    {
+        let registration = arena.registration().unwrap();
+        let prepared = cold
+            .prepare_publication(
+                registration,
+                &access,
+                &[],
+                &[(owner(4), RootValue::Value(&computed))],
+            )
+            .unwrap();
+        assert_eq!(prepared.balance().unwrap().entity_local_bytes, 66);
+        let prepared = prepared
+            .admit(145)
+            .err()
+            .expect("65 bytes of entity headroom is insufficient");
+        let accepted = prepared
+            .admit(146)
+            .unwrap_or_else(|_| panic!("66-byte entity must fit its exact event"));
+        accepted
+            .publish(&mut cold, |_, edit| assert!(edit.is_none()))
+            .unwrap();
+    }
     assert_eq!(cold.balance().unwrap().total().unwrap(), 146);
     admit(
         &mut cold,
@@ -375,10 +379,10 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     )
     .unwrap();
     let constructed = arena.create_list(&[first, second]);
-    let mut registration = arena.registration().unwrap();
+    let registration = arena.registration().unwrap();
     let prepared = cold
-        .prepare_ownership(
-            registration.arena(),
+        .prepare_publication(
+            registration,
             &access,
             &[owner(5), owner(6)],
             &[(owner(7), RootValue::Value(&constructed))],
@@ -389,13 +393,11 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         146,
         "moving occurrences into members is not a second copy"
     );
-    cold.publish(
-        prepared
-            .admit(146)
-            .unwrap_or_else(|_| panic!("only the header and result reference grow")),
-        || registration.commit(),
-    )
-    .unwrap();
+    prepared
+        .admit(146)
+        .unwrap_or_else(|_| panic!("only the header and result reference grow"))
+        .publish(&mut cold, |_, edit| assert!(edit.is_none()))
+        .unwrap();
     let third = lash_kernel_doc::Value::Int(3);
     let prepared = cold
         .prepare_ownership(
@@ -411,10 +413,10 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .unwrap_or_else(|_| panic!("the RHS must fit")),
     )
     .unwrap();
-    let mut registration = arena.registration().unwrap();
+    let registration = arena.registration().unwrap();
     let member = cold
-        .prepare_member_ownership(
-            &mut registration,
+        .prepare_member_publication(
+            registration,
             &access,
             constructed.handle().unwrap(),
             Member::List(2),
@@ -432,7 +434,12 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         .admit(163)
         .unwrap_or_else(|_| panic!("member transfer adds no occurrence"));
     member
-        .publish(&mut cold, registration, |arena, handle, member, next| {
+        .publish(&mut cold, |arena, edit| {
+            let MemberEdit {
+                handle,
+                member,
+                next,
+            } = edit.unwrap();
             let Member::List(index) = member else {
                 panic!("list member");
             };
@@ -441,6 +448,72 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         .unwrap();
     assert!(cold.holding(owner(8), &access).unwrap().is_none());
     assert_eq!(cold.balance().unwrap().entity_local_bytes, 83);
+    // Reusing a physical frame or slot cannot reuse a logical activation.
+    // The next ID is journaled, and survives a cold open without an owner walk.
+    let mut frames = Ledger::fresh();
+    fn enter<'a>(
+        ledger: &Ledger,
+        arena: &'a mut crate::arena::Arena,
+        access: &Access<'_>,
+        value: &lash_kernel_doc::Value,
+    ) -> (Invocation, PreparedPublication<'a>) {
+        ledger
+            .prepare_enter_publication(
+                TaskId::MAIN,
+                arena.registration().unwrap(),
+                access,
+                &[],
+                &[(Slot::Binding(0), RootValue::Value(value))],
+            )
+            .unwrap()
+    }
+    let (first, attempt) = enter(&frames, &mut arena, &access, &constructed);
+    assert!(attempt.admit(162).is_err());
+    let (same, attempt) = enter(&frames, &mut arena, &access, &constructed);
+    assert_eq!(first, same, "abandoned entry consumes no activation");
+    attempt
+        .admit(163)
+        .unwrap_or_else(|_| panic!("entry fits"))
+        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .unwrap();
+    let exit = frames
+        .prepare_leave_publication(
+            &first,
+            arena.registration().unwrap(),
+            &access,
+            &[(
+                Owner::Ended(TaskId::MAIN),
+                RootValue::Existing(first.owner(Slot::Binding(0))),
+            )],
+        )
+        .unwrap();
+    exit.admit(163)
+        .unwrap_or_else(|_| panic!("return transfers its result"))
+        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .unwrap();
+    assert_eq!(frames.balance().unwrap().total().unwrap(), 99);
+    let sealed = frames.seal(&access, budget()).unwrap().unwrap();
+    let mut frames = Ledger::open(sealed).unwrap();
+    let (second, attempt) = enter(&frames, &mut arena, &access, &constructed);
+    assert_ne!(
+        first.id(),
+        second.id(),
+        "cold frame reuse must retain the activation cursor"
+    );
+    attempt
+        .admit(179)
+        .unwrap_or_else(|_| panic!("second alias has one body"))
+        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .unwrap();
+    assert!(
+        frames
+            .invocation(TaskId::MAIN, first.id(), &access)
+            .is_err()
+    );
+    assert_eq!(
+        frames.invocation_owners(&second, &access).unwrap(),
+        [second.frame(), second.owner(Slot::Binding(0))]
+    );
 }
 
 /// K-BND-003 / K-MACH-008: source-retained cycles and unreferenced ended
@@ -475,14 +548,16 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
                 112,
                 &access,
             );
-            let mut registration = arena.registration().unwrap();
+            let registration = arena.registration().unwrap();
             let mutation = ledger
-                .prepare_member(
-                    &mut registration,
+                .prepare_member_publication(
+                    registration,
                     &access,
                     mirror_handle,
                     Member::List(0),
                     Some(mirror),
+                    &[],
+                    &[],
                 )
                 .unwrap();
             assert_eq!(mutation.balance().unwrap().entity_local_bytes, 48);
@@ -490,7 +565,12 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
                 .admit(128)
                 .unwrap_or_else(|_| panic!("self edge must fit"));
             mutation
-                .publish(&mut ledger, registration, |arena, handle, member, next| {
+                .publish(&mut ledger, |arena, edit| {
+                    let MemberEdit {
+                        handle,
+                        member,
+                        next,
+                    } = edit.unwrap();
                     let Member::List(index) = member else {
                         panic!("list edit");
                     };
@@ -684,7 +764,7 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     );
     let scratch = Owner::Value {
         task: TaskId::MAIN,
-        depth: 0,
+        invocation: 0,
         slot: Slot::Scratch(2),
     };
     admit(
@@ -735,5 +815,52 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
         .unwrap_or_else(|_| panic!("copy did not fit"));
     ledger.publish(fresh, || published.set(true)).unwrap();
     assert!(published.get());
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 163);
+    let mut arena = crate::arena::Arena::from_ordinal(1);
+    let fresh_list = arena.create_list(&[lash_kernel_doc::Value::Int(9)]);
+    let attempt = ledger
+        .prepare_publication(
+            arena.registration().unwrap(),
+            &access,
+            &[],
+            &[(owner(2), RootValue::Value(&fresh_list))],
+        )
+        .unwrap();
+    let attempt = match attempt.admit(163) {
+        Err(rejected) => rejected,
+        Ok(_) => panic!("a fresh source body cannot fit without its local price"),
+    };
+    drop(attempt);
+    assert_eq!(
+        arena.next_ordinal(),
+        1,
+        "abandoned publication returns identity grants"
+    );
+    let attempt = ledger
+        .prepare_publication(
+            arena.registration().unwrap(),
+            &access,
+            &[],
+            &[(owner(2), RootValue::Value(&fresh_list))],
+        )
+        .unwrap()
+        .admit(u64::MAX)
+        .unwrap_or_else(|_| panic!("unbounded publication fits"));
+    ledger.handoff().unwrap();
+    published.set(false);
+    assert!(matches!(
+        attempt.publish(&mut ledger, |_, _| published.set(true)),
+        Err(HeapFault::Malformed(_))
+    ));
+    assert!(
+        !published.get(),
+        "stale publication cannot edit semantic storage"
+    );
+    assert_eq!(
+        arena.next_ordinal(),
+        1,
+        "stale publication returns identity grants"
+    );
+    assert!(ledger.holding(owner(2), &access).unwrap().is_none());
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 163);
 }

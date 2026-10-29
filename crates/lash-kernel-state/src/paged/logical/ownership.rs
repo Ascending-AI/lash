@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 /// Outputs name semantic owners. A copy uses the ledger's existing Holding;
 /// a new value uses the canonical value projection, never a caller's byte delta.
+#[derive(Clone, Copy)]
 pub enum RootValue<'a> {
     Value(&'a Value),
     Existing(Owner),
@@ -162,7 +163,8 @@ impl Prepared {
             identity: self.identity,
             revision: self.revision,
         };
-        let next = staged.prepare_ownership(arena, access, inputs, outputs)?;
+        let mut next = staged.prepare_ownership(arena, access, inputs, outputs)?;
+        next.projected.extend(self.projected);
         Ok(Self {
             before: self.before,
             peak: self.peak.max(next.peak),

@@ -10,6 +10,19 @@ pub struct Dependencies {
     values: Vec<ContentVersion>,
 }
 impl Dependencies {
+    pub(super) fn extend(&mut self, next: Self) -> Result<(), HeapFault> {
+        if !Rc::ptr_eq(&self.ledger.identity, &next.ledger.identity)
+            || self.ledger.revision != next.ledger.revision
+        {
+            return Err(invalid("source dependencies span ledger revisions"));
+        }
+        for value in next.values {
+            if !self.values.contains(&value) {
+                self.values.push(value);
+            }
+        }
+        Ok(())
+    }
     pub fn capture(ledger: &Ledger, arena: &Arena, handles: &[ArenaHandle]) -> Option<Self> {
         let mut values = Vec::with_capacity(handles.len());
         for handle in handles {

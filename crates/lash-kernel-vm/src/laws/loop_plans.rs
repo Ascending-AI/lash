@@ -388,7 +388,7 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                         ),
                         Some(Root::Value {
                             task: lash_kernel_doc::TaskId::MAIN,
-                            depth: 73,
+                            invocation: 73,
                             slot: if borrowed {
                                 Slot::Capture(slot as u32)
                             } else {

@@ -20,76 +20,16 @@ pub enum MemberFault {
     #[error(transparent)]
     Native(#[from] NativeError),
 }
-/// All graph work is staged. The storage owner separately reserves or keeps
-/// its rollback until this journal is accepted and published.
-pub struct PreparedMember {
-    prepared: Prepared,
-    dependencies: Dependencies,
-    handle: ArenaHandle,
-    member: Member,
-    next: Option<Value>,
-}
-pub struct AcceptedMember(PreparedMember);
-impl PreparedMember {
-    pub fn peak(&self) -> u64 {
-        self.prepared.peak()
-    }
-    pub fn balance(&self) -> Result<Balance, HeapFault> {
-        self.prepared.balance()
-    }
-    pub fn admit(self, bound: u64) -> Result<AcceptedMember, Box<Self>> {
-        if self.prepared.peak() <= bound {
-            Ok(AcceptedMember(self))
-        } else {
-            Err(Box::new(self))
-        }
-    }
-}
-impl AcceptedMember {
-    /// The callback is the canonical, fully staged storage owner. It receives
-    /// the same target/key/value bound by admission. It must publish without
-    /// fallible work; an abandoned or stale journal invokes no storage edit.
-    pub fn publish(
-        self,
-        ledger: &mut Ledger,
-        mut registration: Registration<'_>,
-        storage: impl FnOnce(&mut Arena, ArenaHandle, Member, Option<Value>),
-    ) -> Result<(), HeapFault> {
-        let PreparedMember {
-            prepared,
-            dependencies,
-            handle,
-            member,
-            next,
-        } = self.0;
-        if !dependencies.is_current(ledger, registration.arena()) {
-            return Err(invalid("stale member facts"));
-        }
-        let accepted = prepared
-            .admit(u64::MAX)
-            .map_err(|_| invalid("admitted member overflow"))?;
-        ledger.publish(accepted, || {
-            storage(registration.arena(), handle, member, next);
-            registration.commit();
-        })
-    }
+pub(super) struct PreparedMember {
+    pub(super) prepared: Prepared,
+    pub(super) dependencies: Dependencies,
 }
 impl Ledger {
-    pub fn prepare_member(
-        &self,
-        registration: &mut Registration<'_>,
-        access: &Access<'_>,
-        handle: ArenaHandle,
-        member: Member,
-        next: Option<Value>,
-    ) -> Result<PreparedMember, MemberFault> {
-        self.prepare_member_ownership(registration, access, handle, member, next, &[], &[])
-    }
     /// A member write and its evaluated operands share one source frontier.
     /// Consuming an RHS transfers its occurrence into the member. A result or
     /// binding alias is separately named, with its own canonical occurrence.
     #[expect(clippy::too_many_arguments, reason = "one atomic source member event")]
-    pub fn prepare_member_ownership(
+    pub(super) fn prepare_member_ownership(
         &self,
         registration: &mut Registration<'_>,
         access: &Access<'_>,
@@ -179,7 +119,7 @@ impl Ledger {
         changes.push(Change::Members {
             entity,
             remove,
-            add,
+            add: Box::new(add),
         });
         changes.push(Change::Roots(roots));
         // Bind every body actually projected by this journal, including fresh
@@ -199,9 +139,6 @@ impl Ledger {
         Ok(PreparedMember {
             prepared: self.prepare_event(changes, access)?,
             dependencies,
-            handle,
-            member,
-            next,
         })
     }
 }

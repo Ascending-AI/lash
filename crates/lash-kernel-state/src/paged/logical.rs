@@ -15,10 +15,15 @@ mod codec;
 mod dependencies;
 pub use dependencies::Dependencies;
 mod graph;
+mod invocations;
+pub use invocations::Invocation;
 mod members;
 mod ownership;
-pub use members::{AcceptedMember, Member, MemberFault, PreparedMember};
+mod publication;
+use members::PreparedMember;
+pub use members::{Member, MemberFault};
 pub use ownership::RootValue;
+pub use publication::{AcceptedPublication, MemberEdit, PreparedPublication};
 mod values;
 pub(crate) use values::stream_value_edges;
 
@@ -41,11 +46,11 @@ pub enum Slot {
 pub enum Owner {
     Frame {
         task: TaskId,
-        depth: u64,
+        invocation: u64,
     },
     Value {
         task: TaskId,
-        depth: u64,
+        invocation: u64,
         slot: Slot,
     },
     Session([u8; 32]),
@@ -219,6 +224,7 @@ pub struct LedgerRoot {
     pub ended: KeyedRoot,
     pub entities: KeyedRoot,
     pub refinements: u64,
+    pub next_invocation: u64,
 }
 
 #[derive(Clone)]
@@ -227,6 +233,7 @@ struct State {
     ended: Tree<RootHolding>,
     entities: Tree<EntityHolding>,
     refinements: u64,
+    next_invocation: u64,
 }
 impl State {
     fn balance(&self) -> Result<Balance, HeapFault> {
@@ -286,7 +293,7 @@ pub enum Change {
     Members {
         entity: EntityId,
         remove: Holding,
-        add: Holding,
+        add: Box<Holding>,
     },
 }
 
@@ -311,6 +318,7 @@ pub struct Prepared {
     next: State,
     peak: u64,
     before: u64,
+    projected: Vec<EntityId>,
 }
 pub struct Accepted(Prepared);
 impl Prepared {
@@ -344,6 +352,7 @@ impl Ledger {
                 ended: Tree::new(false),
                 entities: Tree::new(false),
                 refinements: 0,
+                next_invocation: 1,
             },
             identity: Rc::new(()),
             revision: 0,
@@ -356,6 +365,7 @@ impl Ledger {
                 ended: Tree::of_keyed(&root.ended),
                 entities: Tree::of_keyed(&root.entities),
                 refinements: root.refinements,
+                next_invocation: root.next_invocation,
             },
             identity: Rc::new(()),
             revision: 0,
@@ -457,6 +467,7 @@ impl Ledger {
             fresh: Vec::new(),
         };
         let mut peak = before;
+        let mut projected = Vec::new();
         for change in changes {
             match change {
                 Change::Roots(changes) => edit.roots(changes)?,
@@ -480,6 +491,7 @@ impl Ledger {
                     )?;
                     edit.retain(&body)?;
                     edit.fresh.push(entity);
+                    projected.push(entity);
                 }
                 Change::Members {
                     entity,
@@ -526,6 +538,7 @@ impl Ledger {
             next: edit.state,
             peak,
             before,
+            projected,
         })
     }
     pub fn commit(&mut self, accepted: Accepted) -> Result<(), HeapFault> {
@@ -583,6 +596,7 @@ impl Ledger {
             ended: keyed(&state.ended)?,
             entities: keyed(&state.entities)?,
             refinements: state.refinements,
+            next_invocation: state.next_invocation,
         };
         self.state = state;
         Ok(Some(root))

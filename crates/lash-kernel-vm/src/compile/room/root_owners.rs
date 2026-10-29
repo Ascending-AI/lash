@@ -98,10 +98,7 @@ impl OwnerSlots {
             )));
         }
         if let Owner::Frame(at) = owner {
-            return (at == &self.source).then_some(Root::Frame {
-                task,
-                depth: invocation,
-            });
+            return (at == &self.source).then_some(Root::Frame { task, invocation });
         }
         let index = self
             .binding_slots
@@ -128,7 +125,7 @@ impl OwnerSlots {
         };
         Some(Root::Value {
             task,
-            depth: invocation,
+            invocation,
             slot,
         })
     }
