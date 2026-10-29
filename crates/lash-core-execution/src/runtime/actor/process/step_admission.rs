@@ -562,6 +562,7 @@ impl ProcessActivation {
                             member.call() == &held.call
                                 && member.outcome().is_none()
                                 && member.cancellation().is_none()
+                                && member.final_payload().is_none()
                         }) {
                             let _ = crate::runtime::actor::round::cancel_call(
                                 tx,

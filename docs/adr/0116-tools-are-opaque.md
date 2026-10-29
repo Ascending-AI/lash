@@ -350,3 +350,19 @@ presentation remains one call and result. A host's delegation tool uses the same
 declared start path as any other start.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+
+## Explicit cancellation of a Python-owned call
+
+Cancelling a Python task awaiting its owned tool call submits a typed call-cancel
+request, rather than releasing its wait. The kernel stops at a quiet point; the
+broker saves the call identities and guest state together before cleanup can
+issue another effect. The actor arbitrates the request against a protected
+`x_final`, commits `x_cancel` before signalling, and retains discharge debt until
+`CancelHint::CancelExternalWork` has cancelled the owned process and released its
+hold. `Ignore` releases the hold without requesting a process cancellation.
+Recovery resumes either decision under the new actor epoch. A final winner keeps
+its result, even if Python independently raises `asyncio.CancelledError`.
+
+Observer withdrawal and aggregate selection still release observation only.
+They never acquire authority to cancel another task's call. Cell closing and
+immediate turn cancellation select outstanding calls through the same decision.

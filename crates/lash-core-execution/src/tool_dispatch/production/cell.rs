@@ -557,6 +557,17 @@ impl MemberBodies for CellMembers {
         ))
     }
 
+    fn reserve_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.tools
+            .context
+            .dispatch()
+            .state
+            .reserve_committed_state(state)
+    }
+
     fn publish_state(
         &self,
         state: &[crate::plugin::StateResolution],

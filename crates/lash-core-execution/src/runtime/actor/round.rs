@@ -92,6 +92,7 @@ pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
 mod context;
+pub(crate) mod decision;
 mod fold;
 #[cfg(test)]
 mod fold_tests;
@@ -1090,9 +1091,10 @@ pub(crate) async fn run_bounded(
     if !cx.lease_held() {
         return Err(Stop::Lapsed);
     }
+    let protection = decision::protection().unwrap_or_default();
     let limit = admitted.limit();
     let remaining = limit.remaining(now);
-    if remaining.is_zero() {
+    if remaining.is_zero() && !protection.is_cancelled() {
         return Err(Stop::Limit(LimitCause::ExecutionTotal));
     }
     let (slice, cause) = if limit.max_slice < remaining {
@@ -1107,10 +1109,22 @@ pub(crate) async fn run_bounded(
     let mut running = body(token.clone());
     let stopped = tokio::select! {
         output = &mut running => return Ok(output),
+        () = protection.cancelled() => {
+            return tokio::select! {
+                output = running => Ok(output),
+                () = cx.cancel().cancelled() => Err(Stop::Activation),
+            };
+        }
         () = clock.sleep(slice) => Stop::Limit(cause),
         () = member_cancel.cancelled() => Stop::Cancelled,
         () = cx.cancel().cancelled() => Stop::Activation,
     };
+    if protection.is_cancelled() && stopped != Stop::Activation {
+        return tokio::select! {
+            output = running => Ok(output),
+            () = cx.cancel().cancelled() => Err(Stop::Activation),
+        };
+    }
     token.cancel();
     if stopped == Stop::Activation {
         return Err(stopped);

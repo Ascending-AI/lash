@@ -1011,7 +1011,7 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
     run_seq BIGINT NOT NULL,
     ordinal BIGINT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'present', 'retry',
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'x_final', 'present', 'retry',
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).

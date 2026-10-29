@@ -244,7 +244,9 @@ impl ProductionToolHandlers<'_> {
         if let Some(admitted) = &self.admitted_declaration {
             definition = definition.with_admitted_declaration(admitted.clone());
         }
-        if let Some(engine) = definition.manifest.isolation_engine() {
+        if crate::runtime::actor::round::decision::retained_final(&call.call_id).is_none()
+            && let Some(engine) = definition.manifest.isolation_engine()
+        {
             let granted = invocation
                 .execution_grant
                 .as_deref()
@@ -552,6 +554,20 @@ pub(super) fn member_body(
                         faults = faults.saturating_add(1);
                     }
                     Ok(ended) => break ended,
+                    Err(error)
+                        if crate::runtime::actor::round::decision::retained_final(
+                            &call.call_id,
+                        )
+                        .is_some() =>
+                    {
+                        tracing::debug!(call_id = %call.call_id, error = %error, "draining a protected call final");
+                        context
+                            .dispatch()
+                            .clock
+                            .sleep(context.tool_fault_retry().after_faults(faults))
+                            .await;
+                        faults = faults.saturating_add(1);
+                    }
                     Err(error) => {
                         break (
                             MemberEnd::Final(answered(
@@ -1198,6 +1214,13 @@ impl RoundTools for ProductionRoundTools {
         output: &SettledOutput,
     ) -> CompletedCall {
         completed_answer(call, output)
+    }
+
+    fn reserve_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.context.dispatch().state.reserve_committed_state(state)
     }
 
     fn publish_state(

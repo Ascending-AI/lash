@@ -3,10 +3,12 @@
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
 This is the contract every tool call runs under. A call's admission (A), its
-attempts (X), its decision (D) and its presentation (V) run in memory, inside
-the admitted execution that makes the call durable
+attempts (X), decision (D) and presentation (V) belong to one admitted
+execution. The owning actor commits D before declarations and records V after
+protected work drains
 ([ADR 0132](../adr/0132-durability-is-state-first-over-the-lash-store.md) §5).
-Nothing is a journal, and no code ever runs again against a recorded history.
+Recovery folds the execution records and drains protected declarations; it
+never reruns an opaque body whose final was committed.
 Long, isolated or independently living work is a process admitted before its
 body runs. [ADR 0099](../adr/0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 records ownership and [ADR 0116](../adr/0116-tools-are-opaque.md) defines
@@ -20,10 +22,12 @@ A call has one durable home: the admitted execution that runs it.
   `durable/tool_round.rs`). The round is admitted in `model.done`, with an
   `x_start` for every member. No body starts before that commit, so a model
   stream that never committed launches nothing. Each member's attempt runs
-  the call's A, X, D and V in memory between its `x_start` and its
-  `x_outcome`; the outcome's material is the answer the machine is given.
+  the call's A and X after `x_start`. The actor commits `x_final` with the
+  preparation, capture and reduced state before declarations run, or `x_cancel`
+  with its discharge debt before signalling. `x_outcome` records the winning
+  decision's presentation and effects; its material answers the machine.
   A resume folds the round's run records: a started `Once` without an
-  outcome is `Interrupted` and never starts again, and a started `Repeatable`
+  decision is `Interrupted` and never starts again, and a started `Repeatable`
   reruns at its ordinal. A retryable failure is a known failure, and its
   retry due is a row; an `invalid_request` failure is never retried, since
   the same request fails the same way. Every attempt of a call resolves to
@@ -195,9 +199,9 @@ presented or withheld.
 stable start key, bound to the Run's environment and to a consumer hold that
 carries the call's cancel policy. A keyless start, or one in a Run with no
 environment, is the attempt's typed `StartRefused`. A withheld call never
-reaches its launch. A final launches its start under the key, then
-discharges it: a Run cancel that fired by then cancels the process when its
-policy owes that, and the hold is released, all before it is presented.
+reaches its launch. A committed final launches its start under the key and
+drains its protected declarations before presentation. A later call cancel
+cannot forbid that launch or replace the final.
 A lost launch registers again under the same key and recovers the same
 process.
 
@@ -252,3 +256,11 @@ A change that moves one of these is an identity change, never a shape change.
 | A cell's `processes.await` parks, its session releases, and it resumes with the process's outcome | `cell_restore_laws.rs` |
 | A cell's race loser is admitted and settles on its own | `cell_restore_laws.rs` |
 | A cell past `max_tool_calls` refuses the same call at every cut, and no refused call runs | `tool_crash_laws.rs` |
+
+Explicit Python task cancellation saves its owned call-cancel intent with the
+kernel checkpoint before admitting cleanup effects. Each admitted call has one
+actor-fenced decision: `x_final` retains its capture and reduced state before
+declarations, or `x_cancel` retains cancellation and discharge debt before
+signalling. A successor drains a protected final without rerunning its body;
+a cancel winner fences retries, late results and new declarations. Run stops
+and cell closing select eligible calls through the same decision.

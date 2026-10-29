@@ -305,6 +305,14 @@ pub trait RoundTools: Send + Sync {
     /// committed `output`, with the payload of the material it names.
     fn completed(&self, call: &PendingToolCall, output: &SettledOutput) -> CompletedCall;
 
+    /// Restore the reservations of a committed final before starting bodies.
+    fn reserve_state(
+        &self,
+        _state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Ok(())
+    }
+
     /// Publish `state`, the plugin-state resolutions a member's committed
     /// outcome carries, into the session's resident namespaces. See
     /// [`MemberBodies::publish_state`](super::MemberBodies::publish_state).
@@ -520,6 +528,13 @@ impl MemberBodies for RoundCalls {
             Some(call) => self.tools.discharge(call, execution, parked, cancelled),
             None => Box::pin(async { Ok(()) }),
         }
+    }
+
+    fn reserve_state(
+        &self,
+        state: &[crate::plugin::StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.tools.reserve_state(state)
     }
 
     fn publish_state(

@@ -13,6 +13,11 @@ use lash_execution_contracts::plugin_error::PluginError;
 pub trait ExecutionState: Send + Sync {
     fn propose(&self, proposal: Proposal) -> Result<(), PluginError>;
     fn propose_all(&self, proposals: Vec<Proposal>) -> Result<(), PluginError>;
+    /// Restore reservations retained by committed finals before another body reduces.
+    fn reserve_committed_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError>;
     fn publish_committed_state(
         &self,
         state: &[StateResolution],
@@ -60,6 +65,12 @@ impl ExecutionState for PluginSession {
     }
     fn propose_all(&self, proposals: Vec<Proposal>) -> Result<(), PluginError> {
         super::propose_all(self, proposals).map_err(PluginError::from)
+    }
+    fn reserve_committed_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        PluginSession::reserve_committed_state(self, state)
     }
     fn publish_committed_state(
         &self,

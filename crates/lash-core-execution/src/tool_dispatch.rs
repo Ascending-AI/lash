@@ -1,6 +1,7 @@
 mod atomic_attempt;
 mod attempt_coordinator;
 mod call_run;
+pub(crate) use call_run::protected_state;
 mod context;
 #[cfg(any(test, feature = "testing"))]
 mod execution;

@@ -284,6 +284,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/cell_restore_laws.rs",
+        "tests/support/call_cancel.rs",
         "tests/support/dialect.rs",
         "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",

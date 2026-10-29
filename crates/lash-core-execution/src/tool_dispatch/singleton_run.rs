@@ -56,7 +56,7 @@ pub struct SingletonPreparedRequest {
 
 /// The process implementation and canonical start admission bound to an
 /// isolated call.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IsolatedBinding {
     pub implementation: lash_vocabulary::providers::PluginCallbackIdentity,
     pub engine_kind: String,
@@ -74,7 +74,7 @@ pub struct IsolatedProcessDescriptor {
 /// What an attempt captured (X), or the cached success a before-check
 /// supplied in its place. The capture owns the bounded stream the body
 /// emitted, which the call emits when it is presented.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SingletonCapture {
     /// A process bound at admission. No ordinary body produced this capture.
     Isolated {
@@ -322,6 +322,15 @@ pub trait SingletonToolHandlers: Send + Sync {
 
     /// Prepare the request (A).
     async fn prepare(&self, call: &SingletonToolCall) -> Result<serde_json::Value, String>;
+
+    /// Restore preparation retained by a protected final, without callbacks.
+    fn restore_preparation(
+        &self,
+        _call: &ToolCallId,
+        _prepared: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
     /// Every before-check's reply on the one prepared request (A).
     async fn before_checks(

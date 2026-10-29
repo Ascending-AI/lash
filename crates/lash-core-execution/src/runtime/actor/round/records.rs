@@ -76,6 +76,10 @@ pub(super) enum Record {
         start: u64,
         cancellation: lash_protocol_types::ToolCancellation,
     },
+    Final {
+        start: u64,
+        payload: serde_json::Value,
+    },
     Present(Vec<NodeId>),
     CellReport(NodeId),
 }
@@ -89,6 +93,7 @@ impl Record {
             Self::Outcome(_) => RunFactKind::XOutcome,
             Self::Retry(_) => RunFactKind::Retry,
             Self::Cancel { .. } => RunFactKind::XCancel,
+            Self::Final { .. } => RunFactKind::XFinal,
             Self::Present(_) => RunFactKind::Present,
             Self::CellReport(_) => RunFactKind::CellReport,
         }
@@ -221,6 +226,13 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
             },
             true,
         ),
+        Record::Final { start, payload } => (
+            RoundFact::Final {
+                start: *start,
+                payload: payload.clone(),
+            },
+            true,
+        ),
         Record::Present(reads) => (
             RoundFact::Present {
                 reads: reads.clone(),
@@ -327,6 +339,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             start,
             cancellation,
         },
+        RoundFact::Final { start, payload } => Record::Final { start, payload },
         RoundFact::Present { reads } => Record::Present(reads),
         RoundFact::CellReport { report } => Record::CellReport(report),
     })

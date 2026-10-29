@@ -116,19 +116,20 @@ completion; they do not make unrecorded opaque I/O exactly-once.
 
 ### 4. Commit versus cancel arbitration
 
-**Cancellation requests are not cancellation decisions.** The final-attempt
-record and the cancel disposition compete at one durable point in the Run's
-rows, fenced by the owner's epoch, and D commits exactly one final-or-cancel
-decision. A committed
+**Cancellation requests are not cancellation decisions.** The actor arbitrates `x_final` against `x_cancel` in the Run's rows under
+its epoch. `x_final` retains the capture and reduced plugin-state resolutions
+before declarations run; `x_cancel` retains the typed cancellation and its
+discharge obligation. D commits exactly one final-or-cancel decision. A committed
 final retains settlement ownership and is protected from later cancellation. A
 cancel decision refuses any later final and any new semantic admission under
 the cancelled call. Signalling the body follows the decision and cannot reverse
 it. A final found after recovery is protected even if its live notification
 was never published.
 
-- **Declared starts.** The start's own admission commits under the call's
-  cancel fence, so exactly one of launch admission and a cancel decision
-  lands first; an admitted launch still realizes on resume
+- **Declared starts.** A committed final protects its declared start. Recovery
+  drains the retained capture under the same start key, without executing
+  another body. A cancel winner admits no new start. The outcome commits
+  the start registration and presentation after protected declarations drain
   ([ADR 0116](0116-tools-are-opaque.md) §3.2).
 - **Cancel obligations.** A cancelled call whose runtime-owned source carries
   `CancelHint::CancelExternalWork` records and discharges its cancel obligation

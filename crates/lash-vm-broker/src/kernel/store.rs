@@ -680,6 +680,7 @@ impl DurableSnapshotStore {
                         member.call() == &cancelled.call
                             && member.outcome().is_none()
                             && member.cancellation().is_none()
+                            && member.final_payload().is_none()
                     }) {
                         let _ = round::cancel_call(
                             &mut tx,

@@ -1,13 +1,9 @@
-//! One tool call run in memory: its admission checks (A), its attempts (X),
-//! its decision (D), its declarations and its presentation (V).
+//! One admitted call's checks, attempts, durable decision and presentation.
 //!
-//! Nothing here records anything. A call's durability is the admitted
-//! execution that runs it (ADR 0132 §5): a turn's round member, or a code
-//! cell's call (§8), whose `x_start` commits before this runs and whose
-//! `x_outcome` commits what it answers. A crash between those commits
-//! re-runs nothing for a `Once` execution, which is `Interrupted`, and
-//! reruns a `Repeatable` one from its admission at the same ordinal. No
-//! code here is ever run again against a recorded history.
+//! The owning actor commits the captured final before this runner realizes
+//! declarations. Recovery drains that capture without executing another body.
+//! A cancel committed first refuses the final and its declarations. The later
+//! `x_outcome` commits presentation and store-local effects of the winning final.
 
 use std::sync::Arc;
 use {
@@ -27,8 +23,7 @@ use crate::ToolCallId;
 use crate::runtime::actor::round::StoreLocalEffect;
 use crate::runtime::effect::AttemptStreamRecorder;
 use crate::runtime::process::{
-    DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,
-    IsolatedStartRefusal, StartCancelDecision,
+    DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
 };
 use crate::tool_run::{
     AdmissionRefusal, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, CallDecision,
@@ -42,6 +37,32 @@ use lash_vocabulary::identity::ProcessId;
 #[cfg(test)]
 #[path = "call_run/tests.rs"]
 mod tests;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtectedFinal {
+    decision: CallDecision,
+    capture: SingletonCapture,
+    prepared: serde_json::Value,
+    state: Vec<lash_core_store::tool_run::StateResolution>,
+}
+
+pub(crate) fn protected_state(
+    payload: &serde_json::Value,
+) -> Result<Vec<lash_core_store::tool_run::StateResolution>, crate::RuntimeEffectControllerError> {
+    serde_json::from_value(
+        payload
+            .get("state")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    )
+    .map_err(|error| {
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeToolRunShape,
+            error.to_string(),
+        )
+    })
+}
 
 impl RankedVerdict for BeforeCheckReply {
     fn rank(&self) -> CheckRank {
@@ -244,6 +265,26 @@ impl<'a> AdmittedToolCall<'a> {
         call.declaration
             .validate()
             .map_err(|cause| AdmissionRefusal::Declaration { member: 0, cause })?;
+        if let Some(payload) = crate::runtime::actor::round::decision::retained_final(&call.call_id)
+        {
+            let retained: ProtectedFinal = serde_json::from_value(payload).map_err(fault)?;
+            handlers
+                .restore_preparation(&call.call_id, &retained.prepared)
+                .map_err(fault)?;
+            return Ok(Self {
+                handlers,
+                policy: lash_kernel_value::ExecutionPolicy::Once,
+                call,
+                request: SingletonPreparedRequest {
+                    arguments: serde_json::Value::Null,
+                    prepared: serde_json::Value::Null,
+                    state_snapshot: None,
+                    isolation: None,
+                },
+                selection: Selection::Execute,
+                address: None,
+            });
+        }
         let isolation = if call.declaration.isolated {
             Some(isolated_binding(handlers.as_ref(), &call)?)
         } else {
@@ -340,6 +381,20 @@ impl<'a> AdmittedToolCall<'a> {
         may_retry: bool,
         cancel: &CancellationToken,
     ) -> Result<AttemptEnd, SingletonRunError> {
+        if let Some(payload) =
+            crate::runtime::actor::round::decision::retained_final(&self.call.call_id)
+        {
+            let retained: ProtectedFinal = serde_json::from_value(payload).map_err(fault)?;
+            let mut end = self
+                .present(retained.decision, retained.capture, cancel)
+                .await?;
+            if let CallEnd::Final { store_local, .. } = &mut end {
+                store_local.push(StoreLocalEffect::PluginState(
+                    crate::plugin::StagedPluginState::retained(retained.state),
+                ));
+            }
+            return Ok(AttemptEnd::Ended(end));
+        }
         let (source, capture) = match &self.selection {
             Selection::Withheld { decision, cause } => {
                 return self
@@ -575,6 +630,29 @@ impl<'a> AdmittedToolCall<'a> {
                 });
             return self.withheld(decision, cause, Some(&capture));
         }
+        let payload = serde_json::to_value(ProtectedFinal {
+            decision: decision.clone(),
+            capture: capture.clone(),
+            prepared: self.request.prepared.clone(),
+            state: staged
+                .as_ref()
+                .map_or_else(Vec::new, |state: &crate::plugin::StagedPluginState| {
+                    state.resolutions().to_vec()
+                }),
+        })
+        .map_err(fault)?;
+        if !crate::runtime::actor::round::decision::commit_final(&self.call.call_id, payload)
+            .await
+            .map_err(fault)?
+        {
+            if let Some(staged) = staged {
+                staged.discard();
+            }
+            return self.withheld(CallDecision::Cancelled, None, Some(&capture));
+        }
+        if let Some(staged) = &staged {
+            staged.protect();
+        }
         let end = self.present(decision, capture, cancel).await;
         match (end, staged) {
             (
@@ -683,29 +761,13 @@ impl<'a> AdmittedToolCall<'a> {
         })
     }
 
-    /// Stage a final's declared start under its key: the process it
-    /// launches, and the rows that register it with the call's outcome. A
-    /// cancel of the Run that fired by now launches nothing when the call's
-    /// policy owes the start a cancel.
+    /// Stage a protected final's declared start under its stable key.
+    /// Its registration commits with the outcome, including on recovery.
     async fn launch(
         &self,
         obligation: &DeclaredStartObligation,
-        cancel: &CancellationToken,
+        _cancel: &CancellationToken,
     ) -> Result<(ProcessId, Option<StoreLocalEffect>), SingletonRunError> {
-        if cancel.is_cancelled()
-            && matches!(
-                obligation.on_cancel(DeclaredStartPhase::Launched),
-                StartCancelDecision::RecoverAndDischarge {
-                    cancel_process: true,
-                    ..
-                }
-            )
-        {
-            return Err(fault(format!(
-                "the Run was cancelled before call {}'s declared start launched",
-                self.call.call_id
-            )));
-        }
         match self.handlers.stage_start(obligation).await.map_err(fault)? {
             StartLaunch::Staged { handle, effect } => Ok((handle.process_id, effect)),
             StartLaunch::Refused(refusal) => Err(fault(refusal.describe())),

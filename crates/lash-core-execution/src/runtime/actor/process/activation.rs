@@ -1007,11 +1007,11 @@ impl ProcessActivation {
                 .rounds()
                 .filter(|view| view.run() < RunSeq(driver.next_run))
             {
-                for member in view
-                    .members()
-                    .iter()
-                    .filter(|member| member.outcome().is_none() && member.cancellation().is_none())
-                {
+                for member in view.members().iter().filter(|member| {
+                    member.outcome().is_none()
+                        && member.cancellation().is_none()
+                        && member.final_payload().is_none()
+                }) {
                     let _ = super::super::round::cancel_call(
                         &mut tx,
                         &view.execution(member),

@@ -41,8 +41,10 @@ non-cooperative external work have stopped.
 
 ## Cancel modes: immediate abort and after-step stop
 
-`Immediate` feeds accepted evidence into the cooperative token and can unwind
-provider, tool and durable-wait work. Its uncommitted tail returns to the last
+`Immediate` selects every eligible admitted call for the shared per-call
+decision. The actor commits cancellation before signalling that call's token;
+a committed final instead drains its protected work. It can unwind provider,
+tool and durable-wait work. Its uncommitted tail returns to the last
 checkpoint. The start, after-model and after-step gates commit the decision
 they observe with the phase they end, so a resumed turn keeps it.
 

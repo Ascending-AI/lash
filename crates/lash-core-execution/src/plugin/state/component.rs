@@ -95,6 +95,12 @@ impl crate::plugin::ExecutionState for ComponentState {
         propose_all(self, proposals)
             .map_err(lash_execution_contracts::plugin_error::PluginError::from)
     }
+    fn reserve_committed_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        self.desk().reserve_committed_state(state)
+    }
     fn publish_committed_state(
         &self,
         state: &[StateResolution],

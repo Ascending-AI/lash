@@ -338,3 +338,22 @@ pub fn cancel_call(
         },
     ))
 }
+
+/// Stage the final selected from the owner's coherent fold.
+pub(super) fn final_call(
+    tx: &mut ActorTx,
+    execution: &AdmittedExecution,
+    payload: serde_json::Value,
+) -> StagedRecord {
+    append_staged(
+        tx,
+        &execution.id().owner,
+        execution.id().run,
+        execution.cursor().take(),
+        Some(execution.call()),
+        Record::Final {
+            start: execution.id().ordinal.0,
+            payload,
+        },
+    )
+}

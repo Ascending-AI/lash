@@ -254,6 +254,7 @@ impl EffectPublication {
             reservation: Some(Arc::new(StateReservation {
                 plugins: Arc::clone(&self.plugins),
                 address: self.address.clone(),
+                protected: std::sync::atomic::AtomicBool::new(false),
             })),
         }
     }
@@ -296,6 +297,23 @@ pub struct StagedPluginState {
 }
 
 impl StagedPluginState {
+    /// Retain reductions already protected by a committed call final.
+    pub(crate) fn retained(resolutions: Vec<StateResolution>) -> Self {
+        Self {
+            resolutions,
+            reservation: None,
+        }
+    }
+
+    /// A committed final owns this reservation until its outcome publishes.
+    pub(crate) fn protect(&self) {
+        if let Some(reservation) = &self.reservation {
+            reservation
+                .protected
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     /// The resolutions, as the outcome's record carries them.
     #[must_use]
     pub fn resolutions(&self) -> &[StateResolution] {
@@ -305,7 +323,11 @@ impl StagedPluginState {
     /// Release the reservation without publishing: the call ended without
     /// an outcome that carries these resolutions, so none is durable.
     pub fn discard(self) {
-        if let Some(reservation) = &self.reservation {
+        if let Some(reservation) = &self.reservation
+            && !reservation
+                .protected
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
             reservation
                 .plugins
                 .release_publication(&reservation.address);
@@ -334,11 +356,14 @@ impl Eq for StagedPluginState {}
 struct StateReservation {
     plugins: Arc<dyn super::super::ExecutionState>,
     address: crate::EffectAddress,
+    protected: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for StateReservation {
     fn drop(&mut self) {
-        self.plugins.abandon_publication(&self.address);
+        if !self.protected.load(std::sync::atomic::Ordering::Acquire) {
+            self.plugins.abandon_publication(&self.address);
+        }
     }
 }
 
@@ -454,6 +479,13 @@ impl crate::PluginSession {
         staged: &[StateResolution],
     ) -> Result<PluginState, PluginStateError> {
         self.state_desk().state_with(staged)
+    }
+
+    pub(crate) fn reserve_committed_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.state_desk().reserve_committed_state(state)
     }
 
     pub(crate) fn release_publication(&self, address: &crate::EffectAddress) {
@@ -837,6 +869,36 @@ impl StateDesk<'_> {
             }
         }
         Ok(data)
+    }
+
+    /// Restore a durable final's namespace fence without reducing or publishing.
+    pub(crate) fn reserve_committed_state(
+        &self,
+        state: &[StateResolution],
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let mut registry = self.state.lock_recover();
+        for resolution in state {
+            if registry
+                .reserved
+                .get(&resolution.plugin)
+                .is_some_and(|holder| holder != &resolution.publisher)
+            {
+                return Err(lash_execution_contracts::plugin_error::PluginError::State(
+                    PluginStateError::PublicationFenced {
+                        plugin: resolution.plugin.clone(),
+                    },
+                )
+                .into());
+            }
+        }
+        for resolution in state {
+            registry
+                .reserved
+                .insert(resolution.plugin.clone(), resolution.publisher.clone());
+            // The committed record resolves the uncertainty of an abandoned reservation.
+            registry.fenced.remove(&resolution.plugin);
+        }
+        Ok(())
     }
 
     /// Release what `address` reserved, and wake every waiting reduction: a

@@ -649,6 +649,21 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .insert(call.call_id.clone(), prepared);
         Ok(request)
     }
+    fn restore_preparation(
+        &self,
+        call_id: &crate::ToolCallId,
+        value: &serde_json::Value,
+    ) -> Result<(), String> {
+        let prepared: Prepared =
+            serde::Deserialize::deserialize(value).map_err(|error| error.to_string())?;
+        if &prepared.call.call_id != call_id {
+            return Err("the protected final's preparation names another call".to_owned());
+        }
+        self.prepared
+            .lock_recover()
+            .insert(call_id.clone(), prepared);
+        Ok(())
+    }
     async fn before_checks(
         &self,
         _call: &SingletonToolCall,

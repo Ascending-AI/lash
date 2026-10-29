@@ -74,6 +74,7 @@ pub struct RoundMember {
     /// When its final outcome's commit retained it.
     ended_at_ms: Option<u64>,
     cancellation: Option<lash_protocol_types::ToolCancellation>,
+    final_payload: Option<serde_json::Value>,
 }
 
 impl RoundMember {
@@ -126,6 +127,12 @@ impl RoundMember {
     #[must_use]
     pub fn cancellation(&self) -> Option<&lash_protocol_types::ToolCancellation> {
         self.cancellation.as_ref()
+    }
+
+    /// The protected final whose declarations must drain without another body execution.
+    #[must_use]
+    pub fn final_payload(&self) -> Option<&serde_json::Value> {
+        self.final_payload.as_ref()
     }
 
     /// Its final outcome, once it has one.
@@ -580,6 +587,7 @@ fn fold_run(
                             attempts: BTreeMap::new(),
                             ended_at_ms: None,
                             cancellation: None,
+                            final_payload: None,
                         });
                     }
                     Some(member)
@@ -602,7 +610,7 @@ fn fold_run(
                     return Err(out_of_order(row));
                 };
                 let member = open_attempt(&mut members, row, parked.start)?;
-                if member.cancellation.is_some() {
+                if member.cancellation.is_some() || member.final_payload.is_some() {
                     return Err(out_of_order(row));
                 }
                 // A park settles only a started attempt, once.
@@ -641,7 +649,7 @@ fn fold_run(
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
-                if member.cancellation.is_some() {
+                if member.cancellation.is_some() || member.final_payload.is_some() {
                     return Err(out_of_order(row));
                 }
                 // Only a bounded retry writes one, within its bound.
@@ -671,7 +679,17 @@ fn fold_run(
                 cancellation,
             } => {
                 let member = open_attempt(&mut members, row, *start)?;
-                if member.cancellation.replace(cancellation.clone()).is_some() {
+                if member.final_payload.is_some()
+                    || member.cancellation.replace(cancellation.clone()).is_some()
+                {
+                    return Err(out_of_order(row));
+                }
+            }
+            Record::Final { start, payload } => {
+                let member = open_attempt(&mut members, row, *start)?;
+                if member.cancellation.is_some()
+                    || member.final_payload.replace(payload.clone()).is_some()
+                {
                     return Err(out_of_order(row));
                 }
             }
@@ -748,7 +766,10 @@ fn open_attempt<'m>(
         .ok_or_else(|| out_of_order(row))?;
     match member.state {
         MemberState::Final { .. }
-            if matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
+            if matches!(
+                row.kind,
+                RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+            ) =>
         {
             Err(FoldRefusal::SecondFinal(call.clone()))
         }
@@ -757,14 +778,20 @@ fn open_attempt<'m>(
         // cancel or a veto settles it at the attempt that failed.
         MemberState::RetryDue { start: failed, .. }
             if failed.0 == start
-                && matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
+                && matches!(
+                    row.kind,
+                    RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+                ) =>
         {
             Ok(member)
         }
         // A parked call ends at the attempt that parked it.
         MemberState::Waiting { start: parked, .. }
             if parked.0 == start
-                && matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XCancel) =>
+                && matches!(
+                    row.kind,
+                    RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+                ) =>
         {
             Ok(member)
         }

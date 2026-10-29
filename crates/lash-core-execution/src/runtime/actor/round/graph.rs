@@ -1120,6 +1120,11 @@ pub fn admission_pin(
 /// Kind 21: one run record's typed body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoundFact {
+    /// 9: a protected final, retained before declarations run.
+    Final {
+        start: u64,
+        payload: serde_json::Value,
+    },
     /// 0: the round's members, in declared order.
     Admit {
         members: Vec<AdmitMember>,
@@ -1175,6 +1180,7 @@ impl RoundFact {
             Self::Outcome { .. } => RunFactKind::XOutcome,
             Self::CellReport { .. } => RunFactKind::CellReport,
             Self::Cancel { .. } => RunFactKind::XCancel,
+            Self::Final { .. } => RunFactKind::XFinal,
         }
     }
 
@@ -1274,7 +1280,7 @@ impl RoundFact {
                     decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
                 }
             }
-            Self::Start { .. } | Self::Cancel { .. } => {}
+            Self::Start { .. } | Self::Cancel { .. } | Self::Final { .. } => {}
         }
         Ok(())
     }
@@ -1349,6 +1355,11 @@ impl TokenCodec for RoundFact {
                     out,
                 );
             }
+            Self::Final { start, payload } => {
+                out.sum(variant, 2);
+                out.unsigned(*start);
+                encode_json(payload, out);
+            }
             Self::CellReport { report } => {
                 out.sum(variant, 1);
                 report.encode(out);
@@ -1412,6 +1423,13 @@ impl TokenCodec for RoundFact {
                     state: decode_tree(input)?,
                     pages: Option::decode(input)?,
                     ended_at_ms: if ended { Some(input.unsigned()?) } else { None },
+                }
+            }
+            RunFactKind::XFinal => {
+                expect(2)?;
+                Self::Final {
+                    start: input.unsigned()?,
+                    payload: decode_json(input)?,
                 }
             }
             RunFactKind::XCancel => {

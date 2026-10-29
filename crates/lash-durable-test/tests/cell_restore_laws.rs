@@ -48,6 +48,9 @@
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/call_cancel.rs"]
+mod call_cancel;
+
 #[path = "support/dialect.rs"]
 mod dialect;
 #[path = "support/sim.rs"]
@@ -167,7 +170,7 @@ enum Cell {
     Repeatable,
     /// A race of a fast call against a slow one.
     Race,
-    ExplicitCancel(CancelSource),
+    ExplicitCancel(CancelCase),
     /// A `processes.await` of a host process.
     AwaitProcess,
     /// A granted call, a durable sleep of [`SLEEP_MS`], and the granted
@@ -183,7 +186,31 @@ enum Cell {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CancelSource {
     Python,
-    TypeScript,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommitOrder {
+    CancelFirst,
+    FinalFirst,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CancelCase {
+    source: CancelSource,
+    order: CommitOrder,
+    hint: Option<lash_core::CancelHint>,
+    explicit: bool,
+}
+
+impl CancelCase {
+    fn python(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool) -> Self {
+        Self {
+            source: CancelSource::Python,
+            order,
+            hint,
+            explicit,
+        }
+    }
 }
 
 impl Cell {
@@ -200,7 +227,7 @@ impl Cell {
             Self::Race => "const w = await Promise.race([tools.extFast({ x: 1 }), \
                  tools.extSlow({ x: 2 })]);\nconsole.log(w);"
                 .to_owned(),
-            Self::ExplicitCancel(CancelSource::Python) => r#"import asyncio
+            Self::ExplicitCancel(case) => r#"import asyncio
 async def selected():
     try:
         await tools.ext_slow({"x": 1})
@@ -213,22 +240,25 @@ a.cancel()
 try:
     await a
 except asyncio.CancelledError:
-    pass
+    await tools.ext_write({"x": 4})
 await asyncio.sleep(60)
 print("cell stayed alive")"#
-                .to_owned(),
-            Self::ExplicitCancel(CancelSource::TypeScript) => r#"const c = new AbortController();
-const a = tools.extSlow({ x: 1 }, { signal: c.signal });
-const b = tools.extSlow({ x: 2 });
-await tools.extFast({});
-c.abort();
-try { await a; } catch (e) {
-    if (e.name !== "AbortError") { throw e; }
-    await tools.extWrite({ x: 3 });
-}
-await sleep(60000);
-console.log("cell stayed alive");"#
-                .to_owned(),
+                .replace(
+                    "a.cancel()",
+                    if case.explicit {
+                        "a.cancel()"
+                    } else {
+                        "await tools.ext_write({\"x\": 3})"
+                    },
+                )
+                .replace(
+                    "    await a\nexcept",
+                    if case.explicit {
+                        "    await a\nexcept"
+                    } else {
+                        "    pass\nexcept"
+                    },
+                ),
             Self::AwaitProcess => "const h = await tools.extHandle({});\n\
                  const r = await processes.await({ handle: h });\n\
                  console.log(r);"
@@ -285,6 +315,14 @@ struct ExternalWorld {
     cancelled: std::sync::atomic::AtomicUsize,
     signalled: Mutex<Vec<i64>>,
     cleanup_signals: Mutex<Option<Vec<i64>>>,
+    cancel_case: Mutex<Option<CancelCase>>,
+    cancel_backend: Mutex<Option<Backend>>,
+    cleanup_children: Mutex<Option<Vec<(i64, bool)>>>,
+    ready: Mutex<std::collections::BTreeSet<i64>>,
+    changed: tokio::sync::Notify,
+    final_presenting: std::sync::atomic::AtomicBool,
+    fast_returned: std::sync::atomic::AtomicBool,
+    nodes: Mutex<std::sync::Weak<SimNodes>>,
 }
 
 impl ExternalWorld {
@@ -315,6 +353,82 @@ impl StaticToolExecute for ExtTools {
             .push((call.tool_id().as_str().to_owned(), call.args.clone()));
         match call.tool_id().as_str() {
             SLOW => {
+                let case = *self.world.cancel_case.lock_recover();
+                let declared = if case.is_some() {
+                    let payload = json!({ "callcancel_x": written_x(call.args).unwrap() });
+                    let launch =
+                        lash_core_execution::testing::held_engine_launch(call.context, &payload)
+                            .await
+                            .unwrap();
+                    let start_cx = call.context.start_cx().unwrap();
+                    let start = lash_execution_contracts::tool_intent::StartProcessIntent {
+                        owner: lash_vocabulary::identity::RuntimeOwner::Session(
+                            call.context.session_id().unwrap().clone(),
+                        ),
+                        declaration:
+                            lash_execution_contracts::process::ProcessStartDeclaration::engine(
+                                lash_execution_contracts::testing::HELD_PROCESS_ENGINE_KIND,
+                                payload,
+                                launch,
+                                lash_execution_contracts::process::ProcessOriginator::Session {
+                                    session_id: call.context.session_id().unwrap().clone(),
+                                    agent_frame_id: Some(
+                                        call.context.agent_frame_id().unwrap().clone(),
+                                    ),
+                                },
+                                lash_execution_contracts::process::lifetime::starter(&start_cx),
+                            ),
+                    };
+                    Some(start)
+                } else {
+                    None
+                };
+                if written_x(call.args) == Some(1)
+                    && case.is_some_and(|case| case.order == CommitOrder::FinalFirst)
+                {
+                    return lash_core::ToolAttemptOutcome::done(
+                        lash_core::ToolOutcomeDone::ok(json!({ "final": 1 }))
+                            .with_state(call_cancel::increment_state()),
+                        lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                            lash_execution_contracts::tool_intent::ToolIntent::StartProcess(
+                                Box::new(declared.unwrap()),
+                            ),
+                        ]),
+                    );
+                }
+                if let Some(hint) = case.and_then(|case| case.hint) {
+                    let mut pending = lash_core::PendingCompletion::new();
+                    pending.on_cancel = hint;
+                    return lash_core::ToolAttemptOutcome::pending(
+                        pending.resolved_by_declared_start(
+                            call.context.declare_start(declared.unwrap()).unwrap(),
+                        ),
+                    );
+                }
+                if case.is_some_and(|case| case.order == CommitOrder::FinalFirst) {
+                    loop {
+                        let changed = self.world.changed.notified();
+                        tokio::pin!(changed);
+                        changed.as_mut().enable();
+                        if self
+                            .world
+                            .fast_returned
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            break;
+                        }
+                        changed.await;
+                    }
+                    return lash_core::ToolAttemptOutcome::done_without_intents(
+                        lash_core::ToolOutcomeDone::ok(json!({ "sibling": true }))
+                            .with_state(call_cancel::increment_state()),
+                    );
+                }
+                self.world
+                    .ready
+                    .lock_recover()
+                    .insert(written_x(call.args).unwrap());
+                self.world.changed.notify_waiters();
                 // Runs until its call is cancelled.
                 match call.context.cancellation_token() {
                     Some(token) => token.cancelled().await,
@@ -327,11 +441,76 @@ impl StaticToolExecute for ExtTools {
                 self.world
                     .cancelled
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                ToolOutcome::err_fmt("ext_slow was cancelled").into()
+                if let Some(start) = declared {
+                    // A late success asks to launch after the cancel. The fence must refuse it.
+                    lash_core::ToolAttemptOutcome::done(
+                        lash_core::ToolOutcomeDone::ok(json!({ "late": true })),
+                        lash_execution_contracts::tool_intent::ToolIntents::v3(vec![
+                            lash_execution_contracts::tool_intent::ToolIntent::StartProcess(
+                                Box::new(start),
+                            ),
+                        ]),
+                    )
+                } else {
+                    ToolOutcome::err_fmt("ext_slow was cancelled").into()
+                }
+            }
+            FAST if self.world.cancel_case.lock_recover().is_some() => {
+                let case = self.world.cancel_case.lock_recover().unwrap();
+                let backend = self.world.cancel_backend.lock_recover().clone().unwrap();
+                loop {
+                    let changed = self.world.changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    let ready = if case.order == CommitOrder::FinalFirst {
+                        self.world
+                            .final_presenting
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                    } else if case.hint.is_some() {
+                        cancel_children(&backend).await.len() == 2
+                    } else {
+                        self.world.ready.lock_recover().len() == 2
+                    };
+                    if ready {
+                        break;
+                    }
+                    if case.hint.is_some() {
+                        tokio::task::yield_now().await;
+                    } else {
+                        changed.await;
+                    }
+                }
+                self.world
+                    .fast_returned
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                self.world.changed.notify_waiters();
+                ToolOutcome::ok(json!({ "barrier": true })).into()
             }
             WRITE if written_x(call.args) == Some(3) => {
-                *self.world.cleanup_signals.lock_recover() =
-                    Some(self.world.signalled.lock_recover().clone());
+                let backend = self.world.cancel_backend.lock_recover().clone();
+                if let Some(backend) = backend {
+                    let children = cancel_children(&backend)
+                        .await
+                        .into_iter()
+                        .map(|child| {
+                            let ProcessInput::Engine { payload, .. } = child.input.as_ref() else {
+                                unreachable!()
+                            };
+                            (
+                                payload["callcancel_x"].as_i64().unwrap(),
+                                child.cancel_request.is_some(),
+                            )
+                        })
+                        .collect();
+                    self.world
+                        .cleanup_children
+                        .lock_recover()
+                        .get_or_insert(children);
+                }
+                self.world
+                    .cleanup_signals
+                    .lock_recover()
+                    .get_or_insert_with(|| self.world.signalled.lock_recover().clone());
                 ToolOutcome::ok(json!({ "cleanup": true })).into()
             }
             HANDLE => {
@@ -583,15 +762,52 @@ impl lash_core::plugin::packages::DeferredPackageProvider for GrantingResolver {
     }
 }
 
+async fn cancel_children(backend: &Backend) -> Vec<ProcessRecord> {
+    lash_core::testing::process_roster_records_for_fixture(backend.process_registry().as_ref(),
+        &lash_execution_contracts::process::ProcessListFilter {
+            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
+            ..Default::default()
+        }).await.unwrap().into_iter().filter(|child| matches!(child.input.as_ref(), ProcessInput::Engine { payload, .. } if payload.get("callcancel_x").is_some())).collect()
+}
+
 fn ext_tools(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
+    let explicit = world.cancel_case.lock_recover().is_some();
+    let fixture_policy = if explicit {
+        ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).unwrap(), 10, 100)
+    } else {
+        ExecutionPolicy::Once
+    };
+    let slow = if world
+        .cancel_case
+        .lock_recover()
+        .is_some_and(|case| case.hint.is_some())
+    {
+        definition(SLOW, fixture_policy, json!({ "type": "object" }))
+            .with_declaration(
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring()
+                    .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]),
+                Some(lash_vocabulary::tool_contract::ParkBound::Within(
+                    Duration::from_secs(120),
+                )),
+            )
+            .unwrap()
+    } else {
+        definition(SLOW, fixture_policy, json!({ "type": "object" }))
+            .with_declaration(
+                lash_vocabulary::tool_declaration::ToolDeclaration::default()
+                    .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]),
+                None,
+            )
+            .unwrap()
+    };
     let object = json!({ "type": "object" });
     let repeatable = ExecutionPolicy::repeatable(std::num::NonZeroU32::new(3).unwrap(), 10, 100);
     Arc::new(StaticToolProvider::new(
         vec![
-            definition(WRITE, ExecutionPolicy::Once, object.clone()),
+            definition(WRITE, fixture_policy, object.clone()),
             definition(RETRY, repeatable, object.clone()),
-            definition(FAST, ExecutionPolicy::Once, object.clone()),
-            definition(SLOW, ExecutionPolicy::Once, object.clone()),
+            definition(FAST, fixture_policy, object.clone()),
+            slow,
             definition(
                 HANDLE,
                 ExecutionPolicy::Once,
@@ -972,7 +1188,7 @@ impl CellTurn {
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
-                    if self.cell == Cell::ExplicitCancel(CancelSource::Python) {
+                    if matches!(self.cell, Cell::ExplicitCancel(case) if case.source == CancelSource::Python) {
                         lash::rlm::CellDialect::python()
                     } else {
                         lash::rlm::CellDialect::typescript()
@@ -999,6 +1215,7 @@ impl CellTurn {
                     } else {
                         (None, ext_tools(Arc::clone(&self.world)))
                     };
+                let presentation_world = Arc::clone(&self.world);
                 let builder = lash::LashCore::rlm_builder(backend.clone(), factory);
                 builder
                     .serve_sessions(false)
@@ -1025,6 +1242,32 @@ impl CellTurn {
                             ),
                             None => lash::plugins::PluginSpec::new(),
                         }
+                        .with_state_reducer("increment", call_cancel::increment_reducer())
+                        .with_presentation_step(lash::hook_key!("callcancel-final"), Arc::new(move |input| {
+                            let world = Arc::clone(&presentation_world);
+                            Box::pin(async move {
+                                let selected = world.cancel_case.lock_recover().is_some_and(|case| case.order == CommitOrder::FinalFirst)
+                                    && world.entries.lock_recover().get(&input.context.call_id).is_some_and(|entries|
+                                        entries.iter().any(|(tool, args)| tool == SLOW && written_x(args) == Some(1)));
+                                if selected {
+                                    world.final_presenting.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    world.changed.notify_waiters();
+                                    loop {
+                                        let nodes = world.nodes.lock_recover().upgrade().unwrap();
+                                        let trace = nodes.script().trace();
+                                        let fast = world.entries().into_iter().find_map(|(id, entries)|
+                                            entries.iter().any(|(tool, _)| tool == FAST).then_some(id));
+                                        let fast_outcome = trace.iter().rposition(|write| write.committed()
+                                            && write.facts.rows.iter().any(|row| row.kind == lash_durable::domain::RunFactKind::XOutcome && row.call == fast));
+                                        if fast_outcome.is_some_and(|at| trace.iter().skip(at + 1).any(|write|
+                                            write.committed() && write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT)) { break; }
+                                        let settled = trace.iter().filter(|write| write.stored != Stored::Pending).count();
+                                        nodes.script().settled(settled + 1).await;
+                                    }
+                                }
+                                Ok(input.previous)
+                            })
+                        }))
                         .with_tool_provider(lash::tool_provider_key!("tools"), tools)
                         .with_package_provider(
                             lash::tool_provider_key!("tools"),
@@ -1398,7 +1641,10 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
     Backend::assemble(BackendParts {
         stores,
         settings: sim::settings(),
-        engines: vec![Arc::new(SleepEngine)],
+        engines: vec![
+            Arc::new(SleepEngine),
+            Arc::new(lash_core_execution::testing::HeldProcessEngine),
+        ],
 
         formats: lash::formats::actor_state_surfaces(),
     })
@@ -1416,7 +1662,16 @@ impl Scenario for CellTurn {
             &self.keep,
         )
         .await;
-        *self.backend.lock_recover() = Some(shipped_backend(stores));
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            stores.process_env_store().as_ref(),
+        )
+        .await;
+        let backend = shipped_backend(stores);
+        if let Cell::ExplicitCancel(case) = self.cell {
+            *self.world.cancel_case.lock_recover() = Some(case);
+            *self.world.cancel_backend.lock_recover() = Some(backend.clone());
+        }
+        *self.backend.lock_recover() = Some(backend);
         database
     }
 
@@ -1445,6 +1700,7 @@ impl Scenario for CellTurn {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
+        *self.world.nodes.lock_recover() = Arc::downgrade(nodes);
         self.send().await?;
         nodes.start("a");
         nodes.quiesce().await;
@@ -1467,14 +1723,7 @@ impl Scenario for CellTurn {
         let mut violations = match self.cell {
             Cell::Repeatable => self.repeatable_laws(nodes).await,
             Cell::Race => self.race_laws(nodes, cut).await,
-            Cell::ExplicitCancel(_) => {
-                let mut violations = turn_ended(nodes).await;
-                let signals = self.world.cleanup_signals.lock_recover().clone();
-                if signals.as_deref() != Some(&[1]) {
-                    violations.push(format!("the selected call must be signalled before cleanup, while its sibling stays live; observed {signals:?}; model saw {}", self.last_request()));
-                }
-                violations
-            }
+            Cell::ExplicitCancel(case) => self.cancellation_laws(nodes, cut, case).await,
             Cell::Identity | Cell::Sleep | Cell::AwaitProcess | Cell::Deferred => {
                 self.identity_laws(nodes, cut).await
             }
@@ -2438,24 +2687,5 @@ async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sq
 
 #[tokio::test]
 async fn explicit_call_cancel_is_durable_and_selective_before_cell_end() {
-    let mut violations = Vec::new();
-    for source in [CancelSource::Python, CancelSource::TypeScript] {
-        let result = tokio::spawn(async move {
-            Matrix::new()
-                .faults(&[])
-                .horizon(Duration::from_secs(600))
-                .run_test(|| {
-                    CellTurn::new(Cell::ExplicitCancel(source), Dialect::SqliteMemory, None)
-                })
-                .await
-                .assert_held();
-        })
-        .await;
-        if result.is_err() {
-            violations.push(format!("{source:?}: explicit cancellation law failed"));
-        } else {
-            eprintln!("{source:?}: explicit cancellation before cleanup held");
-        }
-    }
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
+    call_cancel::run_law().await;
 }
