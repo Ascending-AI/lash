@@ -36,6 +36,10 @@ agent-workbench-foreground port='3030':
 facade-production:
   bash "{{repo}}/scripts/ci/facade-production.sh"
 
+# Exercise downstream JSON feature unification on its own Cargo graph.
+json-number-host:
+  cargo test --workspace --all-targets --locked --features serde_json/arbitrary_precision a_model_citation_read_survives_canonical_plan_decode_on_sqlite_memory -- --exact
+
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
 

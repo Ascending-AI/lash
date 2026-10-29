@@ -93,6 +93,9 @@
 
 #![deny(clippy::future_not_send)]
 
+#[cfg(test)]
+extern crate self as lash;
+
 /// Administrative facade handles and operations.
 pub mod admin;
 mod artifacts;

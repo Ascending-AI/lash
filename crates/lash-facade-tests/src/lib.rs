@@ -15,9 +15,6 @@
     )
 )]
 
-#[cfg(test)]
-use crate as lash;
-
 use lash::{EmbedError, LashCore, Result, async_trait};
 use lash_core::facade_support::ProviderHandle;
 use lash_core::facade_support::{PluginFactory, TurnActivitySink};

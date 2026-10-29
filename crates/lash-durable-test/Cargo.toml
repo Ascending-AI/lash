@@ -65,8 +65,7 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing", "perf-witness"] }
 lash-vm-client = { workspace = true, features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
-# Match downstream hosts that unify these serde_json features into Lash.
-serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
+serde_json = { workspace = true, features = ["raw_value"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tempfile = { workspace = true }
