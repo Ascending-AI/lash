@@ -33,6 +33,16 @@ impl Invocation {
     }
 }
 impl Ledger {
+    /// A pure prospective activation. Its cursor is advanced only by an
+    /// accepted Enter event; abandoned prefixes consume no activation ID.
+    pub fn prospective_invocation(&self, task: TaskId) -> Invocation {
+        Invocation {
+            task,
+            id: self.state.next_invocation,
+            ledger: Rc::clone(&self.identity),
+        }
+    }
+
     /// Reserve the next activation in the unpublished journal. A miss consumes
     /// no ID; concurrent preparations cannot both publish against its stamp.
     pub fn prepare_enter(

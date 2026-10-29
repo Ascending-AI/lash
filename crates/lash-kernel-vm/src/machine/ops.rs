@@ -574,6 +574,8 @@ impl KernelMachine {
         lib: LibId,
         invocation: super::exec::Invocation<'_>,
     ) -> Status {
+        self.logical
+            .handoff(&mut self.arena.borrow_mut(), &self.heap)?;
         let super::exec::Invocation { args, count, .. } = invocation;
         let code = match self
             .answer(task, exe, lib, args, count, args)

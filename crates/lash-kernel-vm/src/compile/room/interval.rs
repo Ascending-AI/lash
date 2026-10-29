@@ -37,7 +37,12 @@ impl Linear {
             })
     }
 }
+pub(super) struct PublicationSite {
+    pub(super) assignment: Option<lash_kernel_value::Name>,
+    pub(super) member: bool,
+}
 struct Step {
+    publication: PublicationSite,
     event: Event,
     selected: ExitKind,
     normal: ExitKind,
@@ -105,7 +110,30 @@ impl Source {
                     (measure, index)
                 })
                 .collect();
+            let mut node = doc::Node::Block(&self.body);
+            for index in &event.point.site.path[self.site.path.len()..] {
+                node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+            }
+            let publication = PublicationSite {
+                assignment: match node {
+                    doc::Node::Stmt(doc::Stmt::Assign {
+                        place: doc::Place::Variable(name),
+                        ..
+                    }) => Some(name.clone()),
+                    _ => None,
+                },
+                member: matches!(
+                    node,
+                    doc::Node::Stmt(
+                        doc::Stmt::Assign {
+                            place: doc::Place::Member(_),
+                            ..
+                        } | doc::Stmt::Remove { .. }
+                    )
+                ),
+            };
             steps.push(Step {
+                publication,
                 peak: Linear::compile(&event.peak, &indices),
                 delta: Linear::compile(&event.delta, &indices),
                 normal: self
@@ -172,6 +200,10 @@ impl evaluate::Events for Trace<'_> {
     }
 }
 impl CompiledInterval {
+    pub(crate) fn owner(&self) -> doc::constant_pool::PoolOwner {
+        self.owner
+    }
+
     pub(crate) fn exit(&self) -> ExitKind {
         self.exit
     }
@@ -187,6 +219,13 @@ impl CompiledInterval {
         &self,
         execution: &mut impl Execution,
     ) -> Result<CheckedRoom, Refused> {
+        self.evaluate_checked(execution, |_, _, _| Ok(()))
+    }
+    pub(super) fn evaluate_checked(
+        &self,
+        execution: &mut impl Execution,
+        mut check: impl FnMut(&Event, &PublicationSite, &dyn Facts) -> Result<(), Refused>,
+    ) -> Result<CheckedRoom, Refused> {
         let mut values = vec![0; self.variables];
         let mut balance = 0_i128;
         let mut peak = 0_i128;
@@ -201,6 +240,7 @@ impl CompiledInterval {
                 Selection::Event { at, .. } => {
                     let step = steps.next().ok_or(Refused::Path)?;
                     let facts = execution.event(at).ok_or(Refused::Facts)?;
+                    check(&step.event, &step.publication, facts.as_ref())?;
                     for (measure, index) in &step.variables {
                         values[*index] =
                             Amount::measure(measure, facts.as_ref()).ok_or(Refused::Facts)?;

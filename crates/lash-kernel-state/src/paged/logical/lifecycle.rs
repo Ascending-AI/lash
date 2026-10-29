@@ -181,6 +181,10 @@ impl Lifecycle {
             .map_err(|_| invalid("carry root cost overflow"))?;
         ledger.publish(accepted, || registration.commit())
     }
+    pub fn handoff(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
+        self.flush(arena, heap)?;
+        self.ledger.borrow_mut().handoff()
+    }
     pub fn enter(
         &self,
         task: TaskId,

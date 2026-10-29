@@ -39,7 +39,7 @@ mod session;
 pub(crate) mod sites;
 mod steps;
 mod stream;
-mod tasks;
+pub(crate) mod tasks;
 
 use std::sync::Arc;
 
@@ -856,7 +856,27 @@ impl KernelMachine {
     /// needs, from the heap or its pages.
     pub(super) fn warm(&mut self, handle: ArenaHandle, chunk: u32) -> Result<(), Halt> {
         let mut arena = self.arena.borrow_mut();
-        project::materialize(&mut arena, &self.heap, &self.exe, handle, chunk).map_err(Halt::from)
+        self.logical.handoff(&mut arena, &self.heap)?;
+        let ledger = self.heap.logical_ledger();
+        let fact = if arena
+            .facts(handle)
+            .map_err(|error| fault(&error.to_string()))?
+            .entity
+            .is_some()
+        {
+            Some(
+                ledger
+                    .borrow()
+                    .authenticate_warm(&arena, handle, self.heap.pages())?,
+            )
+        } else {
+            None
+        };
+        project::materialize(&mut arena, &self.heap, &self.exe, handle, chunk)?;
+        if let Some(fact) = fact {
+            fact.finish(&ledger.borrow(), &arena)?;
+        }
+        Ok(())
     }
 
     /// Opens the head of `handle` when it is a proxy: what a read of its

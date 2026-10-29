@@ -99,3 +99,116 @@ impl Window {
         self.admit(request, need.before, need.units, need.close, need.strict)
     }
 }
+
+/// The source verifier and physical charge verifier select this exact path.
+/// It is bound into the checked prefix, including every close and unpaid head.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Allowance {
+    pub(crate) occurrences: Vec<usize>,
+    pub(crate) before: u64,
+    pub(crate) units: u64,
+    pub(crate) close: Option<Close>,
+    pub(crate) strict: bool,
+    pub(crate) depth: u64,
+    pub(crate) safe_point: u64,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResourceFacts {
+    window: Window,
+    depth: u64,
+    limit: u64,
+    safe_point: u64,
+    counts: Vec<(usize, u64)>,
+}
+/// Exclusive source resource owner. Its borrow prevents charge/counter changes
+/// between acceptance and publication; fallible counter staging precedes edits.
+pub(crate) struct SourceResources<'a> {
+    pub(crate) charged: &'a mut u64,
+    pub(crate) counters: &'a mut crate::machine::tasks::Occurrences,
+    pub(crate) bound: u64,
+    pub(crate) slice: u64,
+    pub(crate) depth: u64,
+    pub(crate) limit: u64,
+    pub(crate) safe_point: u64,
+}
+pub(crate) struct SourceAccepted<'a, C> {
+    resources: SourceResources<'a>,
+    accepted: Accepted<C>,
+    occurrences: Vec<usize>,
+}
+impl SourceResources<'_> {
+    pub(crate) fn facts(&self, need: &Allowance) -> Option<ResourceFacts> {
+        Some(ResourceFacts {
+            window: Window::new(*self.charged, self.bound, self.slice),
+            depth: self.depth,
+            limit: self.limit,
+            safe_point: self.safe_point,
+            counts: need
+                .occurrences
+                .iter()
+                .map(|index| Some((*index, self.counters.current(*index)?)))
+                .collect::<Option<_>>()?,
+        })
+    }
+}
+impl<'a> SourceResources<'a> {
+    pub(crate) fn admit_interval<C>(
+        self,
+        facts: &ResourceFacts,
+        need: &Allowance,
+        request: C,
+    ) -> Result<Option<SourceAccepted<'a, C>>, lash_kernel_doc::heap::HeapFault> {
+        if self.facts(need).as_ref() != Some(facts)
+            || need.safe_point != self.safe_point
+            || self
+                .depth
+                .checked_add(need.depth)
+                .is_none_or(|depth| depth > self.limit)
+        {
+            return Ok(None);
+        }
+        if !self.counters.prepare_publication(&need.occurrences)? {
+            return Ok(None);
+        }
+        let Some(accepted) = facts.window.admit_counted(
+            &*self.counters,
+            request,
+            &Requirements {
+                occurrences: &need.occurrences,
+                before: need.before,
+                units: need.units,
+                close: need.close,
+                strict: need.strict,
+            },
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(SourceAccepted {
+            resources: self,
+            accepted,
+            occurrences: need.occurrences.clone(),
+        }))
+    }
+}
+impl<'a, C> SourceAccepted<'a, C> {
+    pub(crate) fn try_map<D, E>(
+        self,
+        map: impl FnOnce(C) -> Result<D, E>,
+    ) -> Result<SourceAccepted<'a, D>, E> {
+        let request = map(self.accepted.request)?;
+        Ok(SourceAccepted {
+            resources: self.resources,
+            accepted: Accepted {
+                request,
+                end: self.accepted.end,
+            },
+            occurrences: self.occurrences,
+        })
+    }
+    pub(crate) fn commit<R, E>(self, commit: impl FnOnce(C) -> Result<R, E>) -> Result<R, E> {
+        let result = commit(self.accepted.request)?;
+        *self.resources.charged = self.accepted.end;
+        self.resources.counters.publish_admitted(&self.occurrences);
+        Ok(result)
+    }
+}

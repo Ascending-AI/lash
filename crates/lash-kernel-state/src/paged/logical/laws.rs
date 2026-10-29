@@ -801,6 +801,7 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
 /// page failures cannot publish a partial root, and scratch cannot cross seal.
 #[test]
 fn failed_or_stale_source_admission_never_publishes_a_holding() {
+    checked_program_and_warm_balance();
     let (heap, _) = fresh();
     let access = heap.pages().clone();
     let mut ledger = Ledger::fresh();
@@ -994,4 +995,166 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     );
     assert!(ledger.holding(owner(2), &access).unwrap().is_none());
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 163);
+}
+
+fn checked_program_and_warm_balance() {
+    use crate::arena::ProxyKind;
+    use crate::paged::{EditEpoch, ObjectInit, SemanticHeap};
+    use lash_kernel_doc::{Value, heap::PageValue};
+    let (mut heap, pages) = fresh();
+    let entity = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
+    let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
+    arena.watch_logical_members();
+    let lifecycle = Lifecycle::new(heap.logical_ledger());
+    let root = Owner::session(&lash_kernel_value::Name::new("cold"));
+    lifecycle.replace(root, Some(SourceValue::Page(PageValue::List(entity))));
+    lifecycle.flush(&mut arena, &heap).unwrap();
+    let balance = heap.logical_balance().unwrap();
+    assert_eq!(balance.total().unwrap(), 48);
+    let handle = arena.proxy(entity, ProxyKind::List);
+    lifecycle.handoff(&mut arena, &heap).unwrap();
+    let fact = heap
+        .logical_ledger()
+        .borrow()
+        .authenticate_warm(&arena, handle, heap.pages())
+        .unwrap();
+    arena.open_list(handle, 0).unwrap();
+    assert_eq!(
+        fact.finish(&heap.logical_ledger().borrow(), &arena)
+            .unwrap(),
+        balance,
+        "warming authenticates an existing fact without minting a physical claim"
+    );
+    heap.record_capacity(1 << 20);
+    let sealed = heap.seal(budget()).unwrap().unwrap();
+    assert_eq!(
+        sealed.root.logical.balance().unwrap(),
+        balance,
+        "seal publishes the source balance"
+    );
+    let opened = crate::paged::heap_impl::PagedHeap::open_header(
+        heap.sealed_root().unwrap(),
+        Box::new(Source(pages)),
+        EditEpoch(3),
+    )
+    .unwrap();
+    assert_eq!(
+        opened.logical_balance().unwrap(),
+        balance,
+        "open restores ledger summaries rather than physical capacity"
+    );
+    assert_eq!(opened.certificate().capacity, 1 << 20);
+
+    let (heap, _) = fresh();
+    let mut arena = crate::arena::Arena::new();
+    let mut ledger = Ledger::fresh();
+    let id = EntityId {
+        family: FamilyId::PRIMARY,
+        ordinal: 0,
+    };
+    let make = || {
+        Program::new(vec![
+            JournalEvent {
+                entities: vec![VirtualEntity {
+                    entity: id,
+                    body: VirtualBody::List(vec![]),
+                }],
+                outputs: vec![(owner(0), PublicationValue::Page(PageValue::List(id)))],
+                ..Default::default()
+            },
+            JournalEvent {
+                entities: vec![VirtualEntity {
+                    entity: id,
+                    body: VirtualBody::List(vec![PageValue::List(id)]),
+                }],
+                ..Default::default()
+            },
+            JournalEvent {
+                inputs: vec![owner(0)],
+                outputs: vec![(owner(0), PublicationValue::Native(Value::Null))],
+                ..Default::default()
+            },
+        ])
+    };
+    let evaluated = make().evaluate(&ledger, &arena).unwrap();
+    let prepared = evaluated
+        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .unwrap();
+    assert_eq!(
+        prepared.balance().unwrap().entity_local_bytes,
+        48,
+        "an elided source cycle remains itemized"
+    );
+    assert_eq!(prepared.peak(), 64);
+    let materializations = prepared
+        .admit(64)
+        .unwrap()
+        .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
+        .unwrap();
+    assert_eq!(materializations.entities().len(), 1);
+    materializations
+        .publish(&mut ledger, |recipes| assert_eq!(recipes[0].entity, id))
+        .unwrap();
+    ledger
+        .normalize(heap.pages(), TraceLimits::default())
+        .unwrap();
+    assert_eq!(ledger.balance().unwrap().entity_local_bytes, 0);
+    // Equal-size actual scalar substitutions are not the evaluated recipe.
+    let make = |value| {
+        Program::new(vec![JournalEvent {
+            inputs: vec![owner(0)],
+            outputs: vec![(owner(0), PublicationValue::Native(value))],
+            ..Default::default()
+        }])
+    };
+    let evaluated = make(Value::Int(1)).evaluate(&ledger, &arena).unwrap();
+    assert!(
+        evaluated
+            .prepare(
+                &ledger,
+                arena.registration().unwrap(),
+                &heap,
+                make(Value::Int(2))
+            )
+            .is_err()
+    );
+    let entity = EntityId {
+        family: FamilyId::PRIMARY,
+        ordinal: arena.next_ordinal(),
+    };
+    let make = || {
+        Program::new(vec![JournalEvent {
+            entities: vec![VirtualEntity {
+                entity,
+                body: VirtualBody::List(vec![PageValue::Int(1.into()), PageValue::Int(2.into())]),
+            }],
+            outputs: vec![(owner(1), PublicationValue::Page(PageValue::List(entity)))],
+            ..Default::default()
+        }])
+    };
+    let expected = make().evaluate(&ledger, &arena).unwrap();
+    let prepared = expected
+        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .unwrap();
+    assert_eq!(prepared.balance().unwrap().entity_local_bytes, 66);
+    assert!(
+        prepared.admit(97).is_none(),
+        "65 entity bytes after all containing obligations cannot fit 66"
+    );
+    assert_eq!(
+        arena.next_ordinal(),
+        entity.ordinal,
+        "a declined prefix consumes no identity"
+    );
+    let expected = make().evaluate(&ledger, &arena).unwrap();
+    let prepared = expected
+        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .unwrap();
+    let materializations = prepared
+        .admit(98)
+        .unwrap()
+        .publish(&mut ledger, |_, _| {})
+        .unwrap();
+    assert_eq!(ledger.balance().unwrap().entity_local_bytes, 66);
+    materializations.publish(&mut ledger, |_| {}).unwrap();
 }

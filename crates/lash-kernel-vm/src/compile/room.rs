@@ -15,10 +15,10 @@ mod bulk;
 mod derive;
 mod evaluate;
 mod interval;
+pub(crate) mod publication;
 mod root_owners;
 pub(crate) use interval::CompiledInterval;
-#[cfg(test)]
-pub(crate) use interval::Selection;
+pub(crate) type Selection = interval::Selection;
 mod verify;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -180,6 +180,12 @@ impl Amount {
 /// A callee result can only be built by evaluating its checked source program
 /// or the exact native contract; an unchecked peak number is not a fact.
 pub(crate) trait Facts {
+    /// All resident cell, callee and size/depth views used by a publication.
+    /// Numeric-only projections deliberately cannot mint a capability.
+    fn dependencies(&self) -> Option<&[lash_kernel_doc::arena::ArenaHandle]> {
+        None
+    }
+
     fn measure(&self, measure: &Measure) -> Option<i128>;
     fn call(&self, at: &Site, callee: CallSource) -> Option<&CheckedRoom>;
     fn raised(&self) -> bool;

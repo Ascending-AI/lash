@@ -130,6 +130,45 @@ impl crate::admission::Counters for Occurrences {
     }
 }
 impl Occurrences {
+    #[cfg(test)]
+    pub(crate) fn for_source_law(count: usize) -> Self {
+        Self {
+            counts: vec![0; count].into_boxed_slice(),
+            marked: vec![false; count].into_boxed_slice(),
+            dirty: Vec::new(),
+        }
+    }
+
+    pub(crate) fn current(&self, index: usize) -> Option<u64> {
+        self.counts.get(index).copied()
+    }
+    pub(crate) fn prepare_publication(&mut self, sites: &[usize]) -> Result<bool, HeapFault> {
+        let mut counts = BTreeMap::<usize, u64>::new();
+        for site in sites {
+            let Some(count) = self.current(*site) else {
+                return Ok(false);
+            };
+            let next = counts.entry(*site).or_insert(count);
+            let Some(value) = next.checked_add(1) else {
+                return Ok(false);
+            };
+            *next = value;
+        }
+        self.dirty
+            .try_reserve(sites.len())
+            .map_err(|error| HeapFault::Malformed(format!("source counter staging: {error}")))?;
+        Ok(true)
+    }
+    pub(crate) fn publish_admitted(&mut self, sites: &[usize]) {
+        for &site in sites {
+            self.counts[site] += 1;
+            if !self.marked[site] {
+                self.marked[site] = true;
+                self.dirty.push(site);
+            }
+        }
+    }
+
     fn new(exe: &Executable) -> Self {
         Self {
             counts: vec![0; exe.occurrence_count()].into_boxed_slice(),

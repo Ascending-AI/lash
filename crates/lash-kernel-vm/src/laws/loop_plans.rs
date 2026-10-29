@@ -6,6 +6,8 @@
 //! occurrences state it. A closure an island calls keeps the code it found
 //! by its site, as an ordinary call keeps it (FIG-6844).
 
+mod publication;
+
 use super::embedder::{Embedder, Setup};
 use crate::compile::expr::{self, Expr};
 use crate::compile::islands::{self, Kind};
@@ -820,6 +822,7 @@ fn source_room_scratch_ends_on_both_primitive_exits() {
 
 #[test]
 fn source_room_exits_preserve_charge_prefix_and_holdings() {
+    publication::checked_source_publication();
     use crate::compile::room::{Phase, Refused};
     source_rooms(|source| {
         let slots = source.owner_slots().unwrap();

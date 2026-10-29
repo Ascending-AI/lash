@@ -90,6 +90,9 @@ impl Machine for KernelMachine {
                 .project_occurrences()
                 .map_err(MachineError::Heap)?;
         }
+        self.logical
+            .handoff(&mut self.arena.borrow_mut(), &self.heap)
+            .map_err(MachineError::Heap)?;
         self.observe_phase(if matches!(result, Ok(Step::Parked(_))) {
             GuestPhase::Park
         } else {

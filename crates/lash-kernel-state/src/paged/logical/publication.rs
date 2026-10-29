@@ -117,6 +117,20 @@ impl Ledger {
 }
 
 impl<'a> PreparedPublication<'a> {
+    pub(super) fn from_program(
+        registration: Registration<'a>,
+        dependencies: Dependencies,
+        prepared: Prepared,
+        members: Vec<MemberEdit>,
+    ) -> Self {
+        Self {
+            registration,
+            dependencies,
+            prepared,
+            members,
+        }
+    }
+
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
         self.view().holding(owner, access)
     }

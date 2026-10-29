@@ -18,6 +18,10 @@ pub(crate) struct MemberEvent {
     pub add: Option<MemberEntry>,
 }
 impl Arena {
+    pub fn logical_member_frontier(&self) -> Option<usize> {
+        self.watching_members.then_some(self.member_events.len())
+    }
+
     pub(super) fn pending_member_handles(&self, handles: &mut Vec<ArenaHandle>) {
         let mut value = |value: Value| handles.extend(value.handle());
         for event in &self.member_events {

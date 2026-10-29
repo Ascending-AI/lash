@@ -33,6 +33,12 @@ impl Arena {
             revision: facts.content_revision,
         })
     }
+    pub fn same_generation(&self, version: &ContentVersion) -> bool {
+        std::rc::Rc::ptr_eq(&self.identity, &version.arena)
+            && self
+                .facts(version.handle)
+                .is_ok_and(|facts| facts.token == version.token)
+    }
     pub fn content_is(&self, version: &ContentVersion) -> bool {
         std::rc::Rc::ptr_eq(&self.identity, &version.arena)
             && self.facts(version.handle).is_ok_and(|facts| {
@@ -72,6 +78,18 @@ pub struct Registration<'a> {
     committed: bool,
 }
 impl Registration<'_> {
+    pub fn reserve_entity(&mut self) -> Result<EntityId, NativeError> {
+        let entity = EntityId {
+            family: lash_kernel_doc::heap::FamilyId::PRIMARY,
+            ordinal: self.arena.next_ordinal,
+        };
+        self.arena.next_ordinal = self
+            .arena
+            .next_ordinal
+            .checked_add(1)
+            .ok_or_else(|| malformed("identity ordinals overflow"))?;
+        Ok(entity)
+    }
     pub fn arena(&mut self) -> &mut Arena {
         self.arena
     }

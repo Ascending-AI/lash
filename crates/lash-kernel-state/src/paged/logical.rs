@@ -21,11 +21,18 @@ mod lifecycle;
 pub use lifecycle::{Lifecycle, SourceValue};
 mod members;
 mod ownership;
+mod program;
+pub use program::{
+    AcceptedProgram, EvaluatedProgram, FrameEvent, JournalEvent, Materializations, PreparedProgram,
+    Program, PublicationValue, ScratchEvent, VirtualBody, VirtualEntity,
+};
 mod publication;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::RootValue;
 pub use publication::{AcceptedPublication, MemberEdit, PreparedPublication};
+mod warming;
+pub use warming::WarmFact;
 mod values;
 pub(crate) use values::stream_value_edges;
 
@@ -239,6 +246,25 @@ pub struct LedgerRoot {
     pub entities: KeyedRoot,
     pub refinements: u64,
     pub next_invocation: u64,
+}
+
+impl LedgerRoot {
+    /// Authenticated source balance from root summaries; no physical residency
+    /// counter or previous capacity certificate participates in this value.
+    pub fn balance(self) -> Result<Balance, HeapFault> {
+        let balance = Balance {
+            entity_local_bytes: self.entities.cost().0,
+            root_and_control_bytes: self
+                .owners
+                .cost()
+                .0
+                .checked_add(self.ended.cost().0)
+                .ok_or_else(|| invalid("root holding cost overflow"))?,
+            entities: self.entities.len(),
+        };
+        balance.total()?;
+        Ok(balance)
+    }
 }
 
 #[derive(Clone)]

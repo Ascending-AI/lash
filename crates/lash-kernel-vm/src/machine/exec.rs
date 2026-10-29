@@ -877,7 +877,8 @@ impl KernelMachine {
         admission: Option<super::operation_entry::OperationEntry>,
     ) -> Eval<()> {
         self.logical_flush_controls(task, exe)?;
-        self.logical_flush()?;
+        self.logical
+            .handoff(&mut self.arena.borrow_mut(), &self.heap)?;
         let Call {
             library,
             link,

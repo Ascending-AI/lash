@@ -168,7 +168,7 @@ impl Ledger {
     ) -> Result<Vec<Change>, HeapFault> {
         self.allocate_membership_from(arena, access, pending, None)
     }
-    fn allocate_membership_from(
+    pub(super) fn allocate_membership_from(
         &self,
         arena: &mut Arena,
         access: &Access<'_>,

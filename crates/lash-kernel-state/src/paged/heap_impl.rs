@@ -159,6 +159,11 @@ impl PagedHeap {
     pub fn logical_ledger(&self) -> Rc<RefCell<super::logical::Ledger>> {
         Rc::clone(&self.logical)
     }
+    /// The source ledger's complete warm/cold balance, independent of the
+    /// physical accounting certificate retained by the interim meter.
+    pub fn logical_balance(&self) -> Result<super::logical::Balance, HeapFault> {
+        self.logical.borrow().balance()
+    }
     /// Select the unaccounted heap at run entry. No census is installed.
     pub fn without_memory_accounting(&mut self) {
         self.census = None;

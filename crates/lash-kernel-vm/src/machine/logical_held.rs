@@ -29,6 +29,11 @@ impl Projection<'_> {
 }
 impl KernelMachine {
     #[cfg(test)]
+    pub(crate) fn source_law_heap(&self) -> &PagedHeap {
+        &self.heap
+    }
+
+    #[cfg(test)]
     pub(crate) fn logical_balance(
         &self,
     ) -> Result<lash_kernel_state::kernel_internals::logical::Balance, HeapFault> {

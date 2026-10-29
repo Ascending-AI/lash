@@ -40,6 +40,46 @@ impl Ledger {
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<PreparedMember, MemberFault> {
         let arena = registration.arena();
+        let (change, mut pending, mut handles) =
+            self.member_change(arena, access, handle, member, next)?;
+        for (_, value) in outputs {
+            match value {
+                RootValue::Value(value) => handles.extend(value.handle()),
+                RootValue::Capture(handle) => handles.push(*handle),
+                _ => {}
+            }
+        }
+        let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
+        let mut changes = self.allocate_membership(arena, access, pending)?;
+        changes.push(change);
+        changes.push(Change::Roots(roots));
+        // Bind every body actually projected by this journal, including fresh
+        // descendants of an immutable result. The registration borrow prevents
+        // foreign mutation, but its owner can still edit staging before publish.
+        for change in &changes {
+            if let Change::Mutate { entity, .. } = change {
+                handles.push(
+                    arena
+                        .logical_handle(*entity)
+                        .ok_or_else(|| invalid("projected body disappeared"))?,
+                );
+            }
+        }
+        let dependencies = Dependencies::capture(self, arena, &handles)
+            .ok_or_else(|| invalid("member facts are unavailable"))?;
+        Ok(PreparedMember {
+            prepared: self.prepare_event(changes, access)?,
+            dependencies,
+        })
+    }
+    pub(super) fn member_change(
+        &self,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        handle: ArenaHandle,
+        member: Member,
+        next: Option<Value>,
+    ) -> Result<(Change, Vec<EntityId>, Vec<ArenaHandle>), MemberFault> {
         let entity = arena.identify(handle)?;
         if self.entity_holding(entity, access)?.is_none() {
             return Err(invalid("member owner is absent").into());
@@ -52,16 +92,6 @@ impl Ledger {
             && let Some(handle) = key.handle()
         {
             handles.push(handle);
-        }
-        for (_, value) in outputs {
-            match value {
-                RootValue::Value(value) => handles.extend(value.handle()),
-                RootValue::Capture(handle) => handles.push(*handle),
-                RootValue::Existing(_)
-                | RootValue::Frame
-                | RootValue::Page(_)
-                | RootValue::Frozen(_) => {}
-            }
         }
         let mut remove = Holding::scalar(0);
         let mut add = Holding::scalar(0);
@@ -117,32 +147,15 @@ impl Ledger {
             }
             Ok(())
         })?;
-        let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
-        let mut changes = self.allocate_membership(arena, access, pending)?;
-        changes.push(Change::Members {
-            entity,
-            remove,
-            add: Box::new(add),
-        });
-        changes.push(Change::Roots(roots));
-        // Bind every body actually projected by this journal, including fresh
-        // descendants of an immutable result. The registration borrow prevents
-        // foreign mutation, but its owner can still edit staging before publish.
-        for change in &changes {
-            if let Change::Mutate { entity, .. } = change {
-                handles.push(
-                    arena
-                        .logical_handle(*entity)
-                        .ok_or_else(|| invalid("projected body disappeared"))?,
-                );
-            }
-        }
-        let dependencies = Dependencies::capture(self, arena, &handles)
-            .ok_or_else(|| invalid("member facts are unavailable"))?;
-        Ok(PreparedMember {
-            prepared: self.prepare_event(changes, access)?,
-            dependencies,
-        })
+        Ok((
+            Change::Members {
+                entity,
+                remove,
+                add: Box::new(add),
+            },
+            pending,
+            handles,
+        ))
     }
 }
 fn entry(
