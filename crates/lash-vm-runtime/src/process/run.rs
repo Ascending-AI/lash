@@ -67,8 +67,13 @@ pub(crate) async fn run_kernel_step(
     run: EngineStepRun,
     stop: CancellationToken,
 ) -> EngineStepAnswer {
+    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
     let process = run.process.clone();
-    match kernel_run(engine, run, stop).await {
+    let mut engine = engine.clone();
+    engine.workers = engine
+        .workers
+        .begin_execution(std::time::Duration::ZERO, Arc::clone(&run.clock));
+    match kernel_run(&engine, run, stop).await {
         Ok((output, candidate)) => match serde_json::to_string(&output) {
             Ok(text) => {
                 let output = Box::new(SettledOutput::Completed(material(&process, text)));
@@ -299,6 +304,27 @@ async fn kernel_run(
             ));
         }
     };
+    let settings: KernelRecordedSettings = match run
+        .engine_settings
+        .as_ref()
+        .map(|settings| serde_json::from_value(settings.value().clone()))
+    {
+        Some(Ok(settings)) => settings,
+        Some(Err(error)) => {
+            return ended(failure(
+                KernelProcessFailureCode::SettingsInvalid,
+                format!("the process's recorded settings do not decode: {error}"),
+                None,
+            ));
+        }
+        None => {
+            return ended(failure(
+                KernelProcessFailureCode::SettingsInvalid,
+                "the process recorded no settings",
+                None,
+            ));
+        }
+    };
     let loaded_execution = engine
         .documents
         .load_execution_content(&process_input.code, &run.environment.retained_code)
@@ -338,7 +364,13 @@ async fn kernel_run(
         .await;
         match checked {
             Ok(selection) => selection,
-            Err(failure) => return worker_failure(failure),
+            Err(failure) => {
+                return worker_failure(
+                    failure,
+                    &settings.bounds(),
+                    worker_bound_readings(&engine.workers),
+                );
+            }
         }
     } else {
         lash_kernel_doc::Selection::Fresh
@@ -364,27 +396,6 @@ async fn kernel_run(
         .get(&root.document)
         .ok_or_else(|| RunFault("process Document is absent".into()))?
         .clone();
-    let settings: KernelRecordedSettings = match run
-        .engine_settings
-        .as_ref()
-        .map(|settings| serde_json::from_value(settings.value().clone()))
-    {
-        Some(Ok(settings)) => settings,
-        Some(Err(error)) => {
-            return ended(failure(
-                KernelProcessFailureCode::SettingsInvalid,
-                format!("the process's recorded settings do not decode: {error}"),
-                None,
-            ));
-        }
-        None => {
-            return ended(failure(
-                KernelProcessFailureCode::SettingsInvalid,
-                "the process recorded no settings",
-                None,
-            ));
-        }
-    };
     let args = match entry_args(
         &document,
         &process_input,
@@ -600,7 +611,19 @@ async fn kernel_run(
         ..
     } = match driven {
         Ok(driven) => driven,
-        Err(failure) => return worker_failure(failure),
+        Err(failure) => {
+            let result = worker_failure(
+                failure,
+                &settings.bounds(),
+                worker_bound_readings(&engine.workers),
+            );
+            if let Ok((KernelRunOutput::Ended { outcome, .. }, _)) = &result
+                && let Some(trace) = &trace
+            {
+                trace.finished(outcome);
+            }
+            return result;
+        }
     };
     let caught = if counts {
         caught
@@ -941,7 +964,11 @@ impl lash_core_execution::kernel_runner::KernelOwner for ProcessKernelOwner<'_> 
 /// when every attempt would meet it the same way, the host's capacity
 /// verdict, which records nothing and runs again uncounted, or a fault of
 /// this attempt, which is asked again within the step's attempts.
-fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
+fn worker_failure(
+    failure_: KernelFailure,
+    bounds: &Bounds,
+    readings: lash_core_execution::kernel_runner::BoundReadings,
+) -> Result<Answered, Unsettled> {
     if let KernelFailure::Worker { outcome } = &failure_
         && let Some(cause) = capacity_cause(outcome)
     {
@@ -962,12 +989,30 @@ fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
         )),
         KernelFailure::Worker {
             outcome: InfrastructureOutcome::WorkerLimitExceeded { limit },
-        } if !limit.is_host_verdict() => ended(failure(
+        } if !limit.is_host_verdict() => ended(caused_failure(
             KernelProcessFailureCode::BoundExceeded,
             format!("worker execution bound exhausted: {limit}"),
             Some(serde_json::json!({ "worker_limit": limit })),
+            lash_core_execution::kernel_runner::worker_bound_fact(*limit, bounds, readings)
+                .map(|fact| lash_core::ToolFailureCause::ExecutionBound { fact }),
         )),
         _ => Err(RunFault(failure_.to_string()).into()),
+    }
+}
+
+fn worker_bound_readings(
+    service: &lash_vm_client::service::Service,
+) -> lash_core_execution::kernel_runner::BoundReadings {
+    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+    let budget = service.execution_budget();
+    let meters = budget.and_then(|budget| budget.meters());
+    let nanos =
+        |duration: std::time::Duration| u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+    lash_core_execution::kernel_runner::BoundReadings {
+        charged: meters.and_then(|meters| meters.charged),
+        memory: meters.map(|meters| meters.memory),
+        worker_cpu_nanos: budget.and_then(|budget| budget.cpu()).map(nanos),
+        held_wall_nanos: budget.map(|budget| nanos(budget.held())),
     }
 }
 
@@ -1339,6 +1384,19 @@ impl KernelRecordedSettings {
 mod tests {
     use super::*;
 
+    fn test_bounds() -> Bounds {
+        Bounds {
+            memory_meter: Default::default(),
+            charge: Default::default(),
+            charge_limit: 1_000_000,
+            memory: 64 * 1024 * 1024,
+            call_depth: Bounds::DEFAULT_CALL_DEPTH,
+            live_tasks: 100,
+            requests_per_park: 100,
+            join_members: 100,
+        }
+    }
+
     /// FIG-7143: the plugin/host boundary keeps the kernel's typed mismatch.
     #[test]
     fn entry_mismatch_stays_typed_in_process_failure() {
@@ -1384,13 +1442,21 @@ mod tests {
     fn a_worker_the_run_crashed_spends_an_attempt_and_one_lost_before_it_ran_does_not() {
         let evidence =
             lash_protocol_types::engine_fault::SupervisorEvidence::Signalled { signal: 9 };
-        let ran = worker_failure(KernelFailure::Worker {
-            outcome: InfrastructureOutcome::RunCrashedWorker { evidence },
-        });
+        let ran = worker_failure(
+            KernelFailure::Worker {
+                outcome: InfrastructureOutcome::RunCrashedWorker { evidence },
+            },
+            &test_bounds(),
+            Default::default(),
+        );
         assert!(matches!(ran, Err(Unsettled::Fault(_))));
-        let lost = worker_failure(KernelFailure::Worker {
-            outcome: InfrastructureOutcome::WorkerCrashed { evidence },
-        });
+        let lost = worker_failure(
+            KernelFailure::Worker {
+                outcome: InfrastructureOutcome::WorkerCrashed { evidence },
+            },
+            &test_bounds(),
+            Default::default(),
+        );
         assert!(matches!(
             lost,
             Err(Unsettled::Capacity(
@@ -1398,5 +1464,48 @@ mod tests {
                 _
             ))
         ));
+    }
+    /// FIG-7557: a worker-enforced CPU stop reaches the same process bound contract.
+    #[test]
+    fn a_process_worker_cpu_bound_retains_the_structured_fact() {
+        for observed in [None, Some(101_000_000)] {
+            let (output, _) = worker_failure(
+                lash_vm_broker::kernel::KernelFailure::Worker {
+                    outcome: lash_vm_client::InfrastructureOutcome::WorkerLimitExceeded {
+                        limit: lash_vm_client::WorkerLimit::Cpu { bound_ms: 100 },
+                    },
+                },
+                &test_bounds(),
+                lash_core_execution::kernel_runner::BoundReadings {
+                    worker_cpu_nanos: observed,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|_| panic!("a worker CPU stop is terminal"));
+            let KernelRunOutput::Ended { outcome, .. } = output else {
+                panic!("the process ended")
+            };
+            let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } =
+                *outcome
+            else {
+                panic!("the process failed")
+            };
+            let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+                panic!("the CPU stop failed")
+            };
+            assert_eq!(
+                failure.cause.as_deref(),
+                Some(&lash_core::ToolFailureCause::ExecutionBound {
+                    fact: lash_core::ExecutionBoundFact {
+                        resource: lash_core::CellResource::WorkerCpuNanos,
+                        limit: 100_000_000,
+                        observed,
+                        consumed: observed,
+                        function: None,
+                        site: None
+                    },
+                })
+            );
+        }
     }
 }

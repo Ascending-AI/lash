@@ -67,6 +67,8 @@ impl RuntimeExecutionContext<'_> {
         output: ToolCallOutput,
     ) -> ToolInvocationReply {
         let record = ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id,
             provider_call_id: None,
             tool: tool.into(),

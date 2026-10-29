@@ -300,6 +300,7 @@ struct Failure<'a>(&'a crate::TraceToolFailure);
 impl Serialize for Failure<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let crate::TraceToolFailure {
+            bound: _,
             class,
             code,
             source,

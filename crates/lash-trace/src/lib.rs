@@ -663,6 +663,10 @@ pub enum TraceToolCallOutcome {
 /// governed [diagnostics](TraceToolFailure::diagnostics).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceToolFailure {
+    /// Content-free bound evidence from the terminal cause. It survives
+    /// diagnostic content omission, hooks and bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound: Option<Box<lash_protocol_types::ExecutionBoundFact>>,
     pub class: lash_protocol_types::ToolFailureClass,
     pub code: String,
     pub source: lash_protocol_types::ToolFailureSource,
@@ -682,6 +686,12 @@ impl TraceToolFailure {
     /// captures tool results.
     pub fn new(failure: &lash_protocol_types::ToolFailure, content: ContentPolicy) -> Self {
         Self {
+            bound: failure.cause.as_deref().and_then(|cause| match cause {
+                lash_protocol_types::ToolFailureCause::ExecutionBound { fact } => {
+                    Some(Box::new(fact.clone()))
+                }
+                _ => None,
+            }),
             class: failure.class.clone(),
             code: failure.code.clone(),
             source: failure.source.clone(),

@@ -1,5 +1,44 @@
 //! Tool reads retained by the caller's next save, without admitted executions.
 
+/// Whether tool-call activity describes a recorded call or an unrecorded read.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallExecution {
+    #[default]
+    Recorded,
+    Read,
+}
+
+impl ToolCallExecution {
+    pub fn is_recorded(&self) -> bool {
+        *self == Self::Recorded
+    }
+}
+
+/// The stable read metadata retained with a tool-call record. Live timing and
+/// byte measurements are provisional and remain on activity events.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ToolReadIdentity {
+    pub caller: ToolReadCaller,
+    pub provider: lash_vocabulary::providers::ToolProviderHandle,
+    pub ordinal: u64,
+    pub site: String,
+    pub origin: String,
+}
+
 /// The caller of an unrecorded tool read. This is observation identity only.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -57,6 +96,14 @@ pub struct ReadFact {
 impl ReadFact {
     pub fn record(&self) -> crate::ToolCallRecord {
         crate::ToolCallRecord {
+            execution: crate::ToolCallExecution::Read,
+            read: Some(Box::new(crate::ToolReadIdentity {
+                caller: self.caller.clone(),
+                provider: self.provider.clone(),
+                ordinal: self.ordinal,
+                site: self.site.clone(),
+                origin: self.origin.clone(),
+            })),
             call_id: self.call_id.clone(),
             provider_call_id: None,
             tool: self.tool.clone(),

@@ -83,6 +83,8 @@ pub enum TraceLanguageExecutionPayload {
         observation: lash_kernel_value::observation::RunObservation,
     },
     ExecutionFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<Box<crate::TraceToolFailure>>,
         subject: crate::TraceRuntimeSubject,
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]

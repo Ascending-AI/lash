@@ -123,6 +123,7 @@ enum Cell {
     ModelMixed,
     ModelCitation,
     Bound,
+    BoundMemory,
     Hooked,
     HookedModel,
 }
@@ -135,6 +136,7 @@ impl Cell {
             Self::InvalidOutput | Self::ModelInvalidOutput => "await reads.extRead({ x: -11 });".to_owned(),
             Self::Pending => "await reads.extRead({ x: -12 });".to_owned(),
             Self::ModelMixed | Self::ModelCitation => String::new(),
+            Self::BoundMemory => "const sibling = tools.extWrite({ x: -20 }); await tools.extWrite({ x: 1 }); let text = \"a\"; while (true) { text = text + text; }".to_owned(),
             Self::Bound => "const sibling = tools.extWrite({ x: -20 }); await tools.extWrite({ x: 1 }); while (true) {}".to_owned(),
             Self::ReadWriteRead => "const a = await reads.extRead({ x: 1 });\n\
                  const w = await tools.extWrite({ x: a.v });\n\
@@ -460,6 +462,7 @@ enum Law {
 
 /// The scenario for one cell, fresh for every matrix cell.
 struct ReadTurn {
+    sent: Mutex<Option<lash::SendHandle>>,
     cell: Cell,
     law: Law,
     world: Arc<ExternalWorld>,
@@ -472,6 +475,7 @@ struct ReadTurn {
 impl ReadTurn {
     fn new(cell: Cell, law: Law) -> Self {
         Self {
+            sent: Mutex::default(),
             cell,
             law,
             world: Arc::default(),
@@ -504,11 +508,13 @@ impl ReadTurn {
                         .instruction_limit(lash::rlm::InstructionBound::instructions(
                             if self.cell == Cell::Bound {
                                 100
+                            } else if self.cell == Cell::BoundMemory {
+                                10_000_000
                             } else {
                                 1_000_000
                             },
                         ))
-                        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                        .memory_limit(lash::rlm::MemoryBound::mebibytes(if self.cell == Cell::BoundMemory { 1 } else { 64 }))
                         .build(),
                     lash::rlm::CellDialect::typescript(),
                 )
@@ -547,7 +553,7 @@ impl ReadTurn {
                     },
                 ));
                 let writes = Arc::new(StaticToolProvider::new(
-                    vec![if self.cell == Cell::Bound {
+                    vec![if matches!(self.cell, Cell::Bound | Cell::BoundMemory) {
                         definition(WRITE, ExecutionPolicy::Once).with_declaration(
                             lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
                             Some(lash_vocabulary::tool_contract::ParkBound::Within(Duration::from_secs(120))),
@@ -658,10 +664,11 @@ impl ReadTurn {
             )))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
-        session
+        let handle = session
             .send(lash::TurnInput::text("run the cell"))
             .await
             .map_err(|error| format!("send the turn's input: {error}"))?;
+        *self.sent.lock_recover() = Some(handle);
         Ok(())
     }
 
@@ -835,6 +842,7 @@ impl Scenario for ReadTurn {
             | Cell::ModelMixed
             | Cell::ModelCitation
             | Cell::Bound
+            | Cell::BoundMemory
             | Cell::Hooked
             | Cell::HookedModel => Vec::new(),
         };
@@ -860,7 +868,7 @@ impl Scenario for ReadTurn {
                 ));
             }
         }
-        if self.cell == Cell::Bound {
+        if matches!(self.cell, Cell::Bound | Cell::BoundMemory) {
             let checked = async {
                 let durable = self
                     .core()
@@ -884,6 +892,27 @@ impl Scenario for ReadTurn {
                     .bound
                     .as_ref()
                     .ok_or("the cell lost structured bound evidence")?;
+                if self.cell == Cell::BoundMemory {
+                    if fact.resource != lash_core::CellResource::MemoryBytes
+                        || fact.limit != 1024 * 1024
+                    {
+                        return Err(format!("KERNEL-BOUND-FACT: {fact:?}"));
+                    }
+                    let meter = cell
+                        .consumption
+                        .iter()
+                        .find(|reading| reading.resource == fact.resource)
+                        .ok_or("the saved memory receipt")?;
+                    if fact.observed != meter.observed
+                        || fact.consumed != meter.consumed
+                        || fact.function.as_ref().map(|name| name.as_str()) != Some("text.concat")
+                    {
+                        return Err(format!(
+                            "the memory fact differs from its saved receipt: {fact:?}, {meter:?}"
+                        ));
+                    }
+                    return Ok(());
+                }
                 if fact.resource != lash_core::CellResource::Charges
                     || fact.limit != 100
                     || fact.observed != Some(101)
@@ -930,6 +959,13 @@ impl Scenario for ReadTurn {
                 | Cell::ModelMixed
         ) {
             let checked = async {
+                let live = if self.cell == Cell::ModelMixed && cut.is_none() {
+                    let handle = self.sent.lock_recover().take().ok_or("the sent model turn")?;
+                    let output = handle.output().await.map_err(|error| error.to_string())?;
+                    let events = output.activities.iter().map(|activity| serde_json::to_value(&activity.event).unwrap()).collect::<Vec<_>>();
+                    self.core.lock_recover().take();
+                    Some(events)
+                } else { None };
                 let durable = self.core().session(session()).durable().await.map_err(|e| e.to_string())?;
                 let transcript = durable.transcript().await.map_err(|e| e.to_string())?;
                 if self.cell == Cell::ModelInvalidOutput {
@@ -961,6 +997,17 @@ impl Scenario for ReadTurn {
                     if args != [json!({"x":1}), json!({"x":91}), json!({"x":2})] { return Err(format!("MODEL-READ-SAVED-ORDER: {args:?}")); }
                     for (slot,x) in [(0,1),(2,2)] {
                         let record = records.iter().find(|record| record.call_id == returned[slot]).ok_or("a saved read slot is not hydrated")?;
+                        let saved = serde_json::to_value(lash_protocol_types::Durable(record)).map_err(|error| error.to_string())?;
+                        if saved["execution"] != "read" || saved["read"]["ordinal"] != if slot == 0 { 1 } else { 2 }
+                            || saved["read"]["caller"]["kind"] != "model_round" {
+                            return Err(format!("MODEL-READ-HISTORY-IDENTITY: {saved}"));
+                        }
+                        if let Some(live) = &live {
+                            let event = live.iter().find(|event| event["type"] == "tool_call_returned" && event["call_id"] == record.call_id.as_str()).ok_or("the model read emitted its live row")?;
+                            for key in ["caller", "provider", "ordinal", "site", "origin"] {
+                                if saved["read"][key] != event["read"][key] { return Err(format!("the model read lost its live {key}")); }
+                            }
+                        }
                         let answer = self.world.answers(x);
                         if record.args != json!({"x":x}) || record.output.value_for_projection() != oversized_read(*answer.last().ok_or("the read ran")?) {
                             return Err(format!("MODEL-READ-SAVED-ORDER: {record:?}"));
@@ -1517,6 +1564,33 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
         "page unavailable"
     );
     assert_eq!(turn.world.reads(), [(1, 1), (10, 2), (2, 3), (3, 4)]);
+    turn.core.lock_recover().take();
+    let durable = turn
+        .core()
+        .session(self::session())
+        .durable()
+        .await
+        .unwrap();
+    let transcript = durable.transcript().await.unwrap();
+    let turn_id = transcript
+        .entries()
+        .iter()
+        .find_map(|entry| entry.provenance.turn_id.clone())
+        .unwrap();
+    for event in returned {
+        let call = lash::TurnToolCallRef {
+            turn_id: turn_id.clone(),
+            call_id: lash::ToolCallId::parse(event["call_id"].as_str().unwrap()).unwrap(),
+        };
+        let lash::ToolCallRead::Settled { record } = durable.read_tool_call(&call).await.unwrap()
+        else {
+            panic!("the saved read is retained")
+        };
+        let saved = serde_json::to_value(lash_protocol_types::Durable(record.as_ref())).unwrap();
+        assert_eq!(saved["execution"], "read");
+        assert_eq!(saved["read"]["caller"], event["read"]["caller"]);
+        assert_eq!(saved["read"]["ordinal"], event["read"]["ordinal"]);
+    }
 }
 
 /// READ-PANIC-TERMINAL: catch cannot continue a cell after its reader panics.
@@ -1610,4 +1684,24 @@ async fn a_model_citation_read_survives_canonical_plan_decode_on_sqlite_memory()
         .run_test(|| ReadTurn::new(Cell::ModelCitation, Law::Counted))
         .await
         .assert_held();
+}
+
+/// FIG-7557: a separately saved memory stop retains its fact on takeover.
+#[tokio::test]
+async fn a_saved_cell_memory_bound_survives_takeover_on_sqlite_memory() {
+    let report = Matrix::new()
+        .faults(&[Fault::CommitThenAbort])
+        .labels(&[CommitLabel::CELL_SNAPSHOT])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| ReadTurn::new(Cell::BoundMemory, Law::Counted))
+        .await;
+    assert!(
+        report
+            .cells
+            .iter()
+            .any(|cell| cell.point.label == CommitLabel::CELL_SNAPSHOT
+                && cell.fault == Fault::CommitThenAbort),
+        "the saved memory end must be taken over"
+    );
+    report.assert_held();
 }

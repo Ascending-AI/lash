@@ -78,6 +78,12 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `gen_ai.tool.name` | String | Provenance | tool, cell, process, tool_intent |
 | `gen_ai.tool.call.id` | String | Provenance | tool, process, tool_intent |
 | `lash.cell.id` | String | Provenance | cell |
+| `lash.execution.bound.resource` | String | Provenance | cell, process, workflow |
+| `lash.execution.bound.limit` | Integer | Provenance | cell, process, workflow |
+| `lash.execution.bound.observed` | Integer | Provenance | cell, process, workflow |
+| `lash.execution.bound.consumed` | Integer | Provenance | cell, process, workflow |
+| `lash.execution.bound.function` | String | Provenance | cell, process, workflow |
+| `lash.execution.bound.site` | String | Provenance | cell, process, workflow |
 | `lash.cell.charges.consumed` | Integer | Provenance | cell |
 | `lash.cell.charges.limit` | Integer | Provenance | cell |
 | `lash.cell.charges.observed` | Integer | Provenance | cell |
@@ -196,9 +202,9 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `model` | 53 |
 | `model_attempt` | 40 |
 | `tool` | 31 |
-| `cell` | 42 |
-| `process` | 26 |
-| `workflow` | 24 |
+| `cell` | 48 |
+| `process` | 32 |
+| `workflow` | 30 |
 | `workflow_node` | 22 |
 | `tool_intent` | 24 |
 | `extension` | 26 |

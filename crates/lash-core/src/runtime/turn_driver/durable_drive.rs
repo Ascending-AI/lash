@@ -613,6 +613,8 @@ fn cell_calls_from_ledger(
             .map_err(lash_durable::DurableError::Graph)?;
         ledger.entries.push(body);
         records.push(crate::ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id: completed.call_id,
             provider_call_id: completed.provider_call_id,
             tool: completed.tool_name,

@@ -610,6 +610,8 @@ pub fn tool_step_output(
         }
         settled => {
             let record = completed_call(&settled).map(|completed| crate::ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id: completed.call_id.clone(),
                 provider_call_id: completed.provider_call_id.clone(),
                 tool: completed.tool_name.clone(),
@@ -670,6 +672,8 @@ pub fn tool_step_refused(
         .payload()
         .and_then(|payload| serde_json::from_str::<crate::ToolCallOutput>(payload).ok())
         .map(|output| crate::ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id: call.call_id.clone(),
             provider_call_id: call.provider_call_id.clone(),
             tool: call.tool_name.clone(),
@@ -695,6 +699,8 @@ pub fn dispatch_resolution(
     let record = serde_json::to_value(matched)
         .ok()
         .map(|value| crate::ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id: call.call_id.clone(),
             provider_call_id: call.provider_call_id.clone(),
             tool: call.tool_name.clone(),
@@ -798,6 +804,8 @@ pub fn tool_step_resolved(
     };
     let output = crate::tool_dispatch::parked_call_output(&parked, resolution);
     let record = crate::ToolCallRecord {
+        execution: Default::default(),
+        read: None,
         call_id: retained.call.call_id,
         provider_call_id: retained.call.provider_call_id,
         tool: retained.call.tool_name,

@@ -181,6 +181,7 @@ impl CellTrace {
 
     pub(super) fn finished(&self, status: TraceLanguageExecutionStatus, error: Option<String>) {
         self.emit(TraceLanguageExecutionPayload::ExecutionFinished {
+            failure: None,
             subject: self.subject(),
             status,
             error,

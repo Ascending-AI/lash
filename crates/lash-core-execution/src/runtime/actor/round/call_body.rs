@@ -62,6 +62,8 @@ impl TokenCodec for StoredBody {
         let output = decode_output(input, &answer)?;
         Ok(Self {
             record: crate::ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id,
                 provider_call_id,
                 tool,

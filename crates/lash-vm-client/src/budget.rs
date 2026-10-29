@@ -28,6 +28,7 @@ pub struct ExecutionBudget {
 struct BudgetTotals {
     attempts: u32,
     cpu_nanos: u64,
+    cpu_observed: bool,
     meters: Option<crate::RunMeters>,
     #[cfg(feature = "testing")]
     injected_cpu: Option<u64>,
@@ -71,11 +72,19 @@ impl ExecutionBudget {
             && let Some(cpu) = totals.injected_cpu.take()
         {
             totals.cpu_nanos = totals.cpu_nanos.max(cpu);
+            totals.cpu_observed = true;
         }
     }
     #[cfg(feature = "testing")]
     pub(crate) fn inject_cpu_at_safe_point(&self, cpu: Option<u64>) {
         lock(&self.totals).injected_cpu = cpu;
+    }
+    /// Accounted worker CPU, only after a supervisor receipt was received.
+    pub fn cpu(&self) -> Option<Duration> {
+        let totals = lock(&self.totals);
+        totals
+            .cpu_observed
+            .then(|| Duration::from_nanos(totals.cpu_nanos))
     }
     pub fn totals(&self) -> (u32, Duration) {
         let totals = lock(&self.totals);
@@ -124,6 +133,7 @@ impl ExecutionBudget {
     pub(crate) fn charge(&self, delta: u64, config: &PoolConfig) -> Result<(), PoolError> {
         let mut totals = lock(&self.totals);
         totals.cpu_nanos = totals.cpu_nanos.saturating_add(delta);
+        totals.cpu_observed = true;
         if totals.cpu_nanos >= nanos(config.deadlines.cumulative_cpu) {
             return Err(limit(config.deadlines.cpu_limit()));
         }

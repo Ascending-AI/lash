@@ -154,6 +154,17 @@ impl super::activation::ProcessActivation {
                 label: record.identity.label.clone(),
             },
         };
+        let failure = match &outcome {
+            lash_execution_contracts::process::ProcessTerminal::Settled { output } => {
+                match &output.outcome {
+                    crate::ToolCallOutcome::Failure(failure) => Some(Box::new(
+                        lash_trace::TraceToolFailure::new(failure, tracing.content()),
+                    )),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let started_at_ms = scope.started_at_ms;
         tracing.unreplayed(Some(scope)).transition(
             Some(&lash_trace::EmissionPermit::new_transition()),
@@ -164,11 +175,15 @@ impl super::activation::ProcessActivation {
                 (
                     lash_trace::TraceContext::default(),
                     lash_trace::TraceEvent::DomainCompleted {
-                        completion: lash_trace::TraceDomainCompletion::new(
-                            subject,
-                            started_at_ms,
-                            status,
-                        ),
+                        completion: {
+                            let mut completion = lash_trace::TraceDomainCompletion::new(
+                                subject,
+                                started_at_ms,
+                                status,
+                            );
+                            completion.failure = failure;
+                            completion
+                        },
                     },
                 )
             },

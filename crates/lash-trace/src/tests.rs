@@ -176,6 +176,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "language execution failed",
             language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
+                failure: None,
                 subject: TraceRuntimeSubject::Process {
                     process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
                 },
@@ -277,6 +278,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "completed language execution",
             language_execution(TraceLanguageExecutionPayload::ExecutionFinished {
+                failure: None,
                 subject: TraceRuntimeSubject::Process {
                     process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
                 },

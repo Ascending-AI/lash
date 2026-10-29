@@ -146,7 +146,7 @@ pub mod facade_support {
     pub use crate::runtime::{
         DurableSessionOps, EMPTY_HEAD_REVISION, HostInputAdmission, QueueWithdrawalObservation,
     };
-    pub use lash_core_execution::kernel_runner::bound_fact;
+    pub use lash_core_execution::kernel_runner::{BoundReadings, bound_fact, worker_bound_fact};
     pub use lash_core_execution::runtime::actor::resolutions::{
         CommittedUse, FirstUse, ResolutionError, ResolutionValidator, registration,
         start_requirements,

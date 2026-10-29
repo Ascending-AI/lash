@@ -1199,6 +1199,23 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
         first.error().and_then(|f| f.worker_limit),
         Some(lash_vm_client::WorkerLimit::Fuel)
     );
+    let expected = lash_core::ExecutionBoundFact {
+        resource: lash_core::CellResource::Charges,
+        limit: instruction_limit,
+        observed: Some(instruction_limit + 1),
+        consumed: Some(instruction_limit),
+        function: None,
+        site: None,
+    };
+    assert_eq!(
+        first.error().and_then(|failure| failure.bound.as_deref()),
+        Some(&expected)
+    );
+    assert_eq!(
+        again.error().and_then(|failure| failure.bound.as_deref()),
+        Some(&expected),
+        "a saved instruction end retains its fact"
+    );
     let encoded = serde_json::to_value(&first).expect("encode result");
     let reading = |resource: &str| {
         encoded["consumption"]
@@ -1269,6 +1286,47 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
     let cpu = reading(lash_core::CellResource::WorkerCpuNanos);
     assert_eq!(cpu.limit, cpu_bound);
     assert!(cpu.consumed.is_some_and(|used| used >= cpu_bound));
+    let fact = response
+        .error()
+        .and_then(|failure| failure.bound.as_deref())
+        .expect("a worker CPU stop retains its structured bound");
+    assert_eq!(fact.resource, lash_core::CellResource::WorkerCpuNanos);
+    assert_eq!(fact.limit, cpu_bound);
+    assert_eq!(fact.observed, cpu.observed);
+    assert_eq!(fact.consumed, cpu.consumed);
+}
+
+/// FIG-7557: a memory stop keeps its own bound when no parked end supplied one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_memory_stop_retains_its_structured_fact_on_reopening() {
+    let tools = Arc::new(CellTools::default());
+    let mut memory_services = cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::default(),
+    );
+    memory_services.execution_bounds = crate::plugin::ExecutionBounds::new(
+        crate::plugin::InstructionBound::instructions(10_000_000),
+        crate::plugin::MemoryBound::mebibytes(1),
+    );
+    let (memory, restored) = run_and_replay(
+        &memory_services,
+        &tools,
+        "let text = \"a\"; while (true) { text = text + text; }",
+    )
+    .await;
+    let fact = memory
+        .error()
+        .and_then(|failure| failure.bound.as_deref())
+        .expect("a memory stop retains its bound");
+    assert_eq!(fact.resource, lash_core::CellResource::MemoryBytes);
+    assert_eq!(fact.limit, 1024 * 1024);
+    assert_eq!(
+        restored
+            .error()
+            .and_then(|failure| failure.bound.as_deref()),
+        Some(fact),
+        "a saved memory end retains the exact fact"
+    );
 
     // Successful cells carry the same meters without an extra worker call.
     let host = open_host().await;

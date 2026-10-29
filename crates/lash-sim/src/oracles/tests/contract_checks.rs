@@ -481,6 +481,8 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         .pointer_mut("/runtime_effect_outcome/result/Ok")
         .unwrap();
     let records = ["first", "second"].map(|label| lash_core::ToolCallRecord {
+        execution: Default::default(),
+        read: None,
         call_id: lash_core::ToolCallId::fixture(label),
         provider_call_id: None,
         tool: "read_file".to_string(),

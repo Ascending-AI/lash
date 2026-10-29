@@ -250,6 +250,7 @@ fn execution_finished(event_key: &str, status: LanguageExecutionStatus) -> Trace
     language(
         event_key,
         TraceLanguageExecutionPayload::ExecutionFinished {
+            failure: None,
             subject: subject(),
             status,
             error: None,

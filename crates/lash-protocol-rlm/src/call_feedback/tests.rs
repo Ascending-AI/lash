@@ -159,6 +159,8 @@ fn result_summaries_elide_structure_without_splitting_scalar_leaves() {
     let zero = super::with_result_summaries(
         vec![call("inbox.write", true, "zero-result", Some("previous"))],
         &[lash_core::ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id: lash_core::ToolCallId::fixture("zero-result"),
             provider_call_id: None,
             tool: "inbox.write".into(),

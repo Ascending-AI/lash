@@ -22,7 +22,10 @@ pub mod plugin;
 pub mod profile;
 mod read_fact;
 mod redacted;
-pub use read_fact::{ReadFact, ReadFailure, ReadPanic, ReadResult, ToolReadCaller};
+pub use read_fact::{
+    ReadFact, ReadFailure, ReadPanic, ReadResult, ToolCallExecution, ToolReadCaller,
+    ToolReadIdentity,
+};
 mod result_fit;
 mod retained_output;
 mod run_aggregate;

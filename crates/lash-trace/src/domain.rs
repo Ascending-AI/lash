@@ -63,6 +63,9 @@ pub enum TraceDomainStatus {
 /// The terminal of one durable domain operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceDomainCompletion {
+    /// The terminal's typed failure classification, bound and governed diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Box<crate::TraceToolFailure>>,
     pub subject: TraceDomainSubject,
     /// Wall-clock epoch milliseconds the operation's scope retained as its
     /// start.
@@ -80,6 +83,7 @@ pub struct TraceDomainCompletion {
 impl TraceDomainCompletion {
     pub fn new(subject: TraceDomainSubject, started_at_ms: u64, status: TraceDomainStatus) -> Self {
         Self {
+            failure: None,
             subject,
             started_at_ms,
             status,

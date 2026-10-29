@@ -100,6 +100,8 @@ fn a_settled_call_is_one_outcome_node_that_rebuilds_its_presentation_after_colle
             NodeKind::CALL_BODY,
             &call_body::StoredBody {
                 record: crate::ToolCallRecord {
+                    execution: Default::default(),
+                    read: None,
                     call_id: outcome.call_id.clone(),
                     provider_call_id: outcome.provider_call_id.clone(),
                     tool: outcome.tool_name.clone(),

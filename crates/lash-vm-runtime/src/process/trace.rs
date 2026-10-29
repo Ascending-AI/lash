@@ -90,6 +90,20 @@ impl ProcessTrace {
             _ => TraceLanguageExecutionStatus::Failed,
         };
         self.emit(TraceLanguageExecutionPayload::ExecutionFinished {
+            failure: match outcome {
+                lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } => {
+                    match &output.outcome {
+                        lash_core::ToolCallOutcome::Failure(failure) => {
+                            Some(Box::new(lash_trace::TraceToolFailure::new(
+                                failure,
+                                self.tracing.trace_runtime().content(),
+                            )))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            },
             subject: self.subject(),
             status,
             error: None,

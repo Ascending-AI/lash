@@ -114,6 +114,9 @@ pub enum ToolViewBlock {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self")]
 pub struct ToolCallRecord {
+    pub execution: crate::ToolCallExecution,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub read: Option<Box<crate::ToolReadIdentity>>,
     /// Lash's identity for the call (ADR 0117).
     pub call_id: crate::ToolCallId,
     /// The model provider's id for the call, when a model issued it:

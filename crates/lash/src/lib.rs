@@ -441,6 +441,7 @@ pub use lash_execution_contracts::session_spec::SpecResolveError;
 pub use lash_execution_contracts::session_types::SessionCreateRequest;
 pub use lash_execution_contracts::session_types::UnstatedSessionConfig;
 pub use lash_kernel_value::identity::SessionId;
+pub use lash_protocol_types::ToolReadIdentity;
 pub use lash_vocabulary::identity::BatchId;
 pub use lash_vocabulary::identity::InputId;
 pub use lash_vocabulary::identity::NodeId;

@@ -17,6 +17,8 @@ pub(super) fn map_effect_task_join(
         Some(call) => Ok(RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(crate::ToolAttemptLaunch::Done {
                 record: Box::new(crate::ToolCallRecord {
+                    execution: Default::default(),
+                    read: None,
                     call_id: call.call_id.clone(),
                     provider_call_id: call.provider_call_id,
                     tool: call.tool_name.clone(),

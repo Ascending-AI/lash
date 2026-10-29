@@ -156,30 +156,7 @@ impl TurnActivity {
 
 pub use lash_protocol_types::ToolReadCaller;
 
-/// Whether tool-call activity describes a recorded call or an unrecorded read.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolCallExecution {
-    #[default]
-    Recorded,
-    Read,
-}
-
-impl ToolCallExecution {
-    fn is_recorded(&self) -> bool {
-        *self == Self::Recorded
-    }
-}
+pub use lash_protocol_types::ToolCallExecution;
 
 /// Read observation identity and live measurements. The caller saves the read
 /// fact, while elapsed time and byte counts remain provisional activity.

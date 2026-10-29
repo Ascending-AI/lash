@@ -118,11 +118,27 @@ impl Processes {
         {
             return Ok(Some(record));
         }
+        Ok(self
+            .saved_reads(process_id)
+            .await?
+            .into_iter()
+            .find(|record| record.call_id == *call_id))
+    }
+
+    /// Saved reads in caller ordinal order, independent of the bounded live
+    /// replay store. Terminal processes retain these records until pruning.
+    /// This offline query runs no engine, provider, hook or catalog lookup.
+    pub async fn saved_reads(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Vec<crate::tools::ToolCallRecord>> {
+        let host = self.core.effect_host();
         let kernel_run = format!(
             "{}/{}",
             lash_vm_runtime::LASH_VM_ENGINE_KIND,
             lash_vm_runtime::KERNEL_RUN_STEP
         );
+        let mut reads = Vec::new();
         for step in lash_core::facade_support::read_process_steps(&host, process_id).await? {
             if step.tool != kernel_run {
                 continue;
@@ -134,20 +150,20 @@ impl Processes {
             else {
                 continue;
             };
-            let facts = lash_vm_runtime::process::saved_read_facts(payload).map_err(|error| {
-                EmbedError::Durable(lash_core::durable_port::DurableError::Store(
-                    lash_core::durable_port::StoreFailure {
-                        code: None,
-                        kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                        message: format!("the kernel run's saved read facts: {error}"),
-                    },
-                ))
-            })?;
-            if let Some(fact) = facts.into_iter().find(|fact| fact.call_id == *call_id) {
-                return Ok(Some(fact.record()));
-            }
+            reads.extend(
+                lash_vm_runtime::process::saved_read_facts(payload).map_err(|error| {
+                    EmbedError::Durable(lash_core::durable_port::DurableError::Store(
+                        lash_core::durable_port::StoreFailure {
+                            code: None,
+                            kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                            message: format!("the kernel run's saved read facts: {error}"),
+                        },
+                    ))
+                })?,
+            );
         }
-        Ok(None)
+        reads.sort_by_key(|fact| fact.ordinal);
+        Ok(reads.into_iter().map(|fact| fact.record()).collect())
     }
 
     /// Replay recorded run segments of a process observed at `counts`, on

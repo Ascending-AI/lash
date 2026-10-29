@@ -813,12 +813,12 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 |---|---|
 | `producer` | 36 |
 | `agent` | 38 |
-| `model` | 47 |
-| `model_attempt` | 35 |
+| `model` | 53 |
+| `model_attempt` | 40 |
 | `tool` | 31 |
-| `cell` | 42 |
-| `process` | 26 |
-| `workflow` | 24 |
+| `cell` | 48 |
+| `process` | 32 |
+| `workflow` | 30 |
 | `workflow_node` | 22 |
 | `tool_intent` | 24 |
 | `extension` | 26 |

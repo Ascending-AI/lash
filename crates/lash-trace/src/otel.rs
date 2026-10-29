@@ -1090,6 +1090,13 @@ impl<'a> Projection<'a> {
                 model::attempt_attributes(attempt, out)
             }
             TraceEvent::DomainCompleted { completion } => {
+                if let Some(bound) = completion
+                    .failure
+                    .as_ref()
+                    .and_then(|failure| failure.bound.as_deref())
+                {
+                    execution_bound_attributes(bound, out);
+                }
                 out.push(A::Outcome.value(match completion.status {
                     TraceDomainStatus::Completed => "completed",
                     TraceDomainStatus::Failed => "failed",
@@ -1230,6 +1237,12 @@ impl<'a> Projection<'a> {
                     "completed"
                 };
                 cell_attributes(record, outcome, Some(tool_calls.len()), out);
+                if let lash_protocol_types::CellOutcome::Failed(failure) = result
+                    && let Some(bound) = failure.bound.as_deref()
+                {
+                    execution_bound_attributes(bound, out);
+                }
+
                 if !consumption.is_empty() {
                     #[expect(
                         clippy::expect_used,
@@ -1370,6 +1383,27 @@ fn cell_attributes(
         out.push(A::CellToolCalls.value(i64::try_from(calls).unwrap_or(i64::MAX)));
     }
     out.push(A::Outcome.value(outcome));
+}
+
+fn execution_bound_attributes(
+    fact: &lash_protocol_types::ExecutionBoundFact,
+    out: &mut Vec<KeyValue>,
+) {
+    let integer = |value| i64::try_from(value).unwrap_or(i64::MAX);
+    out.push(A::ExecutionBoundResource.value(crate::wire_tag(&fact.resource)));
+    out.push(A::ExecutionBoundLimit.value(integer(fact.limit)));
+    if let Some(observed) = fact.observed {
+        out.push(A::ExecutionBoundObserved.value(integer(observed)));
+    }
+    if let Some(consumed) = fact.consumed {
+        out.push(A::ExecutionBoundConsumed.value(integer(consumed)));
+    }
+    if let Some(function) = &fact.function {
+        out.push(A::ExecutionBoundFunction.value(function.to_string()));
+    }
+    if let Some(site) = &fact.site {
+        out.push(A::ExecutionBoundSite.value(serde_json::to_string(site).unwrap_or_default()));
+    }
 }
 
 /// Writes the projection's folded logical usage as `gen_ai.usage.*`, or the

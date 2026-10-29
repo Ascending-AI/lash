@@ -702,9 +702,17 @@ impl TraceEvent {
                 payload,
                 plugin_id: _,
             } => value(C::InputMessages, "protocol.payload", payload, f),
+            Self::DomainCompleted { completion } => {
+                if let Some(failure) = &mut completion.failure {
+                    optional_value(C::ToolResults, "tool_results", &mut failure.diagnostics, f);
+                }
+            }
             Self::LanguageExecution { event, language: _ } => match &mut event.payload {
-                TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => {
-                    json(C::DiagnosticsText, "diagnostics.execution", error, f)
+                TraceLanguageExecutionPayload::ExecutionFinished { error, failure, .. } => {
+                    json(C::DiagnosticsText, "diagnostics.execution", error, f);
+                    if let Some(failure) = failure {
+                        optional_value(C::ToolResults, "tool_results", &mut failure.diagnostics, f);
+                    }
                 }
                 TraceLanguageExecutionPayload::Node { fact, .. } => match fact {
                     TraceNodeFact::Failed { failure, .. } => match failure {
@@ -788,7 +796,6 @@ impl TraceEvent {
                 max_context_tokens: _,
                 pruned_attachments: _,
             }
-            | Self::DomainCompleted { completion: _ }
             | Self::ProviderReplayDropped { event: _ }
             | Self::StepBodyStarted { step: _ }
             | Self::ToolCheckConflict {

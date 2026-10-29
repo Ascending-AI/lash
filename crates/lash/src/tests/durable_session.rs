@@ -69,6 +69,8 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
                 output,
                 ..
             } => Some(lash_core::ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id,
                 provider_call_id,
                 tool: name,

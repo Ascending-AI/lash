@@ -41,6 +41,7 @@ fn tag(resource: CellResource) -> u64 {
         CellResource::EffectValueBytes => 16,
         CellResource::VmStateBytes => 17,
         CellResource::FrameBytes => 18,
+        CellResource::WorkerDeadlineNanos => 19,
     }
 }
 
@@ -65,6 +66,7 @@ fn resource(tag: u64) -> Result<CellResource, TokenError> {
         16 => CellResource::EffectValueBytes,
         17 => CellResource::VmStateBytes,
         18 => CellResource::FrameBytes,
+        19 => CellResource::WorkerDeadlineNanos,
         _ => return Err(TokenError::Invalid("unknown consumption resource".into())),
     })
 }

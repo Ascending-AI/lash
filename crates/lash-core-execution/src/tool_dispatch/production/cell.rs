@@ -290,6 +290,8 @@ fn cell_answer(
 fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolInvocationReply {
     let completed = cell_answer(call, output);
     let record = ToolCallRecord {
+        execution: Default::default(),
+        read: None,
         call_id: completed.call_id.clone(),
         provider_call_id: completed.provider_call_id.clone(),
         tool: completed.tool_name.clone(),
@@ -496,6 +498,8 @@ impl MemberBodies for CellMembers {
                 .collect::<Vec<_>>();
             let completed = cell_answer(&pending, output);
             let record = ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id: completed.call_id,
                 provider_call_id: completed.provider_call_id,
                 tool: completed.tool_name,

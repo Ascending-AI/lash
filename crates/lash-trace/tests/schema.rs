@@ -585,6 +585,7 @@ fn event_samples() -> Vec<TraceEvent> {
                 event_key: "process:p1:finished".to_string(),
                 identity: lash_vm_identity(),
                 payload: TraceLanguageExecutionPayload::ExecutionFinished {
+ failure: None,
  subject: TraceRuntimeSubject::Process { process_id: lash_vocabulary::identity::ProcessId::fixture("p1") },
                     status: TraceLanguageExecutionStatus::Completed,
                     error: None,
@@ -933,6 +934,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             fact: lash_trace::TraceNodeFact::Cancelled,
         },
         TraceLanguageExecutionPayload::ExecutionFinished {
+            failure: None,
             subject: TraceRuntimeSubject::Process {
                 process_id: lash_vocabulary::identity::ProcessId::fixture("p1"),
             },
@@ -1459,6 +1461,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             payload: json!({ "assistant": CONTENT }),
         },
         language(TraceLanguageExecutionPayload::ExecutionFinished {
+ failure: None,
  subject: TraceRuntimeSubject::Process { process_id: lash_vocabulary::identity::ProcessId::fixture("p1") },
             status: TraceLanguageExecutionStatus::Failed,
             error: Some(CONTENT.to_string()),

@@ -469,18 +469,19 @@ async fn a_resumed_process_renews_its_page_lease_during_a_long_host_read_on_sqli
 async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
     let (stores, _keep) = stores(Tier::SqliteMemory).await;
     let answered = Arc::new(Answered::default());
+    let build = |backend: &lash::Backend| {
+        let workers = lash::vm::WorkerService::default();
+        let bounds = workers.config().run_bounds;
+        lash::LashCore::standard_builder(backend.clone())
+            .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                workers,
+                "typescript",
+                bounds,
+            )))
+            .process_component(knowledge_component(&answered), KNOWLEDGE)
+    };
     let (_, core) =
-        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-live", |backend| {
-            let workers = lash::vm::WorkerService::default();
-            let bounds = workers.config().run_bounds;
-            lash::LashCore::standard_builder(backend.clone())
-                .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
-                    workers,
-                    "typescript",
-                    bounds,
-                )))
-                .process_component(knowledge_component(&answered), KNOWLEDGE)
-        });
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-live", build);
     let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .component(KNOWLEDGE, &())
         .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
@@ -591,6 +592,14 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
         2,
         "replay consumes its tape without calling a reader"
     );
+    drop(feed);
+    drop(observed);
+    core.shutdown().await.unwrap();
+    drop(core);
+    let (_, core) =
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-history", build);
+    let saved_reads = core.processes().saved_reads(&process).await.unwrap();
+    assert_eq!(saved_reads.iter().map(|record| serde_json::to_value(lash_protocol_types::Durable(record)).unwrap()["read"]["ordinal"].clone()).collect::<Vec<_>>(), [serde_json::json!(1),serde_json::json!(2)], "a terminal process lists its saved reads without its old replay store");
     for event in activities
         .iter()
         .filter(|event| event["type"] == "tool_call_returned")
@@ -602,6 +611,15 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
             .await
             .unwrap()
             .expect("the caller's save retains the live read row");
+        let identity = serde_json::to_value(lash_protocol_types::Durable(&saved)).unwrap();
+        assert_eq!(identity["execution"], "read");
+        assert_eq!(identity["read"]["caller"], event["read"]["caller"]);
+        assert_eq!(identity["read"]["ordinal"], event["read"]["ordinal"]);
+        assert_eq!(
+            saved_reads.iter().find(|record| record.call_id == id),
+            Some(&saved),
+            "listing and lookup preserve the same record"
+        );
         assert_eq!(saved.args, event["args"]);
         assert_eq!(
             serde_json::to_value(lash_protocol_types::Durable(&saved.output)).unwrap(),

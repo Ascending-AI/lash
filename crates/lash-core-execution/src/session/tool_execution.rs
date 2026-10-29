@@ -380,6 +380,8 @@ impl RuntimeExecutionContext<'_> {
             self.emit_tool_intent_outcome_activities(call_key, call_id, &outcome.intent_outcomes);
 
             let record = ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id: ids.call_id.clone(),
                 provider_call_id: ids.provider_call_id.clone(),
                 tool: outcome.record.tool.clone(),
@@ -532,6 +534,8 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
     ) {
         let record = ToolCallRecord {
+            execution: Default::default(),
+            read: None,
             call_id: completed.call_id.clone(),
             provider_call_id: completed.provider_call_id.clone(),
             tool: completed.tool_name.clone(),

@@ -523,6 +523,8 @@ pub enum CellResource {
     WorkerCpuNanos,
     HeldWallNanos,
     ComputeNanos,
+    /// A worker exchange deadline, without an identified compute/serialization phase.
+    WorkerDeadlineNanos,
     SerializationNanos,
     LibraryWork,
     HostReadNanos,

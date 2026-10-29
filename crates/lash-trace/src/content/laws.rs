@@ -731,6 +731,7 @@ fn semantic_views_preserve_encoded_shapes() {
     }
     for outcome in [
         TraceToolCallOutcome::Failure(TraceToolFailure {
+            bound: None,
             class: lash_protocol_types::ToolFailureClass::Io,
             code: "io".into(),
             source: lash_protocol_types::ToolFailureSource::Tool,

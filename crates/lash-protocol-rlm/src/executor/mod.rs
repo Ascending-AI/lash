@@ -42,6 +42,7 @@ pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UN
 pub use session::{CodeModeExecutionState, saved_function_pins};
 pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};
 
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -932,7 +933,7 @@ async fn run_linked_cell(
     // An end an earlier activation recorded stands over the cell's root.
     let recorded = matches!(
         &run,
-        Ok(KernelEnd::Ended { end, owed: None, .. }) if !matches!(end, End::Cancelled)
+        Ok(KernelEnd::Ended { end, owed: None, pages: None }) if !matches!(end, End::Cancelled)
     );
     let document_id = document_identity;
     let died = cell_run::DiedRunning {
@@ -974,7 +975,6 @@ async fn run_linked_cell(
             _ => None,
         }
     };
-    host.graph.lock_recover().state.bound = bound_fact.clone();
     let answer = || -> ExecResponse {
         let collected = host.ledgers();
         let respond = |result| exec_response_from(&collected, &printed, result);
@@ -1105,7 +1105,7 @@ async fn run_linked_cell(
     };
     let mut response = answer();
     if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
-        failure.bound = bound_fact;
+        failure.bound = bound_fact.or_else(|| failure.bound.take());
     }
     response.consumption = if recorded {
         host.graph.lock_recover().state.consumption.clone()
@@ -1125,6 +1125,35 @@ async fn run_linked_cell(
             observed: None,
             limit,
         });
+    }
+    if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
+        if failure.bound.is_none()
+            && let Some(limit) = failure.worker_limit
+        {
+            let observed = |resource| {
+                response
+                    .consumption
+                    .iter()
+                    .find(|reading| reading.resource == resource)
+                    .and_then(|reading| reading.observed)
+            };
+            failure.bound = lash_core::facade_support::worker_bound_fact(
+                limit,
+                &bounds,
+                lash_core::facade_support::BoundReadings {
+                    charged: observed(lash_core::CellResource::Charges),
+                    memory: observed(lash_core::CellResource::MemoryBytes),
+                    worker_cpu_nanos: services
+                        .workers
+                        .execution_budget()
+                        .and_then(|budget| budget.cpu())
+                        .map(|cpu| u64::try_from(cpu.as_nanos()).unwrap_or(u64::MAX)),
+                    held_wall_nanos: observed(lash_core::CellResource::HeldWallNanos),
+                },
+            )
+            .map(Box::new);
+        }
+        host.graph.lock_recover().state.bound = failure.bound.clone();
     }
     host.graph.lock_recover().state.consumption = response.consumption.clone();
     let consumption = response.consumption.clone();

@@ -374,6 +374,8 @@ pub(crate) fn exec_response(
             .iter()
             .filter(|_| error.is_none())
             .map(|value| lash_protocol_types::ToolCallRecord {
+                execution: Default::default(),
+                read: None,
                 call_id: finish_call_id(),
                 provider_call_id: None,
                 tool: lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
