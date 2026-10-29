@@ -162,7 +162,15 @@ fn code_imports(
         .collect()
 }
 
+type OriginKey = Box<[(lash_kernel_value::LinkId, DocumentId)]>;
+
+pub(super) struct Origins {
+    pub(super) helpers: Box<[(lash_kernel_value::LinkId, Box<[FunctionId]>)]>,
+    pub(super) library: Box<[FunctionId]>,
+}
+
 struct PreparedCode {
+    origins: Mutex<BTreeMap<OriginKey, Arc<Origins>>>,
     own: Arc<DocumentCode>,
     /// Fresh permission sets are immutable document content over this admission's
     /// exact helper image. Link membership is still checked by the executable.
@@ -197,6 +205,7 @@ thread_local! {
     static IMPORT_SOURCE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static DEFINITION_COPIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static DOCUMENT_ENCODINGS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ORIGIN_SOURCE_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn identify_document(document: &Document) -> DocumentId {
@@ -448,53 +457,7 @@ impl Admission {
             .as_ref()
             .map_err(|missing| *missing)?;
         let library = code.library.as_ref().unwrap_or(library);
-        // These facts belong to this exact immutable instance set, selection
-        // and helper image. Never place them in DocumentCode, whose content can
-        // be shared by different operation Links and restore selections.
-        let mut helper_origins = BTreeMap::new();
-        let mut library_reached = BTreeSet::new();
-        for (link, instance) in instances {
-            let Some(source) = documents.get(&instance.document) else {
-                continue;
-            };
-            let mut reached = BTreeSet::new();
-            match &self.selection {
-                doc::Selection::Fresh => {
-                    if let Ok(at) = code
-                        .helper_reach
-                        .binary_search_by_key(&instance.document, |(id, _)| *id)
-                    {
-                        reached.extend(code.helper_reach[at].1.iter().copied());
-                    }
-                }
-                doc::Selection::Restored(selected) => {
-                    reached.extend(selected.live.iter().filter_map(|callable| {
-                        (callable.link == *link
-                            && selected.pins.contains(&callable.function)
-                            && library.helpers().contains(&callable.function))
-                        .then_some(callable.function)
-                    }));
-                }
-            }
-            library_reached.extend(source.functions.keys().copied());
-            library_reached.extend(reached.iter().copied());
-            helper_origins.insert(*link, reached);
-        }
-        // This walk has a different duty: authored library frames can stand
-        // in non-native callees even when those are not helper-image members.
-        let mut pending: Vec<_> = document.functions.keys().copied().collect();
-        let mut authored = BTreeSet::new();
-        while let Some(id) = pending.pop() {
-            if !authored.insert(id) {
-                continue;
-            }
-            if let Some(registered) = library.registry().get(&id)
-                && registered.native().is_none()
-            {
-                pending.extend(registered.callees().iter().copied());
-            }
-        }
-        library_reached.extend(authored);
+        let origins = code.origins(document, library, documents, instances, &self.selection);
         Ok(Arc::new(Executable {
             origin_cache_bytes: (std::mem::size_of_val(code.helper_reach.as_ref()) as u64)
                 .saturating_add(
@@ -503,11 +466,7 @@ impl Admission {
                         .map(|(_, ids)| std::mem::size_of_val(ids.as_ref()) as u64)
                         .sum::<u64>(),
                 ),
-            helper_origins: helper_origins
-                .into_iter()
-                .map(|(link, reached)| (link, reached.into_iter().collect()))
-                .collect(),
-            library_reached: library_reached.into_iter().collect(),
+            origins,
             code_base: library.0.tables.codes.len(),
             block_base: library.0.tables.blocks.len(),
             stmt_base: library.0.tables.stmts.len(),
@@ -693,10 +652,100 @@ impl Admission {
                 Box::new([])
             };
         Ok(PreparedCode {
+            origins: Mutex::default(),
             helper_reach,
             own,
             library: loaded,
         })
+    }
+}
+
+impl PreparedCode {
+    fn origins(
+        &self,
+        document: &Document,
+        library: &PreparedLibrary,
+        documents: &BTreeMap<DocumentId, Arc<Document>>,
+        instances: &BTreeMap<lash_kernel_value::LinkId, crate::interface::PreparedInstance>,
+        selection: &doc::Selection,
+    ) -> Arc<Origins> {
+        // Selection, helper image and resolved code content are already scoped
+        // by Admission and PreparedCode. Permissions additionally bind the exact
+        // defining Links; changing only a Link must never reuse another's grant.
+        let key: OriginKey = instances
+            .iter()
+            .map(|(link, instance)| (*link, instance.document))
+            .collect();
+        let mut cache = self
+            .origins
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(origins) = cache.get(&key) {
+            return Arc::clone(origins);
+        }
+        // These facts belong to this exact immutable instance set, selection
+        // and helper image. Never place them in DocumentCode, whose content can
+        // be shared by different operation Links and restore selections.
+        let mut helper_origins = BTreeMap::new();
+        let mut library_reached = BTreeSet::new();
+        for (link, instance) in instances {
+            let Some(source) = documents.get(&instance.document) else {
+                continue;
+            };
+            #[cfg(test)]
+            ORIGIN_SOURCE_VISITS.with(|count| count.set(count.get() + source.functions.len()));
+            let mut reached = BTreeSet::new();
+            match selection {
+                doc::Selection::Fresh => {
+                    if let Ok(at) = self
+                        .helper_reach
+                        .binary_search_by_key(&instance.document, |(id, _)| *id)
+                    {
+                        reached.extend(self.helper_reach[at].1.iter().copied());
+                    }
+                }
+                doc::Selection::Restored(selected) => {
+                    reached.extend(selected.live.iter().filter_map(|callable| {
+                        (callable.link == *link
+                            && selected.pins.contains(&callable.function)
+                            && library.helpers().contains(&callable.function))
+                        .then_some(callable.function)
+                    }));
+                }
+            }
+            library_reached.extend(source.functions.keys().copied());
+            library_reached.extend(reached.iter().copied());
+            helper_origins.insert(*link, reached);
+        }
+        // This walk has a different duty: authored library frames can stand
+        // in non-native callees even when those are not helper-image members.
+        let mut pending: Vec<_> = document.functions.keys().copied().collect();
+        let mut authored = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !authored.insert(id) {
+                continue;
+            }
+            if let Some(registered) = library.registry().get(&id)
+                && registered.native().is_none()
+            {
+                pending.extend(registered.callees().iter().copied());
+            }
+        }
+        library_reached.extend(authored);
+        let origins = Arc::new(Origins {
+            helpers: helper_origins
+                .into_iter()
+                .map(|(link, reached)| (link, reached.into_iter().collect()))
+                .collect(),
+            library: library_reached.into_iter().collect(),
+        });
+        // These are host preparation facts. Bound retained variants when a
+        // caller repeatedly starts the same content under distinct Link sets.
+        if cache.len() >= 128 {
+            cache.clear();
+        }
+        cache.insert(key, Arc::clone(&origins));
+        origins
     }
 }
 
@@ -785,6 +834,7 @@ mod tests {
             .unwrap_or_else(|_| panic!("valid root"));
         IMPORT_SOURCE_VISITS.with(|count| count.set(0));
         DEFINITION_COPIES.with(|count| count.set(0));
+        ORIGIN_SOURCE_VISITS.with(|count| count.set(0));
         for _ in 0..32 {
             admission
                 .executable(
@@ -798,9 +848,10 @@ mod tests {
         }
         let visits = IMPORT_SOURCE_VISITS.with(|count| count.get());
         let copies = DEFINITION_COPIES.with(|count| count.get());
+        let origins = ORIGIN_SOURCE_VISITS.with(|count| count.get());
         assert!(
-            visits <= 64 && copies <= 1,
-            "selected preparation repeated source work: {visits} import-source visits, {copies} definition copies"
+            visits <= 64 && copies <= 1 && origins <= 64,
+            "selected preparation repeated source work: {visits} import-source visits, {copies} definition copies, {origins} origin-source visits"
         );
     }
 

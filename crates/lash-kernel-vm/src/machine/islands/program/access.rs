@@ -491,15 +491,15 @@ impl Build<'_> {
             return;
         };
         let (operator, reads, write, after) = match &instruction.op {
-            Op::DirectOperator {
+            Op::Operator {
                 site: operator,
-                reads,
+                inputs: OperatorInputs::Source(reads),
                 to: Destination::Write(write),
                 ..
             } => (&**operator, reads.as_ref(), &**write, at + 1),
-            Op::DirectOperator {
+            Op::Operator {
                 site: operator,
-                reads,
+                inputs: OperatorInputs::Source(reads),
                 ..
             } => {
                 let Some(Instruction {

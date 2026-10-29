@@ -45,9 +45,9 @@ impl Build<'_> {
                         next,
                         Instruction {
                             op:
-                                Op::Binary {
-                                    left,
-                                    right,
+                                Op::Operator {
+                                    inputs:
+                                        OperatorInputs::Scalar(ScalarInputs::Binary([left, right])),
                                     to: Destination::Write(write),
                                     ..
                                 },
@@ -82,10 +82,9 @@ impl Build<'_> {
                 else {
                     unreachable!();
                 };
-                let Op::Binary {
+                let Op::Operator {
                     site: scalar,
-                    left,
-                    right,
+                    inputs: OperatorInputs::Scalar(ScalarInputs::Binary([left, right])),
                     covered,
                     to: Destination::Write(write),
                 } = consumer.op

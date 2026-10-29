@@ -449,8 +449,7 @@ pub(crate) struct Executable {
     document: Arc<Document>,
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
-    helper_origins: Box<[(lash_kernel_value::LinkId, Box<[FunctionId]>)]>,
-    library_reached: Box<[FunctionId]>,
+    origins: Arc<preparation::Origins>,
     origin_cache_bytes: u64,
 }
 
@@ -481,10 +480,11 @@ impl Executable {
         self.instances.get(&callable.link).is_some_and(|document| {
             document.functions.contains_key(&callable.function)
                 || self
-                    .helper_origins
+                    .origins
+                    .helpers
                     .binary_search_by_key(&callable.link, |(link, _)| *link)
                     .is_ok_and(|at| {
-                        self.helper_origins[at]
+                        self.origins.helpers[at]
                             .1
                             .binary_search(&callable.function)
                             .is_ok()
@@ -704,17 +704,18 @@ impl Executable {
     /// `function`: the document lists it, or the body of one it lists
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
-        self.library_reached.binary_search(function).is_ok()
+        self.origins.library.binary_search(function).is_ok()
     }
 
-    /// Exact allocated bytes of the executable-owned admission index. Sorted
-    /// boxed slices bound metadata by this executable's Links and functions.
+    /// Admission metadata for this executable's Links and functions. Sharing
+    /// immutable preparation does not change its per-execution accounting.
     pub(crate) fn admission_bytes(&self) -> u64 {
         self.origin_cache_bytes
-            .saturating_add(std::mem::size_of_val(self.library_reached.as_ref()) as u64)
-            .saturating_add(std::mem::size_of_val(self.helper_origins.as_ref()) as u64)
+            .saturating_add(std::mem::size_of_val(self.origins.library.as_ref()) as u64)
+            .saturating_add(std::mem::size_of_val(self.origins.helpers.as_ref()) as u64)
             .saturating_add(
-                self.helper_origins
+                self.origins
+                    .helpers
                     .iter()
                     .map(|(_, reached)| std::mem::size_of_val(reached.as_ref()) as u64)
                     .sum::<u64>(),

@@ -166,21 +166,7 @@ operations! {
     inputs {
         Operator {
             site: Box<OperatorSite>,
-            args: Box<[u32]>,
-            covered: bool,
-            to: Destination,
-        }
-
-        Unary {
-            site: Box<OperatorSite>,
-            arg: Operand,
-            covered: bool,
-            to: Destination,
-        }
-        Binary {
-            site: Box<OperatorSite>,
-            left: Operand,
-            right: Operand,
+            inputs: OperatorInputs,
             covered: bool,
             to: Destination,
         }
@@ -198,12 +184,6 @@ operations! {
             reads: Option<Box<[Read; 3]>>,
             property: Box<compiled::MemberWrite>,
             finish: Option<u32>,
-        }
-        DirectOperator {
-            site: Box<OperatorSite>,
-            reads: Box<[Read]>,
-            covered: bool,
-            to: Destination,
         }
         DirectNative {
             site: NativeSite,
@@ -418,13 +398,13 @@ operations! {
 
 /// Fixed scalar placements use the canonical operator packet and library
 /// kernel facts. They carry no second runtime site or copied native kernel.
-pub(super) enum OperatorInputs {
+pub(crate) enum OperatorInputs {
     Registers(Box<[u32]>),
     Source(Box<[Read]>),
     Scalar(ScalarInputs),
 }
 
-pub(super) enum ScalarInputs {
+pub(crate) enum ScalarInputs {
     Unary(Operand),
     Binary([Operand; 2]),
 }
@@ -540,33 +520,16 @@ impl Code {
     /// register operands. No direct-input operation survives publication.
     fn input_packet(&mut self, op: Op) -> Option<Packet> {
         let (opcode, x, reads) = match op {
-            Op::Unary {
-                site,
-                arg,
-                covered,
-                to,
-            } => {
-                return self.scalar_packet(site, ScalarInputs::Unary(arg), covered, to);
-            }
-            Op::Binary {
-                site,
-                left,
-                right,
-                covered,
-                to,
-            } => {
-                return self.scalar_packet(site, ScalarInputs::Binary([left, right]), covered, to);
-            }
             Op::Operator {
                 site,
-                args,
+                inputs,
                 covered,
                 to,
             } => {
                 let x = u32::try_from(self.sites.operator.len()).ok()?;
                 self.sites.operator.push(sites::Operator {
                     site,
-                    inputs: OperatorInputs::Registers(args),
+                    inputs,
                     covered,
                     to,
                 });
@@ -610,21 +573,6 @@ impl Code {
                     reads.map(|reads| (*reads).into_iter().collect::<Box<[_]>>()),
                 )
             }
-            Op::DirectOperator {
-                site,
-                reads,
-                covered,
-                to,
-            } => {
-                let x = u32::try_from(self.sites.operator.len()).ok()?;
-                self.sites.operator.push(sites::Operator {
-                    site,
-                    inputs: OperatorInputs::Source(reads),
-                    covered,
-                    to,
-                });
-                (Opcode::Operator, x, None)
-            }
             Op::DirectNative { site, reads } => {
                 let x = u32::try_from(self.sites.native.len()).ok()?;
                 self.sites.native.push(sites::Native {
@@ -661,29 +609,6 @@ impl Code {
         })
     }
 
-    fn scalar_packet(
-        &mut self,
-        site: Box<OperatorSite>,
-        scalar: ScalarInputs,
-        covered: bool,
-        to: Destination,
-    ) -> Option<Packet> {
-        let x = u32::try_from(self.sites.operator.len()).ok()?;
-        self.sites.operator.push(sites::Operator {
-            site,
-            inputs: OperatorInputs::Scalar(scalar),
-            covered,
-            to,
-        });
-        Some(Packet {
-            opcode: Opcode::Operator,
-            mode: 0,
-            dst: 0,
-            x,
-            y: 0,
-        })
-    }
-
     fn recovery(op: &Op, live: Box<[u32]>) -> Recovery {
         #[cfg(not(any(test, feature = "perf-witness")))]
         let _ = op;
@@ -698,9 +623,6 @@ impl Code {
                         Reason::ResidentRead
                     }
                     Op::Operator { .. }
-                    | Op::DirectOperator { .. }
-                    | Op::Unary { .. }
-                    | Op::Binary { .. }
                     | Op::Unit { .. }
                     | Op::Kind { .. }
                     | Op::DirectKind { .. }
@@ -725,10 +647,7 @@ impl Code {
             #[cfg(any(test, feature = "perf-witness"))]
             library: match op {
                 Op::Native { site, .. } | Op::DirectNative { site, .. } => Some(site.lib),
-                Op::Operator { site, .. }
-                | Op::DirectOperator { site, .. }
-                | Op::Unary { site, .. }
-                | Op::Binary { site, .. } => Some(site.lib),
+                Op::Operator { site, .. } => Some(site.lib),
                 Op::Heap { site, .. }
                 | Op::MemberStore { site, .. }
                 | Op::MemberAccess { site, .. } => Some(site.lib),

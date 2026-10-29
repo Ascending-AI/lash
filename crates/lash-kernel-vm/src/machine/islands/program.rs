@@ -2,6 +2,7 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
+use crate::machine::islands::code::{OperatorInputs, ScalarInputs};
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
@@ -1007,9 +1008,9 @@ impl<'e> Build<'e> {
                     if !covered {
                         self.open = None;
                     }
-                    self.emit(Op::DirectOperator {
+                    self.emit(Op::Operator {
                         site: Box::new(site),
-                        reads,
+                        inputs: OperatorInputs::Source(reads),
                         covered,
                         to: Destination::Register,
                     });
@@ -1027,7 +1028,7 @@ impl<'e> Build<'e> {
                 }
                 self.emit(Op::Operator {
                     site: Box::new(site),
-                    args: args.clone(),
+                    inputs: OperatorInputs::Registers(args.clone()),
                     covered,
                     to: Destination::Register,
                 });

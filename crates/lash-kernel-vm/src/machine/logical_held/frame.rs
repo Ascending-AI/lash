@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub(in crate::machine) struct FrameRoots {
-    lifecycle: Lifecycle,
+    bank: super::BankRoots,
     invocation: Invocation,
     source: Arc<Source>,
     by_at: Arc<[u32]>,
@@ -21,19 +21,8 @@ pub(in crate::machine) struct FrameRoots {
     active_departure: Cell<bool>,
 }
 impl FrameRoots {
-    pub(in crate::machine) fn bank(&self) -> Result<super::BankRoots, HeapFault> {
-        let Owner::Frame { task, invocation } = self.invocation.frame() else {
-            unreachable!("frame owner");
-        };
-        Ok(super::BankRoots {
-            lifecycle: self.lifecycle.clone(),
-            task,
-            invocation,
-            slots: self
-                .source
-                .owner_slots()
-                .map_err(|_| HeapFault::Malformed("source ownership verification failed".into()))?,
-        })
+    pub(in crate::machine) fn bank(&self) -> super::BankRoots {
+        self.bank.clone()
     }
     pub(in crate::machine) fn restore(
         lifecycle: Lifecycle,
@@ -46,8 +35,17 @@ impl FrameRoots {
             .ledger()
             .borrow()
             .invocation(task, frame.invocation, access)?;
+        let source = Arc::clone(&exe.code(frame.code).source_room);
+        let slots = source
+            .owner_slots()
+            .map_err(|_| HeapFault::Malformed("source ownership verification failed".into()))?;
         Ok(Self {
-            lifecycle,
+            bank: super::BankRoots {
+                lifecycle,
+                task,
+                invocation: invocation.id(),
+                slots,
+            },
             invocation,
             control_owners: RefCell::new(BTreeSet::new()),
             active_departure: Cell::new(
@@ -56,7 +54,7 @@ impl FrameRoots {
                         matches!(exe.stmt(stmt).form, crate::compile::Form::ReturnVia { .. })
                     }),
             ),
-            source: Arc::clone(&exe.code(frame.code).source_room),
+            source,
             by_at: Arc::clone(&exe.code(frame.code).slots_by_at),
         })
     }
@@ -66,34 +64,37 @@ impl FrameRoots {
         }
         let index = self.by_at[at as usize];
         let slot = binding_slot(&self.source, index);
-        self.lifecycle
+        self.bank
+            .lifecycle
             .replace(self.invocation.owner(slot), source_value(slot, next));
     }
     fn role(
         &self,
-        bank: &super::BankRoots,
         selector: crate::compile::room::Owner,
         value: Option<Value>,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
+        let bank = &self.bank;
         let owner = bank
             .slots
             .root(&selector, bank.task, bank.invocation)
             .ok_or_else(|| HeapFault::Malformed("source control has no canonical owner".into()))?;
         let mut owned = self.control_owners.borrow_mut();
         if let Some(value) = value {
-            self.lifecycle
+            self.bank
+                .lifecycle
                 .replace(owner, Some(SourceValue::Value(value)));
             owned.insert(owner);
         } else if owned.remove(&owner)
             || self
+                .bank
                 .lifecycle
                 .ledger()
                 .borrow()
                 .holding(owner, access)?
                 .is_some()
         {
-            self.lifecycle.replace(owner, None);
+            self.bank.lifecycle.replace(owner, None);
         }
         Ok(())
     }
@@ -106,7 +107,6 @@ impl FrameRoots {
             return Ok(());
         }
         self.role(
-            &self.bank()?,
             crate::compile::room::Owner::ActiveDeparture(self.source.site.clone()),
             value,
             access,
@@ -127,8 +127,8 @@ impl FrameRoots {
         if !controls.has_changes() && cleaning.is_none() {
             return Ok(());
         }
-        let bank = self.bank()?;
-        let record = |selector, value| self.role(&bank, selector, value, access);
+        let bank = &self.bank;
+        let record = |selector, value| self.role(selector, value, access);
         controls.flush(|role, keep| match role {
             Roles::For {
                 stmt,
@@ -250,7 +250,7 @@ impl KernelMachine {
                 HeapFault::Malformed("source continuation has another role map".into()).into(),
             );
         }
-        let bank = roots.bank()?;
+        let bank = roots.bank();
         for source in &entry.roles {
             let saved = pending
                 .roles
@@ -272,6 +272,10 @@ impl KernelMachine {
         inputs: &[Owner],
     ) -> Result<(), Halt> {
         let compiled = exe.code(code);
+        let slots = compiled
+            .source_room
+            .owner_slots()
+            .map_err(|_| HeapFault::Malformed("source ownership verification failed".into()))?;
         let bindings = self
             .frame(task)?
             .slot_states()
@@ -290,7 +294,12 @@ impl KernelMachine {
             &bindings,
         )?;
         let roots = FrameRoots {
-            lifecycle: self.logical.clone(),
+            bank: super::BankRoots {
+                lifecycle: self.logical.clone(),
+                task,
+                invocation: invocation.id(),
+                slots,
+            },
             invocation,
             control_owners: RefCell::new(BTreeSet::new()),
             active_departure: Cell::new(false),

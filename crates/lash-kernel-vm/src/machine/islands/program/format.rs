@@ -57,7 +57,9 @@ impl Build<'_> {
                             args: joined,
                         },
                         Op::Operator {
-                            site: append, args, ..
+                            site: append,
+                            inputs: OperatorInputs::Registers(args),
+                            ..
                         },
                         Op::Write { site: write },
                     ) if matches!(join.direct(self.exe), Some(Direct::TextJoin))
@@ -124,7 +126,7 @@ impl Build<'_> {
                 };
                 let Op::Operator {
                     site: append,
-                    args: append_args,
+                    inputs: OperatorInputs::Registers(append_args),
                     covered,
                     to: Destination::Register,
                 } = appending.op

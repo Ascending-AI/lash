@@ -90,10 +90,18 @@ impl Build<'_> {
                 Op::DirectNative { site, .. } if site.direct(self.exe).is_some() => {
                     fixed += total(site.close);
                 }
-                Op::Operator { site, args, .. } if pure(site) && args.len() <= 3 => {
+                Op::Operator {
+                    site,
+                    inputs: OperatorInputs::Registers(args),
+                    ..
+                } if pure(site) && args.len() <= 3 => {
                     fixed += site.fixed;
                 }
-                Op::DirectOperator { site, .. } if pure(site) => fixed += site.fixed,
+                Op::Operator {
+                    site,
+                    inputs: OperatorInputs::Source(_),
+                    ..
+                } if pure(site) => fixed += site.fixed,
                 Op::Branch {
                     opens: [Some(block), _],
                     ..
@@ -184,7 +192,7 @@ impl Build<'_> {
         };
         let Op::Operator {
             site: conversion,
-            args,
+            inputs: OperatorInputs::Registers(args),
             ..
         } = &self.ops[*convert].op
         else {
@@ -221,21 +229,25 @@ impl Build<'_> {
     fn index_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<AccessShape> {
         let (path, validation) = match path {
             [first, left, right, compare, branch, rest @ ..] if path.len() == 13 => {
-                let Op::DirectOperator {
-                    site: a, reads: x, ..
+                let Op::Operator {
+                    site: a,
+                    inputs: OperatorInputs::Source(x),
+                    ..
                 } = &self.ops[*left].op
                 else {
                     return None;
                 };
-                let Op::DirectOperator {
-                    site: b, reads: y, ..
+                let Op::Operator {
+                    site: b,
+                    inputs: OperatorInputs::Source(y),
+                    ..
                 } = &self.ops[*right].op
                 else {
                     return None;
                 };
                 let Op::Operator {
                     site: predicate,
-                    args,
+                    inputs: OperatorInputs::Registers(args),
                     ..
                 } = &self.ops[*compare].op
                 else {
@@ -333,7 +345,11 @@ impl Build<'_> {
                 _ => false,
             };
             for at in [left, right] {
-                let Op::DirectOperator { reads, .. } = &self.ops[at].op else {
+                let Op::Operator {
+                    inputs: OperatorInputs::Source(reads),
+                    ..
+                } = &self.ops[at].op
+                else {
                     unreachable!()
                 };
                 if !same_operand(&reads[0]) {
@@ -377,7 +393,7 @@ impl Build<'_> {
         }
         let Op::Operator {
             site: comparison,
-            args,
+            inputs: OperatorInputs::Registers(args),
             ..
         } = &self.ops[*test].op
         else {
@@ -470,7 +486,9 @@ impl Build<'_> {
             return None;
         }
         let Op::Operator {
-            site: test, args, ..
+            site: test,
+            inputs: OperatorInputs::Registers(args),
+            ..
         } = &self.ops[*negate].op
         else {
             return None;

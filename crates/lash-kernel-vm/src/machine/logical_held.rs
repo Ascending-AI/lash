@@ -128,12 +128,7 @@ impl KernelMachine {
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
         self.logical_flush()?;
-        let roots = self
-            .frame(task)?
-            .logical
-            .as_ref()
-            .map(FrameRoots::bank)
-            .transpose()?;
+        let roots = self.frame(task)?.logical.as_ref().map(FrameRoots::bank);
         self.regs.source_context(roots);
         let projection = Projection {
             arena: &self.arena,

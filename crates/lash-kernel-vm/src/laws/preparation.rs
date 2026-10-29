@@ -173,6 +173,26 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         edges, 0,
         "ADMIT-ONCE: repeated origin queries rewalked {edges} edges"
     );
+    let other_link = lash_kernel_value::LinkId::from_bytes([92; 32]);
+    let mut relinked = program.instances.clone();
+    let mut instance = relinked.remove(&program.link).expect("root instance");
+    instance.link = other_link;
+    relinked.insert(other_link, instance);
+    let relinked = admission
+        .executable(
+            &root,
+            &library,
+            &program.documents,
+            &BTreeSet::new(),
+            &relinked,
+        )
+        .unwrap_or_else(|_| panic!("same content under another defining Link"));
+    assert!(relinked.admits_callable(&CallableId {
+        link: other_link,
+        ..callable
+    }));
+    assert!(!relinked.admits_callable(&callable));
+    assert_eq!(relinked.admission_bytes(), again.admission_bytes());
     // A second, empty manifest cannot inherit the first origin's permission.
     let empty = Arc::new(Document::new(NumberPolicy::BySpelling, vec![]));
     let other = super::embedder::program(Arc::clone(&empty), library.clone());

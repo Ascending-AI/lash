@@ -54,13 +54,9 @@ impl Build<'_> {
                     *finish = Some(leaves);
                 }
                 let candidate = match &instruction.op {
-                    Op::Unary {
+                    Op::Operator {
                         site,
-                        to: Destination::Register,
-                        ..
-                    }
-                    | Op::Binary {
-                        site,
+                        inputs: OperatorInputs::Scalar(_),
                         to: Destination::Register,
                         ..
                     } => Some(site.reg),
@@ -86,9 +82,9 @@ impl Build<'_> {
                         unreachable!()
                     };
                     match &mut instruction.op {
-                        Op::Unary { to, .. }
-                        | Op::Binary { to, .. }
-                        | Op::MemberAccess { to, .. } => *to = Destination::Write(write),
+                        Op::Operator { to, .. } | Op::MemberAccess { to, .. } => {
+                            *to = Destination::Write(write)
+                        }
                         _ => unreachable!(),
                     }
                 }
@@ -303,67 +299,64 @@ fn eligible(site: &OperatorSite, exe: &Executable) -> bool {
 }
 
 fn fixed(op: Op, exe: &Executable) -> Op {
-    let eligible_destination = |site: &OperatorSite, to: &Destination| match to {
+    let Op::Operator {
+        site,
+        inputs,
+        covered,
+        to,
+    } = op
+    else {
+        return op;
+    };
+    let count = match &inputs {
+        OperatorInputs::Registers(args) => args.len(),
+        OperatorInputs::Source(reads) => reads.len(),
+        OperatorInputs::Scalar(_) => {
+            return Op::Operator {
+                site,
+                inputs,
+                covered,
+                to,
+            };
+        }
+    };
+    let destination = match &to {
         Destination::Register => true,
         Destination::Write(write) => !write.accumulates && !exe.lib(site.lib).kernels(exe).append,
     };
-    let (site, args, covered, to) = match op {
-        Op::DirectOperator {
+    if !eligible(&site, exe)
+        || !destination
+        || !(count == 1 || (count == 2 && site.pair(exe).is_some()))
+    {
+        return Op::Operator {
             site,
-            reads,
+            inputs,
             covered,
             to,
-        } if eligible(&site, exe)
-            && eligible_destination(&site, &to)
-            && (reads.len() == 1 || (reads.len() == 2 && site.pair(exe).is_some())) =>
-        {
-            (
-                site,
-                reads
-                    .into_vec()
-                    .into_iter()
-                    .map(Operand::from)
-                    .collect::<Vec<_>>(),
-                covered,
-                to,
-            )
-        }
-        Op::Operator {
-            site,
-            args,
-            covered,
-            to,
-        } if eligible(&site, exe)
-            && eligible_destination(&site, &to)
-            && (args.len() == 1 || (args.len() == 2 && site.pair(exe).is_some())) =>
-        {
-            (
-                site,
-                args.into_vec().into_iter().map(Operand::Register).collect(),
-                covered,
-                to,
-            )
-        }
-        other => return other,
+        };
+    }
+    let args = match inputs {
+        OperatorInputs::Registers(args) => args
+            .into_vec()
+            .into_iter()
+            .map(Operand::Register)
+            .collect::<Vec<_>>(),
+        OperatorInputs::Source(reads) => reads.into_vec().into_iter().map(Operand::from).collect(),
+        OperatorInputs::Scalar(_) => unreachable!("already selected scalar inputs returned above"),
     };
     let mut args = args.into_iter();
-    let Some(left) = args.next() else {
-        unreachable!("a fixed scalar has an operand")
+    let left = args
+        .next()
+        .unwrap_or_else(|| unreachable!("a fixed scalar has an operand"));
+    let scalar = match args.next() {
+        Some(right) => ScalarInputs::Binary([left, right]),
+        None => ScalarInputs::Unary(left),
     };
-    match args.next() {
-        Some(right) => Op::Binary {
-            site,
-            left,
-            right,
-            covered,
-            to,
-        },
-        None => Op::Unary {
-            site,
-            arg: left,
-            covered,
-            to,
-        },
+    Op::Operator {
+        site,
+        inputs: OperatorInputs::Scalar(scalar),
+        covered,
+        to,
     }
 }
 

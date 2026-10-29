@@ -11,8 +11,14 @@ impl Build<'_> {
         if end < 2 {
             return;
         }
-        let (Op::DirectOperator { site, reads, .. }, Op::Write { site: write }) =
-            (&self.ops[end - 2].op, &self.ops[end - 1].op)
+        let (
+            Op::Operator {
+                site,
+                inputs: OperatorInputs::Source(reads),
+                ..
+            },
+            Op::Write { site: write },
+        ) = (&self.ops[end - 2].op, &self.ops[end - 1].op)
         else {
             return;
         };
@@ -53,9 +59,9 @@ impl Build<'_> {
             operator.begin = accumulation.begin;
             operator.live = accumulation.live;
         }
-        let Op::DirectOperator {
+        let Op::Operator {
             site,
-            reads,
+            inputs: OperatorInputs::Source(reads),
             covered,
             ..
         } = operator.op
@@ -69,9 +75,9 @@ impl Build<'_> {
                 site.body_when_observed,
             );
         }
-        written.op = Op::DirectOperator {
+        written.op = Op::Operator {
             site,
-            reads,
+            inputs: OperatorInputs::Source(reads),
             covered,
             to: Destination::Write(write),
         };
