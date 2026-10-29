@@ -49,7 +49,7 @@ pub fn process_sse_event(
                 Some("function_call" | "custom_tool_call") => {
                     kinds.insert(K::ToolArguments);
                 }
-                Some("message") => {
+                Some("message")
                     if item
                         .get("content")
                         .and_then(Value::as_array)
@@ -60,10 +60,9 @@ pub fn process_sse_event(
                                     Some("output_text" | "refusal")
                                 )
                             })
-                        })
-                    {
-                        kinds.insert(K::Text);
-                    }
+                        }) =>
+                {
+                    kinds.insert(K::Text);
                 }
                 _ => {}
             }

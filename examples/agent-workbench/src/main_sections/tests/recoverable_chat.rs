@@ -97,6 +97,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     class: lash::provider::RetryClass::NoResponse,
                 }),
                 error: Some(lash::provider::NormalizedError {
+                    stream_evidence: None,
                     transport: None,
                     class: lash::provider::ProviderFailureKind::Transport,
                     code: Some(lash::provider::FailureCode::provider("connection_reset")),

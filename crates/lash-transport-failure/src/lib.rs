@@ -74,7 +74,7 @@ pub struct LlmTransportError {
     pub message: String,
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
-    rejected_slots: Box<[usize]>,
+    rejected_slots: Option<Box<Vec<usize>>>,
     /// The HTTP status, when the failure observed one. Also retained in
     /// `stream_evidence` when a provider observed HTTP progress; `code` never mirrors it.
     pub http_status: Option<u16>,
@@ -108,7 +108,7 @@ impl LlmTransportError {
             message: message.into(),
             retry_verdict: TransportRetryVerdict::NotRetryable,
             retry_verdict_classified: false,
-            rejected_slots: Box::default(),
+            rejected_slots: None,
             http_status: None,
             raw: None,
             code: None,
@@ -145,13 +145,13 @@ impl LlmTransportError {
     }
 
     pub fn with_rejected_slots(mut self, slots: Vec<usize>) -> Self {
-        self.rejected_slots = slots.into_boxed_slice();
+        self.rejected_slots = (!slots.is_empty()).then(|| Box::new(slots));
         self
     }
     /// Delivered slots identified by structured provider rejection evidence.
     /// Empty means no delivered resource was identified; prose cannot fill it.
     pub fn rejected_slots(&self) -> &[usize] {
-        &self.rejected_slots
+        self.rejected_slots.as_deref().map_or(&[], Vec::as_slice)
     }
 
     pub fn with_kind(mut self, kind: ProviderFailureKind) -> Self {
@@ -312,6 +312,28 @@ pub fn retry_after_from_headers(headers: &[(String, String)]) -> Option<std::tim
     )
 }
 
+pub fn response_has_output_evidence(response: &LlmResponse) -> bool {
+    !response.full_text().is_empty()
+        || response
+            .provider_usage
+            .as_ref()
+            .is_some_and(lash_protocol_types::llm::types::provider_usage_has_quantities)
+        || response.usage != lash_protocol_types::llm::types::LlmUsage::default()
+        || response.parts.iter().any(|part| match part {
+            lash_protocol_types::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),
+            lash_protocol_types::llm::types::LlmOutputPart::Reasoning { text, replay } => {
+                !text.is_empty()
+                    || replay.as_ref().is_some_and(|replay| {
+                        replay.encrypted_content.is_some()
+                            || replay.summary.iter().any(|text| !text.is_empty())
+                    })
+            }
+            lash_protocol_types::llm::types::LlmOutputPart::ToolCall { input_json, .. } => {
+                !input_json.is_empty()
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -392,26 +414,4 @@ mod tests {
             None
         );
     }
-}
-
-pub fn response_has_output_evidence(response: &LlmResponse) -> bool {
-    !response.full_text().is_empty()
-        || response
-            .provider_usage
-            .as_ref()
-            .is_some_and(lash_protocol_types::llm::types::provider_usage_has_quantities)
-        || response.usage != lash_protocol_types::llm::types::LlmUsage::default()
-        || response.parts.iter().any(|part| match part {
-            lash_protocol_types::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),
-            lash_protocol_types::llm::types::LlmOutputPart::Reasoning { text, replay } => {
-                !text.is_empty()
-                    || replay.as_ref().is_some_and(|replay| {
-                        replay.encrypted_content.is_some()
-                            || replay.summary.iter().any(|text| !text.is_empty())
-                    })
-            }
-            lash_protocol_types::llm::types::LlmOutputPart::ToolCall { input_json, .. } => {
-                !input_json.is_empty()
-            }
-        })
 }
