@@ -1818,6 +1818,69 @@
       "minimum": 1,
       "type": "integer"
     },
+    "ModelStreamEvidence": {
+      "description": "Content-free progress of one HTTP model request. Missing observations stay absent.",
+      "properties": {
+        "bytes_received": {
+          "description": "Bytes delivered by the HTTP body, before SSE or JSON decoding.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "first_body_chunk_ms": {
+          "description": "Monotonic milliseconds from send to the first nonempty body chunk.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "http_status": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "partial_output": {
+          "description": "Empty means no protocol output was observed. Ordered and bounded to four kinds.",
+          "items": {
+            "$ref": "#/$defs/PartialOutputKind"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "protocol_position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProtocolPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response_headers_ms": {
+          "description": "Monotonic milliseconds from send to response headers, on the injected clock.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "partial_output"
+      ],
+      "type": "object"
+    },
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
@@ -1896,6 +1959,16 @@
             }
           ]
         },
+        "stream_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelStreamEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "transport": {
           "anyOf": [
             {
@@ -1911,6 +1984,15 @@
         "class"
       ],
       "type": "object"
+    },
+    "PartialOutputKind": {
+      "enum": [
+        "text",
+        "reasoning",
+        "tool_arguments",
+        "other_event"
+      ],
+      "type": "string"
     },
     "ProcessStartPhase": {
       "description": "A phase of a host process start, in the order a start passes them. Each\nphase a start reached carries its duration on the start's producer.",

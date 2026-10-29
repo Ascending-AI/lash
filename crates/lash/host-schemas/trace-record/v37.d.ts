@@ -1055,6 +1055,31 @@ export type LlmUsage = {
 export type MaxToolCalls = number;
 
 /**
+ * Content-free progress of one HTTP model request. Missing observations stay absent.
+ */
+export type ModelStreamEvidence = {
+  /**
+   * Bytes delivered by the HTTP body, before SSE or JSON decoding.
+   */
+  "bytes_received"?: (number | null);
+  /**
+   * Monotonic milliseconds from send to the first nonempty body chunk.
+   */
+  "first_body_chunk_ms"?: (number | null);
+  "http_status"?: (number | null);
+  /**
+   * Empty means no protocol output was observed. Ordered and bounded to four kinds.
+   */
+  "partial_output": Array<PartialOutputKind>;
+  "protocol_position"?: (ProtocolPosition | null);
+  /**
+   * Monotonic milliseconds from send to response headers, on the injected clock.
+   */
+  "response_headers_ms"?: (number | null);
+  [key: string]: unknown;
+};
+
+/**
  * A variable, parameter or declared-function name.
  *
  * Any text is a name; the kernel gives none of them meaning. Structural
@@ -1092,9 +1117,12 @@ export type NormalizedError = {
   "http_status"?: (number | null);
   "provider_request_id"?: (string | null);
   "retry_after"?: (Duration | null);
+  "stream_evidence"?: (ModelStreamEvidence | null);
   "transport"?: (TransportFailure | null);
   [key: string]: unknown;
 };
+
+export type PartialOutputKind = ("text" | "reasoning" | "tool_arguments" | "other_event");
 
 /**
  * A phase of a host process start, in the order a start passes them. Each
