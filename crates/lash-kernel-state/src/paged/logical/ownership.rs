@@ -96,6 +96,101 @@ impl Ledger {
         changes.push(Change::Roots(roots));
         self.prepare_event(changes, access)
     }
+    /// The source release fact is evaluated with the result's existing graph
+    /// protected. An alias or a fresh wrapper must not retire the body that
+    /// the result is about to own. This borrows reach, with no new occurrence,
+    /// and changes only a cloned graph. Identity projection belongs to the
+    /// caller's Registration until its eventual publication.
+    pub fn release_cost_preserving(
+        &self,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<u64, HeapFault> {
+        let access = heap.pages();
+        let mut pending = Vec::new();
+        for (owner, value) in outputs {
+            self.project_root(arena, access, owner, value)?
+                .each_edge(access, &mut |edge| {
+                    if let Identity::Object(entity) = edge.target {
+                        pending.push(entity);
+                    }
+                    Ok(())
+                })?;
+        }
+        let mut protected = BTreeSet::new();
+        let mut fresh = BTreeSet::new();
+        while let Some(entity) = pending.pop() {
+            if self.entity_holding(entity, access)?.is_some() {
+                protected.insert(entity);
+            } else if fresh.insert(entity) {
+                let body = if arena.holds_resident(entity) {
+                    let handle = arena
+                        .logical_handle(entity)
+                        .ok_or_else(|| invalid("source result body is absent"))?;
+                    Holding::native_body(arena, access, handle)?
+                } else {
+                    Holding::heap_body(heap, entity)?
+                };
+                body.each_edge(access, &mut |edge| {
+                    if let Identity::Object(child) = edge.target {
+                        pending.push(child);
+                    }
+                    Ok(())
+                })?;
+            }
+        }
+        let protection =
+            Holding::with_edges(0, protected.into_iter().map(Identity::Object), access)?;
+        let mut edit = Edit {
+            state: self.state.clone(),
+            access,
+            zero: VecDeque::new(),
+            fresh: Vec::new(),
+        };
+        edit.retain(&protection)?;
+        let before = edit.state.balance()?.total()?;
+        edit.roots(inputs.iter().map(|owner| (*owner, None)).collect())?;
+        before
+            .checked_sub(edit.state.balance()?.total()?)
+            .ok_or_else(|| invalid("source release grew its balance"))
+    }
+    fn project_root(
+        &self,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        owner: &Owner,
+        value: &RootValue<'_>,
+    ) -> Result<Holding, HeapFault> {
+        Ok(match value {
+            RootValue::Frame if matches!(owner, Owner::Frame { .. }) => Holding::frame(),
+            RootValue::Frozen(value) if matches!(owner, Owner::Incoming(_)) => Holding::scalar(
+                super::super::family_impl::frozen_holding_cost(access, value)?,
+            ),
+            RootValue::Page(value) if !matches!(owner, Owner::Frame { .. }) => {
+                Holding::from_page(access, value)?
+            }
+            RootValue::Value(value) if !matches!(owner, Owner::Frame { .. }) => {
+                Holding::from_native(arena, access, value)?
+            }
+            RootValue::Existing(from) => self
+                .holding(*from, access)?
+                .ok_or_else(|| invalid("source copy owner is absent"))?,
+            RootValue::Capture(handle)
+                if matches!(
+                    owner,
+                    Owner::Value {
+                        slot: Slot::Capture(_),
+                        ..
+                    }
+                ) =>
+            {
+                Holding::borrowed_cell(arena, access, *handle)?
+            }
+            _ => return Err(invalid("source output has another owner kind")),
+        })
+    }
     pub(super) fn ownership_changes(
         &self,
         arena: &mut Arena,
@@ -123,33 +218,7 @@ impl Ledger {
             if !consumed.contains(owner) && self.holding(*owner, access)?.is_some() {
                 return Err(invalid("source destination was not consumed"));
             }
-            let holding = match value {
-                RootValue::Frame if matches!(owner, Owner::Frame { .. }) => Holding::frame(),
-                RootValue::Frozen(value) if matches!(owner, Owner::Incoming(_)) => Holding::scalar(
-                    super::super::family_impl::frozen_holding_cost(access, value)?,
-                ),
-                RootValue::Page(value) if !matches!(owner, Owner::Frame { .. }) => {
-                    Holding::from_page(access, value)?
-                }
-                RootValue::Value(value) if !matches!(owner, Owner::Frame { .. }) => {
-                    Holding::from_native(arena, access, value)?
-                }
-                RootValue::Existing(from) => self
-                    .holding(*from, access)?
-                    .ok_or_else(|| invalid("source copy owner is absent"))?,
-                RootValue::Capture(handle)
-                    if matches!(
-                        owner,
-                        Owner::Value {
-                            slot: Slot::Capture(_),
-                            ..
-                        }
-                    ) =>
-                {
-                    Holding::borrowed_cell(arena, access, *handle)?
-                }
-                _ => return Err(invalid("source output has another owner kind")),
-            };
+            let holding = self.project_root(arena, access, owner, value)?;
             holding.each_edge(access, &mut |edge| {
                 if let Identity::Object(entity) = edge.target {
                     pending.push(entity);

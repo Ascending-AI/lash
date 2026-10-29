@@ -614,6 +614,43 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             retained_delta: 16
         }
     );
+    let enter = crate::compile::room::Point {
+        site: source.site.clone(),
+        phase: Phase::Enter,
+    };
+    let event = source
+        .compile_event(&enter, crate::compile::room::ExitKind::Normal)
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &event,
+        &source
+            .compile_event(&enter, crate::compile::room::ExitKind::Normal)
+            .unwrap()
+    ));
+    assert_eq!(
+        event
+            .evaluate_interval(&mut RoomExecution::default())
+            .unwrap()
+            .balance(),
+        Balance {
+            peak_extra: 64,
+            retained_delta: 64
+        }
+    );
+    assert!(
+        matches!(
+            source.compile_interval(
+                &source.site,
+                &[crate::compile::room::Selection::Event {
+                    at: enter,
+                    exit: crate::compile::room::ExitKind::Normal
+                }],
+                100
+            ),
+            Err(Refused::Path | Refused::Exit)
+        ),
+        "an exact event cannot authenticate a truncated whole-source route"
+    );
     let mut wrong_path = execution.route.clone();
     wrong_path.remove(1);
     assert!(matches!(

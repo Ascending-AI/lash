@@ -152,6 +152,45 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         145,
         "a group releases each body once"
     );
+    let stamp = ledger.stamp();
+    for result in [
+        RootValue::Value(&child),
+        RootValue::Page(&lash_kernel_doc::heap::PageValue::List(id(0))),
+    ] {
+        assert_eq!(
+            ledger
+                .release_cost_preserving(
+                    &mut arena,
+                    &heap,
+                    &[owner(0), owner(1)],
+                    &[(owner(4), result)]
+                )
+                .unwrap(),
+            96,
+            "an outgoing result keeps the child's body while both input occurrences leave"
+        );
+    }
+    let wrapper = arena.create_list(&[child]);
+    {
+        let mut registration = arena.registration().unwrap();
+        assert_eq!(
+            ledger
+                .release_cost_preserving(
+                    registration.arena(),
+                    &heap,
+                    &[owner(0), owner(1)],
+                    &[(owner(4), RootValue::Value(&wrapper))]
+                )
+                .unwrap(),
+            96,
+            "a new result body protects the old entities in its members"
+        );
+    }
+    assert!(
+        ledger.is_current(&stamp),
+        "pure source release evaluation publishes no owner or graph"
+    );
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 209);
     // The tuple has two 16-byte aliases, plus its 16-byte outer occurrence.
     let tuple = arena.tuple(vec![child, child], 256).unwrap();
     let tuple_holding = Holding::from_native(&mut arena, heap.pages(), &tuple).unwrap();

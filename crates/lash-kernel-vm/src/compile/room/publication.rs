@@ -179,6 +179,7 @@ impl Frontier {
         resources: ResourceFacts,
     ) -> Result<EvaluatedInterval, Refused> {
         if interval.owner() != self.source.owner
+            || interval.defining_source() != &self.source.site
             || interval.start() != &self.position.at.site
             || interval
                 .events()

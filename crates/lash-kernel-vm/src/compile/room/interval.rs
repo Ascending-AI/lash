@@ -9,6 +9,7 @@ pub(crate) enum Selection {
 }
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Key {
+    event: bool,
     at: Site,
     selected: Box<[Selection]>,
 }
@@ -50,6 +51,66 @@ struct Step {
     peak: Linear,
     delta: Linear,
 }
+impl Step {
+    fn compile(
+        source: &Source,
+        event: Event,
+        selected: ExitKind,
+        variables: &mut usize,
+    ) -> Result<Self, Refused> {
+        let indices: BTreeMap<_, _> = event
+            .peak
+            .terms
+            .keys()
+            .chain(event.delta.terms.keys())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|measure| {
+                let index = *variables;
+                *variables += 1;
+                (measure, index)
+            })
+            .collect();
+        let mut node = doc::Node::Block(&source.body);
+        for index in &event.point.site.path[source.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        let publication = PublicationSite {
+            assignment: match node {
+                doc::Node::Stmt(doc::Stmt::Assign {
+                    place: doc::Place::Variable(name),
+                    ..
+                }) => Some(name.clone()),
+                _ => None,
+            },
+            member: matches!(
+                node,
+                doc::Node::Stmt(
+                    doc::Stmt::Assign {
+                        place: doc::Place::Member(_),
+                        ..
+                    } | doc::Stmt::Remove { .. }
+                )
+            ),
+        };
+        Ok(Self {
+            publication,
+            peak: Linear::compile(&event.peak, &indices),
+            delta: Linear::compile(&event.delta, &indices),
+            normal: source
+                .room
+                .exits
+                .iter()
+                .find(|exit| exit.point == event.point)
+                .ok_or(Refused::Exit)?
+                .kind,
+            variables: indices.into_iter().collect(),
+            event,
+            selected,
+        })
+    }
+}
 /// The fields and constructors are private. A schedule is not a source proof;
 /// only the independent Source verifier and control walker form this program.
 pub(crate) struct CompiledInterval {
@@ -60,8 +121,55 @@ pub(crate) struct CompiledInterval {
     steps: Box<[Step]>,
     variables: usize,
     exit: ExitKind,
+    whole: bool,
 }
 impl Source {
+    /// Exact execution is already at this authenticated source point. Compile
+    /// its one event, never a helper body or a numeric replacement for a path.
+    /// The finite source event set is cached separately from selected routes.
+    pub(crate) fn compile_event(
+        &self,
+        at: &Point,
+        selected: ExitKind,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.verify()?;
+        if !self
+            .room
+            .exits
+            .iter()
+            .any(|exit| exit.point == *at && exit.kind == selected)
+        {
+            return Err(Refused::Exit);
+        }
+        let key = Key {
+            event: true,
+            at: at.site.clone(),
+            selected: vec![Selection::Event {
+                at: at.clone(),
+                exit: selected,
+            }]
+            .into(),
+        };
+        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
+        if let Some(interval) = cache.get(&key) {
+            return Ok(Arc::clone(interval));
+        }
+        let event = self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone();
+        let mut variables = 0;
+        let step = Step::compile(self, event, selected, &mut variables)?;
+        let interval = Arc::new(CompiledInterval {
+            owner: self.owner,
+            source: self.site.clone(),
+            at: at.site.clone(),
+            route: key.selected.clone(),
+            steps: vec![step].into(),
+            variables,
+            exit: selected,
+            whole: false,
+        });
+        cache.insert(key, Arc::clone(&interval));
+        Ok(interval)
+    }
     pub(crate) fn compile_interval(
         &self,
         at: &Site,
@@ -73,6 +181,7 @@ impl Source {
             return Err(Refused::Path);
         }
         let key = Key {
+            event: false,
             at: at.clone(),
             selected: selected.into(),
         };
@@ -80,7 +189,7 @@ impl Source {
         if let Some(interval) = cache.get(&key) {
             return Ok(Arc::clone(interval));
         }
-        if cache.len() >= 128 {
+        if cache.keys().filter(|key| !key.event).count() >= 128 {
             return Err(Refused::Path);
         }
         let mut trace = Trace {
@@ -96,57 +205,7 @@ impl Source {
         let mut variables = 0;
         let mut steps = Vec::with_capacity(trace.events.len());
         for (event, selected) in trace.events {
-            let indices: BTreeMap<_, _> = event
-                .peak
-                .terms
-                .keys()
-                .chain(event.delta.terms.keys())
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .map(|measure| {
-                    let index = variables;
-                    variables += 1;
-                    (measure, index)
-                })
-                .collect();
-            let mut node = doc::Node::Block(&self.body);
-            for index in &event.point.site.path[self.site.path.len()..] {
-                node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
-            }
-            let publication = PublicationSite {
-                assignment: match node {
-                    doc::Node::Stmt(doc::Stmt::Assign {
-                        place: doc::Place::Variable(name),
-                        ..
-                    }) => Some(name.clone()),
-                    _ => None,
-                },
-                member: matches!(
-                    node,
-                    doc::Node::Stmt(
-                        doc::Stmt::Assign {
-                            place: doc::Place::Member(_),
-                            ..
-                        } | doc::Stmt::Remove { .. }
-                    )
-                ),
-            };
-            steps.push(Step {
-                publication,
-                peak: Linear::compile(&event.peak, &indices),
-                delta: Linear::compile(&event.delta, &indices),
-                normal: self
-                    .room
-                    .exits
-                    .iter()
-                    .find(|exit| exit.point == event.point)
-                    .ok_or(Refused::Exit)?
-                    .kind,
-                variables: indices.into_iter().collect(),
-                event,
-                selected,
-            });
+            steps.push(Step::compile(self, event, selected, &mut variables)?);
         }
         let interval = Arc::new(CompiledInterval {
             owner: self.owner,
@@ -156,6 +215,7 @@ impl Source {
             steps: steps.into(),
             variables,
             exit,
+            whole: at == &self.site,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -206,6 +266,9 @@ impl CompiledInterval {
 
     pub(crate) fn exit(&self) -> ExitKind {
         self.exit
+    }
+    pub(crate) fn defining_source(&self) -> &Site {
+        &self.source
     }
     pub(crate) fn start(&self) -> &Site {
         &self.at
@@ -264,7 +327,7 @@ impl CompiledInterval {
         Ok(CheckedRoom {
             owner: self.owner,
             native: false,
-            whole: self.at == self.source,
+            whole: self.whole,
             native_contract: None,
             balance: Balance {
                 peak_extra: u64::try_from(peak.max(0)).map_err(|_| Refused::Facts)?,
