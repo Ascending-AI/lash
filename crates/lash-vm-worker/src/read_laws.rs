@@ -20,8 +20,7 @@ use lash_kernel_doc::{Datum, ErrorDatum, Integer};
 
 use lash_kernel_value::names::EffectName;
 use lash_kernel_vm::{
-    CellStart, EffectModes, End, Host, HostFault, KernelMachine, Machine, Outcome, Program,
-    Request, Step, Target,
+    CellStart, EffectModes, End, Host, HostFault, Machine, Outcome, Program, Request, Step, Target,
 };
 use lash_vm_broker::kernel::next_stage_lease;
 use lash_vm_broker::kernel::pages::{CommittedPages, LocalPages, SpoolRoot};
@@ -33,17 +32,22 @@ use crate::embedding::tests::every_dialect;
 struct Answering {
     answer: Option<Result<Datum, ErrorDatum>>,
     prints: Vec<Datum>,
+    calls: Vec<Vec<Datum>>,
 }
 
 impl Host for Answering {
     fn perform(
         &mut self,
         _effect: &lash_kernel_value::OperationUse,
-        _args: &[Datum],
+        args: &[Datum],
         _site: &lash_kernel_value::sites::PositionLabel,
         _origin: &lash_kernel_value::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
-        Ok(self.answer.take().expect("the cell reads once"))
+        self.calls.push(args.to_vec());
+        Ok(answer_at(
+            args,
+            self.answer.as_ref().expect("the cell binds its read"),
+        ))
     }
 
     fn print(&mut self, value: &Datum) {
@@ -72,6 +76,7 @@ struct Ran {
     prints: Vec<Datum>,
     charged: u64,
     parks: usize,
+    calls: Vec<Vec<Datum>>,
 }
 
 /// Runs `program` with `effect` bound as a read when `read`, answering its
@@ -81,6 +86,21 @@ fn run(
     effect: &EffectName,
     read: bool,
     answer: &Result<Datum, ErrorDatum>,
+) -> Ran {
+    run_in(
+        program,
+        effect,
+        read,
+        answer,
+        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
+    )
+}
+fn run_in(
+    program: &Program,
+    effect: &EffectName,
+    read: bool,
+    answer: &Result<Datum, ErrorDatum>,
+    strategy: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> Ran {
     let instance = &program.instances[&program.link];
     let slot = program
@@ -118,10 +138,11 @@ fn run(
         requests_per_park: 16,
         join_members: 16,
     };
-    let mut machine = KernelMachine::start(
+    let mut machine = lash_kernel_vm::testing::start(
         program.clone(),
         bounds,
         start,
+        strategy,
         Box::new(LocalPages::new(
             Uncommitted,
             Box::new(spools.spool(next_stage_lease()).expect("spool")),
@@ -131,6 +152,7 @@ fn run(
     let mut host = Answering {
         answer: read.then(|| answer.clone()),
         prints: Vec::new(),
+        calls: Vec::new(),
     };
     let mut parks = 0;
     loop {
@@ -142,6 +164,7 @@ fn run(
                     prints: host.prints,
                     charged: machine.meters().charged.expect("exact charge"),
                     parks,
+                    calls: host.calls,
                 };
             }
             Step::Parked(park) => {
@@ -149,9 +172,10 @@ fn run(
                 for request in park.requests {
                     let Request::Effect(request) = request;
                     assert_eq!(request.use_, use_, "the cell performs only its tool");
-                    let outcome = match answer {
-                        Ok(value) => Outcome::Completed(value.clone()),
-                        Err(error) => Outcome::Failed(error.clone()),
+                    host.calls.push(request.args.clone());
+                    let outcome = match answer_at(&request.args, answer) {
+                        Ok(value) => Outcome::Completed(value),
+                        Err(error) => Outcome::Failed(error),
                     };
                     machine
                         .deliver(request.wait, outcome)
@@ -165,17 +189,27 @@ fn run(
 /// The cell `source`, written in `dialect`, lowered against one tool,
 /// `effect`.
 fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
+    lowered_with_schemas(
+        dialect,
+        source,
+        effect,
+        serde_json::json!({"type":"object", "properties":{"x":{"type":"number"}}}),
+        serde_json::json!({"type":"integer"}),
+    )
+}
+fn lowered_with_schemas(
+    dialect: &str,
+    source: &str,
+    effect: &EffectName,
+    input: serde_json::Value,
+    output: serde_json::Value,
+) -> Program {
     let embedding = every_dialect(&WorkerTuning::standard()).expect("an embedding of both");
     let effects = BTreeMap::from([(
         effect.clone(),
         lash_kernel_value::json_schema::tool_signature(
-            &lash_kernel_value::JsonSchema::admit(serde_json::json!({
-                "type": "object",
-                "properties": { "x": { "type": "number" } }
-            }))
-            .expect("an admissible input schema"),
-            &lash_kernel_value::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
-                .expect("an admissible result schema"),
+            &lash_kernel_value::JsonSchema::admit(input).expect("an admissible input schema"),
+            &lash_kernel_value::JsonSchema::admit(output).expect("an admissible result schema"),
         ),
     )]);
     let library = embedding.library();
@@ -202,6 +236,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
 
 #[test]
 fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
+    cenote_read_loop();
     let typescript = (
         "typescript",
         "let r = 0;\n\
@@ -238,6 +273,12 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
         for (what, answer) in &answers {
             let read = run(&program, &effect, true, answer);
             let recorded = run(&program, &effect, false, answer);
+            assert_eq!(read.calls.len(), 1, "{dialect}, {what}: one actual read");
+            assert_eq!(
+                recorded.calls.len(),
+                1,
+                "{dialect}, {what}: one recorded call"
+            );
             assert_eq!(read.parks, 0, "{dialect}, {what}: a read does not park");
             assert_eq!(
                 recorded.parks, 1,
@@ -249,5 +290,96 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
                 "{dialect}, {what}: a read ends, prints and is charged as the same perform recorded"
             );
         }
+    }
+}
+
+// FIG-7513: the cell keeps source operands across the entry helper's calls,
+// and executes exactly the reads from its loop and taken branch.
+fn cenote_read_loop() {
+    const SOURCE: &str = r#"const pages = ['plans', 'seats', 'archive'];
+for (const [i, path] of pages.entries()) {
+  if (i === 0) await cenote.readDocument({ document: { collection: 'wiki', path: 'pricing' } });
+  try { await cenote.readDocument({ document: { collection: 'wiki', path } }); } catch {}
+}
+if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki', path: 'never' } });"#;
+    let effect = EffectName::new("cenote.readDocument").expect("the tool name");
+    let program = lowered_with_schemas(
+        "typescript",
+        SOURCE,
+        &effect,
+        serde_json::json!({"type":"object", "properties":{"document":{"type":"object", "properties":{"collection":{"type":"string"}, "path":{"type":"string"}}, "required":["collection","path"]}}, "required":["document"]}),
+        serde_json::json!({"type":"object"}),
+    );
+    let page = Ok(Datum::Record(vec![(
+        "ok".into(),
+        Datum::Record(vec![
+            ("version".into(), Datum::Int(Integer::from(1))),
+            (
+                "text".into(),
+                Datum::Text("Pricing is per seat, billed monthly.".into()),
+            ),
+        ]),
+    )]));
+    let mut baseline = None;
+    for strategy in [
+        lash_kernel_vm::testing::ExecutionStrategy::Optimized,
+        lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+    ] {
+        let mut program = program.clone();
+        program.library = lash_kernel_vm::testing::library(&program.library, strategy);
+        let read = run_in(&program, &effect, true, &page, strategy);
+        let recorded = run_in(&program, &effect, false, &page, strategy);
+        assert!(
+            matches!(read.end, End::Finished(_)),
+            "{strategy:?}: {read:?}"
+        );
+        assert_eq!(
+            read.calls
+                .iter()
+                .map(|args| read_path(args).expect("document path"))
+                .collect::<Vec<_>>(),
+            ["pricing", "plans", "seats", "archive"]
+        );
+        assert_eq!(read.parks, 0);
+        assert_eq!(recorded.parks, 4);
+        assert_eq!(
+            (&read.end, &read.prints, &read.calls, read.charged),
+            (
+                &recorded.end,
+                &recorded.prints,
+                &recorded.calls,
+                recorded.charged
+            )
+        );
+        let observation = (read.end, read.prints, read.calls, read.charged);
+        if let Some(baseline) = &baseline {
+            assert_eq!(&observation, baseline, "register and reference cells agree");
+        } else {
+            baseline = Some(observation);
+        }
+    }
+}
+
+fn read_path(args: &[Datum]) -> Option<&str> {
+    let Datum::Record(fields) = args.first()? else {
+        return None;
+    };
+    let Datum::Record(document) = &fields.iter().find(|(key, _)| key == "document")?.1 else {
+        return None;
+    };
+    let Datum::Text(path) = &document.iter().find(|(key, _)| key == "path")?.1 else {
+        return None;
+    };
+    Some(path)
+}
+fn answer_at(args: &[Datum], answer: &Result<Datum, ErrorDatum>) -> Result<Datum, ErrorDatum> {
+    if read_path(args) == Some("archive") {
+        Err(ErrorDatum {
+            kind: "tool_failed".into(),
+            message: "page unavailable".into(),
+            data: Datum::Null,
+        })
+    } else {
+        answer.clone()
     }
 }
