@@ -1358,6 +1358,30 @@ fn tree_provider() -> ProviderHandle {
     .into_handle()
 }
 
+async fn tree_parked(core: &LashCore) {
+    use lash_core::durable_port::domain::{OwnerKey, RunFactKind};
+    let owner = OwnerKey::Turn(
+        lash_kernel_value::identity::SessionId::parse(TREE_SESSION).expect("the session id"),
+        lash_vocabulary::identity::TurnId::parse(TREE_TURN).expect("the turn id"),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let facts = core
+                .backend()
+                .durable()
+                .run_facts(&owner)
+                .await
+                .expect("the turn's run facts are readable");
+            if facts.rows.iter().any(|row| row.kind == RunFactKind::XWait) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the pending tool outcome commits before the cut");
+}
+
 async fn resolve_tree_key(core: &LashCore, key: &PinnedKey) -> Result<()> {
     assert_eq!(
         core.completions()
@@ -1401,6 +1425,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let session = golden.session(TREE_SESSION).await?;
     let turn = tokio::spawn(send(&session));
     let (key, _) = published.recv().await.expect("the call publishes its key");
+    tree_parked(&golden.core).await;
     resolve_tree_key(&golden.core, &key).await?;
     assert!(completed(&turn.await.expect("the golden turn joins")?));
     let golden_tree = span_tree(&golden.entries());
@@ -1427,6 +1452,7 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let session = node_a.session(TREE_SESSION).await?;
     let parked = tokio::spawn(send(&session));
     let (key, _) = published.recv().await.expect("the call publishes its key");
+    tree_parked(&node_a.core).await;
     node_a.core.shutdown().await?;
     drop(parked);
     let before = node_a.entries();
@@ -1480,7 +1506,11 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     assert_eq!(
         edges(&cut_tree),
         edges(&golden_tree),
-        "the records nodes A and B wrote build the golden tree"
+        "the records nodes A and B wrote build the golden tree; cut tool outputs: {:?}",
+        of_type(&entries, "tool_call_completed")
+            .into_iter()
+            .map(|entry| &entry["output"])
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         cut_tree
