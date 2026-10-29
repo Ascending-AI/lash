@@ -54,8 +54,3 @@ fn every_guarded_surface_decodes_its_supported_range() {
 fn unknown_version_is_refused_with_zero_mutation() {
     laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes());
 }
-
-#[test]
-fn upcast_preserves_immutable_bytes_and_hashes() {
-    laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
-}

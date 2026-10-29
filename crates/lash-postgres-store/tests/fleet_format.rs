@@ -200,6 +200,13 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
     )
     .await
     .expect("a select-only role opens: the fleet format is a row it can read");
+    assert!(
+        storage
+            .verify_schema()
+            .await
+            .expect("verify select-only schema")
+            .is_conformant()
+    );
     // The scratch catalog records the epoch an installer seeds for this
     // build: the floor of its writable range.
     assert_eq!(

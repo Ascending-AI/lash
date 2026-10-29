@@ -162,6 +162,9 @@ def run(repo: Path, argv: list[str], environment=None):
 
 def regenerate_fixtures(repo: Path):
     for generator in discover(repo):
+        if "artifact" in generator:
+            run(repo, [sys.executable, generator["tool"], generator["artifact"]])
+            continue
         run(repo, ["kiln", "test", generator["target"], "--local-test-execution", "--no-test-cache",
                    "--test_arg=--ignored", "--test_arg=--exact", f"--test_arg={generator['law']}",
                    "--test_env=LASH_REGENERATE=1", f"--test_env=BUILD_WORKSPACE_DIRECTORY={repo}",

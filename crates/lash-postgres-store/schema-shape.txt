@@ -1,10 +1,9 @@
 # lash-postgres-store expected schema shape.
 #
 # Generated artifact -- never edit by hand. Regenerate after any change to
-# schema.sql by running the crate's `schema_shape` suite against a live
-# PostgreSQL with LASH_REGENERATE=1, which rewrites this file from the
-# catalog the DDL artifact actually produces, on PostgreSQL 18, the one
-# supported major for lash 1.0.
+# schema.sql with `python3 scripts/regenerate-postgres-artifact.py schema-shape.txt`
+# inside a private PostgreSQL gate. This reads the catalog the DDL artifact
+# actually produces on PostgreSQL 18, the one supported major for lash 1.0.
 #
 # Columns are matched by name, never by ordinal position; constraint and index names
 # are never compared at all. A uniqueness guard is matched by its kind and its key

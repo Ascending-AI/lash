@@ -54,7 +54,7 @@ use std::fmt;
 use crate::{SCHEMA_COMPONENT, SCHEMA_VERSION};
 
 /// Generated description of the schema this build expects, regenerated from
-/// [`crate::PostgresStorage::schema_ddl`] by the `schema_shape` test suite.
+/// [`crate::PostgresStorage::schema_ddl`] by `scripts/regenerate-postgres-artifact.py schema-shape.txt`.
 const SHAPE_ARTIFACT: &str = include_str!("../../schema-shape.txt");
 
 /// Seed rows `schema.sql` inserts, paired with what each one is for. They are a
@@ -662,7 +662,7 @@ impl SchemaShape {
 
     /// Rendering exists to regenerate the committed artifact from a live database;
     /// nothing at runtime ever writes the format, only parses it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn render(&self, version: i32) -> String {
         let mut out = String::new();
         out.push_str(ARTIFACT_HEADER);
@@ -757,15 +757,14 @@ impl SchemaShape {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 const ARTIFACT_HEADER: &str = "\
 # lash-postgres-store expected schema shape.
 #
 # Generated artifact -- never edit by hand. Regenerate after any change to
-# schema.sql by running the crate's `schema_shape` suite against a live
-# PostgreSQL with LASH_REGENERATE=1, which rewrites this file from the
-# catalog the DDL artifact actually produces, on PostgreSQL 18, the one
-# supported major for lash 1.0.
+# schema.sql with `python3 scripts/regenerate-postgres-artifact.py schema-shape.txt`
+# inside a private PostgreSQL gate. This reads the catalog the DDL artifact
+# actually produces on PostgreSQL 18, the one supported major for lash 1.0.
 #
 # Columns are matched by name, never by ordinal position; constraint and index names
 # are never compared at all. A uniqueness guard is matched by its kind and its key
@@ -1441,14 +1440,20 @@ impl fmt::Display for SchemaReport {
 #[path = "schema_shape/introspect.rs"]
 mod introspect;
 
+#[cfg(test)]
+pub(crate) use introspect::normalize_predicate;
 pub(crate) use introspect::{
     Installation, read_search_path, resolve_installation, verify_schema_shape,
 };
 /// Reached only by the artifact-generation and catalog tests, which execute the
 /// introspection directly rather than through a full verification.
-#[cfg(test)]
-pub(crate) use introspect::{normalize_predicate, read_live_shape, resolve_tables};
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use introspect::{read_live_shape, resolve_tables};
 
 #[path = "schema_shape/tests.rs"]
 #[cfg(test)]
 mod tests;
+
+#[cfg(any(test, feature = "testing"))]
+#[path = "schema_shape/artifacts.rs"]
+pub(crate) mod artifacts;

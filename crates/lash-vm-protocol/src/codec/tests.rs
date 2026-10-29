@@ -282,7 +282,7 @@ fn the_fence_admits_only_the_current_lease_epochs_and_next_sequence() {
 }
 
 #[test]
-fn envelope_and_encoding_allocation_fit_the_frame_bound() {
+fn bounded_encoder_capacity_does_not_double_past_the_cap() {
     let frame = request_frame();
     let bytes = codec().encode_worker(&frame).unwrap();
     let bounded = |limit| {
@@ -311,10 +311,7 @@ fn envelope_and_encoding_allocation_fit_the_frame_bound() {
     std::io::Write::write_all(&mut writer, &[0; 1024]).unwrap();
     assert!(writer.bytes.is_empty());
     assert_eq!(writer.refused, Some(1024));
-}
 
-#[test]
-fn bounded_encoder_capacity_does_not_double_past_the_cap() {
     let mut writer = CappedWriter {
         bytes: Vec::new(),
         limit: 10,

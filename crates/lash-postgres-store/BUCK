@@ -110,6 +110,39 @@ lash_rust_binary(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "schema_artifact_generator__bin",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "schema_artifact_generator",
+    crate_root = "src/bin/schema_artifact_generator.rs",
+    declared_features = [
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    compile_data_patterns = [
+        "postgres-host-config-v1.schema.json",
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "schema_artifact_generator"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-postgres-store",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "hermetic-postgres",
+    ],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "integration__test",
     crate_features = [
@@ -1828,6 +1861,114 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash-postgres-store",
     package_name = "lash-internal-postgres-store",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "hermetic-postgres",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_e2fe4ac7", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_70c351e8", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_fd7bde19", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_7488aee4", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_16989d3f", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_54c86a22", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_542c617a", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_e92a2109", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_d6b68cb4", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_eccd07ca", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_2d760070", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_c589132a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c5dedb61", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_ef3128cf", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_2fae3685", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_8dfb84f2", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_75960fd4", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_d5b29695", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_dbc9668e", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_b4a74081", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_7e5d67eb", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_6fcbae7c", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_eb2b1dcc", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_409c4f9c", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_193aaf35", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_e3ecd6dc", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_881c84ea", "//crates/lash:lash": "//crates/lash:lash__fv_5f8e2e0c"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "schema_artifact_generator__bin__fv_1c8b838f",
+    crate_features = [
+        "synthetic-next",
+        "testing",
+    ],
+    crate_name = "schema_artifact_generator",
+    crate_root = "src/bin/schema_artifact_generator.rs",
+    declared_features = [
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "schema_artifact_generator"),
+    compile_data_patterns = [
+        "postgres-host-config-v1.schema.json",
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_19f1b9c9",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "hermetic-postgres",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_d4fa95e7", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_fb780feb", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_7386bd84", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_644ed045", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_66d7952c", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_33de3047", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_ac1ed572", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_269ddd74", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_754327f3", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_d9830303", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_bec31be1", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_c589132a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c5dedb61", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_ef3128cf", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_2fae3685", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_8dfb84f2", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_75960fd4", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_026696bd", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_219db28a", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_42929a35", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_9d88ff5f", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_425a9f99", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_fcf6b11a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_993067de", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_1186cecc", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_596557f3", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_6342b3cf", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ef226de5", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_2ffd4f86", "//crates/lash:lash": "//crates/lash:lash__fv_b8bc325d"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "schema_artifact_generator__bin__fv_ac8f3345",
+    crate_features = [
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    crate_name = "schema_artifact_generator",
+    crate_root = "src/bin/schema_artifact_generator.rs",
+    declared_features = [
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "schema_artifact_generator"),
+    compile_data_patterns = [
+        "postgres-host-config-v1.schema.json",
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_90a64d29",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "hermetic-postgres",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_8a009b53", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_fa5cb888", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_12463b28", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_644ed045", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9a6bbc9f", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_cc4488cd", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_1f04ff6e", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_41988d50", "//crates/lash-durable-test:lash-durable-test": "//crates/lash-durable-test:lash-durable-test__fv_b12659aa", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_de679a0e", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_667dd55b", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_c589132a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_c5dedb61", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_ef3128cf", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_2fae3685", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_8dfb84f2", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_75960fd4", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_169f5caa", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_377a1b5a", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f1152c32", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_8aab677c", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_425a9f99", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_fcf6b11a", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7fb18275", "//crates/lash-tool-presenter-api:lash-tool-presenter-api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api__fv_1186cecc", "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__fv_596557f3", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_32bcb945", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ef226de5", "//crates/lash-transport-failure:lash-transport-failure": "//crates/lash-transport-failure:lash-transport-failure__fv_2ffd4f86", "//crates/lash:lash": "//crates/lash:lash__fv_b7964421"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "schema_artifact_generator__bin__fv_efafc27f",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "schema_artifact_generator",
+    crate_root = "src/bin/schema_artifact_generator.rs",
+    declared_features = [
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-postgres-store", "schema_artifact_generator"),
+    compile_data_patterns = [
+        "postgres-host-config-v1.schema.json",
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-postgres-store:lash-postgres-store__fv_3b34de47",
+    library_crate_name = "lash_postgres_store",
+    manifest_dir = "crates/lash-postgres-store",
+    package_name = "lash-internal-postgres-store",
+    rustc_env = {},
     tags = [
         "feature-lane",
         "hermetic-postgres",

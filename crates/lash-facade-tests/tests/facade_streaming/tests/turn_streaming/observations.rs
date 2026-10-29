@@ -1240,10 +1240,18 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
             "{boundary:?}: the snapshot holds the switching commit"
         );
 
+        let mut continued = false;
         while let Ok(Some(item)) =
             tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await
         {
             if let lash::observe::SessionObservationStreamItem::Event(event) = item? {
+                if let lash_core::SessionObservationEventPayload::Committed { entries, .. } =
+                    &event.payload
+                    && event.revision() > held
+                    && !entries.is_empty()
+                {
+                    continued = true;
+                }
                 assert!(
                     !matches!(
                         &event.payload,
@@ -1253,6 +1261,10 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
                 );
             }
         }
+        assert!(
+            continued,
+            "{boundary:?}: the subscriber must receive the fresh frame's commit after its snapshot"
+        );
     }
     Ok(())
 }

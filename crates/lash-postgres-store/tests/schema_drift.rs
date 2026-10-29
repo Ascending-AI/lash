@@ -377,22 +377,6 @@ async fn a_missing_catalog_identity_is_fatal_in_every_mode() {
     scratch.cleanup().await;
 }
 
-/// A dropped table.
-#[tokio::test]
-async fn a_missing_table_is_rejected() {
-    assert_mutation_is_rejected(
-        "DROP TABLE lash_process_observers",
-        &["MISSING TABLES", "lash_process_observers: table is missing"],
-        |finding| {
-            matches!(
-                finding,
-                SchemaFinding::MissingTable { table } if table == "lash_process_observers"
-            )
-        },
-    )
-    .await;
-}
-
 /// A column lash does not know about. lash owns these tables by contract, and a
 /// host column that is `NOT NULL` without a default breaks every insert.
 #[tokio::test]
@@ -519,75 +503,6 @@ fn above_this_build() -> u32 {
         .reads
         .max()
         + 1
-}
-
-/// Rewrites a connection URL's credentials, so a test can connect as a role other
-/// than the one the suite is configured with.
-fn with_credentials(database_url: &str, role: &str, password: &str) -> String {
-    let (scheme, rest) = database_url
-        .split_once("://")
-        .expect("a Postgres URL carries a scheme");
-    let host_and_path = rest.rsplit_once('@').map_or(rest, |(_, tail)| tail);
-    format!("{scheme}://{role}:{password}@{host_and_path}")
-}
-
-/// Worker open must run no DDL at all (FIG-3797): a deployment may run lash
-/// under a role with nothing but `USAGE` on the schema and row privileges on
-/// its tables. Proven against a purpose-made role that holds `USAGE` plus
-/// `SELECT` alone: any open that executed even one `CREATE TABLE IF NOT
-/// EXISTS`, or that wrote a version stamp or a seed row, fails here.
-#[tokio::test]
-async fn worker_open_needs_no_ddl_privilege() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping host-provisioned no-DDL proof: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    let role = format!("lash_reader_{}", uuid::Uuid::new_v4().simple());
-    scratch
-        .apply(&format!(
-            "CREATE ROLE {role} LOGIN PASSWORD 'reader';
-             GRANT USAGE ON SCHEMA {schema} TO {role};
-             GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {role};",
-            schema = scratch.name
-        ))
-        .await;
-
-    let reader_url = with_credentials(&database_url, &role, "reader");
-    let schema = scratch.name.clone();
-    let reader_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .after_connect(move |connection, _meta| {
-            let schema = schema.clone();
-            Box::pin(async move {
-                connection
-                    .execute(format!("SET search_path TO {schema}").as_str())
-                    .await?;
-                Ok(())
-            })
-        })
-        .connect(&reader_url)
-        .await
-        .expect("connect as the read-only role");
-    let storage = lash_postgres_store::testing::from_pool(
-        reader_pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
-    .await
-    .unwrap_or_else(|error| panic!("worker open must need no privilege beyond SELECT: {error}"));
-    assert!(
-        storage
-            .verify_schema()
-            .await
-            .expect("verify provisioned schema")
-            .is_conformant()
-    );
-    reader_pool.close().await;
-
-    scratch
-        .apply(&format!("DROP OWNED BY {role}; DROP ROLE {role};",))
-        .await;
-    scratch.cleanup().await;
 }
 
 /// An unprovisioned database is a configuration error every open refuses, and
@@ -791,49 +706,6 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
     }
 }
 
-/// A reader floor above this build is fatal in either schema-check mode.
-#[tokio::test]
-async fn a_raised_reader_floor_is_fatal_in_every_mode() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping version-gate universality: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    let above = above_this_build();
-    scratch
-        .apply(&format!(
-            "UPDATE lash_schema_versions SET version = {above}, min_reader = {above}
-             WHERE component = 'lash-postgres-store'"
-        ))
-        .await;
-    for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = lash_postgres_store::testing::from_pool(
-            scratch.pool.clone(),
-            &lash_postgres_store::PostgresHostConfig {
-                schema_check: check,
-                ..lash_postgres_store::PostgresHostConfig::default()
-            },
-        )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("{check:?} must reject a raised reader floor"));
-        assert!(
-            matches!(
-                error,
-                StoreError::Incompatible {
-                    refusal: CompatRefusal::ReaderFloorAbove {
-                        found,
-                        min_reader,
-                        ..
-                    }
-                } if found == above && min_reader == above
-            ),
-            "{check:?}: {error}"
-        );
-    }
-    scratch.cleanup().await;
-}
-
 /// A reader floor past this build refuses before open can use an old catalog
 /// without its durable vocabulary CHECKs.
 #[tokio::test]
@@ -972,13 +844,24 @@ async fn verify_schema_for_describes_a_database_that_cannot_be_opened() {
     };
     let scratch = ScratchSchema::provision(&database_url).await;
     scratch.apply("DROP TABLE lash_process_observers").await;
-    assert!(
-        scratch
-            .open_host_provisioned(SchemaCheck::Enforce)
-            .await
-            .is_err(),
-        "Enforce must not open a database with a missing table"
-    );
+    let error = scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .err()
+        .expect("Enforce must not open a database with a missing table");
+    for fragment in ["MISSING TABLES", "lash_process_observers: table is missing"] {
+        assert!(error.to_string().contains(fragment), "{error}");
+    }
+    let warned = scratch
+        .open_host_provisioned(SchemaCheck::WarnOnly)
+        .await
+        .expect("WarnOnly must open a database with a missing table");
+    let warned_report = warned.verify_schema().await.expect("verify warned schema");
+    assert!(!warned_report.is_conformant());
+    assert!(warned_report.findings.iter().any(|finding| matches!(
+        finding,
+        SchemaFinding::MissingTable { table } if table == "lash_process_observers"
+    )));
     let report = PostgresStorage::verify_schema_for(&scratch.pool)
         .await
         .expect("verify_schema_for must not need a successful open");

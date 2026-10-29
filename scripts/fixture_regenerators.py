@@ -1,4 +1,4 @@
-"""Discover fixture-writing tests from Rust modules and Cargo target roots.
+"""Discover fixture-writing tools and tests from Cargo target roots.
 
 Generators declare #[ignore = "regenerates <repository-relative path>"] and
 require LASH_REGENERATE=1. Normal fixture checks remain separate tests.
@@ -34,7 +34,15 @@ def without_comments(text: str) -> str:
 
 
 def discover(repo: Path) -> list[dict]:
-    generators = []
+    generators = [
+        dict(target="//crates/lash-postgres-store:schema_artifact_generator__bin",
+             tool="scripts/regenerate-postgres-artifact.py",
+             artifact=name, output=f"crates/lash-postgres-store/{name}",
+             source="crates/lash-postgres-store/src/bin/schema_artifact_generator.rs",
+             environment={})
+        for name in ("teardown.sql", "schema-shape.txt")
+        if (repo / "crates/lash-postgres-store/src/bin/schema_artifact_generator.rs").is_file()
+    ]
     visited = set()
 
     def file(path, modules, target, module_dir):
@@ -127,4 +135,4 @@ def discover(repo: Path) -> list[dict]:
                       for test in config.get("test", [])})
         for name, path in sorted(tests.items()):
             file(path, [], label + name + "__test", path.parent)
-    return sorted(generators, key=lambda row: (row["target"], row["law"]))
+    return sorted(generators, key=lambda row: (row["target"], row.get("law", row.get("artifact"))))

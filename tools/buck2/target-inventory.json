@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 98,
-  "cargo_target_count": 301,
+  "cargo_target_count": 302,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_385bcf2d__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_9aad8e2d__metadata[check]",
@@ -710,6 +710,9 @@
     "//crates/lash-postgres-store:process_replay__test__fv_1c8b838f",
     "//crates/lash-postgres-store:process_replay__test__fv_ac8f3345",
     "//crates/lash-postgres-store:process_replay__test__fv_efafc27f",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
     "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f",
     "//crates/lash-postgres-store:schema_constraints__test__fv_ac8f3345",
     "//crates/lash-postgres-store:schema_constraints__test__fv_efafc27f",
@@ -1995,6 +1998,9 @@
     "//crates/lash-postgres-store:process_replay__test__fv_1c8b838f__rust_test__metadata[check]",
     "//crates/lash-postgres-store:process_replay__test__fv_ac8f3345__rust_test__metadata[check]",
     "//crates/lash-postgres-store:process_replay__test__fv_efafc27f__rust_test__metadata[check]",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f__metadata[check]",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345__metadata[check]",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f__metadata[check]",
     "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f__rust_test__metadata[check]",
     "//crates/lash-postgres-store:schema_constraints__test__fv_ac8f3345__rust_test__metadata[check]",
     "//crates/lash-postgres-store:schema_constraints__test__fv_efafc27f__rust_test__metadata[check]",
@@ -3280,6 +3286,9 @@
     "//crates/lash-postgres-store:process_replay__test__fv_1c8b838f",
     "//crates/lash-postgres-store:process_replay__test__fv_ac8f3345",
     "//crates/lash-postgres-store:process_replay__test__fv_efafc27f",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
     "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f",
     "//crates/lash-postgres-store:schema_constraints__test__fv_ac8f3345",
     "//crates/lash-postgres-store:schema_constraints__test__fv_efafc27f",
@@ -59716,6 +59725,65 @@
       "package": "lash-internal-postgres-store"
     },
     {
+      "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+      "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f__metadata[check]",
+      "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+      "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f__metadata[check]",
+      "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345",
+      "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345__metadata[check]",
+      "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345__clippy[clippy.txt]",
+      "features": [
+        "perf-witness",
+        "synthetic-next",
+        "testing"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
+      "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f__metadata[check]",
+      "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f__clippy[clippy.txt]",
+      "features": [
+        "testing"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
+      "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f__metadata[check]",
+      "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f__clippy[clippy.txt]",
+      "features": [
+        "testing"
+      ],
+      "kind": "bin",
+      "label": "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
+      "package": "lash-internal-postgres-store"
+    },
+    {
       "build_label": "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f",
       "check_label": "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f__rust_test__metadata[check]",
       "clippy_label": "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f__clippy[clippy.txt]",
@@ -97501,6 +97569,7 @@
       "//crates/lash-postgres-store:preflight_durable_walk__test__fv_efafc27f",
       "//crates/lash-postgres-store:preflight_schema_status__test__fv_efafc27f",
       "//crates/lash-postgres-store:process_replay__test__fv_efafc27f",
+      "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
       "//crates/lash-postgres-store:schema_constraints__test__fv_efafc27f",
       "//crates/lash-postgres-store:schema_drift__test__fv_efafc27f",
       "//crates/lash-protocol-standard:lash-protocol-standard__fv_7e5d67eb",
@@ -97854,6 +97923,9 @@
       "//crates/lash-postgres-store:process_replay__test__fv_1c8b838f",
       "//crates/lash-postgres-store:process_replay__test__fv_ac8f3345",
       "//crates/lash-postgres-store:process_replay__test__fv_efafc27f",
+      "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_1c8b838f",
+      "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_ac8f3345",
+      "//crates/lash-postgres-store:schema_artifact_generator__bin__fv_efafc27f",
       "//crates/lash-postgres-store:schema_constraints__test__fv_1c8b838f",
       "//crates/lash-postgres-store:schema_constraints__test__fv_ac8f3345",
       "//crates/lash-postgres-store:schema_constraints__test__fv_efafc27f",
@@ -97995,7 +98067,7 @@
       "//crates/lash:lash__fv_d7293f22"
     ]
   },
-  "generated_label_count": 413,
+  "generated_label_count": 414,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -99286,7 +99358,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1639,
+  "metadata_target_count": 1643,
   "packages": [
     {
       "declared_features": [
@@ -103194,6 +103266,17 @@
           "clippy_label": "//crates/lash-postgres-store:host_config_schema_generator__bin__clippy[clippy.txt]",
           "kind": "bin",
           "label": "//crates/lash-postgres-store:host_config_schema_generator__bin",
+          "tags": [
+            "hermetic-postgres"
+          ]
+        },
+        {
+          "build_label": "//crates/lash-postgres-store:schema_artifact_generator__bin",
+          "cargo": "schema_artifact_generator",
+          "check_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__metadata[check]",
+          "clippy_label": "//crates/lash-postgres-store:schema_artifact_generator__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-postgres-store:schema_artifact_generator__bin",
           "tags": [
             "hermetic-postgres"
           ]
@@ -107495,6 +107578,7 @@
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:process_replay__test",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-postgres-workers:failover__test",
@@ -107957,6 +108041,7 @@
     "//crates/lash-postgres-store:preflight_durable_walk__test__rust_test__metadata[check]",
     "//crates/lash-postgres-store:preflight_schema_status__test__rust_test__metadata[check]",
     "//crates/lash-postgres-store:process_replay__test__rust_test__metadata[check]",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__metadata[check]",
     "//crates/lash-postgres-store:schema_constraints__test__rust_test__metadata[check]",
     "//crates/lash-postgres-store:schema_drift__test__rust_test__metadata[check]",
     "//crates/lash-postgres-workers:failover__test__rust_test__metadata[check]",
@@ -108397,6 +108482,7 @@
     "//crates/lash-postgres-store:preflight_durable_walk__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:preflight_schema_status__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:process_replay__test__clippy[clippy.txt]",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin__clippy[clippy.txt]",
     "//crates/lash-postgres-store:schema_constraints__test__clippy[clippy.txt]",
     "//crates/lash-postgres-store:schema_drift__test__clippy[clippy.txt]",
     "//crates/lash-postgres-workers:failover__test__clippy[clippy.txt]",
@@ -108807,6 +108893,7 @@
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:process_replay__test",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-postgres-workers:failover__test",
@@ -109222,6 +109309,7 @@
     "//crates/lash-postgres-store:preflight_durable_walk__test",
     "//crates/lash-postgres-store:preflight_schema_status__test",
     "//crates/lash-postgres-store:process_replay__test",
+    "//crates/lash-postgres-store:schema_artifact_generator__bin",
     "//crates/lash-postgres-store:schema_constraints__test",
     "//crates/lash-postgres-store:schema_drift__test",
     "//crates/lash-postgres-workers:failover__test",

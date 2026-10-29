@@ -117,3 +117,9 @@ path = "tests/schema_constraints.rs"
 name = "host_config_schema_generator"
 path = "src/bin/host_config_schema_generator.rs"
 test = false
+
+[[bin]]
+name = "schema_artifact_generator"
+path = "src/bin/schema_artifact_generator.rs"
+required-features = ["testing"]
+test = false

@@ -1227,3 +1227,6 @@ pub trait CodecVariant {
 pub const MAX_DECODE_DEPTH: u64 = 512;
 /// Stable sum tags shared by runtime values and neutral JSON/tool values.
 pub const FROZEN_DATUM: u32 = 0;
+
+#[cfg(test)]
+mod tests;

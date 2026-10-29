@@ -547,7 +547,7 @@ mod guarded_surface_tests {
         laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes());
     }
     #[test]
-    fn upcast_preserves_immutable_bytes_and_hashes() {
-        laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes());
+    fn history_reads_are_epoch_invariant_and_writers_are_deterministic() {
+        laws::history_reads_are_epoch_invariant_and_writers_are_deterministic(OWNER, &probes());
     }
 }

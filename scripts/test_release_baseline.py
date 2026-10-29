@@ -93,7 +93,7 @@ const RAW: &str = r#"/* a literal */"#;
             if variables:
                 undiscovered.append(f"{path.relative_to(ROOT)}: {', '.join(variables)}")
             annotations = re.findall(r'#\[ignore\s*=\s*"regenerates ([^"]+)"\]', source)
-            actual = [row["output"] for row in generators if row["source"] == str(path.relative_to(ROOT))]
+            actual = [row["output"] for row in generators if row["source"] == str(path.relative_to(ROOT)) and "law" in row]
             self.assertCountEqual(annotations, actual, str(path))
             if '"LASH_REGENERATE"' in source and str(path.relative_to(ROOT)) not in discovered:
                 undiscovered.append(f"{path.relative_to(ROOT)}: LASH_REGENERATE")
@@ -140,6 +140,9 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         for call, row in zip(run.call_args_list, rows):
             repo, argv = call.args
             self.assertEqual(repo, ROOT)
+            if "artifact" in row:
+                self.assertEqual(argv, [sys.executable, row["tool"], row["artifact"]])
+                continue
             self.assertEqual(argv[:3], ["kiln", "test", row["target"]])
             for argument in ("--test_arg=--ignored", "--test_arg=--exact",
                              f"--test_arg={row['law']}", "--test_env=LASH_REGENERATE=1",

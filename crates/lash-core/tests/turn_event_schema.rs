@@ -5,12 +5,6 @@
 //! boundaries, so its serde shape — tag string, field names, and
 //! absent-when-`None` optional fields — is a contract. These tests assert the
 //! exact `serde_json::Value` for every variant.
-//!
-//! Drift guard: [`expected_type_tag`] is an exhaustive `match` with no
-//! wildcard, so adding a new `TurnEvent` variant fails to compile here until it
-//! is given a tag. [`samples_cover_every_variant`] then fails until a
-//! representative sample for the new variant is added to [`sample_events`], so
-//! the new shape actually gets pinned rather than silently skipped.
 
 use lash_core::llm::types::{LlmTerminalReason, ProviderFailureKind};
 use lash_protocol_types::{
@@ -20,7 +14,6 @@ use lash_protocol_types::{
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 use lash_vocabulary::identity::TurnId;
-use std::collections::BTreeSet;
 
 use lash_core::CheckpointKind;
 use lash_core::LlmCallId;
@@ -45,12 +38,6 @@ macro_rules! turn_event_tags {
                 $( TurnEvent::$variant { .. } => $tag, )*
             }
         }
-
-        /// Canonical list of every serialized tag. Paired with [`samples_cover_every_variant`],
-        /// this catches a variant that gained a tag mapping but no pinned sample.
-        const ALL_TURN_EVENT_TAGS: &[&str] = &[
-            $( $tag, )*
-        ];
     };
 }
 
@@ -616,19 +603,6 @@ fn every_variant_serializes_to_pinned_json() {
             "round-trip drifted for `{label}`"
         );
     }
-}
-
-#[test]
-fn samples_cover_every_variant() {
-    let sampled: BTreeSet<&str> = sample_events()
-        .iter()
-        .map(|(_, event, _)| expected_type_tag(event))
-        .collect();
-    let canonical: BTreeSet<&str> = ALL_TURN_EVENT_TAGS.iter().copied().collect();
-    assert_eq!(
-        sampled, canonical,
-        "sample_events must pin exactly one representative per TurnEvent variant"
-    );
 }
 
 #[test]

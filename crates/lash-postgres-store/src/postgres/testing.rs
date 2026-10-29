@@ -1001,3 +1001,13 @@ fn replace_database_name(base_url: &str, database_name: &str) -> String {
         .unwrap_or(before_query.len());
     format!("{}/{database_name}{query}", &before_query[..authority_end])
 }
+
+/// Generate the teardown artifact from the published schema's object list.
+pub fn teardown_artifact() -> String {
+    crate::schema_shape::artifacts::teardown_artifact()
+}
+
+/// Generate the schema-shape artifact in a private scratch schema.
+pub async fn schema_shape_artifact(database_url: &str) -> String {
+    crate::schema_shape::artifacts::schema_shape_artifact(database_url).await
+}

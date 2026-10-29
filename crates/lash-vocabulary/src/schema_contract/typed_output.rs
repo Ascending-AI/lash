@@ -354,8 +354,7 @@ mod tests {
     fn rejects_any_of_with_junk_siblings() {
         let output = serde_json::json!({
             (LASH_TYPE_KEY): {
-                "anyOf": [],
-                "type": null,
+                "anyOf": [{"type": "string"}],
                 "x": 1
             }
         });

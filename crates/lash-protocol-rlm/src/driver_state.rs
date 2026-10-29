@@ -218,7 +218,7 @@ mod tests {
         let probes = probes();
         laws::every_guarded_surface_decodes_its_supported_range(OWNER, &probes);
         laws::unknown_version_is_refused_with_zero_mutation(OWNER, &probes);
-        laws::upcast_preserves_immutable_bytes_and_hashes(OWNER, &probes);
+        laws::history_reads_are_epoch_invariant_and_writers_are_deterministic(OWNER, &probes);
         for parts in [
             Vec::new(),
             vec![lash_core::Part::text(
