@@ -60,6 +60,7 @@ pub use lash_core_store::artifact_referrer::{
 };
 pub use lash_core_store::attachments::{AttachmentExecutionBinding, AttachmentHolder};
 pub use lash_core_store::compat::{CompatRefusal, CompatStamp};
+pub use lash_core_store::phase_preparation::{PhaseContentPreparations, PreparationRole};
 pub use lash_core_store::runtime_error::ExecutableGenerationRefusal;
 pub use lash_core_store::session_graph::{
     NodeTimestamp, NodeTimestampError, SessionGraphAppendBuilder, SessionGraphData,
