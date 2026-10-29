@@ -387,4 +387,111 @@ mod tests {
         assert!(matches(&Duplicate, &json!({"key":true})));
         assert!(!matches(&Duplicate, &json!({"key":false})));
     }
+    #[derive(Debug, Serialize)]
+    #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
+    enum GeneratedKind {
+        Empty,
+        Values(Vec<Value>),
+        Row { value: Value },
+    }
+
+    #[derive(Debug, Serialize)]
+    struct GeneratedPayload {
+        tree: Value,
+        boundaries: Vec<Value>,
+        tagged: GeneratedKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        optional: Option<Value>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        enabled: bool,
+        raw_number: Box<serde_json::value::RawValue>,
+        raw_object: Box<serde_json::value::RawValue>,
+    }
+
+    fn json_tree() -> impl proptest::strategy::Strategy<Value = Value> {
+        use proptest::prelude::*;
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::from),
+            any::<i64>().prop_map(Value::from),
+            any::<u64>().prop_map(Value::from),
+            any::<f64>()
+                .prop_filter("finite JSON floats", |value| value.is_finite())
+                .prop_map(|value| Value::Number(serde_json::Number::from_f64(value).unwrap())),
+            ".{0,16}".prop_map(Value::from),
+        ];
+        leaf.prop_recursive(4, 64, 8, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..8).prop_map(Value::Array),
+                proptest::collection::btree_map("[a-z]{1,8}", inner, 0..8)
+                    .prop_map(|entries| Value::Object(entries.into_iter().collect())),
+            ]
+        })
+    }
+
+    fn leaf_count(value: &Value) -> usize {
+        match value {
+            Value::Array(items) => items.iter().map(leaf_count).sum(),
+            Value::Object(items) => items.values().map(leaf_count).sum(),
+            _ => 1,
+        }
+    }
+
+    fn change_leaf(value: &mut Value, at: &mut usize) -> bool {
+        match value {
+            Value::Array(items) => items.iter_mut().any(|value| change_leaf(value, at)),
+            Value::Object(items) => items.values_mut().any(|value| change_leaf(value, at)),
+            _ if *at == 0 => {
+                *value = if value.is_null() {
+                    Value::Bool(true)
+                } else {
+                    Value::Null
+                };
+                true
+            }
+            _ => {
+                *at -= 1;
+                false
+            }
+        }
+    }
+
+    proptest::proptest! {
+        /// FIG-7554: the spelling comparator agrees with serde_json across
+        /// recursive values, typed omission/tagging, and private JSON scalars.
+        #[test]
+        fn comparator_agrees_with_serde_json_and_rejects_a_changed_leaf(
+            tree in json_tree(),
+            optional in proptest::option::of(json_tree()),
+            enabled in proptest::bool::ANY,
+            tag in 0u8..3,
+            number in proptest::sample::select(vec![
+                "-9223372036854775808", "18446744073709551615",
+                "18446744073709551617", "0.12345678901234567890123456789", "1.5",
+            ]),
+            leaf in proptest::prelude::any::<usize>(),
+        ) {
+            let boundaries = [i64::MIN.to_string(), i64::MAX.to_string(),
+                u64::MAX.to_string(), "-0.0".into(), "1.5".into()]
+                .iter().map(|text| serde_json::from_str(text).unwrap()).collect();
+            let value = GeneratedPayload {
+                tagged: match tag {
+                    0 => GeneratedKind::Empty,
+                    1 => GeneratedKind::Values(vec![tree.clone()]),
+                    _ => GeneratedKind::Row { value: tree.clone() },
+                },
+                raw_number: serde_json::value::RawValue::from_string(number.into()).unwrap(),
+                raw_object: serde_json::value::RawValue::from_string(
+                    serde_json::to_string(&json!({"nested": [tree.clone()]})).unwrap()).unwrap(),
+                tree, boundaries, optional, enabled,
+            };
+            let expected = serde_json::to_value(&value).unwrap();
+            proptest::prop_assert!(matches(&value, &expected));
+            let mut changed = expected.clone();
+            let mut at = leaf % leaf_count(&changed);
+            proptest::prop_assert!(change_leaf(&mut changed, &mut at));
+            proptest::prop_assert_ne!(&changed, &expected);
+            proptest::prop_assert!(!matches(&value, &changed));
+        }
+    }
 }

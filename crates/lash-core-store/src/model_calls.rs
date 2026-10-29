@@ -1,4 +1,8 @@
 //! One sealed logical model call, retained independently of its answer receipt.
+//!
+//! ModelCallFact stores JSON text. Its graph identity promises the exact
+//! stored string, including whitespace and member order. It does not promise
+//! a semantic one-spelling identity for the deserialized record.
 
 use crate::checkpoint_graph::{GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind};
 use lash_protocol_types::{

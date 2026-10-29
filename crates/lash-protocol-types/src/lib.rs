@@ -119,10 +119,10 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin, CancelRequest,
-    ModelToolOutcome, ModelToolReturn, ModelToolReturnPart, NextRun, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolCallStatus, ToolCancellation, ToolControl, ToolFailure,
-    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntentIdentity, ToolValue, ToolView,
-    ToolViewBlock, ToolViewMeta, TurnControl,
+    ModelToolOutcome, ModelToolReturn, ModelToolReturnPart, NextRun, NonFiniteToolViewPriority,
+    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCallStatus, ToolCancellation, ToolControl,
+    ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntentIdentity,
+    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, ToolViewPriority, TurnControl,
 };
 pub use value_shape::{FieldShape, ValueShape, ValueShapeLimits};
 #[cfg(any(test, feature = "testing"))]
@@ -188,6 +188,6 @@ pub use llm::types::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "TurnCheckpoint"
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 6;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 7;
 
 pub mod engine_fault;

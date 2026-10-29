@@ -635,6 +635,7 @@ pub mod tools {
     pub use lash_core::IsolatedProcessRequest;
     pub use lash_core::IsolatedStart;
     pub use lash_core::NextRun;
+    pub use lash_core::NonFiniteToolViewPriority;
     pub use lash_core::PendingCompletion;
     pub use lash_core::PendingResolver;
     pub use lash_core::PreparedToolCall;
@@ -671,6 +672,7 @@ pub mod tools {
     pub use lash_core::ToolView;
     pub use lash_core::ToolViewBlock;
     pub use lash_core::ToolViewMeta;
+    pub use lash_core::ToolViewPriority;
     pub use lash_core::TurnControl;
     pub use lash_core::facade_support::ReconfigureError;
     /// The pending model call passed to a tool's preparation hook.

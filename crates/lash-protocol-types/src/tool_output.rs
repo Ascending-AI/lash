@@ -38,9 +38,47 @@ pub struct ToolView {
 #[serde(deny_unknown_fields)]
 pub struct ToolViewMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<f64>,
+    pub priority: Option<ToolViewPriority>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
+}
+
+/// A tool view's finite display priority. Construct it before admitting a view.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct ToolViewPriority(f64);
+
+/// A nonfinite priority cannot be represented in a saved tool view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a tool view priority must be finite")]
+pub struct NonFiniteToolViewPriority;
+
+impl ToolViewPriority {
+    pub fn new(value: f64) -> Result<Self, NonFiniteToolViewPriority> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(NonFiniteToolViewPriority)
+        }
+    }
+
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for ToolViewPriority {
+    type Error = NonFiniteToolViewPriority;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<ToolViewPriority> for f64 {
+    fn from(value: ToolViewPriority) -> Self {
+        value.get()
+    }
 }
 
 impl ToolViewMeta {

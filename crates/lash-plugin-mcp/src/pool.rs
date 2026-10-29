@@ -1234,10 +1234,21 @@ async fn tool_result_from_rmcp(
         {
             continue;
         }
+        let priority = match annotations
+            .and_then(|annotations| annotations.priority)
+            .map(|value| lash_core::ToolViewPriority::new(f64::from(value)))
+            .transpose()
+        {
+            Ok(priority) => priority,
+            Err(error) => {
+                return ToolOutcome::failure(lash_core::ToolFailure::new(
+                    "mcp_nonfinite_view_priority",
+                    error.to_string(),
+                ));
+            }
+        };
         let meta = ToolViewMeta {
-            priority: annotations
-                .and_then(|annotations| annotations.priority)
-                .map(f64::from),
+            priority,
             last_modified: annotations
                 .and_then(|annotations| annotations.last_modified.as_ref())
                 .map(|timestamp| {

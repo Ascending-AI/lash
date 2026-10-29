@@ -1,4 +1,4 @@
-// Derived from v3.schema.json by scripts/generate-workflow-schemas.py.
+// Derived from v4.schema.json by scripts/generate-workflow-schemas.py.
 // JSON Schema remains authoritative for value constraints and validation.
 
 /**
@@ -4611,8 +4611,13 @@ export type ToolViewBlock = ({
 
 export type ToolViewMeta = {
   "last_modified"?: (string | null);
-  "priority"?: (number | null);
+  "priority"?: (ToolViewPriority | null);
 };
+
+/**
+ * A tool view's finite display priority. Construct it before admitting a view.
+ */
+export type ToolViewPriority = number;
 
 /**
  * The transport sequence: each direction numbers its messages from zero,

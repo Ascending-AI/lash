@@ -414,3 +414,129 @@ fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
         Err(GraphRefusal::PublicationMismatch)
     );
 }
+
+/// FIG-7554: saved read facts must refuse data that typed decoding discards.
+#[test]
+fn saved_read_fact_rejects_unknown_members() {
+    let fact = lash_protocol_types::ReadFact {
+        caller: lash_protocol_types::ToolReadCaller::ModelRound {
+            round_key: "round".into(),
+        },
+        ordinal: 0,
+        call_id: ToolCallId::fixture("read"),
+        provider: crate::ProviderKey::new(
+            lash_vocabulary::claims::RegistryKind::Session,
+            "provider",
+            lash_vocabulary::providers::ToolProviderKey::new("query").unwrap(),
+        ),
+        tool: "query".into(),
+        args: serde_json::json!({}),
+        outcome: crate::ToolCallOutcome::Failure(
+            lash_protocol_types::ReadPanic {
+                tool_name: "query".into(),
+                message: "panic".into(),
+            }
+            .failure(),
+        ),
+        site: String::new(),
+        origin: String::new(),
+    };
+    let mut staging = staging();
+    let node = stage_read_fact(&mut staging, &fact).unwrap();
+    let loaded = load_read_fact(
+        &mut GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20)),
+        node,
+    )
+    .unwrap();
+    assert_eq!(loaded, fact);
+    let output = fact.record().output;
+    let saved = crate::runtime::actor::round::ModelReadResult {
+        fact: fact.clone(),
+        presentation: crate::runtime::effect::ToolPresentation {
+            model_return: ModelToolReturn::from_output("query".into(), &output),
+            artifacts: vec![],
+            retention: crate::OutputRetentionPolicy::STANDARD,
+        },
+    };
+    let node = stage_model_read(&mut staging, &saved).unwrap();
+    assert_eq!(
+        load_model_read(
+            &mut GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20)),
+            node
+        )
+        .unwrap(),
+        saved
+    );
+    for pointer in ["", "/caller", "/outcome/payload/cause/panic"] {
+        let mut tree = serde_json::to_value(&fact).unwrap();
+        tree.pointer_mut(pointer)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("discarded_member".into(), serde_json::json!(true));
+        let MaterialNode::Value(node) = stage_value(&mut staging, &tree).unwrap() else {
+            panic!("value")
+        };
+        assert!(
+            load_read_fact(
+                &mut GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20)),
+                node
+            )
+            .is_err(),
+            "{pointer}"
+        );
+        let mut tree = serde_json::to_value(&saved).unwrap();
+        tree.pointer_mut(&format!("/fact{pointer}"))
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("discarded_member".into(), serde_json::json!(true));
+        let MaterialNode::Value(node) = stage_value(&mut staging, &tree).unwrap() else {
+            panic!("value")
+        };
+        assert!(
+            load_model_read(
+                &mut GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20)),
+                node
+            )
+            .is_err(),
+            "model {pointer}"
+        );
+    }
+}
+
+/// FIG-7554: a view must refuse nonfinite priorities before writing a saved tree.
+#[test]
+fn tool_view_refuses_nonfinite_priority_before_storage() {
+    for priority in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            lash_protocol_types::ToolViewPriority::new(priority),
+            Err(lash_protocol_types::NonFiniteToolViewPriority)
+        );
+    }
+    for priority in [f64::MIN, -0.0, 0.5, f64::MAX] {
+        let view = lash_protocol_types::ToolView {
+            blocks: vec![lash_protocol_types::ToolViewBlock::Text {
+                text: "row".into(),
+                meta: lash_protocol_types::ToolViewMeta {
+                    priority: Some(lash_protocol_types::ToolViewPriority::new(priority).unwrap()),
+                    last_modified: None,
+                },
+            }],
+        };
+        let output = ToolCallOutput::success(serde_json::json!(null)).with_view(view);
+        let call = completed(
+            output.clone(),
+            ModelToolReturn::from_output("query".into(), &output),
+        );
+        let outcome = CallOutcome::of(&call, None, 0);
+        let mut staging = staging();
+        let node = outcome.stage(&mut staging).unwrap();
+        let loaded = CallOutcome::load(
+            &mut GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20)),
+            node,
+        )
+        .unwrap();
+        assert_eq!(loaded.output.view, output.view);
+    }
+}

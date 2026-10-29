@@ -126,38 +126,6 @@ pub fn decode_json(input: &mut TokenReader<'_>) -> Result<Value, TokenError> {
     Value::decode(input)
 }
 
-/// A tool value's number, in the JSON tree's number spelling:
-/// non-negative integer 0, negative integer 1, finite float 2.
-fn encode_number(number: &Number, out: &mut TokenWriter) {
-    if let Some(value) = number.as_u64() {
-        out.sum(0, 1);
-        out.unsigned(value);
-    } else if let Some(value) = number.as_i64() {
-        out.sum(1, 1);
-        out.signed(value);
-    } else {
-        out.sum(2, 1);
-        out.float(number.as_f64().unwrap_or(f64::NAN));
-    }
-}
-
-fn decode_number(input: &mut TokenReader<'_>) -> Result<Number, TokenError> {
-    let (variant, fields) = input.sum()?;
-    TokenReader::expect_fields(fields, 1)?;
-    match variant {
-        0 => Ok(Number::from(input.unsigned()?)),
-        1 => {
-            let value = input.signed()?;
-            if value >= 0 {
-                return Err(invalid("a non-negative integer is written as unsigned"));
-            }
-            Ok(Number::from(value))
-        }
-        2 => Number::from_f64(input.float()?).ok_or_else(|| invalid("a JSON number is finite")),
-        other => Err(unsupported(other)),
-    }
-}
-
 /// A JSON value as one FrozenValue body: `sum(2, 1, <json>)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrozenJson(pub Value);
@@ -290,7 +258,7 @@ impl TokenCodec for ToolValue {
             }
             Self::Number(number) => {
                 out.sum(2, 1);
-                encode_number(number, out);
+                number.encode(out);
             }
             Self::String(text) => {
                 out.sum(3, 1);
@@ -331,7 +299,7 @@ fn decode_tool_value(input: &mut TokenReader<'_>, depth: u64) -> Result<ToolValu
     Ok(match variant {
         0 => ToolValue::Null,
         1 => ToolValue::Bool(input.bool()?),
-        2 => ToolValue::Number(decode_number(input)?),
+        2 => ToolValue::Number(Number::decode(input)?),
         3 => ToolValue::String(input.text()?.to_owned()),
         4 => {
             let count = input.seq()?;

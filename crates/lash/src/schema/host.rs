@@ -174,12 +174,12 @@ host_schemas! {
     }
     turn_activity {
         TYPESCRIPT_DECLARATION: (
-            include_str!("../../host-schemas/turn-activity/v3.d.ts"),
-            include_str!("../../../../schemas/host/turn-activity/v3.d.ts")
+            include_str!("../../host-schemas/turn-activity/v4.d.ts"),
+            include_str!("../../../../schemas/host/turn-activity/v4.d.ts")
         ),
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/turn-activity/v3.schema.json"),
-            include_str!("../../../../schemas/host/turn-activity/v3.schema.json")
+            include_str!("../../host-schemas/turn-activity/v4.schema.json"),
+            include_str!("../../../../schemas/host/turn-activity/v4.schema.json")
         ),
     }
     trace_record {
@@ -194,26 +194,26 @@ host_schemas! {
     }
     worker_page_reply {
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/worker-page-reply/v4.schema.json"),
-            include_str!("../../../../schemas/host/worker-page-reply/v4.schema.json")
+            include_str!("../../host-schemas/worker-page-reply/v5.schema.json"),
+            include_str!("../../../../schemas/host/worker-page-reply/v5.schema.json")
         ),
     }
     worker_page_request {
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/worker-page-request/v4.schema.json"),
-            include_str!("../../../../schemas/host/worker-page-request/v4.schema.json")
+            include_str!("../../host-schemas/worker-page-request/v5.schema.json"),
+            include_str!("../../../../schemas/host/worker-page-request/v5.schema.json")
         ),
     }
     worker_seal_batch {
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/worker-seal-batch/v4.schema.json"),
-            include_str!("../../../../schemas/host/worker-seal-batch/v4.schema.json")
+            include_str!("../../host-schemas/worker-seal-batch/v5.schema.json"),
+            include_str!("../../../../schemas/host/worker-seal-batch/v5.schema.json")
         ),
     }
     worker_start {
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/worker-start/v4.schema.json"),
-            include_str!("../../../../schemas/host/worker-start/v4.schema.json")
+            include_str!("../../host-schemas/worker-start/v5.schema.json"),
+            include_str!("../../../../schemas/host/worker-start/v5.schema.json")
         ),
     }
     workflow_execution_overlay {

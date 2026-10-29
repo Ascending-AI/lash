@@ -216,14 +216,14 @@ pub use window_load::{
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionHeadMeta"
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 11's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionHeadMeta"
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
 
 #[cfg(test)]
 #[cfg(test)]

@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 [dev-dependencies]
 proptest = "1"
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 
 [dependencies.lash-kernel-value]
 workspace = true

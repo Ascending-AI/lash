@@ -90,10 +90,15 @@ pub fn encode_tree<T: Serialize>(value: &T, out: &mut TokenWriter) {
 pub fn decode_tree<T: Serialize + DeserializeOwned>(
     input: &mut TokenReader<'_>,
 ) -> Result<T, TokenError> {
-    let tree = decode_json(input)?;
+    decode_tree_value(&decode_json(input)?)
+}
+
+fn decode_tree_value<T: Serialize + DeserializeOwned>(
+    tree: &serde_json::Value,
+) -> Result<T, TokenError> {
     let value: T =
-        serde::Deserialize::deserialize(&tree).map_err(|error| invalid(error.to_string()))?;
-    if !lash_vocabulary::matches_json(&value, &tree) {
+        serde::Deserialize::deserialize(tree).map_err(|error| invalid(error.to_string()))?;
+    if !lash_vocabulary::matches_json(&value, tree) {
         return Err(invalid("a payload tree is not its value's one spelling"));
     }
     Ok(value)
@@ -1454,7 +1459,7 @@ pub fn load_read_fact(
     decoder: &mut GraphDecoder<'_>,
     node: NodeId,
 ) -> Result<lash_protocol_types::ReadFact, GraphRefusal> {
-    serde_json::from_value(load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
+    decode_tree_value(&load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
         kind: NodeKind::FROZEN_VALUE.0,
         reason: error.to_string(),
     })
@@ -1479,7 +1484,7 @@ pub fn load_model_read(
     decoder: &mut GraphDecoder<'_>,
     node: NodeId,
 ) -> Result<super::ModelReadResult, GraphRefusal> {
-    serde_json::from_value(load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
+    decode_tree_value(&load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
         kind: NodeKind::FROZEN_VALUE.0,
         reason: error.to_string(),
     })

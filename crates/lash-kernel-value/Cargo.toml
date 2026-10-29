@@ -24,3 +24,6 @@ serde_json = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["arbitrary_precision"] }

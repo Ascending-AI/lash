@@ -15455,14 +15455,22 @@
           ]
         },
         "priority": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolViewPriority"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
       "type": "object"
+    },
+    "ToolViewPriority": {
+      "description": "A tool view's finite display priority. Construct it before admitting a view.",
+      "format": "double",
+      "type": "number"
     },
     "TransportSequence": {
       "description": "The transport sequence: each direction numbers its messages from zero,\none apart, so a dropped, duplicated or reordered message is refused.",
@@ -16470,7 +16478,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/turn-activity/v3",
+  "$id": "https://lash.dev/schemas/turn-activity/v4",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "App-facing semantic activity emitted during a turn.\n\n`id` is unique per emitted activity event. `correlation_id` groups related\nevents in the same logical activity, such as code start/completion, tool\nstart/completion, or text deltas from one output block.",
   "oneOf": [
@@ -17051,6 +17059,6 @@
   ],
   "title": "TurnActivity",
   "type": "object",
-  "x-lash-schema-version": 3,
+  "x-lash-schema-version": 4,
   "x-lash-version-constant": "TURN_ACTIVITY_SCHEMA_VERSION"
 }

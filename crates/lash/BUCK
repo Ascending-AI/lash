@@ -1895,43 +1895,43 @@ export_file(
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v3.d.ts",
-    src = "host-schemas/turn-activity/v3.d.ts",
+    name = "host-schemas/turn-activity/v4.d.ts",
+    src = "host-schemas/turn-activity/v4.d.ts",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v3.schema.json",
-    src = "host-schemas/turn-activity/v3.schema.json",
+    name = "host-schemas/turn-activity/v4.schema.json",
+    src = "host-schemas/turn-activity/v4.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-page-reply/v4.schema.json",
-    src = "host-schemas/worker-page-reply/v4.schema.json",
+    name = "host-schemas/worker-page-reply/v5.schema.json",
+    src = "host-schemas/worker-page-reply/v5.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-page-request/v4.schema.json",
-    src = "host-schemas/worker-page-request/v4.schema.json",
+    name = "host-schemas/worker-page-request/v5.schema.json",
+    src = "host-schemas/worker-page-request/v5.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-seal-batch/v4.schema.json",
-    src = "host-schemas/worker-seal-batch/v4.schema.json",
+    name = "host-schemas/worker-seal-batch/v5.schema.json",
+    src = "host-schemas/worker-seal-batch/v5.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-start/v4.schema.json",
-    src = "host-schemas/worker-start/v4.schema.json",
+    name = "host-schemas/worker-start/v5.schema.json",
+    src = "host-schemas/worker-start/v5.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )

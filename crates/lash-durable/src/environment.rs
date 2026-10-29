@@ -8,6 +8,10 @@
 //! (SKIP LOCKED) -> enqueue only. The relay later takes referrer/artifact locks.
 //! A peel never waits on an owner or an artifact. Permanent Retired rows prevent
 //! resurrection even after cleanup and graph bytes have disappeared.
+//!
+//! Round and head roots store JSON text beside their version anchor. Their
+//! graph identity promises the exact stored string, including whitespace and
+//! member order, not a semantic one-spelling identity for the typed environment.
 
 use crate::{ActorKey, DurableError, Epoch, StoreFailure, StoreFailureKind};
 use lash_core_store::checkpoint_graph::{GraphRefusal, GraphStaging, NodeId, NodeKind, TypedBody};

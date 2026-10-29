@@ -32,7 +32,7 @@ async fn mcp_view_preserves_order_and_filters_nonassistant_blocks() {
     assert!(
         matches!(&blocks[1], ToolViewBlock::ResourceLink { uri, name, mime_type, meta, .. }
         if uri == "file:///report" && name == "report" && mime_type.as_deref() == Some("text/plain")
-            && meta.priority.is_some_and(|priority| (priority - 0.7).abs() < 0.000001)
+            && meta.priority.is_some_and(|priority| (priority.get() - 0.7).abs() < 0.000001)
             && meta.last_modified.as_deref() == Some("2026-09-28T00:00:00+00:00")),
         "{:?}",
         blocks[1]

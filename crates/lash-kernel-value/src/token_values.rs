@@ -373,6 +373,47 @@ impl TokenCodec for OperationRequirement {
     }
 }
 
+/// JSON integers use the smallest integer token; every other number keeps
+/// Number's exact decimal spelling, including arbitrary-precision values.
+impl TokenCodec for serde_json::Number {
+    fn encode(&self, out: &mut TokenWriter) {
+        if let Some(value) = self.as_u64() {
+            out.sum(0, 1);
+            out.unsigned(value);
+        } else if let Some(value) = self.as_i64() {
+            out.sum(1, 1);
+            out.signed(value);
+        } else {
+            out.sum(2, 1);
+            out.text(&self.to_string());
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        match variant(input, |variant| (variant <= 2).then_some(1))? {
+            0 => Ok(Self::from(input.unsigned()?)),
+            1 => {
+                let value = input.signed()?;
+                if value >= 0 {
+                    return Err(invalid("a negative JSON integer is not negative"));
+                }
+                Ok(Self::from(value))
+            }
+            _ => {
+                let text = input.text()?;
+                let number: Self = text.parse().map_err(invalid)?;
+                if number.to_string() != text
+                    || number.as_u64().is_some()
+                    || number.as_i64().is_some()
+                {
+                    return Err(invalid("a JSON decimal is not its number's one spelling"));
+                }
+                Ok(number)
+            }
+        }
+    }
+}
+
 impl TokenCodec for serde_json::Value {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -383,16 +424,7 @@ impl TokenCodec for serde_json::Value {
             }
             Self::Number(number) => {
                 out.sum(2, 1);
-                if let Some(unsigned) = number.as_u64() {
-                    out.sum(0, 1);
-                    out.unsigned(unsigned);
-                } else if let Some(signed) = number.as_i64() {
-                    out.sum(1, 1);
-                    out.signed(signed);
-                } else {
-                    out.sum(2, 1);
-                    out.float(number.as_f64().unwrap_or(f64::NAN));
-                }
+                number.encode(out);
             }
             Self::String(text) => {
                 out.sum(3, 1);
@@ -425,27 +457,7 @@ impl TokenCodec for serde_json::Value {
             Ok(match number {
                 0 => Self::Null,
                 1 => Self::Bool(input.bool()?),
-                2 => Self::Number(
-                    match variant(input, |variant| (variant <= 2).then_some(1))? {
-                        0 => serde_json::Number::from(input.unsigned()?),
-                        1 => {
-                            let signed = input.signed()?;
-                            if signed >= 0 {
-                                return Err(invalid("a negative JSON integer is not negative"));
-                            }
-                            serde_json::Number::from(signed)
-                        }
-                        _ => {
-                            let float = input.float()?;
-                            let number = serde_json::Number::from_f64(float)
-                                .ok_or_else(|| invalid("a JSON number is not finite"))?;
-                            if number.as_u64().is_some() || number.as_i64().is_some() {
-                                return Err(invalid("a JSON float spells an integer"));
-                            }
-                            number
-                        }
-                    },
-                ),
+                2 => Self::Number(serde_json::Number::decode(input)?),
                 3 => Self::String(String::decode(input)?),
                 4 => Self::Array(Vec::decode(input)?),
                 _ => {
@@ -784,6 +796,33 @@ impl TokenCodec for crate::OperationSlot {
             (0, 1) => Ok(Self::Import(crate::ImportSlot::decode(input)?)),
             (1, 1) => Ok(Self::Helper(crate::HelperOperationId::decode(input)?)),
             _ => Err(invalid("unknown operation namespace or arity")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use crate::tokens::{decode_body, encode_body};
+
+    /// FIG-7554: unrestricted JSON numbers must survive storage without rounding.
+    #[test]
+    fn json_numbers_round_trip_exactly() {
+        for text in [
+            "18446744073709551617",
+            "-9223372036854775809",
+            "0.12345678901234567890123456789",
+            "1e400",
+            "1.00",
+            "18446744073709551615",
+            "-9223372036854775808",
+            "1.5",
+            "-0.0",
+        ] {
+            let original: serde_json::Value = serde_json::from_str(text).unwrap();
+            let decoded: serde_json::Value = decode_body(&encode_body(&original)).unwrap();
+            assert_eq!(decoded, original, "{text}");
         }
     }
 }

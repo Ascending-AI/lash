@@ -63,6 +63,14 @@ bytes. Canonical structure and decode limits are checked at the boundary.
 Shape edits during the pre-1.0 freeze change shapes in place, with no
 version bump or upcaster.
 
+JSON-text roots retain the exact stored string as their identity. In
+`ModelCallFact` and the round/head environment roots, whitespace and member
+order may produce different graph nodes for equivalent typed records. These
+roots do not promise semantic one-spelling identity and do not reject an
+otherwise valid record for its JSON text spelling. Typed JSON value-tree
+payloads retain their decode/re-encode one-spelling check.
+
+
 Reclamation remains host policy under ADR 0014 and ADR 0023. The root supplies
 reachability; it does not choose a retention horizon.
 

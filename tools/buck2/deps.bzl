@@ -1518,7 +1518,8 @@ PACKAGE_DEPS = {
     "lash-internal-vocabulary": {
         "build": {},
         "dev": {
-            "proptest": "//third-party/rust:p0250"
+            "proptest": "//third-party/rust:p0250",
+            "serde_json": "//third-party/rust:p0321"
         },
         "normal": {
             "blake3": "//third-party/rust:p0032",
@@ -1773,7 +1774,9 @@ PACKAGE_DEPS = {
     },
     "lash-kernel-value": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "serde_json": "//third-party/rust:p0321"
+        },
         "normal": {
             "blake3": "//third-party/rust:p0032",
             "jsonschema": "//third-party/rust:p0184",
