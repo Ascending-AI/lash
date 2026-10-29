@@ -85,6 +85,7 @@ macro_rules! operations {
         pub(super) enum Opcode {
             Begin,
             Collection,
+            Operator,
             $( $hot, )*
             $( $hot_tuple, )*
             $( $name, )*
@@ -94,6 +95,12 @@ macro_rules! operations {
 
         pub(super) mod sites {
             use super::*;
+            pub(in crate::machine::islands) struct Operator {
+                pub(in crate::machine::islands) site: Box<OperatorSite>,
+                pub(in crate::machine::islands) inputs: OperatorInputs,
+                pub(in crate::machine::islands) covered: bool,
+                pub(in crate::machine::islands) to: Destination,
+            }
             $( pub(in crate::machine::islands) struct $name {
                 $( pub(in crate::machine::islands) $field: $ty, )*
             } )*
@@ -105,6 +112,7 @@ macro_rules! operations {
         #[derive(Default)]
         pub(super) struct Sites {
             pub(super) begin: Vec<StatementEntry>,
+            pub(super) operator: Vec<sites::Operator>,
             pub(super) collection: Vec<(std::sync::Arc<CollectionStep>, bool)>,
             $( pub(super) $table: Vec<sites::$name>, )*
             $( pub(super) $tuple_table: Vec<sites::$tuple>, )*
@@ -118,6 +126,10 @@ macro_rules! operations {
                 $( for record in &self.sites.$tuple_table {
                     check_tuple!($tuple, record, stream);
                 } )*
+                for record in &self.sites.operator {
+                    record.site.verify(stream)?;
+                    record.to.verify(stream)?;
+                }
                 self.verify_roles(stream)
             }
 
@@ -152,6 +164,27 @@ macro_rules! operations {
 
 operations! {
     inputs {
+        Operator {
+            site: Box<OperatorSite>,
+            args: Box<[u32]>,
+            covered: bool,
+            to: Destination,
+        }
+
+        Unary {
+            site: Box<OperatorSite>,
+            arg: Operand,
+            covered: bool,
+            to: Destination,
+        }
+        Binary {
+            site: Box<OperatorSite>,
+            left: Operand,
+            right: Operand,
+            covered: bool,
+            to: Destination,
+        }
+
         MemberAccess {
             site: HeapSite,
             args: Box<[u32]>,
@@ -271,27 +304,6 @@ operations! {
             covered: bool,
             reg: u32,
         }
-        Operator operator {
-            site: Box<OperatorSite>,
-            args: Box<[u32]>,
-            covered: bool,
-            to: Destination,
-        }
-
-        Unary unary {
-            site: Box<OperatorSite>,
-            arg: Operand,
-            covered: bool,
-            to: Destination,
-        }
-        Binary binary {
-            kernel: lash_kernel_doc::scalar::Pair,
-            site: Box<OperatorSite>,
-            left: Operand,
-            right: Operand,
-            covered: bool,
-            to: Destination,
-        }
         Native native {
             site: NativeSite,
             args: Box<[u32]>,
@@ -404,6 +416,19 @@ operations! {
     units { EndLoop }
 }
 
+/// Fixed scalar placements use the canonical operator packet and library
+/// kernel facts. They carry no second runtime site or copied native kernel.
+pub(super) enum OperatorInputs {
+    Registers(Box<[u32]>),
+    Source(Box<[Read]>),
+    Scalar(ScalarInputs),
+}
+
+pub(super) enum ScalarInputs {
+    Unary(Operand),
+    Binary([Operand; 2]),
+}
+
 /// Source-certified resident selection at an ordinary heap call. Arguments,
 /// fallback, recovery and result installation belong to that single call.
 pub(crate) enum HeapKernel {
@@ -436,6 +461,25 @@ pub(super) struct Code {
     pub(super) inputs: Vec<Box<[Read]>>,
 }
 
+/// Every compiler selection and final publication uses this address map.
+/// Source recovery coordinates are carried by the descriptors, never decoded
+/// from a removed predecessor operation.
+pub(super) fn relocate(ops: &mut [Instruction], blocks: &mut [Block], mapping: &[usize]) {
+    for instruction in ops {
+        instruction.op.addresses(&mut |at| *at = mapping[*at]);
+        if let Some(kernel) = &mut instruction.kernel {
+            kernel.addresses(&mut |at| *at = mapping[*at]);
+        }
+    }
+    for block in blocks {
+        for start in &mut block.starts {
+            *start = mapping[*start];
+        }
+        block.end = mapping[block.end];
+        block.after = mapping[block.after];
+    }
+}
+
 impl Code {
     pub(super) fn lower(ops: &mut Vec<Instruction>, blocks: &mut [Block]) -> Option<Self> {
         let mut relocation = Vec::with_capacity(ops.len() + 1);
@@ -449,19 +493,7 @@ impl Code {
         }
         relocation.push(length);
         u32::try_from(length).ok()?;
-        for instruction in ops.iter_mut() {
-            instruction.op.addresses(&mut |at| *at = relocation[*at]);
-            if let Some(kernel) = &mut instruction.kernel {
-                kernel.addresses(&mut |at| *at = relocation[*at]);
-            }
-        }
-        for block in blocks {
-            for start in &mut block.starts {
-                *start = relocation[*start];
-            }
-            block.end = relocation[block.end];
-            block.after = relocation[block.after];
-        }
+        relocate(ops, blocks, &relocation);
         let mut code = Self::default();
         for instruction in std::mem::take(ops) {
             if let Some(begin) = instruction.begin {
@@ -508,6 +540,38 @@ impl Code {
     /// register operands. No direct-input operation survives publication.
     fn input_packet(&mut self, op: Op) -> Option<Packet> {
         let (opcode, x, reads) = match op {
+            Op::Unary {
+                site,
+                arg,
+                covered,
+                to,
+            } => {
+                return self.scalar_packet(site, ScalarInputs::Unary(arg), covered, to);
+            }
+            Op::Binary {
+                site,
+                left,
+                right,
+                covered,
+                to,
+            } => {
+                return self.scalar_packet(site, ScalarInputs::Binary([left, right]), covered, to);
+            }
+            Op::Operator {
+                site,
+                args,
+                covered,
+                to,
+            } => {
+                let x = u32::try_from(self.sites.operator.len()).ok()?;
+                self.sites.operator.push(sites::Operator {
+                    site,
+                    inputs: OperatorInputs::Registers(args),
+                    covered,
+                    to,
+                });
+                (Opcode::Operator, x, None)
+            }
             Op::MemberAccess {
                 site,
                 args,
@@ -555,11 +619,11 @@ impl Code {
                 let x = u32::try_from(self.sites.operator.len()).ok()?;
                 self.sites.operator.push(sites::Operator {
                     site,
-                    args: Box::default(),
+                    inputs: OperatorInputs::Source(reads),
                     covered,
                     to,
                 });
-                (Opcode::Operator, x, Some(reads))
+                (Opcode::Operator, x, None)
             }
             Op::DirectNative { site, reads } => {
                 let x = u32::try_from(self.sites.native.len()).ok()?;
@@ -594,6 +658,29 @@ impl Code {
             dst: 0,
             x,
             y,
+        })
+    }
+
+    fn scalar_packet(
+        &mut self,
+        site: Box<OperatorSite>,
+        scalar: ScalarInputs,
+        covered: bool,
+        to: Destination,
+    ) -> Option<Packet> {
+        let x = u32::try_from(self.sites.operator.len()).ok()?;
+        self.sites.operator.push(sites::Operator {
+            site,
+            inputs: OperatorInputs::Scalar(scalar),
+            covered,
+            to,
+        });
+        Some(Packet {
+            opcode: Opcode::Operator,
+            mode: 0,
+            dst: 0,
+            x,
+            y: 0,
         })
     }
 

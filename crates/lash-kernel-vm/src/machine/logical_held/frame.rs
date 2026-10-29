@@ -207,6 +207,42 @@ impl KernelMachine {
         }
         Ok(())
     }
+    /// Packet reconstruction installs the same saved operand owners that
+    /// source capture transfers out of its register bank.
+    pub(in crate::machine) fn logical_flush_continuation(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+    ) -> Result<(), Halt> {
+        let frame = self.frame(task)?;
+        let (Some(roots), Some(pending), Some(stmt), Some(act)) = (
+            &frame.logical,
+            frame.pending.peek(),
+            frame.awaiting,
+            frame.nested,
+        ) else {
+            return Ok(());
+        };
+        let entry = &exe.statement(stmt).0.nested[act.ix()];
+        if pending.site != entry.suffix || pending.roles.len() != entry.roles.len() {
+            return Err(
+                HeapFault::Malformed("source continuation has another role map".into()).into(),
+            );
+        }
+        let bank = roots.bank()?;
+        for source in &entry.roles {
+            let saved = pending
+                .roles
+                .iter()
+                .find(|saved| saved.site == source.suffix)
+                .ok_or_else(|| {
+                    HeapFault::Malformed("source continuation role is missing".into())
+                })?;
+            bank.acquire(bank.continuation(&source.site)?, saved.value);
+        }
+        Ok(())
+    }
+
     pub(in crate::machine) fn logical_enter_frame(
         &mut self,
         task: TaskId,

@@ -25,15 +25,7 @@ pub(super) fn frame(
                 }) => {}
         _ => return Err(malformed("frame code is not in its defining Link").into()),
     }
-    let code_id = (0..=site.path.len())
-        .rev()
-        .find_map(|length| {
-            exe.code_at(
-                &Site::new(site.unit.clone(), &site.path[..length]),
-                &record.capture_names,
-            )
-        })
-        .ok_or_else(|| malformed("a frame has no admitted code body"))?;
+    let code_id = code_of(record, exe, access)?;
     let code = exe.code(code_id);
     let pending = match &record.pending {
         Some(pending) => Some(Pending {
@@ -378,6 +370,28 @@ mod laws {
             })
             .unwrap();
         let (key, binding, id) = captured.expect("the source capture has a borrowed row");
+        assert!(
+            original.created.is_some(),
+            "a lexical frame retains its creation site"
+        );
+        for created in [
+            None,
+            Some(SiteRef::new(&Site::new(Unit::Main, vec![999]), &access).unwrap()),
+        ] {
+            let mut forged = original.clone();
+            forged.created = created;
+            assert!(
+                frame(
+                    &forged,
+                    Arrival::Requested,
+                    &access,
+                    &exe,
+                    &mut Arena::new()
+                )
+                .is_err(),
+                "a substituted lexical source was accepted"
+            );
+        }
         assert!(
             frame(
                 &original,

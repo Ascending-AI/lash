@@ -183,9 +183,8 @@ fn linear_text_accumulators_keep_every_version_they_extend() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// FIG-7472 / K-CHG-007 / PLAN-INDEP: shallow bulk copies preserve the
-/// body's charge and held bytes, including holes and shared nested lists.
-/// A known-length copy executes a bounded number of helper statements.
+/// FIG-7472 / K-CHG-007 / PLAN-INDEP: copies through the shared packet body
+/// preserve charge and held bytes, including holes and shared nested lists.
 #[test]
 fn bulk_array_copies_keep_charge_and_held_bytes() {
     let runner = crate::helper_plans::runner::Runner::new("typescript").unwrap();
@@ -220,37 +219,37 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
             .map(|i| Datum::Int(i.into()))
             .collect::<Vec<_>>()
     };
-    for (name, body, expected, bulk) in [
+    for (name, body, expected) in [
         ("concat holes and nested aliases",
          "let nested = [7] let out = invoke ts.array.concat([(), nested], [[absent, (), nested], 3]) set nested[0] = 9 return out".to_owned(),
-         Datum::List(vec![Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Absent, Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Int(3.into())]), true),
+         Datum::List(vec![Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Absent, Datum::Tuple(vec![]), Datum::List(vec![Datum::Int(9.into())]), Datum::Int(3.into())])),
         ("concat immutable comparison",
          "let out = invoke ts.array.concat([(1, 2)], [[]]) return out".to_owned(),
-         Datum::List(vec![Datum::Tuple(vec![Datum::Int(1.into()), Datum::Int(2.into())])]), true),
+         Datum::List(vec![Datum::Tuple(vec![Datum::Int(1.into()), Datum::Int(2.into())])])),
         ("concat non-array argument",
          "let out = invoke ts.array.concat([1], [{x: 2}]) return out".to_owned(),
-         Datum::List(vec![Datum::Int(1.into()), Datum::Record(vec![("x".into(), Datum::Int(2.into()))])]), false),
+         Datum::List(vec![Datum::Int(1.into()), Datum::Record(vec![("x".into(), Datum::Int(2.into()))])])),
         ("concat large", format!("{build} let out = invoke ts.array.concat(big, [[1, 2]]) return out"),
-         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect())),
         ("concat nursery turnover",
          "let acc = [] let i = 0 while num.lt(i, 96) { let next = invoke ts.array.concat(acc, [[1, 2]]) set acc = next set i = num.add(i, 1) } return acc".to_owned(),
-         Datum::List((0..96).flat_map(|_| [Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+         Datum::List((0..96).flat_map(|_| [Datum::Int(1.into()), Datum::Int(2.into())]).collect())),
         ("spread operand snapshots",
          "let xs = [1] let first = invoke ts.array.spread(xs) set xs[0] = 9 let second = invoke ts.array.spread(xs) return ts.spread([first, second])".to_owned(),
-         Datum::List(vec![Datum::Int(1.into()), Datum::Int(9.into())]), true),
+         Datum::List(vec![Datum::Int(1.into()), Datum::Int(9.into())])),
         ("spread holes",
          "let out = invoke ts.array.spread([(), [7], absent]) return out".to_owned(),
-         Datum::List(vec![Datum::Absent, Datum::List(vec![Datum::Int(7.into())]), Datum::Absent]), true),
+         Datum::List(vec![Datum::Absent, Datum::List(vec![Datum::Int(7.into())]), Datum::Absent])),
         ("dense large", format!("{build} let out = invoke ts.array.dense(big) return out"),
-         Datum::List(large_values()), true),
+         Datum::List(large_values())),
         ("spread nested dense large", format!("{build} let out = invoke ts.array.spread(big) return out"),
-         Datum::List(large_values()), true),
+         Datum::List(large_values())),
         ("spread large", format!("{build} let out = invoke ts.spread([big, [1, 2]]) return out"),
-         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect())),
         ("slice large", format!("return list.slice([{large}], 63, 130)"),
-         Datum::List((63..130).map(|i| Datum::Int(i.into())).collect()), true),
+         Datum::List((63..130).map(|i| Datum::Int(i.into())).collect())),
         ("list plus", format!("{build} return list.concat(big, [1, 2])"),
-         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect()), true),
+         Datum::List(large_values().into_iter().chain([Datum::Int(1.into()), Datum::Int(2.into())]).collect())),
     ] {
         let text = format!("kernel 1\nnumbers by_spelling\nmain {{ {body} }}");
         let document = crate::document_fixture::authored(&text, base.library.registry());
@@ -263,7 +262,7 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
         reference_case.name.push_str(" reference");
         let reference = finished::<3>(&bodies, &reference_case, u64::MAX);
         assert_eq!(reference.0, ExpectedEnd::Finished(expected), "{name}");
-        let (actual, census) = crate::projection::counted(|| finished::<0>(&natural, &case, u64::MAX));
+        let actual = finished::<0>(&natural, &case, u64::MAX);
         assert_eq!(actual, reference, "{name}: value, charge and held bytes");
         if matches!(name, "concat holes and nested aliases" | "spread holes") {
             for limit in [30, reference.1.unwrap() / 2, reference.1.unwrap()] {
@@ -286,11 +285,6 @@ fn bulk_array_copies_keep_charge_and_held_bytes() {
                 }
             }
             assert_eq!(finished::<0>(&natural, &case, 7), reference, "{name} at slice 7");
-        }
-        if bulk {
-            let statements: u64 = census.statements.values().sum();
-            let limit = if name == "concat nursery turnover" { 2000 } else { 100 };
-            assert!(statements < limit, "{name}: a bulk copy executes no per-element helper loop: {census:?}");
         }
     }
 }

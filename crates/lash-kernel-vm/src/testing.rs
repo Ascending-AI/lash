@@ -52,6 +52,22 @@ pub fn take_packet_counts(machine: &mut KernelMachine) -> (u64, u64) {
     machine.take_packet_counts()
 }
 
+/// The source ledger's entity bytes, root/control bytes and entity count.
+/// Physical residency and saved capacity floors do not participate.
+///
+/// # Errors
+/// The source ledger could not read its authenticated balance.
+pub fn owner_balance(
+    machine: &KernelMachine,
+) -> Result<[u64; 3], lash_kernel_doc::heap::HeapFault> {
+    let balance = machine.logical_balance()?;
+    Ok([
+        balance.entity_local_bytes,
+        balance.root_and_control_bytes,
+        balance.entities,
+    ])
+}
+
 /// Seals and reads the canonical cold equality domain at a legal boundary.
 ///
 /// # Errors

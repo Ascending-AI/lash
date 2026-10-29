@@ -152,6 +152,26 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         handoff
     }
 
+    /// A returned resident root keeps its source bindings until its caller
+    /// closes the completion formula, including a refusal at that close.
+    pub(in crate::machine::islands) fn project_return(
+        &mut self,
+        active: &mut Frame<'e>,
+        state: &mut crate::machine::Frame,
+    ) {
+        let mut slab = std::mem::take(&mut self.scratch.slab);
+        let mut values = slab.view(active);
+        if let Some(returned) = values.state.returned {
+            self.restore_expression_scopes(values.slots, returned.statement, returned.pc);
+        }
+        for (at, slot) in values.slots.iter().enumerate() {
+            state.set_slot(at as u32, *slot);
+        }
+        self.recycle(&mut values);
+        slab.release(active);
+        self.scratch.slab = slab;
+    }
+
     /// A resident root already has a semantic owner. Project directly into
     /// that owner before releasing the borrow and running the scheduler.
     fn handoff_values(
@@ -165,14 +185,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         state.link = active.state.callee.link;
         state.control.replace(
-            active.state.control.iter().map(|position| {
-                let mut control = Control::Block {
-                    block: active.state.callee.compiled.blocks[0].id,
-                    next: 0,
-                };
-                position.project(active.state.callee.compiled, &active.pending, &mut control);
-                control
-            }).collect(),
+            active
+                .state
+                .control
+                .iter()
+                .map(|position| {
+                    let mut control = Control::Block {
+                        block: active.state.callee.compiled.blocks[0].id,
+                        next: 0,
+                    };
+                    position.project(active.state.callee.compiled, &active.pending, &mut control);
+                    control
+                })
+                .collect(),
         );
         let Some(stmt) = active.state.statement else {
             unreachable!("a scheduler handoff has a statement");

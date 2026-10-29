@@ -287,7 +287,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         #[cfg(not(any(test, feature = "perf-witness")))]
         let answer = self.execute_program(active, &mut slab);
-        if !active.handoff {
+        if !active.handoff && !(active.resident && answer.is_ok()) {
             slab.clear();
         }
         self.scratch.slab = slab;
@@ -324,7 +324,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 && watching.sites()
                 && matches!(
                     packet.opcode,
-                    Opcode::Call | Opcode::Operator | Opcode::Unary | Opcode::Binary | Opcode::Heap
+                    Opcode::Call | Opcode::Operator | Opcode::Heap
                 )
             {
                 let mut loops = Vec::new();
@@ -446,6 +446,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         && let Some(sampling) = self.sampling
                     {
                         sampling.pop();
+                    }
+                    if active.resident && callers.is_empty() {
+                        // Its source frame still owns the bindings through
+                        // completion charging. Transfer them before recycling.
+                        self.depth = 0;
+                        return Ok(value);
                     }
                     slots -= active.bindings.len();
                     self.recycle(&mut slab.view(active));

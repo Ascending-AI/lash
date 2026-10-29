@@ -579,6 +579,10 @@ impl KernelMachine {
         } else {
             result
         };
+        // The popped frame still owns its arguments and departure until
+        // its completion formula closes. Resolve queued native values
+        // before a charge refusal can release their physical storage.
+        self.logical_flush()?;
         self.refresh_charging(task)?;
         if self.charging
             && let Some(call) = &frame.library

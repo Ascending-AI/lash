@@ -1019,7 +1019,7 @@ const LAW_COPY_SNAPSHOT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: law_copy_snapshot,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: Some(law_copy_snapshot_bulk), depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `law.copy_snapshot`.
@@ -1107,7 +1107,6 @@ fn law_copy_snapshot(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
     Ok(Value::Null)
 }
 static LAW_COPY_SNAPSHOT_COPY: p::CopyLoop = p::CopyLoop { kind: p::CopyKind::Dense, read: p::ElementPath { operation: p::Element::Read, depth: 5, room: 3, requires: &[p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },] }, read_units: 13, loop_units: 2, temporary_values: 12 };
-fn law_copy_snapshot_bulk(heap: &mut dyn p::TemplateHeap, args: &[Value], _: &[lash_kernel_doc::PreparedNative]) -> Option<Value> { heap.copy(args, &LAW_COPY_SNAPSHOT_COPY) }
 
 const TS_ARRAY_DENSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.dense",

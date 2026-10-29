@@ -301,6 +301,7 @@ struct Island<'a, const OBSERVING: bool> {
     stream: &'a Stream,
     /// The run's arena: a closure whose code a call finds keeps it there.
     arena: &'a mut Arena,
+    pages: lash_kernel_state::kernel_internals::tree::Access<'static>,
     /// The machine's property caches, which a field read reads and keeps
     /// as the reference's does.
     sites: &'a mut SiteCaches,
@@ -337,9 +338,6 @@ struct Island<'a, const OBSERVING: bool> {
     memory: bool,
     /// Entry nursery and outstanding per-statement native/construction credit.
     ceiling: u64,
-    /// A certified whole-copy operation may use the remaining entry room,
-    /// after reserving the separately admitted physical frames.
-    copy_ceiling: u64,
     transient: u64,
     /// Live physical register windows share the statement/nursery allowance.
     register_bytes: u64,

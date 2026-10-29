@@ -42,7 +42,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame.regs[site.read.reg as usize] = value;
         let answer = self.numeric_binary(
             frame,
-            site.pair,
             &site.scalar,
             (&site.left, &site.right),
             site.covered,

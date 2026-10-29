@@ -43270,7 +43270,7 @@ const TS_ARRAY_DENSE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_dense,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: Some(ts_array_dense_bulk), depth: 6, writes: false, copy: Some(&TS_ARRAY_DENSE_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 6, writes: false, copy: Some(&TS_ARRAY_DENSE_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.dense`.
@@ -43358,7 +43358,6 @@ fn ts_array_dense(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
     Ok(Value::Null)
 }
 static TS_ARRAY_DENSE_COPY: p::CopyLoop = p::CopyLoop { kind: p::CopyKind::Dense, read: p::ElementPath { operation: p::Element::Read, depth: 6, room: 4, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },] }, read_units: 64, loop_units: 2, temporary_values: 13 };
-fn ts_array_dense_bulk(heap: &mut dyn p::TemplateHeap, args: &[Value], _: &[lash_kernel_doc::PreparedNative]) -> Option<Value> { heap.copy(args, &TS_ARRAY_DENSE_COPY) }
 
 const TS_ARRAY_SPREAD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.spread",
@@ -44702,7 +44701,7 @@ const TS_ARRAY_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_concat,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: Some(ts_array_concat_bulk), depth: 6, writes: false, copy: Some(&TS_ARRAY_CONCAT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 6, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 6, writes: false, copy: Some(&TS_ARRAY_CONCAT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
 };
 
 /// `ts.array.concat`.
@@ -44872,7 +44871,6 @@ fn ts_array_concat(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
     Ok(Value::Null)
 }
 static TS_ARRAY_CONCAT_COPY: p::CopyLoop = p::CopyLoop { kind: p::CopyKind::Concat, read: p::ElementPath { operation: p::Element::Read, depth: 6, room: 4, requires: &[p::NativeRequirement { function: p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::List)) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::ToFloat) },p::NativeRequirement { function: p::function("affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Lt)) },p::NativeRequirement { function: p::function("b34ff8a8da17b26e6bfea66942e4ce80eec31038aa5fd3440c206e32cbe317c9"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Le)) },p::NativeRequirement { function: p::function("cc28b6a5a626a73e1953dc4b5377125e4735a7f089dfffadd1cb1701294ce2c5"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Floor) },p::NativeRequirement { function: p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Eq)) },p::NativeRequirement { function: p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Numeric(lash_kernel_doc::scalar::ScalarOp::Add)) },p::NativeRequirement { function: p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Not) },] }, read_units: 64, loop_units: 0, temporary_values: 12 };
-fn ts_array_concat_bulk(heap: &mut dyn p::TemplateHeap, args: &[Value], _: &[lash_kernel_doc::PreparedNative]) -> Option<Value> { heap.copy(args, &TS_ARRAY_CONCAT_COPY) }
 
 const TS_ARRAY_FILL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.array.fill",

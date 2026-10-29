@@ -82,6 +82,13 @@ pub(super) fn scan_checkpoint(
                 let site = frame.statement.resolve(heap.pages())?;
                 scan.code.frames.insert((frame.link, site.unit.clone()));
                 scan.code.sites.insert((frame.link, site.as_ref().clone()));
+                if let Some(created) = &frame.created {
+                    let created = created.resolve(heap.pages())?;
+                    scan.code.frames.insert((frame.link, created.unit.clone()));
+                    scan.code
+                        .sites
+                        .insert((frame.link, created.as_ref().clone()));
+                }
                 if let Some(convention) = &frame.convention {
                     for target in convention.targets() {
                         match target {

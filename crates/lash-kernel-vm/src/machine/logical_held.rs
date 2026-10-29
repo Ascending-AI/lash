@@ -33,7 +33,7 @@ impl KernelMachine {
         &self.heap
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn logical_balance(
         &self,
     ) -> Result<lash_kernel_state::kernel_internals::logical::Balance, HeapFault> {

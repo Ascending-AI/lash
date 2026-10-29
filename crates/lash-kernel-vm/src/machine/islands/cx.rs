@@ -28,7 +28,6 @@ use crate::compile::{
     inner_entry as inner,
 };
 mod collections;
-mod copies;
 mod meter;
 mod texts;
 pub(super) use texts::{append_long_text, append_text};
@@ -61,7 +60,6 @@ pub(crate) struct Cx<'a> {
     /// held at the region's entry and the nursery the capacity meter's
     /// headroom admitted there (§3.5). Within it no verdict refuses.
     pub(crate) ceiling: u64,
-    pub(crate) copy_ceiling: u64,
     /// What the running statement sets aside of the room until it ends:
     /// its native calls' work; while a construction collects its members,
     /// the least it will hold; and the bound of the write it holds.
@@ -921,10 +919,6 @@ impl TemplateMeter for HeapCx<'_, '_> {
 }
 
 impl TemplateHeap for HeapCx<'_, '_> {
-    fn copy(&mut self, args: &[Value], path: &lash_kernel_doc::plan::CopyLoop) -> Option<Value> {
-        self.copy_loop(args, path)
-    }
-
     fn call(&mut self, callee: usize, args: &[Value]) -> Option<Value> {
         if self.cx.held.is_some() || self.cx.concatenated() {
             return None;

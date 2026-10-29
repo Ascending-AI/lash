@@ -111,14 +111,9 @@ fn operator<'a>(site: &OperatorSite, source: &'a Expr) -> Option<&'a [Expr]> {
     .then_some(args)
 }
 
-fn scalar_kernel(
-    site: &OperatorSite,
-    pair: lash_kernel_doc::scalar::Pair,
-    exe: &Executable,
-) -> bool {
+fn scalar_kernel(site: &OperatorSite, exe: &Executable) -> bool {
     let lib = exe.lib(site.lib);
-    crate::compile::numeric_pair(lib, site.checked)
-        .is_some_and(|canonical| canonical.ints == pair.ints && canonical.floats == pair.floats)
+    crate::compile::numeric_pair(lib, site.checked).is_some()
         && lib
             .specialization
             .prepared
@@ -167,7 +162,7 @@ fn read_charge(site: &Update, exe: &Executable) -> bool {
 
 impl Update {
     fn source(&self, plan: &IslandPlan, exe: &Executable) -> Option<()> {
-        if !scalar_kernel(&self.scalar, self.pair, exe) || !read_charge(self, exe) {
+        if !scalar_kernel(&self.scalar, exe) || !read_charge(self, exe) {
             return None;
         }
         let value = written(&self.write, plan)?;

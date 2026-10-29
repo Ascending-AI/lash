@@ -20,7 +20,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let values = site.items.iter().map(|reg| frame.regs[*reg as usize]);
         let answer = self.make(site.make, values);
         frame.state.transient += self.transient.saturating_sub(before);
-        frame.regs[site.reg as usize] = answer.ok_or_else(|| self.at(site.miss))?;
+        let value = answer.ok_or_else(|| self.at(site.miss))?;
+        frame.regs[site.reg as usize] = self.source_result(value)?;
         Ok(Next::Continue)
     }
 

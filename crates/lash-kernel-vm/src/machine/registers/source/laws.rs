@@ -102,6 +102,48 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         matches!(registers[3], Value::Int(11)),
         "the physical mirror can remain initialized"
     );
+    // A protocol's open call takes the iterable's source owner. ForIn
+    // completion must acknowledge that transfer exactly once.
+    let protocol = Stream {
+        ops: vec![Op::ForIn { iterable: Reg(3) }],
+        source_sites: vec![Some(Arc::clone(&result))],
+        ..Default::default()
+    };
+    owners
+        .complete(&stream, 1, &registers, &projection)
+        .unwrap();
+    let _ = owners.take_arguments(3, 1);
+    assert!(
+        owners.is_empty(),
+        "a transferred operand is no longer a source holding"
+    );
+    owners
+        .complete(&protocol, 0, &registers, &projection)
+        .unwrap();
+    assert!(
+        owners
+            .complete(&protocol, 0, &registers, &projection)
+            .is_err(),
+        "a source transfer cannot complete twice"
+    );
+    owners
+        .complete(&stream, 1, &registers, &projection)
+        .unwrap();
+    let _ = owners.take_arguments(3, 1);
+    assert!(
+        owners
+            .complete(&consume, 0, &registers, &projection)
+            .is_err(),
+        "an ordinary binding cannot consume a call transfer"
+    );
+    owners.clear();
+    owners.active = true;
+    assert!(
+        owners
+            .complete(&protocol, 0, &registers, &projection)
+            .is_err(),
+        "a transfer receipt cannot survive its source bank"
+    );
     let mut live = crate::laws::embedder::Embedder::new(
         "main {
 if true {

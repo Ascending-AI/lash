@@ -201,6 +201,10 @@ pub fn checkpoint(
             frame_index += 1;
             r.put(&frame.link);
             r.put(&frame.capture_names);
+            r.put(&frame.created.is_some());
+            if let Some(created) = &frame.created {
+                r.put(created.resolve(r.heap.pages())?.as_ref());
+            }
             r.put(&frame.convention);
             r.put(&frame.public_result);
             r.put(site.as_ref());

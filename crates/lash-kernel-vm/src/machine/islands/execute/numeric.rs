@@ -96,7 +96,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     pub(super) fn numeric_binary(
         &mut self,
         frame: &mut Values<'_, 'e>,
-        kernel: lash_kernel_doc::scalar::Pair,
         site: &OperatorSite,
         (left, right): (&Operand, &Operand),
         covered: bool,
@@ -107,7 +106,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             self.scratch.exit.regs.push((left.reg(), x));
         })?;
         let answer = if !OBSERVING {
-            let typed = super::super::compiled::typed(site, &kernel, x, y, self.charging, self.exe);
+            let typed = site.pair(self.exe).and_then(|kernel| {
+                super::super::compiled::typed(site, &kernel, x, y, self.charging, self.exe)
+            });
             typed.and_then(|(value, units)| self.numeric_charge(site, value, units, covered))
         } else {
             None

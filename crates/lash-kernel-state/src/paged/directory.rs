@@ -440,6 +440,9 @@ pub mod execution {
     pub struct FrameRecord {
         pub invocation: u64,
         pub capture_names: Vec<lash_kernel_value::names::Name>,
+        /// The lexical creation site of a lifted closure body. Its standalone
+        /// function compilation has different ownership of free variables.
+        pub created: Option<SiteRef>,
         pub convention: Option<lash_kernel_doc::StartConvention>,
         pub public_result: Option<lash_kernel_value::types::Type>,
         pub link: lash_kernel_value::content_ids::LinkId,
@@ -509,6 +512,7 @@ pub mod execution {
             Self {
                 invocation: 0,
                 capture_names: Vec::new(),
+                created: None,
                 link,
                 convention: None,
                 public_result: None,
@@ -683,6 +687,11 @@ pub mod execution {
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
             self.capture_names == other.capture_names
+                && match (&self.created, &other.created) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_version(b),
+                    _ => false,
+                }
                 && self.link == other.link
                 && self.convention == other.convention
                 && self.public_result == other.public_result
@@ -735,6 +744,9 @@ pub mod execution {
         }
         fn children(&self, out: &mut Vec<PageRef>) {
             self.statement.children(out);
+            if let Some(created) = &self.created {
+                created.children(out);
+            }
             self.bindings.children(out);
             self.loops.children(out);
             self.finally.children(out);
@@ -749,6 +761,9 @@ pub mod execution {
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
             self.statement.grants(children)?;
+            if let Some(created) = &mut self.created {
+                created.grants(children)?;
+            }
             self.bindings.grants(children)?;
             self.loops.grants(children)?;
             self.finally.grants(children)?;
@@ -855,9 +870,10 @@ pub mod execution {
     }
     impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(13);
+            out.seq(14);
             self.invocation.encode(out);
             self.capture_names.encode(out);
+            self.created.encode(out);
             self.link.encode(out);
             self.convention.encode(out);
             self.public_result.encode(out);
@@ -871,10 +887,11 @@ pub mod execution {
             self.pending.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(13)?;
+            input.expect_struct(14)?;
             Ok(Self {
                 invocation: input.unsigned()?,
                 capture_names: Vec::<lash_kernel_value::names::Name>::decode(input)?,
+                created: Option::<SiteRef>::decode(input)?,
                 link: lash_kernel_value::content_ids::LinkId::decode(input)?,
                 convention: Option::<lash_kernel_doc::StartConvention>::decode(input)?,
                 public_result: Option::<lash_kernel_value::types::Type>::decode(input)?,

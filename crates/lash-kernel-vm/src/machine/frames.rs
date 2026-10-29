@@ -50,6 +50,41 @@ fn malformed(problem: impl Into<String>) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
 
+/// Resolve the exact source compilation of a saved frame. A lifted closure
+/// must use the lexical body that owns its borrowed captures.
+pub(super) fn code_of(
+    record: &FrameRecord,
+    exe: &Executable,
+    access: &Access<'_>,
+) -> Result<crate::compile::CodeId, HeapFault> {
+    let site = record.statement.resolve(access)?;
+    if let Some(created) = &record.created {
+        let Unit::Library(function) = site.unit else {
+            return Err(malformed("a closure frame has no function identity"));
+        };
+        let created = created.resolve(access)?;
+        return exe
+            .closure_at(&function, &created, &record.capture_names)
+            .filter(|code| {
+                let compiled = exe.code(*code);
+                compiled.created.as_ref() == Some(created.as_ref())
+                    && compiled.site.unit == site.unit
+                    && site.path.starts_with(&compiled.site.path)
+            })
+            .ok_or_else(|| malformed("a frame has no admitted lexical body"));
+    }
+    (0..=site.path.len())
+        .rev()
+        .find_map(|length| {
+            exe.code_at(
+                &Site::new(site.unit.clone(), &site.path[..length]),
+                &record.capture_names,
+            )
+            .filter(|code| exe.code(*code).created.is_none())
+        })
+        .ok_or_else(|| malformed("a frame has no admitted code body"))
+}
+
 /// How a task in `state` comes to its top frame.
 pub(super) fn arrival(state: &TaskStateRecord) -> Arrival {
     match state {
@@ -430,6 +465,13 @@ impl Frame {
     ) -> Result<bool, HeapFault> {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
+        if !self.owned {
+            stored.created = code
+                .created
+                .as_ref()
+                .map(|site| SiteRef::new(site, access))
+                .transpose()?;
+        }
         if stored.capture_names != code.capture_names {
             stored.capture_names = code.capture_names.clone();
             changed = true;
@@ -1025,16 +1067,7 @@ impl Frames {
                 Some((_, frame)) => frame.code,
                 None => {
                     let record = row(&self.rows, index, &self.access)?;
-                    let site = record.statement.resolve(&self.access)?;
-                    (0..site.path.len())
-                        .rev()
-                        .find_map(|length| {
-                            self.exe.code_at(
-                                &Site::new(site.unit.clone(), &site.path[..length]),
-                                &record.capture_names,
-                            )
-                        })
-                        .ok_or_else(|| malformed("a frame has no admitted code body"))?
+                    code_of(&record, &self.exe, &self.access)?
                 }
             };
             let code = self.exe.code(code);

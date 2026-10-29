@@ -81,7 +81,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             answer.admission.end - self.charged - before,
             (before, counted),
         )?;
-        Ok(self.commit_heap(answer))
+        self.commit_heap(answer)
     }
 
     #[inline(never)]
@@ -105,7 +105,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if !self.admit_native(answer.admission.end - self.charged) {
             return Err(self.at_operands(site.pc, site.reg, args));
         }
-        Ok(self.commit_heap(answer))
+        self.commit_heap(answer)
     }
 
     /// Claim another physical window only while its bytes and the nursery
@@ -168,7 +168,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             limits: self.limits,
             memory: self.memory,
             ceiling: self.ceiling.saturating_sub(self.register_bytes),
-            copy_ceiling: self.copy_ceiling.saturating_sub(self.register_bytes),
             transient: self.transient,
             fault: None,
             declined: false,
@@ -406,12 +405,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             watching.root_call(self.exe, root, args.len());
         }
         self.root_arguments(before);
-        Ok(self.commit_heap(answer))
+        self.commit_heap(answer)
     }
 
     /// Publish only the facts belonging to this accepted operation, after its
     /// action count and all boundary checks have committed.
-    pub(super) fn commit_heap(&mut self, answer: HeapAnswer) -> Value {
+    pub(super) fn commit_heap(&mut self, answer: HeapAnswer) -> Answer {
+        let value = self.source_result(answer.value)?;
         let units = answer.admission.end - self.charged;
         self.charged = answer.admission.end;
         if let Some(tape) = self.tape {
@@ -427,7 +427,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 None => {}
             }
         }
-        answer.value
+        Ok(value)
+    }
+
+    pub(super) fn source_result(&mut self, value: Value) -> Answer {
+        // The source evaluator registers an output's identity when the value
+        // enters its operand owner. Delaying this until frame reconstruction
+        // changes durable identities when bindings are visited in name order.
+        lash_kernel_state::kernel_internals::logical::Holding::from_native(
+            self.arena,
+            &self.pages,
+            &value,
+        )
+        .map_err(|error| self.halt(error.into()))?;
+        Ok(value)
     }
 
     /// The semantic heap context's room test for an operation that has

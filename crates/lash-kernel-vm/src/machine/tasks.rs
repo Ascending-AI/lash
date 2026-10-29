@@ -1111,18 +1111,7 @@ pub(super) fn source_body(
         if !exe.authored_unit(&statement.unit) {
             continue;
         }
-        let body = (0..=statement.path.len())
-            .rev()
-            .find_map(|length| {
-                exe.code_at(
-                    &lash_kernel_value::sites::Site::new(
-                        statement.unit.clone(),
-                        &statement.path[..length],
-                    ),
-                    &frame.capture_names,
-                )
-            })
-            .ok_or_else(|| HeapFault::Malformed("a frame has no admitted code body".into()))?;
+        let body = super::frames::code_of(&frame, exe, access)?;
         return Ok(Some(exe.code(body).site.clone()));
     }
     Ok(None)

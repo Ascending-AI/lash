@@ -542,7 +542,8 @@ pub(super) fn emit(
     definition: &FunctionDefinition,
     ident: &str,
 ) -> Option<(String, String)> {
-    // These are representation specializations of formula-metered copy bodies.
+    // Keep the source induction for ledger verification. Execution uses the
+    // original body in the common packet stream.
     if definition.charge().is_none() || definition.guard.is_some() {
         return None;
     }
@@ -742,10 +743,10 @@ pub(super) fn emit(
     let kind = if dense { "Dense" } else { "Concat" };
     let copy_ident = format!("{ident}_copy").to_uppercase();
     let code = format!(
-        "static {copy_ident}: p::CopyLoop = p::CopyLoop {{ kind: p::CopyKind::{kind}, read: {read}, read_units: {units}, loop_units: {loop_units}, temporary_values: {room} }};\nfn {ident}_bulk(heap: &mut dyn p::TemplateHeap, args: &[Value], _: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {{ heap.copy(args, &{copy_ident}) }}\n"
+        "static {copy_ident}: p::CopyLoop = p::CopyLoop {{ kind: p::CopyKind::{kind}, read: {read}, read_units: {units}, loop_units: {loop_units}, temporary_values: {room} }};\n"
     );
     let descriptor = format!(
-        "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {depth}, callees: &[], heap: Some(p::HeapTemplate {{ entry: Some({ident}_bulk), depth: {depth}, writes: false, copy: Some(&{copy_ident}), element: None, record_write: None, callees: &[] }}), forwards: p::Forwards {{ floats: None, ints: None, texts: None }} }})"
+        "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {depth}, callees: &[], heap: Some(p::HeapTemplate {{ entry: None, depth: {depth}, writes: false, copy: Some(&{copy_ident}), element: None, record_write: None, callees: &[] }}), forwards: p::Forwards {{ floats: None, ints: None, texts: None }} }})"
     );
     Some((descriptor, code))
 }

@@ -30,7 +30,7 @@ struct Observed {
     end: String,
     printed: Vec<Datum>,
     requests: Vec<Request>,
-    stops: Vec<(&'static str, crate::Meters)>,
+    stops: Vec<(&'static str, crate::Meters, [u64; 3])>,
     checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
     events: Vec<lash_kernel_exec::Weight>,
 }
@@ -137,6 +137,7 @@ fn observe_source_or_register(
                 Step::Parked(_) => "parked",
             },
             embedder.machine.meters(),
+            crate::testing::owner_balance(&embedder.machine).unwrap(),
         ));
         match step {
             Step::Ended(End::Finished(finished)) => {
@@ -292,40 +293,6 @@ fn direct_call_entry_agrees() {
         definition("pause(x: Any)", "do perform 0(x) as Any return x"),
         definition("typed(x: Int)", "return x"),
     );
-    // K-CHG-001 / K-BND-003: a refused statement unit retains updated locals.
-    {
-        let source = format!("{definitions}main {{ {FORMATTED_APPEND} }}");
-        let bounds = Bounds {
-            charge_limit: 157,
-            ..super::super::embedder::ROOMY
-        };
-        let reference = observe_source_or_register(
-            &source,
-            Layout(0),
-            u64::MAX,
-            bounds,
-            false,
-            false,
-            Mode::Source,
-        );
-        let generic = observe_source_or_register(
-            &source,
-            Layout(0),
-            u64::MAX,
-            bounds,
-            false,
-            false,
-            Mode::Generic,
-        );
-        assert_eq!(
-            generic, reference,
-            "a refused statement unit keeps the completed text local"
-        );
-        println!(
-            "refused statement retains updated source locals: {:?}",
-            generic.stops
-        );
-    }
     for body in [SAVED_MEMBER, SUPERSEDED_RETURN, NESTED_RETURN] {
         placement_witness(&format!("{definitions}main {{ {body} }}"), body);
     }
@@ -663,6 +630,40 @@ fn direct_call_entry_agrees() {
         }
         println!("whole-path checkpoint exits: {counts:?}");
     });
+    // K-CHG-001 / K-BND-003: a refused statement unit retains updated locals.
+    {
+        let source = format!("{definitions}main {{ {FORMATTED_APPEND} }}");
+        let bounds = Bounds {
+            charge_limit: 157,
+            ..super::super::embedder::ROOMY
+        };
+        let reference = observe_source_or_register(
+            &source,
+            Layout(0),
+            u64::MAX,
+            bounds,
+            false,
+            false,
+            Mode::Source,
+        );
+        let generic = observe_source_or_register(
+            &source,
+            Layout(0),
+            u64::MAX,
+            bounds,
+            false,
+            false,
+            Mode::Generic,
+        );
+        assert_eq!(
+            generic, reference,
+            "a refused statement unit keeps the completed text local"
+        );
+        println!(
+            "refused statement retains updated source locals: {:?}",
+            generic.stops
+        );
+    }
 }
 
 fn placement_witness(source: &str, body: &str) {

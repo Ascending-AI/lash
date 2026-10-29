@@ -243,6 +243,7 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            pages: self.heap.pages().clone(),
             link: self.active_link,
             exe,
             tape: None,
@@ -298,11 +299,21 @@ impl KernelMachine {
             cx.meter.charges(charges, false, None);
             Some(value)
         });
-        Ok(answer.map(|answer| {
-            let value = island.commit_heap(answer);
-            self.charged = island.charged;
-            value
-        }))
+        let value = answer.map(|answer| island.commit_heap(answer));
+        self.charged = island.charged;
+        match value {
+            None => Ok(None),
+            Some(Ok(value)) => Ok(Some(value)),
+            Some(Err(_)) => Err(island
+                .scratch
+                .exit
+                .halt
+                .take()
+                .unwrap_or_else(|| {
+                    fault("a committed heap output lost its identity registration fault")
+                })
+                .into()),
+        }
     }
 
     /// Runs the root call action of `running` of code `code`, with the
@@ -563,6 +574,7 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            pages: self.heap.pages().clone(),
             link: self.active_link,
             exe,
             tape: recorder.as_ref().filter(|_| gate.charging),
@@ -813,6 +825,8 @@ impl KernelMachine {
             self.task(task)?.frames.push(frame);
             self.logical_enter_frame(task, exe, code, &[])?;
         }
+        self.logical_flush_continuation(task, exe)?;
+        self.logical_flush_controls(task, exe)?;
         self.logical_flush()?;
         self.grown();
         Ok(top)
@@ -977,6 +991,7 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("no frame"))?;
         let ground = Ground {
+            pages: self.heap.pages().clone(),
             link: frame.link,
             exe,
             tape: recorder.as_ref().filter(|_| gate.charging),
@@ -1034,6 +1049,9 @@ impl KernelMachine {
             executor.action_suffix(&mut active, &suffix, &self.regs);
         }
         let ran = executor.execute(&mut active);
+        if ran.is_ok() {
+            executor.project_return(&mut active, frame);
+        }
         let handoff = executor.project_handoff(&mut active, frame, &mut self.regs);
         let returned_explicitly = active.returned_explicitly();
         self.charged = executor.charged;
@@ -1100,6 +1118,7 @@ impl KernelMachine {
 /// Fields no call changes while a region batch or a callback walk runs.
 /// The bound stays at the entry: a callback's limiter can grow it.
 pub(in crate::machine) struct Ground<'a> {
+    pub(in crate::machine) pages: lash_kernel_state::kernel_internals::tree::Access<'static>,
     pub(in crate::machine) link: lash_kernel_value::LinkId,
     pub(in crate::machine) exe: &'a Executable,
     pub(in crate::machine) tape: Option<&'a ChargeTape>,
@@ -1216,21 +1235,13 @@ fn open<'a, const OBSERVING: bool>(
             .saturating_sub(ground.base)
             .min(u64::from(ISLAND_DEPTH)) as u32,
     );
-    let copy_ceiling = if ground.memory {
-        entry.arena.held().saturating_add(
-            ground
-                .headroom
-                .saturating_sub(u64::from(admitted) * super::FRAME_ROOM),
-        )
-    } else {
-        u64::MAX
-    };
     Island {
         public_return: false,
         link: ground.link,
         exe: ground.exe,
         stream: ground.exe.document_stream(),
         arena: entry.arena,
+        pages: ground.pages.clone(),
         sites: entry.sites,
         session: entry.session,
         tape: ground.tape,
@@ -1249,7 +1260,6 @@ fn open<'a, const OBSERVING: bool>(
         limits: ground.limits,
         memory: ground.memory,
         ceiling,
-        copy_ceiling,
         transient: 0,
         register_bytes: 0,
         base: ground.base,

@@ -91,14 +91,13 @@ impl Slab {
             | Opcode::Update
             | Opcode::Access
             | Opcode::Collection
-            | Opcode::Unary
-            | Opcode::Binary
             | Opcode::ReturnLiteral
             | Opcode::Kind => true,
-            Opcode::Operator => matches!(
-                code.sites.operator[packet.x as usize].to,
-                Destination::Write(_)
-            ),
+            Opcode::Operator => {
+                let site = &code.sites.operator[packet.x as usize];
+                matches!(site.inputs, super::super::code::OperatorInputs::Scalar(_))
+                    || matches!(site.to, Destination::Write(_))
+            }
             Opcode::Write => code.sites.write[packet.x as usize].site.access.is_some(),
             Opcode::Header => code.sites.header[packet.x as usize].repeat.is_some(),
             _ => false,

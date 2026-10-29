@@ -2,7 +2,6 @@
 //! Keep these counts, rather than reconstructing a copy pattern in the VM.
 //! Logical byte bounds remain the source event program: members use their
 //! actual immutable occurrence prices, and callees include frames and cells.
-//! The executor's physical max(1024, derived) allowance is not logical scratch.
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

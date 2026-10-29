@@ -15,6 +15,8 @@ pub(super) struct Operands {
     roots: Option<BankRoots>,
     entry_roots: Option<Lifecycle>,
     values: Vec<Operand>,
+    /// Receipts for source operands transferred to a callee invocation.
+    transferred: Vec<Operand>,
     positions: Vec<usize>,
     atoms: Vec<Held>,
     entry: Vec<Held>,
@@ -56,8 +58,10 @@ impl Operands {
         }
         (start..start + count)
             .filter_map(|at| {
-                self.remove_value(Reg(at as u32))
-                    .and_then(|operand| operand.held.owner)
+                let operand = self.remove_value(Reg(at as u32))?;
+                let owner = operand.held.owner;
+                self.transferred.push(operand);
+                owner
             })
             .collect()
     }
@@ -83,6 +87,7 @@ impl Operands {
             }
         }
         self.values.clear();
+        self.transferred.clear();
         self.atoms.clear();
         self.entry.clear();
         self.entry_active = false;
@@ -217,21 +222,15 @@ impl Operands {
             | Op::Nested { args: items, .. } => Some(items),
             _ => None,
         };
-        let missing_input = |reg| {
-            invalid(&format!(
-                "source input has no owner: op {op:?}, pc {pc}, register {reg:?}, source {:?}",
-                stream.source_sites.get(pc as usize),
-            ))
-        };
         match range {
             Some(range) => {
                 for reg in range.regs() {
-                    self.remove(reg).ok_or_else(|| missing_input(reg))?;
+                    self.consume(reg, stream, pc)?;
                 }
             }
             None => {
                 for reg in op.reads() {
-                    self.remove(reg).ok_or_else(|| missing_input(reg))?;
+                    self.consume(reg, stream, pc)?;
                 }
             }
         }
@@ -272,6 +271,37 @@ impl Operands {
         }
         Ok(())
     }
+    fn consume(&mut self, reg: Reg, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
+        let op = stream.ops[pc as usize];
+        if self.remove(reg).is_some() {
+            return Ok(());
+        }
+        // A protocol open enters its callee before ForIn completes. Its
+        // iterable was transferred there, so completion spends that exact
+        // receipt rather than releasing the former source owner again.
+        if matches!(op, Op::ForIn { iterable } if iterable == reg)
+            && let Some(at) = self
+                .transferred
+                .iter()
+                .position(|operand| operand.reg == reg)
+        {
+            let transferred = self.transferred.swap_remove(at);
+            let expected = self
+                .roots
+                .as_ref()
+                .map(|roots| roots.operand(&transferred.site))
+                .transpose()?;
+            if transferred.held.owner == expected {
+                return Ok(());
+            }
+            return Err(invalid("source transfer names another owner"));
+        }
+        Err(invalid(&format!(
+            "source input has no owner: op {op:?}, pc {pc}, register {reg:?}, source {:?}",
+            stream.source_sites.get(pc as usize),
+        )))
+    }
+
     fn put(&mut self, mut operand: Operand) -> Result<(), HeapFault> {
         let at = self
             .positions

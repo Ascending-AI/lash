@@ -337,51 +337,43 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
 
             Opcode::Operator => {
+                use super::super::code::{OperatorInputs, ScalarInputs};
                 let sites::Operator {
                     site,
-                    args,
+                    inputs,
                     covered,
                     to,
                 } = &code.sites.operator[packet.x as usize];
+                if let OperatorInputs::Scalar(inputs) = inputs {
+                    return match inputs {
+                        ScalarInputs::Unary(arg) => {
+                            self.numeric_unary(frame, site, arg, *covered, to)
+                        }
+                        ScalarInputs::Binary([left, right]) => {
+                            self.numeric_binary(frame, site, (left, right), *covered, to)
+                        }
+                    };
+                }
                 if let Destination::Write(write) = to
                     && write.accumulates
                 {
                     self.accumulate(frame, write.at);
                 }
                 let mut values = [Value::Absent; 3];
-                let given = if packet.mode == 0 {
-                    for (to, reg) in values.iter_mut().zip(args.iter()) {
-                        *to = frame.regs[*reg as usize];
+                let given = match inputs {
+                    OperatorInputs::Registers(args) => {
+                        for (to, reg) in values.iter_mut().zip(args.iter()) {
+                            *to = frame.regs[*reg as usize];
+                        }
+                        args.len()
                     }
-                    args.len()
-                } else {
-                    let reads = &code.inputs[packet.y as usize];
-                    self.inputs(frame.slots, reads, &mut values)?;
-                    reads.len()
+                    OperatorInputs::Source(reads) => {
+                        self.inputs(frame.slots, reads, &mut values)?;
+                        reads.len()
+                    }
+                    OperatorInputs::Scalar(_) => unreachable!("scalar inputs returned above"),
                 };
                 return self.operator_destination(frame, site, &values[..given], *covered, to);
-            }
-            Opcode::Unary => {
-                let sites::Unary {
-                    site,
-                    arg,
-                    covered,
-                    to,
-                } = &code.sites.unary[packet.x as usize];
-
-                return self.numeric_unary(frame, site, arg, *covered, to);
-            }
-            Opcode::Binary => {
-                let sites::Binary {
-                    kernel,
-                    site,
-                    left,
-                    right,
-                    covered,
-                    to,
-                } = &code.sites.binary[packet.x as usize];
-
-                return self.numeric_binary(frame, *kernel, site, (left, right), *covered, to);
             }
             Opcode::Native => {
                 let sites::Native { site, args } = &code.sites.native[packet.x as usize];
@@ -466,7 +458,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let values = values.iter().map(|reg| regs[*reg as usize]);
                 let answer = self.record(names, values);
                 frame.state.transient += self.transient.saturating_sub(before);
-                regs[*reg as usize] = answer.ok_or_else(|| self.at(*miss))?;
+                let value = answer.ok_or_else(|| self.at(*miss))?;
+                regs[*reg as usize] = self.source_result(value)?;
             }
             Opcode::Closure => {
                 let sites::Closure { code, reg, miss } = &code.sites.closure[packet.x as usize];
@@ -474,7 +467,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let closure = self.retaining(&mut frame.state.transient, |island| {
                     island.fresh_closure(frame.state.callee, frame.slots, *code)
                 });
-                regs[*reg as usize] = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
+                let value = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
+                regs[*reg as usize] = self.source_result(value)?;
             }
             Opcode::Store => {
                 let sites::Store {

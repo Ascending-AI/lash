@@ -154,6 +154,9 @@ pub struct Forwards {
     pub texts: Option<u8>,
 }
 
+/// A native composition over the canonical heap contract.
+pub type HeapEntry = fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>;
+
 /// A helper's paths that reach the arena: each reads, builds and writes
 /// through a [`TemplateHeap`] the body's own forms in the body's order,
 /// and declines where the body would raise, park, reach guest code or do
@@ -167,8 +170,7 @@ pub struct Forwards {
 pub struct HeapTemplate {
     /// An externally supplied native composition. Generated helpers publish
     /// facts only and execute their bodies through the packet stream.
-    pub entry:
-        Option<fn(&mut dyn TemplateHeap, &[Value], &[crate::PreparedNative]) -> Option<Value>>,
+    pub entry: Option<HeapEntry>,
     /// The natives its paths call through [`TemplateHeap::call`], by index.
     pub callees: &'static [FunctionId],
     /// Conservative extra call-depth headroom, including the helper.
@@ -306,11 +308,6 @@ pub trait TemplateHeap: TemplateMeter {
     fn field(&mut self, target: Value, field: &str) -> Option<Value>;
     /// The tuple of `items`.
     fn tuple(&mut self, items: &[Value]) -> Option<Value>;
-    /// Lower a source-derived copy loop, retaining its read and hole policy.
-    fn copy(&mut self, args: &[Value], path: &CopyLoop) -> Option<Value> {
-        let _ = (args, path);
-        None
-    }
     /// `set target[index] = value`: its growth held and what it changes
     /// marked dirty, or nothing written.
     fn set_index(&mut self, target: Value, index: Value, value: Value) -> Option<()>;

@@ -81,7 +81,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 && (!site.checked
                     || crate::compile::import_result_fits(&function.header.signature.result, value))
             {
-                return self.finish_call_answer(site, regs, edge, |_| value);
+                return self.finish_call_answer(site, regs, edge, |_| Ok(value));
             }
         }
         self.heap_call_answer_values(site, (lib, extra), args, regs, edge)
@@ -151,13 +151,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &CallSite,
         regs: &mut Operands<'_>,
         (before, occurrence): (u64, Option<usize>),
-        finish: impl FnOnce(&mut Self) -> Value,
+        finish: impl FnOnce(&mut Self) -> Answer,
     ) -> Result<bool, Stop> {
         if let Some(at) = occurrence {
             self.count(at)?;
         }
         self.root_arguments(before);
-        regs[site.reg as usize] = finish(self);
+        regs[site.reg as usize] = finish(self)?;
         if site.after != 0 {
             self.admit(site.after);
         }

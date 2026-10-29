@@ -160,15 +160,6 @@ impl Build<'_> {
         }
         let end = relocation.len() - 1;
         relocation[end] = self.ops.len();
-        for instruction in &mut self.ops {
-            instruction.op.addresses(&mut |at| *at = relocation[*at]);
-        }
-        for block in &mut self.blocks {
-            for start in &mut block.starts {
-                *start = relocation[*start];
-            }
-            block.end = relocation[block.end];
-            block.after = relocation[block.after];
-        }
+        crate::machine::islands::code::relocate(&mut self.ops, &mut self.blocks, &relocation);
     }
 }

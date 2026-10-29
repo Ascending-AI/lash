@@ -612,14 +612,18 @@ impl Embedder {
 
     /// Runs the machine once and keeps what a park hands out.
     pub(crate) fn run(&mut self) -> Step {
-        let step = self.machine.run(&mut self.world, self.slice).unwrap();
+        self.try_run().unwrap()
+    }
+
+    pub(crate) fn try_run(&mut self) -> Result<Step, crate::MachineError> {
+        let step = self.machine.run(&mut self.world, self.slice)?;
         if let Step::Parked(park) = &step {
             self.requests.extend(park.requests.iter().cloned());
             self.pending.extend(park.requests.iter().cloned());
             self.cancel_requests
                 .extend(park.cancel_requests.iter().copied());
         }
-        step
+        Ok(step)
     }
 
     /// Answers the pending request a law calls `name` from the table.

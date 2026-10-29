@@ -650,7 +650,9 @@ fn helper_frames_agree() {
                 Mode::Generic => embedder.machine.force_generic_packets(),
                 Mode::Specialized => {}
             }
-            let step = embedder.run();
+            let step = embedder.try_run().unwrap_or_else(|error| {
+                panic!("helper failed for layout {layout:?}, mode {mode:?}, cold={cold}, taped={taped}, charge={:?}: {error:?}; {source}", embedder.machine.meters().charged)
+            });
             stops.push((
                 match &step {
                     Step::Slice => "slice",
@@ -658,6 +660,7 @@ fn helper_frames_agree() {
                     Step::Ended(_) => "ended",
                 },
                 embedder.machine.meters(),
+                crate::testing::owner_balance(&embedder.machine).unwrap(),
             ));
             match step {
                 Step::Ended(end) => {
@@ -769,6 +772,18 @@ main { return call rooted() }
         "main { try { return invoke helper.typed(false) } catch err { return err.kind } }",
         "main { try { return invoke helper.return_checked(\"bad\") } catch err { return err.kind } }",
     ];
+    for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
+        for cold in [false, true] {
+            let reference = run(source, Layout(0), cold, false, Mode::Source).0;
+            for mode in [Mode::Generic, Mode::Specialized] {
+                assert_eq!(
+                    run(source, Layout(0), cold, false, mode).0,
+                    reference,
+                    "quiet collection {mode:?}, cold={cold}: {source}"
+                );
+            }
+        }
+    }
     for source in CONTRACTS.into_iter().chain([
         "main { return invoke pair.twice(21) }",
         ROOT_CALL,
@@ -934,35 +949,7 @@ main { return call rooted() }
             }
         }
     }
-    for source in [REDUCTION, VISIT, SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        for cold in [false, true] {
-            let reference = run(source, Layout(0), cold, false, Mode::Source).0;
-            for mode in [Mode::Generic, Mode::Specialized] {
-                assert_eq!(
-                    run(source, Layout(0), cold, false, mode).0,
-                    reference,
-                    "quiet collection {mode:?}, cold={cold}: {source}"
-                );
-            }
-        }
-    }
     for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
-        let reference = run(source, Layout(0), false, false, Mode::Source).0;
-        for charge_limit in 0..=reference.3.expect("exact charge is enabled") {
-            limits.set(Bounds {
-                charge_limit,
-                ..super::super::embedder::ROOMY
-            });
-            let source_only = run(source, Layout(0), false, false, Mode::Source).0;
-            for mode in [Mode::Generic, Mode::Specialized] {
-                assert_eq!(
-                    run(source, Layout(0), false, false, mode).0,
-                    source_only,
-                    "collection refusal {charge_limit}, {mode:?}: {source}"
-                );
-            }
-        }
-        limits.set(super::super::embedder::ROOMY);
         for slice in [1, 31] {
             cold_slice.set(slice);
             let source_only = run(source, Layout(0), true, false, Mode::Source).0;
@@ -1016,6 +1003,25 @@ main { return call rooted() }
         "the merge must publish its prefix before the actual guest callback: {counts:?}"
     );
     println!("quiet collection family exits: {counts:?}");
+    drop(counts);
+    for source in [SCAN, MERGE, LOOKALIKE_COUNTERS] {
+        let reference = run(source, Layout(0), false, false, Mode::Source).0;
+        for charge_limit in 0..=reference.3.expect("exact charge is enabled") {
+            limits.set(Bounds {
+                charge_limit,
+                ..super::super::embedder::ROOMY
+            });
+            let source_only = run(source, Layout(0), false, false, Mode::Source).0;
+            for mode in [Mode::Generic, Mode::Specialized] {
+                assert_eq!(
+                    run(source, Layout(0), false, false, mode).0,
+                    source_only,
+                    "collection refusal {charge_limit}, {mode:?}: {source}"
+                );
+            }
+        }
+        limits.set(super::super::embedder::ROOMY);
+    }
 }
 
 /// A native's display name does not certify its collection semantics.

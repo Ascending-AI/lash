@@ -9,7 +9,6 @@ pub(crate) struct Update {
     pub(in crate::machine::islands) reads: Option<Box<[Read; 2]>>,
     pub(in crate::machine::islands) charge: super::super::MemberAccess,
     pub(in crate::machine::islands) scalar: Box<OperatorSite>,
-    pub(in crate::machine::islands) pair: lash_kernel_doc::scalar::Pair,
     pub(in crate::machine::islands) left: Operand,
     pub(in crate::machine::islands) right: Operand,
     pub(in crate::machine::islands) covered: bool,
@@ -85,7 +84,6 @@ impl Build<'_> {
                 };
                 let Op::Binary {
                     site: scalar,
-                    kernel: pair,
                     left,
                     right,
                     covered,
@@ -100,7 +98,6 @@ impl Build<'_> {
                     reads,
                     charge,
                     scalar,
-                    pair,
                     left,
                     right,
                     covered,
@@ -112,15 +109,6 @@ impl Build<'_> {
         }
         let end = relocation.len() - 1;
         relocation[end] = self.ops.len();
-        for instruction in &mut self.ops {
-            instruction.op.addresses(&mut |at| *at = relocation[*at]);
-        }
-        for block in &mut self.blocks {
-            for start in &mut block.starts {
-                *start = relocation[*start];
-            }
-            block.end = relocation[block.end];
-            block.after = relocation[block.after];
-        }
+        crate::machine::islands::code::relocate(&mut self.ops, &mut self.blocks, &relocation);
     }
 }
