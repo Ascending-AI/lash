@@ -502,6 +502,7 @@ impl<T: Cell> Tree<T> {
         let Some(root) = &mut self.root else {
             return Ok(true);
         };
+        let root = Rc::make_mut(root);
         if matches!(root.link, Link::Inline { .. }) {
             make_dirty(root, access, sequence)?;
         }
@@ -526,7 +527,7 @@ impl<T: Cell> Tree<T> {
         let (built, sealed) = builder.finish()?;
         self.root = built.map(|mut root| {
             root.family = family;
-            root
+            Rc::new(root)
         });
         Ok(sealed)
     }

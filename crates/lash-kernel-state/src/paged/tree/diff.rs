@@ -34,7 +34,10 @@ impl<T: Cell> Tree<T> {
     ) -> Result<(), HeapFault> {
         let sequence = self.sequence;
         let side = |tree: &Self| -> VecDeque<Item<T>> {
-            tree.root.iter().cloned().map(Item::Sub).collect()
+            tree.root
+                .iter()
+                .map(|root| Item::Sub((**root).clone()))
+                .collect()
         };
         let (mut old, mut new) = (side(self), side(newer));
         loop {

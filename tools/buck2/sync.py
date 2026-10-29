@@ -850,10 +850,23 @@ def profile_bzl(canonical: dict) -> str:
     # ordinary execution profile rather than applying target-package overrides.
     host_only = {"proc-macro2", "quote", "syn"}
     first_party: dict[str, int] = {}
+    first_party_dev: dict[str, list[str]] = {}
     third_party: dict[str, int] = {}
     for name, values in sorted(overrides.items()):
-        if set(values) != {"opt-level"}:
+        if not values or set(values) - {"opt-level", "debug-assertions", "overflow-checks"}:
             raise SystemExit(f"unsupported dev profile keys for {name}: {sorted(values)}")
+        checks = set(values) - {"opt-level"}
+        if checks:
+            if name not in member_names:
+                raise SystemExit(f"explicit dev runtime checks require a workspace package: {name}")
+            flags = [f"-Copt-level={int(values['opt-level'])}"] if "opt-level" in values else []
+            for key in ("debug-assertions", "overflow-checks"):
+                if key in values:
+                    if type(values[key]) is not bool:
+                        raise SystemExit(f"dev profile {key} must be Boolean for {name}")
+                    flags.append(f"-C{key}={'yes' if values[key] else 'no'}")
+            first_party_dev[name] = flags
+            continue
         if name in member_names:
             first_party[name] = int(values["opt-level"])
         elif name not in host_only:
@@ -862,6 +875,8 @@ def profile_bzl(canonical: dict) -> str:
         GENERATED_HEADER
         + "FIRST_PARTY_OPT_LEVELS = "
         + json.dumps(first_party, indent=4, sort_keys=True)
+        + "\n\nFIRST_PARTY_DEV_FLAGS = "
+        + json.dumps(first_party_dev, indent=4, sort_keys=True)
         + "\n\nTHIRD_PARTY_OPT_LEVELS = "
         + json.dumps(third_party, indent=4, sort_keys=True)
         + "\n"

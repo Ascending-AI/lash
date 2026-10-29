@@ -976,8 +976,8 @@ def check_dev_profile_wildcard_projection() -> None:
     import sync
 
     canonical = {
-        "workspace_members": ["member"],
-        "packages": [{"id": "member", "name": "lash-regress"}],
+        "workspace_members": ["member", "kernel"],
+        "packages": [{"id": "member", "name": "lash-regress"}, {"id": "kernel", "name": "lash-kernel-vm"}],
     }
     manifest = {
         "profile": {
@@ -985,6 +985,7 @@ def check_dev_profile_wildcard_projection() -> None:
                 "package": {
                     "*": {"opt-level": 2},
                     "lash-regress": {"opt-level": 2},
+                    "lash-kernel-vm": {"opt-level": 2, "debug-assertions": True, "overflow-checks": True},
                     "insta": {"opt-level": 3},
                     "syn": {"opt-level": 2},
                 }
@@ -994,6 +995,9 @@ def check_dev_profile_wildcard_projection() -> None:
     with patch.object(sync.tomllib, "loads", return_value=manifest):
         projected = sync.profile_bzl(canonical)
     assert bzl_value(projected, "FIRST_PARTY_OPT_LEVELS") == {"lash-regress": 2}
+    assert bzl_value(projected, "FIRST_PARTY_DEV_FLAGS") == {
+        "lash-kernel-vm": ["-Copt-level=2", "-Cdebug-assertions=yes", "-Coverflow-checks=yes"],
+    }
     assert bzl_value(projected, "THIRD_PARTY_OPT_LEVELS") == {"*": 2, "insta": 3}
 
 

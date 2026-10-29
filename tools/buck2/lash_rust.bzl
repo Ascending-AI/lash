@@ -6,7 +6,7 @@ load(":clippy_policy.bzl", "FIRST_PARTY_CLIPPY_LINT_FLAGS", "FIRST_PARTY_RUST_LI
 load(":deps.bzl", "PACKAGE_DEPS")
 load(":exec_sizes.bzl", "HELPER_BUDGET", "sized_exec_properties")
 load(":platforms.bzl", "MEMORY_SCALE", "pool_constraint")
-load(":profile.bzl", "FIRST_PARTY_OPT_LEVELS")
+load(":profile.bzl", "FIRST_PARTY_DEV_FLAGS", "FIRST_PARTY_OPT_LEVELS")
 load(":run_binary.bzl", "binary_run_attrs", "lash_run_binary")
 load(":source_tree.bzl", "lash_rust_source_tree")
 load(":test_rules.bzl", "lash_test_wrapper")
@@ -87,6 +87,13 @@ def _rustc_flags(package_name, declared_features, extra = [], binary = False):
             "//tools/buck2:profile_host": [],
             "//tools/buck2:profile_profiling": [],
             "DEFAULT": ["-Copt-level={}".format(FIRST_PARTY_OPT_LEVELS[package_name])],
+        })
+    if package_name in FIRST_PARTY_DEV_FLAGS:
+        profile += select({
+            "//tools/buck2:profile_host": [],
+            "//tools/buck2:profile_optimized": [],
+            "//tools/buck2:profile_profiling": [],
+            "DEFAULT": FIRST_PARTY_DEV_FLAGS[package_name],
         })
     judged = select({
         "//tools/buck2:profile_judged": ["-Cdebug-assertions=no", "-Coverflow-checks=no"],

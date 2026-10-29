@@ -360,7 +360,7 @@ impl<T: Cell> Clone for Node<T> {
 /// rank uses subtree counts, so removal never renumbers later cells.
 #[derive(Clone)]
 pub struct Tree<T: Cell> {
-    root: Option<Branch<T>>,
+    root: Option<Rc<Branch<T>>>,
     sequence: bool,
 }
 /// A comparison with a published tree, without owning its mutable pages.
@@ -456,20 +456,22 @@ impl<T: Cell> Tree<T> {
     }
     pub fn open(page: Option<PageRef>, len: u64, cost: LogicalBytes, sequence: bool) -> Self {
         Self {
-            root: page.map(|p| Branch {
-                family: None,
-                encoded_bytes: None,
-                is_leaf: None,
-                tasks_known: false,
-                members_known: false,
-                first: Key::from(&[][..]),
-                summary: Summary {
-                    len,
-                    cost: cost.0,
-                    tasks: 0,
-                    members: 0,
-                },
-                link: Link::Sealed(p),
+            root: page.map(|p| {
+                Rc::new(Branch {
+                    family: None,
+                    encoded_bytes: None,
+                    is_leaf: None,
+                    tasks_known: false,
+                    members_known: false,
+                    first: Key::from(&[][..]),
+                    summary: Summary {
+                        len,
+                        cost: cost.0,
+                        tasks: 0,
+                        members: 0,
+                    },
+                    link: Link::Sealed(p),
+                })
             }),
             sequence,
         }
@@ -508,6 +510,7 @@ impl<T: Cell> Tree<T> {
     }
     pub fn in_family(mut self, family: FamilyId) -> Self {
         if let Some(root) = &mut self.root {
+            let root = Rc::make_mut(root);
             if root.family != Some(family)
                 && let Link::Inline { body, .. } = &mut root.link
             {
@@ -549,6 +552,7 @@ impl<T: Cell> Tree<T> {
     }
     pub fn with_task_edges(mut self, tasks: u64) -> Self {
         if let Some(r) = &mut self.root {
+            let r = Rc::make_mut(r);
             r.summary.tasks = tasks;
             r.tasks_known = true;
         }
@@ -973,7 +977,7 @@ impl<T: Cell> Tree<T> {
         let root = grow(leaves, access, sequence)?;
         access.stage_pressure()?;
         Ok(Self {
-            root: Some(root),
+            root: Some(Rc::new(root)),
             sequence,
         })
     }
@@ -1161,17 +1165,18 @@ impl<T: Cell> Tree<T> {
                     key,
                 )?;
                 if changed {
-                    self.root = Some(dirty(Node::Leaf(rows), access, self.sequence)?);
+                    self.root = Some(Rc::new(dirty(Node::Leaf(rows), access, self.sequence)?));
                 }
                 changed
             }
             Some(root) => {
+                let root = Rc::make_mut(root);
                 let (changed, right) =
                     edit(root, key, access, self.sequence, &mut patch, preserve)?;
                 if !right.is_empty() {
                     let mut level = vec![root.clone()];
                     level.extend(right);
-                    self.root = Some(grow(level, access, self.sequence)?);
+                    self.root = Some(Rc::new(grow(level, access, self.sequence)?));
                 }
                 changed
             }
@@ -1244,7 +1249,7 @@ impl<T: Cell> Tree<T> {
         let Some(at) = locate(root, key, access, self.sequence, &mut path)? else {
             return Ok(None);
         };
-        let result = edit(root, &path, at, access, self.sequence)?;
+        let result = edit(Rc::make_mut(root), &path, at, access, self.sequence)?;
         if self.is_empty() {
             self.root = None;
         }

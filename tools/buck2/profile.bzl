@@ -3,6 +3,29 @@ FIRST_PARTY_OPT_LEVELS = {
     "lash-regress": 2
 }
 
+FIRST_PARTY_DEV_FLAGS = {
+    "lash-kernel-doc": [
+        "-Copt-level=2",
+        "-Cdebug-assertions=yes",
+        "-Coverflow-checks=yes"
+    ],
+    "lash-kernel-state": [
+        "-Copt-level=2",
+        "-Cdebug-assertions=yes",
+        "-Coverflow-checks=yes"
+    ],
+    "lash-kernel-value": [
+        "-Copt-level=2",
+        "-Cdebug-assertions=yes",
+        "-Coverflow-checks=yes"
+    ],
+    "lash-kernel-vm": [
+        "-Copt-level=2",
+        "-Cdebug-assertions=yes",
+        "-Coverflow-checks=yes"
+    ]
+}
+
 THIRD_PARTY_OPT_LEVELS = {
     "*": 2,
     "insta": 3,

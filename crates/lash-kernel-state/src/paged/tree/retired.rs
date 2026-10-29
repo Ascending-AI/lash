@@ -30,21 +30,24 @@ impl<T: Cell> Tree<T> {
     pub fn retire(self) -> Retired<T> {
         Retired {
             sequence: self.sequence,
-            root: self.root.map(|root| RetiredBranch {
-                family: root.family,
-                encoded_bytes: root.encoded_bytes,
-                is_leaf: root.is_leaf,
-                first: root.first,
-                summary: root.summary,
-                tasks_known: root.tasks_known,
-                members_known: root.members_known,
-                link: match root.link {
-                    Link::Sealed(page) => RetiredLink::Sealed(page),
-                    Link::Inline { body, children } => RetiredLink::Inline { body, children },
-                    Link::Dirty(page) => {
-                        RetiredLink::Dirty(Rc::downgrade(&page), page.revision.get())
-                    }
-                },
+            root: self.root.map(|root| {
+                let root = Rc::unwrap_or_clone(root);
+                RetiredBranch {
+                    family: root.family,
+                    encoded_bytes: root.encoded_bytes,
+                    is_leaf: root.is_leaf,
+                    first: root.first,
+                    summary: root.summary,
+                    tasks_known: root.tasks_known,
+                    members_known: root.members_known,
+                    link: match root.link {
+                        Link::Sealed(page) => RetiredLink::Sealed(page),
+                        Link::Inline { body, children } => RetiredLink::Inline { body, children },
+                        Link::Dirty(page) => {
+                            RetiredLink::Dirty(Rc::downgrade(&page), page.revision.get())
+                        }
+                    },
+                }
             }),
         }
     }
@@ -71,7 +74,7 @@ impl<T: Cell> Retired<T> {
                             Link::Dirty(page)
                         }
                     };
-                    Ok(Branch {
+                    Ok(Rc::new(Branch {
                         family: root.family,
                         encoded_bytes: root.encoded_bytes,
                         is_leaf: root.is_leaf,
@@ -80,7 +83,7 @@ impl<T: Cell> Retired<T> {
                         tasks_known: root.tasks_known,
                         members_known: root.members_known,
                         link,
-                    })
+                    }))
                 })
                 .transpose()?,
         })

@@ -436,6 +436,13 @@ syn = { opt-level = 2 }
 insta = { opt-level = 3 }
 similar = { opt-level = 3 }
 
+# The source oracle and ledger execute complete finite charge sweeps in tests.
+# Keep development checks while optimizing these runtime hot paths.
+lash-kernel-value = { opt-level = 2, debug-assertions = true, overflow-checks = true }
+lash-kernel-doc = { opt-level = 2, debug-assertions = true, overflow-checks = true }
+lash-kernel-state = { opt-level = 2, debug-assertions = true, overflow-checks = true }
+lash-kernel-vm = { opt-level = 2, debug-assertions = true, overflow-checks = true }
+
 # `lash-regress` is maintained third-party code whose upstream test suite
 # participates in workspace gates. Preserve dependency-like optimization for
 # it; the test profile inherits this override.

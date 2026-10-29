@@ -1850,8 +1850,12 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 /// every bound. Member cases also compare metered held bytes.
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
+    let started = std::time::Instant::now();
     whole_path_packets_agree();
-    println!("whole Python packet checkpoint comparisons completed");
+    println!(
+        "whole Python packet checkpoint comparisons completed at {:?}",
+        started.elapsed()
+    );
     use lash_kernel_vm::testing::{ExecutionStrategy, library};
     let source = r#"
 import json
@@ -1905,8 +1909,9 @@ await build()
     .0;
     let mut optimized_held = Vec::new();
     println!(
-        "broad Python sequence reference charge: {}",
-        reference.charged
+        "broad Python sequence reference charge: {} at {:?}",
+        reference.charged,
+        started.elapsed()
     );
     assert_eq!(
         execution_observation_with_meter(
@@ -1961,7 +1966,10 @@ await build()
     );
     for charge_limit in 0..=reference.charged {
         if charge_limit.is_multiple_of(2048) {
-            println!("broad Python sequence charge bound {charge_limit}");
+            println!(
+                "broad Python sequence charge bound {charge_limit} at {:?}",
+                started.elapsed()
+            );
         }
         let bounds = Bounds {
             charge_limit,

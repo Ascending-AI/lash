@@ -24,6 +24,7 @@ impl<T: Cell> Tree<T> {
         let Some(root) = &mut self.root else {
             return Ok(());
         };
+        let root = Rc::make_mut(root);
         if let Link::Inline {
             body: Inline::Tokens(tokens),
             ..
@@ -216,7 +217,7 @@ impl<T: Cell> Tree<T> {
         root.encoded_bytes = Some(encoded as u64);
         root.is_leaf = Some(true);
         Ok(Self {
-            root: Some(root),
+            root: Some(Rc::new(root)),
             sequence,
         })
     }
@@ -254,7 +255,7 @@ impl<T: Cell> Tree<T> {
                         rows.push((Key::from(key), cell.clone()));
                         true
                     })?;
-                    self.root = Some(dirty(Node::Leaf(rows), access, self.sequence)?);
+                    self.root = Some(Rc::new(dirty(Node::Leaf(rows), access, self.sequence)?));
                 }
                 Node::Index(_) => return self.seal(access, work),
                 Node::Staged(..) => unreachable!("loaded staged node"),
@@ -273,6 +274,7 @@ impl<T: Cell> Tree<T> {
                         let root = self.root.as_mut().ok_or_else(|| {
                             HeapFault::Malformed("nonempty inline tree lost its root".into())
                         })?;
+                        let root = Rc::make_mut(root);
                         let node = Node::Leaf(rows);
                         let page = Rc::new(residency::DirtyNode::new(node));
                         access.track(&page, &page.borrow(), self.sequence);
@@ -286,6 +288,7 @@ impl<T: Cell> Tree<T> {
                     let root = self.root.as_mut().ok_or_else(|| {
                         HeapFault::Malformed("nonempty inline tree lost its root".into())
                     })?;
+                    let root = Rc::make_mut(root);
                     root.link = Link::Inline {
                         body: if root.family.is_none() {
                             Inline::Rows(Rc::from(rows))
@@ -308,6 +311,7 @@ impl<T: Cell> Tree<T> {
         let root = self
             .root
             .map(|r| {
+                let r = Rc::unwrap_or_clone(r);
                 let link = match r.link {
                     Link::Sealed(p) => Link::Sealed(p),
                     Link::Inline { body, children } => Link::Inline {
@@ -331,7 +335,7 @@ impl<T: Cell> Tree<T> {
             })
             .transpose()?;
         Ok(Tree {
-            root,
+            root: root.map(Rc::new),
             sequence: self.sequence,
         })
     }
@@ -451,7 +455,10 @@ impl<T: Cell> TokenCodec for Tree<T> {
             members_known: true,
             link,
         });
-        Ok(Self { root, sequence })
+        Ok(Self {
+            root: root.map(Rc::new),
+            sequence,
+        })
     }
 }
 
