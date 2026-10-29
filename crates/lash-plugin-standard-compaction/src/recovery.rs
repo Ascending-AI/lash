@@ -53,7 +53,7 @@ pub(crate) enum OverflowRecoveryRecord {
 /// version_surface = "migrate"
 /// format_outside_manifest = "optional standard-compaction plugin history; its plugin crate owns the decoder and guarded-surface probes independently of the facade feature set"
 /// version_guard(roots(RecoveryEnvelope))
-pub(crate) const OVERFLOW_RECOVERY_FORMAT_VERSION: u32 = 1;
+pub(crate) const OVERFLOW_RECOVERY_FORMAT_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
