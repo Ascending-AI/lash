@@ -518,6 +518,7 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
     use futures_util::FutureExt as _;
     use lash_core::LiveReplayStore as _;
 
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         for miss_notification in [false, true] {
             let replay = CommitPublicationStore::new(if miss_notification {
@@ -644,8 +645,22 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
                 )
                 .await
                 .expect("auxiliary traffic after B's commit");
+            // A blocking task inhibits Tokio's paused-clock auto-advance
+            // while SQLite's worker answers the already-woken read. Bound
+            // that hold by the same deadline as the whole law.
+            let (release_clock, held_clock) = std::sync::mpsc::channel::<()>();
+            let clock_hold = tokio::task::spawn_blocking(move || {
+                let _ = held_clock
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
+            });
             tokio::time::pause();
             let frozen = tokio::time::Instant::now();
+            while commits.len() < 2 {
+                record(
+                    feed.next().await.expect("the feed stays open")?,
+                    &mut commits,
+                );
+            }
             for _ in 0..256 {
                 while let Some(item) = feed.next().now_or_never() {
                     record(item.expect("the feed stays open")?, &mut commits);
@@ -656,9 +671,13 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
             assert_eq!(
                 commits,
                 vec![a_run.as_str(), b_run.as_str()],
-                "ordered and once, missed={miss_notification}"
+                "ordered and once, missed={miss_notification}, cursor={:?}, retained={:?}",
+                feed.cursor().parse(),
+                replay.inner.tail_cursor(&session_id).parse()
             );
             tokio::time::resume();
+            drop(release_clock);
+            clock_hold.await.expect("release the frozen clock hold");
             core.shutdown().await?;
         }
         Ok(())
