@@ -15,6 +15,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 
 [sites]
+"crates/lash-durable-test/tests/committed_turns.rs#reference_host" = { reads = 0, outputs = 4, kind = "output-read", reason = "FIG-7555 asserts the exact Standard reply and RLM finish value for both sends before comparing live and reloaded committed transcript rows." }
 "crates/lash-perf/src/replay/runner.rs#send" = { reads = 0, outputs = 1, kind = "output-read", reason = "FIG-7428 reads the settled control.finish value for an independent full-record workload oracle, outside the build and sort windows." }
 "crates/lash-trace/src/content/laws.rs#on_content" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "L6 clears the telemetry hook's mutable captured messages before panicking to prove transactional fail-closed redaction; it does not select a transcript reply (FIG-6302)." }
 "crates/lash-sqlite-store/src/tests.rs#cache_release_population" = { reads = 4, outputs = 0, kind = "evidence-read", reason = "The counted cache lifetime laws materialize the transcript before closing and dropping the last reader to pin graph and projection ownership (FIG-6168)." }

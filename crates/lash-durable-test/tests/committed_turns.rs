@@ -614,7 +614,7 @@ fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
 /// A host's own rendering of committed history: one line per visible entry,
 /// built from the typed transcript alone.
 fn render(entries: &[TranscriptEntry]) -> Vec<String> {
-    entries
+    let mut rows: Vec<_> = entries
         .iter()
         .filter(|entry| !entry.is_suppressed())
         .map(|entry| {
@@ -673,7 +673,19 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
                 TranscriptItem::Suppressed(_) => unreachable!("suppressed entries are filtered"),
             }
         })
-        .collect()
+        .collect();
+    // Read rows come from the caller's committed facts, including caught failures.
+    for entry in entries.iter().filter(|entry| !entry.is_suppressed()) {
+        if let TranscriptItem::Cell(cell) = &entry.item {
+            for fact in &cell.read_facts {
+                rows.push(format!(
+                    "read {} {} {:?}",
+                    fact.tool, fact.args, fact.outcome
+                ));
+            }
+        }
+    }
+    rows
 }
 
 /// A host's live view: the snapshot's entries, advanced by each commit's
@@ -682,6 +694,22 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
 struct LiveView(Vec<TranscriptEntry>);
 
 impl LiveView {
+    fn observe(&mut self, item: lash::observe::SessionObservationStreamItem) {
+        match item {
+            lash::observe::SessionObservationStreamItem::Event(event) => {
+                if let lash::observe::SessionObservationEventPayload::Committed {
+                    entries, ..
+                } = &event.payload
+                {
+                    self.apply(entries);
+                }
+            }
+            lash::observe::SessionObservationStreamItem::Gap { observation, .. } => {
+                self.replace(observation.read_view.transcript().unwrap());
+            }
+        }
+    }
+
     fn replace(&mut self, transcript: SessionTranscript) {
         self.0 = transcript.into_entries();
     }
@@ -713,9 +741,7 @@ async fn rendered_live_and_after_recovery(
     script: Vec<lash::provider::LlmResponse>,
     builder: fn(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> Vec<String> {
-    use lash::observe::{
-        SessionObservationEventPayload, SessionObservationStreamItem, Stream as _,
-    };
+    use lash::observe::Stream as _;
     world.script(name, script);
     let session = world.session(name, served::spec(256)).await;
     let session_id =
@@ -761,18 +787,7 @@ async fn rendered_live_and_after_recovery(
                 .await
                 .expect("the feed stays open")
                 .expect("the feed answers");
-            match item {
-                SessionObservationStreamItem::Event(event) => {
-                    if let SessionObservationEventPayload::Committed { entries, .. } =
-                        &event.payload
-                    {
-                        live.apply(entries);
-                    }
-                }
-                SessionObservationStreamItem::Gap { observation, .. } => {
-                    live.replace(observation.read_view.transcript().expect("the gap decodes"));
-                }
-            }
+            live.observe(item);
         }
     })
     .await
@@ -1027,4 +1042,395 @@ async fn postgres_feed_delivery_releases_work_for_input_settlement_facts() {
     drop(feeds);
     drop(observed);
     core.shutdown().await.unwrap();
+}
+
+/// FIG-7555: host JSON features, Read loops, retained feeds and reload agree.
+const REFERENCE_REPLY: &str = "Pricing is per seat, billed monthly [document-1@1]";
+
+struct ReferenceDocument;
+#[async_trait::async_trait]
+impl StaticToolExecute for ReferenceDocument {
+    async fn execute(&self, _: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        panic!("a Read must not enter a recorded tool body")
+    }
+}
+#[async_trait::async_trait]
+impl lash::tools::ToolReads for ReferenceDocument {
+    async fn read(
+        &self,
+        call: lash::tools::ReadCall<'_>,
+    ) -> Result<serde_json::Value, lash::tools::ReadError> {
+        let page = call.args["document"]["id"].as_str().expect("a document id");
+        assert!(
+            matches!(
+                page,
+                "document-1" | "pricing" | "plans" | "seats" | "archive"
+            ),
+            "the untaken never branch must not call a reader: {page}"
+        );
+        if page == "archive" {
+            return Err(lash::tools::ReadError::new("page unavailable"));
+        }
+        Ok(reference_value())
+    }
+}
+fn reference_value() -> serde_json::Value {
+    serde_json::json!({"version":1,"text":"Pricing is per seat, billed monthly","citation":"document-1@1"})
+}
+fn reference_plugin() -> Arc<dyn lash::plugins::PluginFactory> {
+    let key = lash::tool_provider_key!("tools");
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
+        "reference-document-read", "tools.lookup", "Read a versioned document.",
+        serde_json::json!({"type":"object","properties":{"document":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}},"required":["document"]}),
+        serde_json::json!({"type":"object","properties":{"version":{"type":"integer","minimum":0},"text":{"type":"string"},"citation":{"type":"string"}},"required":["version","text","citation"]}),
+    ).unwrap().with_execution(Duration::from_secs(30))
+        .with_execution_policy(lash_kernel_value::ExecutionPolicy::Read);
+    let provider: Arc<dyn lash_core::ToolProvider> =
+        Arc::new(StaticToolProvider::new(vec![definition], ReferenceDocument));
+    Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial("reference-host"),
+        lash::plugins::PluginSpec::new()
+            .with_tool_provider_registration(
+                key,
+                lash::tools::ToolProviderRegistration::new(provider.clone())
+                    .with_reads(Arc::new(ReferenceDocument)),
+            )
+            .with_package_provider(
+                key,
+                packages::operation_provider("reference-host", key, provider),
+            ),
+    ))
+}
+fn reference_standard(backend: &lash::Backend) -> lash::LashCoreBuilder {
+    lash::LashCore::standard_builder(backend.clone()).plugin(reference_plugin())
+}
+fn reference_rlm(backend: &lash::Backend) -> lash::LashCoreBuilder {
+    lash::LashCore::rlm_builder(
+        backend.clone(),
+        served::rlm(backend, sim::untimed_workers()),
+    )
+    .plugin(reference_plugin())
+}
+async fn reference_host(tier: Tier) {
+    use lash::observe::Stream as _;
+    use lash::persistence::{FollowFacts, FollowSubject, SessionStore};
+    use std::pin::Pin;
+    use std::task::Poll;
+    for (mode, builder) in [
+        (
+            "standard",
+            reference_standard as fn(&lash::Backend) -> lash::LashCoreBuilder,
+        ),
+        ("rlm", reference_rlm),
+    ] {
+        let (mut world, pool) = if matches!(tier, Tier::Postgres) {
+            let database = lash_postgres_store::testing::IsolatedDatabase::create(
+                &lash_postgres_store::testing::required_database_url(),
+            )
+            .await;
+            let config = lash_postgres_store::testing::work_pool_of(2);
+            assert_eq!(config.roles.max_store_operations, 2);
+            let storage = lash_postgres_store::testing::connect_with(database.url(), &config)
+                .await
+                .expect("open a two-connection work pool");
+            let pool = storage.pool().clone();
+            let attachments = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+            let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                &storage,
+                attachments.attachment_store(),
+            ));
+            let world = World::with_stores(
+                tier,
+                stores,
+                vec![Box::new(database), Box::new(storage), Box::new(attachments)],
+                builder,
+            )
+            .await;
+            eprintln!("reference host {mode}: work connections=2, max_store_operations=2");
+            (world, Some(pool))
+        } else {
+            (World::new(tier, builder).await.unwrap(), None)
+        };
+        let name = format!("reference-host-{mode}");
+        let next_name = format!("reference-next-{mode}");
+        world.script(
+            &name,
+            if mode == "standard" {
+                vec![
+                    served::response(vec![served::call(
+                        "lookup-1",
+                        "tools.lookup",
+                        serde_json::json!({"document":{"id":"document-1"}}),
+                    )]),
+                    served::response(vec![lash_core::LlmOutputPart::Text {
+                        text: REFERENCE_REPLY.into(),
+                        response_meta: None,
+                    }]),
+                ]
+            } else {
+                vec![
+                    served::cell(
+                        r#"const pages = ['plans', 'seats', 'archive'];
+for (const [i, path] of pages.entries()) {
+  if (i === 0) await tools.lookup({document:{id:'pricing'}});
+  try { await tools.lookup({document:{id:path}}); } catch {}
+}
+if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
+                    ),
+                    served::cell(&format!(
+                        "await control.finish({});",
+                        serde_json::to_string(REFERENCE_REPLY).unwrap()
+                    )),
+                ]
+            },
+        );
+        world.script(
+            &next_name,
+            if mode == "standard" {
+                vec![served::response(vec![lash_core::LlmOutputPart::Text {
+                    text: "next answer".into(),
+                    response_meta: None,
+                }])]
+            } else {
+                vec![served::cell("await control.finish(\"next answer\");")]
+            },
+        );
+        let session = world.session(&name, served::spec(8)).await;
+        let id = session.session_id().clone();
+        let observed = world.core.session(id.clone()).open().await.unwrap();
+        let (snapshot, first) = observed
+            .observe()
+            .follow(lash::FeedStart::Head)
+            .await
+            .unwrap();
+        let (_, second) = observed
+            .observe()
+            .follow(lash::FeedStart::Head)
+            .await
+            .unwrap();
+        let mut feeds = [first, second];
+        let mut live = LiveView::default();
+        live.replace(snapshot.read_view.transcript().unwrap());
+        if let Some(pool) = &pool {
+            let warm = [pool.acquire().await.unwrap(), pool.acquire().await.unwrap()];
+            drop(warm);
+            for feed in &mut feeds {
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    std::future::poll_fn(|cx| {
+                        while let Poll::Ready(item) = Pin::new(&mut *feed).poll_next(cx) {
+                            live.observe(item.unwrap().unwrap());
+                        }
+                        if pool.num_idle() == 2 {
+                            Poll::Ready(())
+                        } else {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        }
+                    }),
+                )
+                .await
+                .expect("establish both live subscriptions");
+            }
+        }
+        let handle = session.send(lash::TurnInput::text(&name)).await.unwrap();
+        let input = handle.input_id().clone();
+        let answer = tokio::time::timeout(Duration::from_secs(5), handle.output())
+            .await
+            .expect("the constrained Read commits MODEL_DONE")
+            .unwrap();
+        assert!(answer.is_success(), "{mode}: {:?}", answer.outcome);
+        if mode == "standard" {
+            assert_eq!(answer.assistant_message(), Some(REFERENCE_REPLY));
+        } else {
+            assert_eq!(
+                answer.finished(),
+                Some(("control.finish", &serde_json::json!(REFERENCE_REPLY)))
+            );
+        }
+        let first_history = session.transcript().await.unwrap();
+        for entry in first_history.entries() {
+            if let TranscriptItem::Cell(cell) = &entry.item {
+                assert!(
+                    !matches!(cell.result, CellOutcome::Failed(_)),
+                    "the host program must execute its loop before a canned later answer counts: {:?}",
+                    cell.result
+                );
+            }
+        }
+        if let Some(pool) = &pool {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while pool.num_idle() != 2 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("the turn released its work connection");
+        }
+        for feed in &mut feeds {
+            let item = if pool.is_some() {
+                // A single poll reaches the delivery/recovery cut without letting
+                // either spawned recovery run before the queued event returns.
+                let item =
+                    std::future::poll_fn(|cx| Poll::Ready(Pin::new(&mut *feed).poll_next(cx)))
+                        .await;
+                let Poll::Ready(Some(Ok(item))) = item else {
+                    panic!("a queued live event crosses the recovery read: {item:?}");
+                };
+                item
+            } else {
+                std::future::poll_fn(|cx| Pin::new(&mut *feed).poll_next(cx))
+                    .await
+                    .unwrap()
+                    .unwrap()
+            };
+            live.observe(item);
+        }
+        let runtime = SessionStore::new(world.backend.session_store_factory(), id.clone()).unwrap();
+        let subject = FollowSubject::Input(input);
+        let (facts, next) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                runtime.follow_facts(&subject),
+                session.send(lash::TurnInput::text(&next_name)).output()
+            )
+        })
+        .await
+        .expect("retained delivered feeds must allow settlement facts and the next input");
+        assert!(matches!(facts.unwrap(), FollowFacts::Input(_)));
+        let next = next.unwrap();
+        assert!(next.is_success());
+        if mode == "standard" {
+            assert_eq!(next.assistant_message(), Some("next answer"));
+        } else {
+            assert_eq!(
+                next.finished(),
+                Some(("control.finish", &serde_json::json!("next answer")))
+            );
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while live
+                .0
+                .iter()
+                .filter(|entry| entry.provenance.is_turn_reply)
+                .count()
+                < 2
+            {
+                let item = std::future::poll_fn(|cx| Pin::new(&mut feeds[0]).poll_next(cx))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                live.observe(item);
+            }
+        })
+        .await
+        .expect("both committed replies reach the live view");
+        let cells: Vec<_> = live
+            .0
+            .iter()
+            .filter_map(|entry| match &entry.item {
+                TranscriptItem::Cell(cell) => Some(cell),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells.len(), if mode == "rlm" { 3 } else { 0 });
+        assert!(
+            cells.iter().all(|cell| matches!(
+                cell.result,
+                CellOutcome::Completed | CellOutcome::Controlled { .. }
+            )),
+            "every host cell must execute successfully: {cells:?}"
+        );
+        let live_rows = render(&live.0);
+        let (turns, _) = follow(&session, None, 2).await;
+        assert_eq!(turns.len(), 2, "both run records committed");
+        let calls = session
+            .read_turn_tool_calls(&turns[0].turn_id)
+            .await
+            .unwrap();
+        let reads: Vec<_> = calls
+            .iter()
+            .filter(|call| call.tool == "reference-document-read")
+            .collect();
+        let expected_pages = if mode == "standard" {
+            vec!["document-1"]
+        } else {
+            vec!["pricing", "plans", "seats", "archive"]
+        };
+        assert_eq!(
+            reads.len(),
+            expected_pages.len(),
+            "every actual Read is retained, and the untaken branch emits none"
+        );
+        for (call, page) in reads.iter().zip(&expected_pages) {
+            assert_eq!(call.args, serde_json::json!({"document":{"id":page}}));
+            if *page == "archive" {
+                let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
+                    panic!("the caught reader failure is retained: {:?}", call.output);
+                };
+                assert_eq!(failure.code, "read_failed");
+                assert_eq!(failure.message, "page unavailable");
+            } else {
+                assert_eq!(call.output.value_for_projection(), reference_value());
+            }
+        }
+        let identities: std::collections::BTreeSet<_> =
+            reads.iter().map(|call| &call.call_id).collect();
+        assert_eq!(
+            identities.len(),
+            reads.len(),
+            "each read has its own retained identity"
+        );
+        if mode == "rlm" {
+            let facts: Vec<_> = live
+                .0
+                .iter()
+                .filter_map(|entry| match &entry.item {
+                    TranscriptItem::Cell(cell) => Some(cell.read_facts.as_slice()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert_eq!(facts.len(), 4);
+            assert_eq!(
+                facts.iter().map(|fact| fact.ordinal).collect::<Vec<_>>(),
+                [1, 2, 3, 4]
+            );
+            for ((fact, page), call) in facts.iter().zip(&expected_pages).zip(&reads) {
+                assert_eq!(fact.args, serde_json::json!({"document":{"id":page}}));
+                assert_eq!(fact.record(), **call);
+            }
+            assert!(
+                live_rows
+                    .iter()
+                    .any(|row| row.starts_with("read reference-document-read "))
+            );
+        }
+        drop(feeds);
+        drop(observed);
+        world.restart("reference-reload", builder).await;
+        let durable = world.core.session(id).durable().await.unwrap();
+        let reloaded = durable.transcript().await.unwrap();
+        assert_eq!(
+            render(reloaded.entries()),
+            live_rows,
+            "live and reload render exactly the same rows"
+        );
+        let reloaded_calls = durable
+            .read_turn_tool_calls(&turns[0].turn_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            reloaded_calls, calls,
+            "reload preserves the exact read identity and versioned output"
+        );
+        world.shutdown().await;
+    }
+}
+#[tokio::test]
+async fn reference_host_read_follow_next_reload_sqlite() {
+    reference_host(Tier::SqliteMemory).await;
+}
+#[tokio::test]
+async fn reference_host_read_follow_next_reload_postgres_pool_2() {
+    reference_host(Tier::Postgres).await;
 }

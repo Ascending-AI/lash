@@ -210,9 +210,59 @@ fn every_round_fact_round_trips_through_its_node() {
     });
     let report = ReportView::default().stage(&mut staging).unwrap();
     let request = Material::journal_local(owner(), MaterialRole::PreparedRequest, "r".to_owned());
+    let callback = |key: &str| lash_vocabulary::providers::PluginCallbackIdentity {
+        owner: "reference-host".into(),
+        key: key.into(),
+    };
+    let provider = crate::ProviderKey::from_name(
+        lash_vocabulary::claims::RegistryKind::Session,
+        &lash_kernel_value::package::ProviderName {
+            owner: "reference-host".into(),
+            key: "tools".into(),
+        },
+    )
+    .unwrap();
+    let plan = super::super::ModelReadPlan {
+        ordinal: 1,
+        slot: 2,
+        caller: lash_protocol_types::ToolReadCaller::ModelRound { round_key: "round-7".into() },
+        provider: provider.clone(),
+        definition: lash_vocabulary::tool_contract::ToolDefinition::raw(
+            "document-read", "tools.lookup", "Read a versioned document.",
+            serde_json::json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
+            serde_json::json!({"type":"object","properties":{"version":{"type":"integer","minimum":0}},"required":["version"]}),
+        ).unwrap().with_execution(std::time::Duration::from_secs(30))
+            .with_execution_policy(lash_kernel_value::ExecutionPolicy::Read),
+        call_id: ToolCallId::fixture("read-1"),
+        presentation: lash_core_store::tool_run::PresentationBinding {
+            presenter: Some(callback("presenter")), steps: vec![callback("retain")],
+        },
+        request: request.reference().clone(),
+        refusal: Some(crate::ToolFailure::new("unavailable", "the document is unavailable")),
+    };
+    let output = ToolCallOutput::failure(plan.refusal.clone().unwrap());
+    let saved = super::super::ModelReadResult {
+        fact: lash_protocol_types::ReadFact {
+            caller: plan.caller.clone(),
+            ordinal: plan.ordinal,
+            call_id: plan.call_id.clone(),
+            provider,
+            tool: "document-read".into(),
+            args: serde_json::json!({"id":"pricing"}),
+            outcome: output.outcome.clone(),
+            site: "model-slot-2".into(),
+            origin: "round-7".into(),
+        },
+        presentation: crate::runtime::effect::ToolPresentation {
+            model_return: ModelToolReturn::from_output("document-read".into(), &output),
+            artifacts: Vec::new(),
+            retention: crate::OutputRetentionPolicy::STANDARD,
+        },
+    };
+    let read = stage_model_read(&mut staging, &saved).unwrap();
     for fact in [
         RoundFact::Admit {
-            reads: Vec::new(),
+            reads: vec![plan],
             members: vec![AdmitMember::Pinned(Box::new(PinnedMember {
                 admitted_at: 0,
                 call: ToolCallId::fixture("a"),
@@ -246,12 +296,22 @@ fn every_round_fact_round_trips_through_its_node() {
             },
             due_at_ms: -5,
         },
+        RoundFact::Admit {
+            members: Vec::new(),
+            reads: Vec::new(),
+        },
         RoundFact::Present { reads: Vec::new() },
+        RoundFact::Present { reads: vec![read] },
         RoundFact::CellReport { report },
     ] {
         let node = fact.stage(&mut staging).unwrap();
         let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20));
         assert_eq!(RoundFact::load(&mut decoder, node).unwrap(), fact);
+        if let RoundFact::Present { reads } = &fact {
+            for read in reads {
+                assert_eq!(load_model_read(&mut decoder, *read).unwrap(), saved);
+            }
+        }
     }
     let stray = RoundFact::Retry {
         start: 1,

@@ -476,7 +476,59 @@ impl World {
             eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
             return None;
         };
-        let stores = layer(stores);
+        Some(Self::serving_stores(
+            tier,
+            layer(stores),
+            keep,
+            settings,
+            engines,
+            model,
+            scripts,
+            batching,
+            builder,
+        ))
+    }
+
+    /// Serve explicitly configured real stores, retaining their fixture resources.
+    pub async fn with_stores(
+        tier: Tier,
+        stores: Arc<dyn StoreSet>,
+        keep: Keep,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Self {
+        lash_execution_contracts::testing::process_execution_env_fixture(
+            stores.process_env_store().as_ref(),
+        )
+        .await;
+        let scripts = Arc::new(Scripts::default());
+        Self::serving_stores(
+            tier,
+            stores,
+            keep,
+            None,
+            Vec::new(),
+            model(Arc::clone(&scripts)),
+            scripts,
+            lash::QueuedWorkBatchingConfig::new(1),
+            builder,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the constructors' store and serving choices"
+    )]
+    fn serving_stores(
+        tier: Tier,
+        stores: Arc<dyn StoreSet>,
+        keep: Keep,
+        settings: Option<lash_core_execution::DurableSettings>,
+        engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
+        model: ProviderHandle,
+        scripts: Arc<Scripts>,
+        batching: lash::QueuedWorkBatchingConfig,
+        builder: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+    ) -> Self {
         let backend = match settings {
             Some(settings) => configured_backend(stores, settings, engines),
             None => backend_with(stores, engines),
@@ -496,13 +548,13 @@ impl World {
                 lash::persistence::LeaseIncarnationId::new("tool-semantics-boot"),
             ))
             .expect("the core builds");
-        Some(Self {
+        Self {
             tier,
             core,
             backend,
             scripts,
             keep,
-        })
+        }
     }
 
     /// Register `script` under the scenario `name`.
