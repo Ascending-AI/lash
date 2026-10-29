@@ -78,6 +78,31 @@ Admission policy remains host-owned under ADR 0015. Figments emits
 `lash.llm_admission`; its decorator must read transport evidence and its retry
 observer must attach the selected wait. Those spans are outside Lash's registry.
 
+### Failed model-call spans
+
+OpenAI-compatible, Anthropic and Google failures carry the same content-free
+`ModelStreamEvidence` on `LlmTransportError.stream_evidence` and the sealed
+attempt's `NormalizedError.stream_evidence`. The failed logical model-call
+span and each failed attempt export:
+
+| Attribute | Meaning |
+| --- | --- |
+| `http.response.status_code` | Established response status, including 200 when a later stream read fails. |
+| `lash.model.response_headers_ms` | Time from HTTP send to response headers. |
+| `lash.model.first_body_chunk_ms` | Time from HTTP send to the first nonempty body chunk. |
+| `lash.model.bytes_received` | Body bytes received before protocol decoding, including framing. |
+| `lash.model.protocol_position` | The existing retry classification's protocol position. |
+| `lash.model.partial_output` | Ordered set of `text`, `reasoning`, `tool_arguments`, `other_event`; empty when none was observed. |
+
+Timings use the caller's injected monotonic clock. Unobserved status, times
+and byte counts stay absent, never synthesized as zero. An observed
+instantaneous duration may be zero. Output kinds describe wire observations,
+including hidden reasoning and unfinished tool arguments, without carrying
+content. A protocol event that produces no output still records `other_event`.
+The logical span uses its final failed attempt; earlier attempts remain
+individually inspectable. Retry policy continues to use the existing protocol
+position, independently of the diagnostic output-kind set.
+
 ## Installing OpenTelemetry and sampling
 
 Enable the facade's `otel-trace` feature. The host builds a provider through

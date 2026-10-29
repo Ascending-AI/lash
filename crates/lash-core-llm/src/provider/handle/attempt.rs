@@ -5,7 +5,7 @@ use super::*;
 pub(super) struct AttemptHorizon<'a> {
     pub deadline: std::time::Instant,
     pub valid_through_ms: u64,
-    pub clock: &'a dyn crate::Clock,
+    pub clock: Arc<dyn crate::Clock>,
     pub cancellation: &'a ProviderAttemptControl,
     pub terminal_policy: ProviderTerminalPolicy,
     pub metrics: &'a TelemetryMetrics,
@@ -27,6 +27,8 @@ pub(super) async fn dispatch_attempt(
 ) -> AttemptExecution {
     lash_core_ids::profile_history!(ProviderEncodeSend, {
         let control = ProviderAttemptControl::default();
+        let observation_clock = Arc::clone(&horizon.clock);
+        control.set_time_source(Arc::new(move || observation_clock.now()));
         context.attempt_control = control.clone();
         context.scope.attempt = Some(ordinal);
         if let Some(downstream) = context.stream_events.take() {

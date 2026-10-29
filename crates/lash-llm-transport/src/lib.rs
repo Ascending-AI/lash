@@ -10,6 +10,7 @@ pub mod passthrough;
 #[cfg(feature = "proptest-support")]
 pub mod proptest_support;
 pub mod response_metadata;
+pub mod stream_evidence;
 pub mod streaming;
 pub mod timeouts;
 pub mod token_gate;

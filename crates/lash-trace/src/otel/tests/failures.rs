@@ -68,6 +68,7 @@ fn failure_attributes_preserve_typed_classes() {
                 evidence: None,
                 generation_disposition: None,
                 error: Some(crate::TraceNormalizedError {
+                    stream_evidence: None,
                     transport: None,
                     class: crate::TraceProviderFailureKind::Http,
                     code,

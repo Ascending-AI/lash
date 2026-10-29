@@ -1048,7 +1048,10 @@ PACKAGE_DEPS = {
     "lash-internal-provider-fixtures": {
         "build": {},
         "dev": {
+            "chrono": "//third-party/rust:p0048",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_trace": "//crates/lash-trace:lash-trace",
+            "opentelemetry_sdk": "//third-party/rust:p0226",
             "tokio": "//third-party/rust:p0380"
         },
         "normal": {

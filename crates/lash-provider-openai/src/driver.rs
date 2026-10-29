@@ -451,6 +451,18 @@ async fn send_attempt(
     endpoint: CompletionEndpoint,
     token: &ProviderToken,
 ) -> Result<LlmResponse, LlmTransportError> {
+    send_attempt_inner(provider, context, body, endpoint, token)
+        .await
+        .map_err(|error| error.with_stream_evidence(context.attempt_control.stream_evidence()))
+}
+
+async fn send_attempt_inner(
+    provider: &mut OpenAiCompatibleProvider,
+    context: &ResponseContext,
+    body: &LiveRequestBody,
+    endpoint: CompletionEndpoint,
+    token: &ProviderToken,
+) -> Result<LlmResponse, LlmTransportError> {
     let origin_model = context.model().wire_model().to_string();
     let origin_route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
@@ -582,17 +594,17 @@ async fn send_attempt(
         response_start_timeout_message: Some(endpoint.response_start_timeout_error().to_string()),
     };
     let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &provider.options);
-    let resp = match provider
-        .transport
-        .send(
-            http_request,
-            response_start_timeout(
-                timeouts.request_timeout,
-                timeouts.response_start_timeout,
-                stream,
-            ),
-        )
-        .await
+    let resp = match lash_llm_transport::stream_evidence::send_observed(
+        provider.transport.as_ref(),
+        http_request,
+        response_start_timeout(
+            timeouts.request_timeout,
+            timeouts.response_start_timeout,
+            stream,
+        ),
+        &context.attempt_control,
+    )
+    .await
     {
         Ok(response) => response,
         Err(error) => {
@@ -884,6 +896,7 @@ async fn complete_buffered_response(
             tool_argument_decoder,
             expose_thinking,
             diagnostic_limits,
+            capture.attempt().cloned(),
         ),
         CompletionEndpoint::ChatCompletions => complete_buffered_chat(
             text,
@@ -893,10 +906,15 @@ async fn complete_buffered_response(
             tool_argument_decoder,
             expose_thinking,
             diagnostic_limits,
+            capture.attempt().cloned(),
         ),
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "response decoding keeps the existing request context and live observer together"
+)]
 fn complete_buffered_responses(
     text: String,
     stream_events: Option<LlmEventSender>,
@@ -905,8 +923,10 @@ fn complete_buffered_responses(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
     expose_thinking: bool,
     diagnostic_limits: crate::RequestDiagnosticLimits,
+    stream_observer: Option<lash_core::provider::ProviderAttemptControl>,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.stream_observer = stream_observer;
     state.expose_thinking = expose_thinking;
     state.diagnostic_limits = diagnostic_limits;
     let body_was_sse = text.trim_start().starts_with("data:") || text.contains("\ndata:");
@@ -1062,6 +1082,10 @@ fn complete_buffered_responses(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "response decoding keeps the existing request context and live observer together"
+)]
 fn complete_buffered_chat(
     text: String,
     stream_events: Option<LlmEventSender>,
@@ -1070,8 +1094,10 @@ fn complete_buffered_chat(
     tool_argument_decoder: crate::responses_shared::ToolArgumentDecoder,
     expose_thinking: bool,
     diagnostic_limits: crate::RequestDiagnosticLimits,
+    stream_observer: Option<lash_core::provider::ProviderAttemptControl>,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.stream_observer = stream_observer;
     state.expose_thinking = expose_thinking;
     state.diagnostic_limits = diagnostic_limits;
     let mut parsed_parts = None;
@@ -1277,6 +1303,7 @@ async fn drive_streaming_responses(
         || ResponsesStreamState::with_tool_argument_decoder(tool_argument_decoder),
         |resume| resume.state,
     );
+    state.stream_observer = capture.attempt().cloned();
     state.expose_thinking = expose_thinking;
     state.diagnostic_limits = diagnostic_limits;
     let mut emitted_parts = Vec::new();
@@ -1445,6 +1472,7 @@ async fn drive_streaming_chat(
         ..
     } = context;
     let mut state = ChatStreamState::with_tool_argument_decoder(tool_argument_decoder);
+    state.stream_observer = capture.attempt().cloned();
     state.expose_thinking = expose_thinking;
     state.diagnostic_limits = diagnostic_limits;
     let stream_result = drive_sse_response(

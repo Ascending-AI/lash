@@ -144,6 +144,7 @@ impl StreamBlock {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct StreamState {
+    pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
     pub(crate) limits: crate::AnthropicStreamLimits,
     pub(crate) blocks: Vec<StreamBlock>,
     pub(crate) usage: LlmUsage,
@@ -282,6 +283,23 @@ impl AnthropicProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+
+        if let Some(observer) = &state.stream_observer {
+            use lash_transport_failure::PartialOutputKind as K;
+            let payload = event.get("delta").or_else(|| event.get("content_block"));
+            let output = payload
+                .and_then(|payload| payload.get("type"))
+                .and_then(Value::as_str)
+                .and_then(|kind| match kind {
+                    "text" | "text_delta" => Some(K::Text),
+                    "thinking" | "redacted_thinking" | "thinking_delta" | "signature_delta" => {
+                        Some(K::Reasoning)
+                    }
+                    "tool_use" | "input_json_delta" => Some(K::ToolArguments),
+                    _ => None,
+                });
+            observer.observe_output_kinds(output);
+        }
 
         match kind.as_str() {
             "message_start" => {

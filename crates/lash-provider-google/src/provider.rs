@@ -103,6 +103,27 @@ impl GoogleOAuthProvider {
         reading: ResponseReading,
         attempt: lash_core::provider::ProviderAttemptControl,
     ) -> Result<LlmResponse, LlmTransportError> {
+        self.execute_body_inner(
+            access_token,
+            admitted,
+            stream_events,
+            provider_trace,
+            reading,
+            attempt.clone(),
+        )
+        .await
+        .map_err(|error| error.with_stream_evidence(attempt.stream_evidence()))
+    }
+
+    async fn execute_body_inner(
+        &self,
+        access_token: &str,
+        admitted: &LiveRequestBody,
+        stream_events: Option<lash_core::llm::types::LlmEventSender>,
+        provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
+        reading: ResponseReading,
+        attempt: lash_core::provider::ProviderAttemptControl,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let ResponseReading {
             stream_termination,
             defaults,
@@ -147,20 +168,21 @@ impl GoogleOAuthProvider {
         merge_extra_headers(&mut http_request.headers, &self.extra_headers, false)?;
         let timeouts = self.options.llm_timeouts();
         let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
-        let resp = self
-            .transport
-            .send(
-                http_request,
-                response_start_timeout(
-                    timeouts.request_timeout,
-                    timeouts.response_start_timeout,
-                    stream_events.is_some(),
-                ),
-            )
-            .await?;
+        let resp = lash_llm_transport::stream_evidence::send_observed(
+            self.transport.as_ref(),
+            http_request,
+            response_start_timeout(
+                timeouts.request_timeout,
+                timeouts.response_start_timeout,
+                stream_events.is_some(),
+            ),
+            &attempt,
+        )
+        .await?;
 
         let mut response_metadata =
-            ResponseMetadataCapture::from_response(&defaults, &resp.headers).with_attempt(attempt);
+            ResponseMetadataCapture::from_response(&defaults, &resp.headers)
+                .with_attempt(attempt.clone());
         if !resp.is_success() {
             let status = resp.status;
             let headers = resp.headers;
@@ -263,6 +285,7 @@ impl GoogleOAuthProvider {
         }
 
         let mut stream_state = GoogleStreamState::default();
+        stream_state.stream_observer = Some(attempt);
         stream_state.expose_thinking = expose_thinking;
         stream_state.execution_evidence =
             provider_request_id.map(|provider_request_id| ExecutionEvidence {

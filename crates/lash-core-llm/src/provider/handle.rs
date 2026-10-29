@@ -534,7 +534,7 @@ impl ProviderHandle {
                 AttemptHorizon {
                     deadline,
                     valid_through_ms,
-                    clock: clock.as_ref(),
+                    clock: Arc::clone(&clock),
                     cancellation: &sideband.cancellation,
                     terminal_policy,
                     metrics,
@@ -572,6 +572,7 @@ impl ProviderHandle {
                     error.partial_response = control.partial_response();
                 }
                 error.output_started |= control.output_started();
+                error = error.with_stream_evidence(control.stream_evidence());
                 let mut record = failure_attempt_record(
                     attempt_ordinal,
                     &error,
@@ -976,10 +977,15 @@ fn model_total_error(
     if let Some(failure) = last_failure {
         message = format!("{message}; last provider failure: {}", failure.message);
     }
-    LlmTransportError::new(message)
+    let mut error = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Timeout)
         .with_lash_code(TurnFailureCode::ModelTotalExceeded)
-        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable);
+    if let Some(failure) = last_failure {
+        error.http_status = failure.http_status;
+        error.stream_evidence = failure.stream_evidence.clone();
+    }
+    error
 }
 
 /// Settle a call whose total expired before or during attempt `ordinal`:
@@ -1132,26 +1138,7 @@ fn announce_retry(
 }
 
 pub(super) fn failure_protocol_position(failure: &LlmTransportError) -> ProtocolPosition {
-    if failure.output_started {
-        return ProtocolPosition::OutputStarted;
-    }
-    failure
-        .partial_response
-        .as_deref()
-        .map(|response| {
-            if response_has_output_evidence(response) {
-                ProtocolPosition::OutputStarted
-            } else {
-                ProtocolPosition::ResponseObserved
-            }
-        })
-        .unwrap_or_else(|| {
-            if failure.http_status.is_some() {
-                ProtocolPosition::ResponseObserved
-            } else {
-                ProtocolPosition::NoResponse
-            }
-        })
+    failure.protocol_position()
 }
 
 pub(super) fn automatic_retry_class(
@@ -1202,25 +1189,7 @@ fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
         )
 }
 
-pub(super) fn response_has_output_evidence(response: &LlmResponse) -> bool {
-    !response.full_text().is_empty()
-        || response
-            .provider_usage
-            .as_ref()
-            .is_some_and(crate::llm::types::provider_usage_has_quantities)
-        || response.usage != crate::llm::types::LlmUsage::default()
-        || response.parts.iter().any(|part| match part {
-            crate::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),
-            crate::llm::types::LlmOutputPart::Reasoning { text, replay } => {
-                !text.is_empty()
-                    || replay.as_ref().is_some_and(|replay| {
-                        replay.encrypted_content.is_some()
-                            || replay.summary.iter().any(|text| !text.is_empty())
-                    })
-            }
-            crate::llm::types::LlmOutputPart::ToolCall { input_json, .. } => !input_json.is_empty(),
-        })
-}
+pub(super) use lash_transport_failure::response_has_output_evidence;
 
 fn empty_stream_partial(failure: &LlmTransportError) -> bool {
     failure.kind == ProviderFailureKind::Stream
@@ -1382,6 +1351,7 @@ fn failure_attempt_record(
         retry_budget_consumed,
         retry_decision,
         error: Some(NormalizedError {
+            stream_evidence: failure.stream_evidence.clone(),
             transport: failure.transport.clone(),
             class: failure.kind,
             code: failure.code.clone(),

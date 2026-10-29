@@ -33,6 +33,13 @@ pub(super) fn call_attributes(
     attempts: Option<&[TraceModelAttempt]>,
     out: &mut Vec<KeyValue>,
 ) {
+    if let Some(error) = attempts
+        .and_then(|attempts| attempts.last())
+        .filter(|attempt| attempt.outcome != AttemptOutcome::Completed)
+        .and_then(|attempt| attempt.error.as_ref())
+    {
+        stream_failure_attributes(error, out);
+    }
     let last_success = attempts
         .iter()
         .flat_map(|attempts| attempts.iter())
@@ -173,6 +180,42 @@ pub(super) fn usage_unknown(event: &TraceEvent) -> bool {
     }
 }
 
+fn stream_failure_attributes(error: &NormalizedError, out: &mut Vec<KeyValue>) {
+    if let Some(status) = error.http_status {
+        out.push(A::HttpResponseStatusCode.value(i64::from(status)));
+    }
+    let Some(evidence) = &error.stream_evidence else {
+        return;
+    };
+    for (attribute, value) in [
+        (A::ResponseHeadersMs, evidence.response_headers_ms),
+        (A::FirstBodyChunkMs, evidence.first_body_chunk_ms),
+        (A::ResponseBytesReceived, evidence.bytes_received),
+    ] {
+        if let Some(value) = value {
+            out.push(attribute.value(i64::try_from(value).unwrap_or(i64::MAX)));
+        }
+    }
+    if let Some(position) = evidence.protocol_position {
+        out.push(A::ModelProtocolPosition.value(match position {
+            ProtocolPosition::Unobserved => "unobserved",
+            ProtocolPosition::NoResponse => "no_response",
+            ProtocolPosition::ResponseObserved => "response_observed",
+            ProtocolPosition::OutputStarted => "output_started",
+            ProtocolPosition::TerminalObserved => "terminal_observed",
+        }));
+    }
+    out.push(
+        A::ModelPartialOutput.value(opentelemetry::Value::Array(opentelemetry::Array::String(
+            evidence
+                .partial_output
+                .iter()
+                .map(|kind| kind.as_str().into())
+                .collect(),
+        ))),
+    );
+}
+
 pub(super) fn attempt_attributes(attempt: &AttemptRecord, out: &mut Vec<KeyValue>) {
     out.push(A::ModelAttemptOrdinal.value(i64::from(attempt.ordinal)));
     out.push(A::Outcome.value(match attempt.outcome {
@@ -185,14 +228,14 @@ pub(super) fn attempt_attributes(attempt: &AttemptRecord, out: &mut Vec<KeyValue
         if attempt.outcome != AttemptOutcome::Aborted {
             out.push(A::ErrorType.value(error_type(error)));
         }
-        if let Some(status) = error.http_status {
-            out.push(A::HttpResponseStatusCode.value(i64::from(status)));
-            if let Some(code) = error.code.as_ref().filter(|code| {
+        stream_failure_attributes(error, out);
+        if error.http_status.is_some()
+            && let Some(code) = error.code.as_ref().filter(|code| {
                 code.namespace() == &lash_protocol_types::session_model::Namespace::PROVIDER
                     && bounded_error_code(code.spelling())
-            }) {
-                out.push(A::ProviderErrorCode.value(code.spelling().to_string()));
-            }
+            })
+        {
+            out.push(A::ProviderErrorCode.value(code.spelling().to_string()));
         }
         if let Some(transport) = &error.transport {
             out.push(A::TransportErrorKind.value(transport.kind.as_str()));

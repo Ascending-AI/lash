@@ -405,6 +405,7 @@ use slots::{
 
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
+    pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
     pub diagnostic_limits: crate::RequestDiagnosticLimits,
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,

@@ -256,9 +256,59 @@ impl TransportFailure {
     }
 }
 
+/// Content-free progress of one HTTP model request. Missing observations stay absent.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
+)]
+pub struct ModelStreamEvidence {
+    pub http_status: Option<u16>,
+    /// Monotonic milliseconds from send to response headers, on the injected clock.
+    pub response_headers_ms: Option<u64>,
+    /// Monotonic milliseconds from send to the first nonempty body chunk.
+    pub first_body_chunk_ms: Option<u64>,
+    /// Bytes delivered by the HTTP body, before SSE or JSON decoding.
+    pub bytes_received: Option<u64>,
+    pub protocol_position: Option<ProtocolPosition>,
+    /// Empty means no protocol output was observed. Ordered and bounded to four kinds.
+    pub partial_output: std::collections::BTreeSet<PartialOutputKind>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PartialOutputKind {
+    Text,
+    Reasoning,
+    ToolArguments,
+    OtherEvent,
+}
+
+impl PartialOutputKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Reasoning => "reasoning",
+            Self::ToolArguments => "tool_arguments",
+            Self::OtherEvent => "other_event",
+        }
+    }
+}
+
 /// A journal-safe projection of a provider/transport failure.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct NormalizedError {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_evidence: Option<Box<ModelStreamEvidence>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<Box<TransportFailure>>,
     pub class: ProviderFailureKind,

@@ -1,3 +1,4 @@
+pub use lash_protocol_types::llm::types::{ModelStreamEvidence, PartialOutputKind};
 pub use lash_protocol_types::llm::types::{TransportErrorKind, TransportFailure};
 use lash_protocol_types::{
     llm::types::LlmResponse, llm::types::LlmTerminalReason, llm::types::ProviderFailureKind,
@@ -65,6 +66,7 @@ pub enum HttpFailureContext {
 #[derive(Debug, thiserror::Error, Clone)]
 #[error("{message}")]
 pub struct LlmTransportError {
+    pub stream_evidence: Option<Box<ModelStreamEvidence>>,
     pub transport: Option<Box<TransportFailure>>,
     pub kind: ProviderFailureKind,
     /// Structured operation evidence used by higher-level adapters.
@@ -73,8 +75,8 @@ pub struct LlmTransportError {
     pub retry_verdict: TransportRetryVerdict,
     retry_verdict_classified: bool,
     rejected_slots: Box<[usize]>,
-    /// The HTTP status, when the failure observed one. Carried exactly once —
-    /// `code` never mirrors it.
+    /// The HTTP status, when the failure observed one. Also retained in
+    /// `stream_evidence` when a provider observed HTTP progress; `code` never mirrors it.
     pub http_status: Option<u16>,
     /// Cold raw provider evidence stays off the inline `Result` error path.
     pub raw: Option<Box<String>>,
@@ -99,6 +101,7 @@ pub struct LlmTransportError {
 impl LlmTransportError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
+            stream_evidence: None,
             transport: None,
             kind: ProviderFailureKind::Unknown,
             context: Box::new(HttpFailureContext::Other),
@@ -238,6 +241,42 @@ impl LlmTransportError {
         self
     }
 
+    /// Attach observations without reclassifying the adapter's retry verdict.
+    pub fn with_stream_evidence(mut self, evidence: Option<Box<ModelStreamEvidence>>) -> Self {
+        if let Some(mut evidence) = evidence {
+            if self.http_status.is_none() {
+                self.http_status = evidence.http_status;
+            }
+            evidence.protocol_position = Some(self.protocol_position());
+            self.stream_evidence = Some(evidence);
+        }
+        self
+    }
+
+    /// The existing retry boundary, independent of stream diagnostics.
+    pub fn protocol_position(&self) -> lash_protocol_types::llm::types::ProtocolPosition {
+        use lash_protocol_types::llm::types::ProtocolPosition;
+        if self.output_started {
+            return ProtocolPosition::OutputStarted;
+        }
+        self.partial_response
+            .as_deref()
+            .map(|response| {
+                if response_has_output_evidence(response) {
+                    ProtocolPosition::OutputStarted
+                } else {
+                    ProtocolPosition::ResponseObserved
+                }
+            })
+            .unwrap_or_else(|| {
+                if self.http_status.is_some() {
+                    ProtocolPosition::ResponseObserved
+                } else {
+                    ProtocolPosition::NoResponse
+                }
+            })
+    }
+
     pub fn with_partial_response(mut self, response: LlmResponse) -> Self {
         self.partial_response = Some(Box::new(response));
         self
@@ -353,4 +392,26 @@ mod tests {
             None
         );
     }
+}
+
+pub fn response_has_output_evidence(response: &LlmResponse) -> bool {
+    !response.full_text().is_empty()
+        || response
+            .provider_usage
+            .as_ref()
+            .is_some_and(lash_protocol_types::llm::types::provider_usage_has_quantities)
+        || response.usage != lash_protocol_types::llm::types::LlmUsage::default()
+        || response.parts.iter().any(|part| match part {
+            lash_protocol_types::llm::types::LlmOutputPart::Text { text, .. } => !text.is_empty(),
+            lash_protocol_types::llm::types::LlmOutputPart::Reasoning { text, replay } => {
+                !text.is_empty()
+                    || replay.as_ref().is_some_and(|replay| {
+                        replay.encrypted_content.is_some()
+                            || replay.summary.iter().any(|text| !text.is_empty())
+                    })
+            }
+            lash_protocol_types::llm::types::LlmOutputPart::ToolCall { input_json, .. } => {
+                !input_json.is_empty()
+            }
+        })
 }

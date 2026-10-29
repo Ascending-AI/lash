@@ -18,6 +18,8 @@ Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_o
 
 FIG-7452: Failed HTTP attempts retain a content-free transport kind in `error.type` and `lash.transport.error.kind`, monotonic elapsed milliseconds in `lash.transport.error.elapsed_ms`, and a parsed endpoint host of at most 253 ASCII bytes in `server.address`. Kinds are `dns`, `connect`, `tls`, `connect_timeout`, `request_timeout`, `reset`, `body_read`, and `other`. The 1-based attempt ordinal and `lash.model.attempt.retry_delay_ms` identify the attempt and selected next wait, with zero when no retry is scheduled. HTTP failures retain status and a typed provider code in `lash.provider.error.code` only when it is at most 128 ASCII letters, digits, underscores, dots or hyphens. No URL paths, queries, credentials, prompts or raw error text are exported. The host owns admission spans such as Figments `lash.llm_admission` and must consume the typed evidence there.
 
+FIG-7553: Failed model-call and attempt spans retain `http.response.status_code`, `lash.model.response_headers_ms`, `lash.model.first_body_chunk_ms`, `lash.model.bytes_received`, `lash.model.protocol_position` and `lash.model.partial_output`. Timings use the injected monotonic clock, relative to HTTP send. Missing observations stay absent. Partial output is a bounded ordered set of text, reasoning, tool_arguments and other_event, with no content. The logical call uses its final failed attempt.
+
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
 
 | Span name or prefix | Kind | Ownership | Semconv type |
@@ -56,7 +58,12 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `lash.transport.error.elapsed_ms` | Integer | Provenance | model_attempt |
 | `lash.provider.error.code` | String | Provenance | model_attempt |
 | `lash.model.attempt.retry_delay_ms` | Integer | Provenance | model_attempt |
-| `http.response.status_code` | Integer | Provenance | model_attempt |
+| `http.response.status_code` | Integer | Provenance | model, model_attempt |
+| `lash.model.response_headers_ms` | Integer | Provenance | model, model_attempt |
+| `lash.model.first_body_chunk_ms` | Integer | Provenance | model, model_attempt |
+| `lash.model.bytes_received` | Integer | Provenance | model, model_attempt |
+| `lash.model.protocol_position` | String | Provenance | model, model_attempt |
+| `lash.model.partial_output` | StringArray | Provenance | model, model_attempt |
 | `lash.session.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.turn.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.attempt.invocation_id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
@@ -186,8 +193,8 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 |---|---|
 | `producer` | 36 |
 | `agent` | 38 |
-| `model` | 47 |
-| `model_attempt` | 35 |
+| `model` | 53 |
+| `model_attempt` | 40 |
 | `tool` | 31 |
 | `cell` | 42 |
 | `process` | 26 |

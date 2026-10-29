@@ -780,6 +780,43 @@ impl OpenAiCompatibleProvider {
                 .with_raw(state.diagnostic_limits.body_excerpt(raw))
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
+        if let Some(observer) = &state.stream_observer {
+            use lash_transport_failure::PartialOutputKind as K;
+            let mut kinds = std::collections::BTreeSet::new();
+            for delta in event
+                .choices
+                .iter()
+                .filter_map(|choice| choice.delta.as_ref())
+            {
+                if delta.content.as_ref().is_some_and(|text| !text.is_empty()) {
+                    kinds.insert(K::Text);
+                }
+                if [
+                    &delta.reasoning_content,
+                    &delta.reasoning,
+                    &delta.reasoning_text,
+                ]
+                .iter()
+                .any(|text| text.as_ref().is_some_and(|text| !text.is_empty()))
+                    || delta
+                        .reasoning_details
+                        .as_ref()
+                        .is_some_and(|value| !value.is_null())
+                {
+                    kinds.insert(K::Reasoning);
+                }
+                if delta.tool_calls.as_ref().is_some_and(|calls| {
+                    calls.iter().any(|call| {
+                        call.pointer("/function/arguments")
+                            .and_then(Value::as_str)
+                            .is_some_and(|args| !args.is_empty())
+                    })
+                }) {
+                    kinds.insert(K::ToolArguments);
+                }
+            }
+            observer.observe_output_kinds(kinds);
+        }
         if let Some(error) = event.error.as_ref() {
             let retry_verdict = responses_error_retry_verdict(error);
             let message = error
@@ -964,6 +1001,7 @@ fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChatStreamState {
+    pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
     pub(crate) diagnostic_limits: crate::RequestDiagnosticLimits,
     pub(crate) full_text: String,
     pub(crate) reasoning_text: String,

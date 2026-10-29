@@ -355,6 +355,7 @@ impl GoogleOAuthProvider {
 /// would turn the same bytes into different reasoning deltas.
 #[derive(Default)]
 pub(crate) struct GoogleStreamState {
+    pub(crate) stream_observer: Option<lash_protocol_types::llm::types::ProviderAttemptControl>,
     pub full: String,
     pub usage: LlmUsage,
     pub provider_usage: Option<Value>,
@@ -426,6 +427,39 @@ impl GoogleStreamState {
             LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}"))
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
+        if let Some(observer) = &self.stream_observer {
+            use lash_transport_failure::PartialOutputKind as K;
+            let mut kinds = std::collections::BTreeSet::new();
+            for part in GoogleOAuthProvider::wire_parts(&event) {
+                if part
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty())
+                    || part.get("thoughtSignature").is_some()
+                {
+                    if part
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.is_empty())
+                    {
+                        kinds.insert(
+                            if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                                K::Reasoning
+                            } else {
+                                K::Text
+                            },
+                        );
+                    }
+                    if part.get("thoughtSignature").is_some() {
+                        kinds.insert(K::Reasoning);
+                    }
+                }
+                if part.get("functionCall").is_some() {
+                    kinds.insert(K::ToolArguments);
+                }
+            }
+            observer.observe_output_kinds(kinds);
+        }
         ExecutionEvidence::merge_optional(
             &mut self.execution_evidence,
             GoogleOAuthProvider::execution_evidence_from_value(&event),

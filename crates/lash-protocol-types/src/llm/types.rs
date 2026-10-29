@@ -15,9 +15,10 @@ pub use response::{
     AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
     ChargeSafetyDenialReason, DiscardReason, DiscardedAfterCell, ExecutionEvidence,
     ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmCallId, LlmCallRecord,
-    LlmProfileSelection, LlmResponse, NormalizedError, ProtocolPosition, TransportErrorKind,
-    TransportFailure, append_assistant_text_part, normalized_response_parts, reasoning_part,
-    visible_response_parts, visible_response_text_from_parts,
+    LlmProfileSelection, LlmResponse, ModelStreamEvidence, NormalizedError, PartialOutputKind,
+    ProtocolPosition, TransportErrorKind, TransportFailure, append_assistant_text_part,
+    normalized_response_parts, reasoning_part, visible_response_parts,
+    visible_response_text_from_parts,
 };
 mod retry;
 mod stream_block;

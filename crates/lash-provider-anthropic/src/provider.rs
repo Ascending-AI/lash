@@ -197,6 +197,18 @@ impl AnthropicProvider {
         minting_route: &ProviderRouteIdentity,
         token: &ProviderToken,
     ) -> Result<LlmResponse, LlmTransportError> {
+        self.send_attempt_inner(context, admitted, minting_route, token)
+            .await
+            .map_err(|error| error.with_stream_evidence(context.attempt_control.stream_evidence()))
+    }
+
+    async fn send_attempt_inner(
+        &self,
+        context: &ResponseContext,
+        admitted: &LiveRequestBody,
+        minting_route: &ProviderRouteIdentity,
+        token: &ProviderToken,
+    ) -> Result<LlmResponse, LlmTransportError> {
         let stream_events = context.stream_events.clone();
         let provider_trace = context.provider_trace.clone();
         let timeouts = self.options.llm_timeouts();
@@ -256,17 +268,17 @@ impl AnthropicProvider {
         merge_extra_headers(&mut request.headers, &self.extra_headers, true)?;
         let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
 
-        let resp = self
-            .transport
-            .send(
-                request,
-                response_start_timeout(
-                    timeouts.request_timeout,
-                    timeouts.response_start_timeout,
-                    true,
-                ),
-            )
-            .await?;
+        let resp = lash_llm_transport::stream_evidence::send_observed(
+            self.transport.as_ref(),
+            request,
+            response_start_timeout(
+                timeouts.request_timeout,
+                timeouts.response_start_timeout,
+                true,
+            ),
+            &context.attempt_control,
+        )
+        .await?;
 
         let mut response_metadata = ResponseMetadataCapture::from_response(
             &context.model().metadata().request_defaults,
@@ -327,6 +339,7 @@ impl AnthropicProvider {
             }));
         }
         let mut state = StreamState {
+            stream_observer: Some(context.attempt_control.clone()),
             limits: self.stream_limits,
             execution_evidence: provider_request_id.map(|provider_request_id| ExecutionEvidence {
                 provider_request_id: Some(provider_request_id),

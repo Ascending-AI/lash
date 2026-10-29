@@ -20,6 +20,67 @@ pub fn process_sse_event(
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
     })?;
     let event_name = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if let Some(observer) = &state.stream_observer {
+        use lash_transport_failure::PartialOutputKind as K;
+        let mut kinds = std::collections::BTreeSet::new();
+        if event_name.starts_with("response.output_text.")
+            || event_name.starts_with("response.refusal.")
+        {
+            kinds.insert(K::Text);
+        } else if event_name.starts_with("response.reasoning_") {
+            kinds.insert(K::Reasoning);
+        } else if event_name.starts_with("response.function_call_arguments.")
+            || event_name.starts_with("response.custom_tool_call_input.")
+        {
+            kinds.insert(K::ToolArguments);
+        }
+        let items = event.get("item").into_iter().chain(
+            event
+                .pointer("/response/output")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        );
+        for item in items {
+            match item.get("type").and_then(Value::as_str) {
+                Some("reasoning") => {
+                    kinds.insert(K::Reasoning);
+                }
+                Some("function_call" | "custom_tool_call") => {
+                    kinds.insert(K::ToolArguments);
+                }
+                Some("message") => {
+                    if item
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .is_some_and(|parts| {
+                            parts.iter().any(|part| {
+                                matches!(
+                                    part.get("type").and_then(Value::as_str),
+                                    Some("output_text" | "refusal")
+                                )
+                            })
+                        })
+                    {
+                        kinds.insert(K::Text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(part) = event.get("part") {
+            match part.get("type").and_then(Value::as_str) {
+                Some("output_text" | "refusal") => {
+                    kinds.insert(K::Text);
+                }
+                Some("summary_text" | "reasoning_text") => {
+                    kinds.insert(K::Reasoning);
+                }
+                _ => {}
+            }
+        }
+        observer.observe_output_kinds(kinds);
+    }
     if event_name == "error" {
         let retry_verdict = sse_error_event_retry_verdict(&event);
         let message = event

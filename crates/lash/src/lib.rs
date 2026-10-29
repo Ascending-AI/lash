@@ -1284,7 +1284,8 @@ pub mod provider {
         llm::types::ResponseContext, llm::types::ResponseContract, llm::types::ToolCallContract,
     };
     pub use lash_transport_failure::{
-        HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
+        HttpFailureContext, LlmTransportError, ModelStreamEvidence, PartialOutputKind,
+        TransportRetryVerdict, retry_after_from_headers,
     };
 
     /// Typed provider-failure classification surfaced on

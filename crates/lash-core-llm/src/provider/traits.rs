@@ -253,6 +253,10 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
                     .with_lash_code(lash_protocol_types::session_model::TurnFailureCode::Timeout)
             })?,
         }?;
+        let observation_clock = Arc::clone(&horizon.clock);
+        request
+            .attempt_control
+            .set_time_source(Arc::new(move || observation_clock.now()));
         let result = self
             .send(&live, ResponseContext::of_request(&request))
             .await;

@@ -48,6 +48,10 @@ impl ResponseMetadataCapture {
         self
     }
 
+    pub fn attempt(&self) -> Option<&lash_core::provider::ProviderAttemptControl> {
+        self.attempt.as_ref()
+    }
+
     pub fn is_active(&self) -> bool {
         !self.headers.is_empty() || !self.body_paths.is_empty()
     }

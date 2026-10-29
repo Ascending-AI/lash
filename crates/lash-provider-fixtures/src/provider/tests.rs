@@ -227,6 +227,15 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
     );
     assert!(err.is_retryable());
     assert!(err.http_status.is_none());
+    let evidence = err
+        .stream_evidence
+        .as_deref()
+        .expect("attempt observations");
+    assert_eq!(evidence.http_status, None);
+    assert_eq!(evidence.response_headers_ms, None);
+    assert_eq!(evidence.first_body_chunk_ms, None);
+    assert_eq!(evidence.bytes_received, None);
+    assert!(evidence.partial_output.is_empty());
     assert!(
         events.lock_recover().is_empty(),
         "response-start timeout should not commit stream events"
@@ -777,4 +786,199 @@ fn responses_request() -> LlmRequest {
         provider_trace: None,
         attempt_control: Default::default(),
     }
+}
+
+/// FIG-7553: headers and a non-delta event must survive a stalled stream,
+/// through the typed failure, sealed attempt and exported model-call span.
+#[tokio::test(start_paused = true)]
+async fn stalled_stream_retains_transport_evidence() {
+    use crate::runtime_providers::{runtime_provider_components, runtime_script_value_for_text};
+    use lash_protocol_types::llm::types::{PartialOutputKind, ProtocolPosition};
+    for (kind, event) in [
+        ("openai-compatible", r#"{"choices":[]}"#),
+        (
+            "openai",
+            r#"{"type":"response.created","response":{"id":"resp-1","status":"in_progress"}}"#,
+        ),
+        ("anthropic", r#"{"type":"ping"}"#),
+        ("google_oauth", r#"{"response":{}}"#),
+    ] {
+        let bytes = format!("data: {event}\n\n");
+        let mut script = runtime_script_value_for_text(kind, "unused").unwrap();
+        script["request_match"] = json!({"any": true});
+        script["timeline"] = json!([
+            { "at": 5, "event": "response_start", "status": 200,
+              "headers": [{"name": "content-type", "value": "text/event-stream"}] },
+            { "at": 12, "event": "chunk", "payload": { "data": bytes } },
+            { "at": 113, "event": "end" }
+        ]);
+        let schedule = ScriptedTransportSchedule::new();
+        let transport = Arc::new(
+            ScriptedLlmHttpTransport::from_json_str(&script.to_string())
+                .unwrap()
+                .with_event_schedule(schedule.clone()),
+        );
+        let (mut handle, metadata, _) = runtime_provider_components(kind, &transport).unwrap();
+        handle = handle.with_clock(Arc::new(StreamTestClock));
+        handle.set_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .request_timeout_ms(Some(1000))
+                .stream_chunk_timeout_ms(Some(100)),
+            ..Default::default()
+        });
+        let mut request = request(Some(LlmEventSender::new(|_| {})));
+        request.model = lash_protocol_types::llm_profile::LlmProfileConfig::new(
+            lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+                lash_protocol_types::llm_profile::LlmProfileKey::new("stream-evidence"),
+                metadata,
+            ),
+        );
+        let task = tokio::spawn(async move {
+            handle
+                .complete(
+                    request,
+                    lash_core::ChargeSafetyPolicy::RequireGuarantee,
+                    lash_protocol_types::ExecutionBudgets::recommended(),
+                    &lash_core::provider::NoSlotDeliveries,
+                )
+                .await
+        });
+        schedule.wait_until_blocked(0, 0).await;
+        tokio::time::advance(Duration::from_millis(5)).await;
+        schedule.release(0, 0, "response_start", 5);
+        schedule.wait_until_blocked(0, 1).await;
+        tokio::time::advance(Duration::from_millis(7)).await;
+        schedule.release(0, 1, "chunk", 12);
+        schedule.wait_until_blocked(0, 2).await;
+        tokio::time::advance(Duration::from_millis(101)).await;
+        let failure = task.await.unwrap().expect_err("stalled stream");
+        let error = &failure.error;
+        assert_eq!(error.kind, ProviderFailureKind::Timeout, "{kind}");
+        assert_eq!(error.http_status, Some(200), "{kind}");
+        let evidence = error
+            .stream_evidence
+            .as_deref()
+            .expect("typed stream evidence");
+        assert_eq!(evidence.http_status, Some(200));
+        assert_eq!(evidence.response_headers_ms, Some(5));
+        assert_eq!(evidence.first_body_chunk_ms, Some(12));
+        assert_eq!(evidence.bytes_received, Some(bytes.len() as u64));
+        assert_eq!(
+            evidence.partial_output,
+            [PartialOutputKind::OtherEvent].into()
+        );
+        let attempt = &failure.call_record.attempts[0];
+        assert_eq!(evidence.protocol_position, Some(attempt.protocol_position));
+        assert!(matches!(
+            attempt.protocol_position,
+            ProtocolPosition::ResponseObserved | ProtocolPosition::OutputStarted
+        ));
+        assert_eq!(
+            attempt.error.as_ref().unwrap().stream_evidence.as_deref(),
+            Some(evidence)
+        );
+        assert_stream_failure_span(&failure, bytes.len() as u64);
+    }
+}
+
+/// Virtual monotonic time makes both recorded timings and the stall deterministic.
+#[derive(Debug)]
+struct StreamTestClock;
+
+#[async_trait::async_trait]
+impl lash_core::Clock for StreamTestClock {
+    fn now(&self) -> std::time::Instant {
+        tokio::time::Instant::now().into_std()
+    }
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(std::time::UNIX_EPOCH)
+    }
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(deadline.into()).await;
+    }
+}
+
+fn assert_stream_failure_span(failure: &lash_core::provider::ProviderCompletionError, bytes: u64) {
+    use lash_trace::otel::{LashTracerProvider, OtelOptions, OtelTelemetry};
+    use lash_trace::*;
+    use opentelemetry_sdk::trace::{
+        InMemorySpanExporter, RandomIdGenerator, Sampler, SdkTracerProvider,
+    };
+    let exporter = InMemorySpanExporter::default();
+    let provider = LashTracerProvider::new(
+        SdkTracerProvider::builder().with_simple_exporter(exporter.clone()),
+        Sampler::AlwaysOn,
+        RandomIdGenerator::default(),
+    );
+    let meter = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    let event = TraceEvent::LlmCallFailed {
+        model: None,
+        request: Default::default(),
+        error: TraceError {
+            code: None,
+            retryable: false,
+            failure_kind: failure.error.kind,
+            terminal_reason: failure.error.terminal_reason,
+        },
+        stream_summary: None,
+        attempts: Some(
+            failure
+                .call_record
+                .attempts
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
+        ),
+    };
+    let span = TraceCarrier::parse_w3c(
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        None,
+    )
+    .unwrap();
+    let record = TraceRecord::host_owned(TraceContext::default(), event)
+        .unwrap()
+        .at(Some(TracePosition {
+            span,
+            parent: None,
+            links: TraceLinks::new(),
+            role: SpanRole::Whole,
+            kind: TraceSpanKind::Model,
+            started_at: TraceTimestamp::from_unix_ms(0),
+            ended_at: Some(TraceTimestamp::from_unix_ms(113)),
+            scope: None,
+            attempt: None,
+        }))
+        .governed(ContentPolicy::standard());
+    adapter.append(&record).unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    let span = spans
+        .iter()
+        .find(|span| span.name.starts_with("chat"))
+        .expect("model span");
+    for (key, expected) in [
+        ("http.response.status_code", "200".to_string()),
+        ("lash.model.response_headers_ms", "5".to_string()),
+        ("lash.model.first_body_chunk_ms", "12".to_string()),
+        ("lash.model.bytes_received", bytes.to_string()),
+        ("lash.model.partial_output", "[\"other_event\"]".to_string()),
+    ] {
+        assert_eq!(
+            span.attributes
+                .iter()
+                .find(|a| a.key.as_str() == key)
+                .map(|a| a.value.to_string()),
+            Some(expected),
+            "{key}"
+        );
+    }
+    assert!(
+        span.attributes
+            .iter()
+            .any(|a| a.key.as_str() == "lash.model.protocol_position")
+    );
 }

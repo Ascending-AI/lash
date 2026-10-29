@@ -38,4 +38,7 @@ tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+chrono = { workspace = true }
+lash-trace = { workspace = true, features = ["otel"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }

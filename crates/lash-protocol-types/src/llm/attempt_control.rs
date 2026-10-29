@@ -23,11 +23,23 @@ pub enum AttemptEndReason {
 #[derive(Debug, Default)]
 struct State {
     reason: Option<AttemptEndReason>,
+    time_source: Option<AttemptTimeSource>,
+    transport_started: Option<std::time::Instant>,
+    stream_evidence: Option<Box<super::types::ModelStreamEvidence>>,
     waiters: Vec<Waker>,
     partial: Option<Box<LlmResponse>>,
     reported_usage: bool,
     /// Output streamed, whether or not its content is retained in `partial`.
     output_started: bool,
+}
+
+#[derive(Clone)]
+struct AttemptTimeSource(Arc<dyn Fn() -> std::time::Instant + Send + Sync>);
+
+impl std::fmt::Debug for AttemptTimeSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AttemptTimeSource")
+    }
 }
 
 /// The live attempt's cancellation signal and response observed so far.
@@ -37,6 +49,75 @@ struct State {
 pub struct ProviderAttemptControl(Arc<Mutex<State>>);
 
 impl ProviderAttemptControl {
+    /// Use the caller's monotonic clock for transport observations.
+    pub fn set_time_source(&self, now: Arc<dyn Fn() -> std::time::Instant + Send + Sync>) {
+        self.state().time_source = Some(AttemptTimeSource(now));
+    }
+
+    fn now(&self) -> std::time::Instant {
+        let source = self.state().time_source.clone();
+        source.map_or_else(std::time::Instant::now, |source| (source.0)())
+    }
+
+    pub fn begin_transport(&self) {
+        let now = self.now();
+        let mut state = self.state();
+        state.transport_started = Some(now);
+        state.stream_evidence = Some(Box::default());
+    }
+
+    pub fn observe_response_headers(&self, status: u16) {
+        let now = self.now();
+        let mut state = self.state();
+        let elapsed = state
+            .transport_started
+            .map(|start| millis(now.saturating_duration_since(start)));
+        if let Some(evidence) = state.stream_evidence.as_mut() {
+            evidence.http_status = Some(status);
+            evidence.response_headers_ms = elapsed;
+        }
+    }
+
+    pub fn observe_body_chunk(&self, bytes: usize) {
+        let now = self.now();
+        let mut state = self.state();
+        let elapsed = state
+            .transport_started
+            .map(|start| millis(now.saturating_duration_since(start)));
+        if let Some(evidence) = state.stream_evidence.as_mut() {
+            evidence.bytes_received = Some(
+                evidence
+                    .bytes_received
+                    .unwrap_or(0)
+                    .saturating_add(bytes as u64),
+            );
+            if bytes > 0 && evidence.first_body_chunk_ms.is_none() {
+                evidence.first_body_chunk_ms = elapsed;
+            }
+        }
+    }
+
+    /// Record a decoded wire event even when no application delta is emitted.
+    pub fn observe_output_kinds(
+        &self,
+        kinds: impl IntoIterator<Item = super::types::PartialOutputKind>,
+    ) {
+        let mut state = self.state();
+        if let Some(evidence) = state.stream_evidence.as_mut() {
+            let mut kinds = kinds.into_iter().peekable();
+            if kinds.peek().is_none() {
+                evidence
+                    .partial_output
+                    .insert(super::types::PartialOutputKind::OtherEvent);
+            }
+            evidence.partial_output.extend(kinds);
+        }
+    }
+
+    pub fn stream_evidence(&self) -> Option<Box<super::types::ModelStreamEvidence>> {
+        self.state().stream_evidence.clone()
+    }
+
     fn empty_partial() -> Box<LlmResponse> {
         Box::new(LlmResponse {
             usage: super::types::LlmUsage::unknown_call(),
@@ -145,4 +226,8 @@ impl ProviderAttemptControl {
     pub fn partial_response(&self) -> Option<Box<LlmResponse>> {
         self.state().partial.clone()
     }
+}
+
+fn millis(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
