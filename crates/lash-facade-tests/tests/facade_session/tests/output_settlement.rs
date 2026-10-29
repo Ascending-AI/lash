@@ -280,3 +280,177 @@ async fn a_host_reads_the_schema_refusal_from_the_cells_committed_call() -> Resu
     reader.shutdown().await?;
     Ok(())
 }
+
+/// FIG-7560: the default string settles on both model protocols and is
+/// retained in history; an explicitly requested object still refuses a string.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn llm_query_settles_its_per_call_output_contract() -> Result<()> {
+    for rlm in [false, true] {
+        let descriptor = serde_json::json!({"summary": "str"});
+        let object = serde_json::json!({"summary": "Customer summary"});
+        for (case, witness, answer, refused) in [
+            (
+                "default string",
+                None,
+                serde_json::json!("Customer summary"),
+                false,
+            ),
+            (
+                "record descriptor",
+                Some(descriptor.clone()),
+                object.clone(),
+                false,
+            ),
+            (
+                "Type witness",
+                Some(serde_json::json!({"$lash_type": {
+                    "type": "object", "properties": {"summary": {"type": "string"}},
+                    "required": ["summary"], "additionalProperties": false
+                }})),
+                object,
+                false,
+            ),
+            (
+                "invalid transformed string",
+                Some(descriptor),
+                serde_json::json!("Customer summary"),
+                true,
+            ),
+        ] {
+            let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+            let calls = Arc::new(AtomicUsize::new(0));
+            let mut args = serde_json::json!({"task": "Summarise the customer", "inputs": {"crm": "Account owner"}});
+            if let Some(witness) = witness {
+                args["output"] = witness;
+            }
+            let provider = lash::testing::TestProvider::builder()
+                .kind("llm-query-output-contract")
+                .complete({
+                    let requests = Arc::clone(&requests);
+                    let answer = answer.clone();
+                    move |request| {
+                        requests.lock_recover().push(format!("{:?}", request.messages));
+                        let ordinal = calls.fetch_add(1, Ordering::SeqCst);
+                        let args = args.clone();
+                        let answer = answer.clone();
+                        async move {
+                            Ok(match ordinal {
+                                0 if rlm => LlmResponse {
+                                    parts: vec![typescript_block(&format!("console.log(await llm.query({args}));"))],
+                                    ..Default::default()
+                                },
+                                0 => LlmResponse {
+                                    parts: vec![LlmOutputPart::ToolCall {
+                                        call_id: "query".into(),
+                                        tool_name: "llm__query".into(),
+                                        input_json: args.to_string(),
+                                        replay: None,
+                                    }],
+                                    ..Default::default()
+                                },
+                                1 => text_response(&serde_json::json!({"kind": "value", "value": answer, "error": null}).to_string()),
+                                _ => text_response("done"),
+                            })
+                        }
+                    }
+                })
+                .build()
+                .into_handle();
+            let backend = sqlite_memory_store_backend().await;
+            let builder = if rlm {
+                rlm_core_builder_over(backend)
+            } else {
+                LashCore::standard_builder(backend)
+            };
+            let transformed = Arc::new(AtomicUsize::new(0));
+            let mut builder = explicit_ephemeral_facets(builder)
+                .serve_test_llm_profile(provider, mock_llm_profile_spec())
+                .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()));
+            if refused {
+                // The provider refuses this string too. A result transform
+                // proposing it as success must still meet runtime admission.
+                let transformed = Arc::clone(&transformed);
+                builder = builder.plugin(Arc::new(StaticPluginFactory::new(
+                    lash_core::plugin::PluginDeclaration::initial("query-result"),
+                    lash_core::facade_support::PluginSpec::new().with_tool_result_transform(
+                        lash::hook_key!("string-answer"),
+                        Arc::new(move |input| {
+                            transformed.fetch_add(1, Ordering::SeqCst);
+                            Box::pin(async move {
+                                Ok(lash_core::plugin::ToolResultCandidate {
+                                    outcome: lash_core::ToolCallOutcome::Success(
+                                        lash_core::ToolValue::untrusted_json(serde_json::json!(
+                                            "Customer summary"
+                                        )),
+                                    ),
+                                    ..input.current
+                                })
+                            })
+                        }),
+                    ),
+                )));
+            }
+            let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
+            let session = created_session(&core, SessionId::fixture("llm-query-output-contract"))
+                .await
+                .open()
+                .await?;
+            let events = RecordingEvents::default();
+            session
+                .send(TurnInput::text("summarise"))
+                .output_into(&events)
+                .await?;
+            let completed: Vec<_> = events
+                .snapshot()
+                .await
+                .into_iter()
+                .filter_map(|activity| match activity.event {
+                    TurnEvent::ToolCallCompleted { output, .. } => Some(output),
+                    _ => None,
+                })
+                .collect();
+            drop(session);
+            core.shutdown().await?;
+            let [output] = completed.as_slice() else {
+                panic!("one query settles: {completed:?}");
+            };
+            if refused {
+                assert_eq!(
+                    transformed.load(Ordering::SeqCst),
+                    1,
+                    "the proposed success reached settlement"
+                );
+                let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+                    panic!("the declared object refuses a string: {output:?}");
+                };
+                assert_eq!(failure.code, "tool_outcome_not_declared");
+                assert!(
+                    matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::Declaration {
+                    refusal: lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch { output_schema, .. }
+                }) if output_schema.as_value()["type"] == "object")
+                );
+            } else {
+                assert!(output.is_success(), "case={case}, rlm={rlm}: {output:?}");
+                assert_eq!(output.value_for_projection(), answer);
+            }
+            let requests = requests.lock_recover();
+            assert_eq!(
+                requests.len(),
+                3,
+                "outer call, direct query, and next model request"
+            );
+            let history_value = if refused {
+                "its value does not fit the tool's output schema"
+            } else {
+                "Customer summary"
+            };
+            assert!(
+                requests[2].contains(history_value),
+                "the model reads the settled outcome: {}",
+                requests[2]
+            );
+        }
+    }
+    Ok(())
+}

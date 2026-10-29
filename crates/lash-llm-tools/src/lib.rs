@@ -495,7 +495,7 @@ fn tool_definition(
         operation,
         description,
         input_schema,
-        json!({ "type": "object", "additionalProperties": true }),
+        ToolDefinition::any_output(),
     )
     .expect("valid declared tool schemas")
     // One model call: as long as lash lets a model call run.

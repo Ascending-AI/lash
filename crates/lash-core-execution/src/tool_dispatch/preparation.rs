@@ -267,6 +267,7 @@ async fn prepare_authorized_tool_call_with_context(
                 manifest.declaration(),
                 &contract,
                 &tool_name,
+                &args,
             );
             completed_preparation(normalized_outcome(context, &ids, tool_name, args, result).await)
         }
@@ -291,6 +292,8 @@ pub(super) fn validate_args(
     args: &serde_json::Value,
     code: &'static str,
 ) -> Result<(), crate::ToolOutcome> {
+    super::output::schema_for_call(contract, args)
+        .map_err(|failure| crate::ToolOutcome::failure(*failure))?;
     validate_tool_input(contract, args).map_err(|err| {
         crate::ToolOutcome::failure(
             crate::ToolFailure::runtime(ToolFailureClass::InvalidRequest, code, err.to_string())

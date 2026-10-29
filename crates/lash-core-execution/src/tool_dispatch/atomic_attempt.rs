@@ -207,30 +207,15 @@ pub(super) fn settled_outcome(
     declaration: &lash_vocabulary::tool_declaration::ToolDeclaration,
     contract: &lash_vocabulary::tool_contract::ToolContract,
     tool_name: &str,
+    args: &serde_json::Value,
 ) -> ToolOutcome {
     match result.into_done_output() {
-        Ok(output) => match output.settled(declaration, &contract.output_schema.canonical) {
+        Ok(output) => match super::output::settle(output, declaration, contract, args, tool_name) {
             Ok(output) => ToolOutcome::from_output(output),
-            Err(refusal) => declaration_refused(tool_name, refusal),
+            Err(failure) => ToolOutcome::failure(*failure),
         },
         Err(pending) => ToolOutcome::pending(pending),
     }
-}
-
-fn declaration_refused(
-    tool_name: &str,
-    refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
-) -> ToolOutcome {
-    ToolOutcome::failure(
-        crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "tool_outcome_not_declared",
-            format!(
-                "tool `{tool_name}` returned an outcome its declaration does not admit: {refusal}"
-            ),
-        )
-        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
-    )
 }
 
 /// The proposal of a body's state commands against its tool's owning
@@ -361,8 +346,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
                 .collect();
             let (output, state) = result.into_parts();
-            let admitted = output
-                .settled(&declaration, &contract.output_schema.canonical)
+            let admitted = super::output::settle(output, &declaration, contract, &args, &tool_name)
                 .and_then(|output| {
                     declaration
                         .admits(lash_vocabulary::tool_declaration::OutcomeShape::Done {
@@ -370,13 +354,16 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                             control: output.turn_control_kind(),
                         })
                         .map(|()| output)
+                        .map_err(|refusal| {
+                            Box::new(super::output::declaration_failure(&tool_name, refusal))
+                        })
                 });
             match admitted {
                 Ok(output) => (ToolOutcome::from_output(output), intents, state),
                 // An undeclared intent is refused with the whole outcome, before
                 // the attempt is recorded: nothing it declared is realized.
-                Err(refusal) => (
-                    declaration_refused(&tool_name, refusal),
+                Err(failure) => (
+                    ToolOutcome::failure(*failure),
                     lash_execution_contracts::tool_intent::ToolIntents::default(),
                     lash_execution_contracts::state_commands::StateCommands::default(),
                 ),
@@ -389,7 +376,8 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
             if let Err(refusal) =
                 declaration.admits(lash_vocabulary::tool_declaration::OutcomeShape::Deferred)
             {
-                let refused = declaration_refused(&tool_name, refusal);
+                let refused =
+                    ToolOutcome::failure(super::output::declaration_failure(&tool_name, refusal));
                 return Ok(attempt_done(
                     normalized_outcome(context, &ids, tool_name, args, refused).await,
                 ));
@@ -422,7 +410,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         result,
     ))
     .await;
-    let result = settled_outcome(result, &declaration, contract, &tool_name);
+    let result = settled_outcome(result, &declaration, contract, &tool_name, &args);
     let result = carry_body_state(context, state, result);
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;

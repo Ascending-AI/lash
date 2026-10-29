@@ -291,7 +291,6 @@ impl ProductionToolHandlers<'_> {
             }
         }
         let declaration = definition.manifest.declaration().clone();
-        let output_schema = definition.contract.output_schema.canonical.clone();
         let singleton = self.admit_leaf(
             owner,
             &invocation,
@@ -336,15 +335,36 @@ impl ProductionToolHandlers<'_> {
                 completion,
                 launch,
                 store_local,
-            } => (
-                MemberEnd::Parked(ParkedCall {
-                    completion: *completion,
-                    launch: launch.map(|launch| *launch),
-                    declaration,
-                    output_schema,
-                }),
-                store_local,
-            ),
+            } => {
+                let prepared = self
+                    .prepared
+                    .lock_recover()
+                    .get(&call.call_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        crate::RuntimeEffectControllerError::from(crate::PluginError::Session(
+                            "a parked call has no prepared input".into(),
+                        ))
+                    })?;
+                let output_schema = super::super::output::schema_for_call(
+                    &prepared.input.definition.contract,
+                    &prepared.call.args,
+                )
+                .map_err(|failure| {
+                    crate::RuntimeEffectControllerError::from(crate::PluginError::Session(
+                        failure.message,
+                    ))
+                })?;
+                (
+                    MemberEnd::Parked(ParkedCall {
+                        completion: *completion,
+                        launch: launch.map(|launch| *launch),
+                        declaration,
+                        output_schema,
+                    }),
+                    store_local,
+                )
+            }
             AttemptEnd::Faulted(fault) => (MemberEnd::Faulted(fault), Vec::new()),
         })
     }

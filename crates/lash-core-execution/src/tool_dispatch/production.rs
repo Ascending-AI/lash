@@ -180,16 +180,7 @@ fn declaration_refused(
     tool_name: &str,
     refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
 ) -> ToolCallOutput {
-    ToolCallOutput::failure(
-        crate::ToolFailure::runtime(
-            crate::ToolFailureClass::Internal,
-            "tool_outcome_not_declared",
-            format!(
-                "tool `{tool_name}` returned an outcome its declaration does not admit: {refusal}"
-            ),
-        )
-        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
-    )
+    ToolCallOutput::failure(super::output::declaration_failure(tool_name, refusal))
 }
 
 impl<'run> ProductionToolHandlers<'run> {
@@ -394,13 +385,14 @@ impl<'run> ProductionToolHandlers<'run> {
         // The call settles as its admitted declaration says, after every
         // transform: a control call's result stays its control alone.
         let final_output = match transformed {
-            Ok(candidate) => candidate
-                .into_output(control)
-                .settled(
-                    prepared.input.definition.manifest.declaration(),
-                    &prepared.input.definition.contract.output_schema.canonical,
-                )
-                .unwrap_or_else(|refusal| declaration_refused(&prepared.call.tool_name, refusal)),
+            Ok(candidate) => super::output::settle(
+                candidate.into_output(control),
+                prepared.input.definition.manifest.declaration(),
+                &prepared.input.definition.contract,
+                &prepared.call.args,
+                &prepared.call.tool_name,
+            )
+            .unwrap_or_else(|failure| ToolCallOutput::failure(*failure)),
             Err(failure) => ToolCallOutput::failure(*failure),
         };
         let outcome = retry::normalized_outcome(
@@ -996,29 +988,39 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 let (output, mut commands) = result.into_parts();
                 let mut intents = intents;
                 let declaration = prepared.input.definition.manifest.declaration();
-                let output_schema = &prepared.input.definition.contract.output_schema.canonical;
-                let admitted = output
-                    .settled(declaration, output_schema)
-                    .and_then(|output| {
-                        declaration
-                            .admits(OutcomeShape::Done {
-                                intents: &intents
-                                    .intents
-                                    .iter()
-                                    .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
-                                    .collect::<Vec<_>>(),
-                                control: output.turn_control_kind(),
-                            })
-                            .map(|()| output)
-                    });
+                let admitted = super::output::settle(
+                    output,
+                    declaration,
+                    &prepared.input.definition.contract,
+                    &prepared.call.args,
+                    &prepared.call.tool_name,
+                )
+                .and_then(|output| {
+                    declaration
+                        .admits(OutcomeShape::Done {
+                            intents: &intents
+                                .intents
+                                .iter()
+                                .map(lash_execution_contracts::tool_intent::ToolIntent::kind)
+                                .collect::<Vec<_>>(),
+                            control: output.turn_control_kind(),
+                        })
+                        .map(|()| output)
+                        .map_err(|refusal| {
+                            Box::new(super::output::declaration_failure(
+                                &prepared.call.tool_name,
+                                refusal,
+                            ))
+                        })
+                });
                 let output = match admitted {
                     Ok(output) => output,
                     // Nothing an outcome its declaration refuses declared is
                     // realized.
-                    Err(refusal) => {
+                    Err(failure) => {
                         commands = Default::default();
                         intents = Default::default();
-                        declaration_refused(&prepared.call.tool_name, refusal)
+                        ToolCallOutput::failure(*failure)
                     }
                 };
                 let captured = self

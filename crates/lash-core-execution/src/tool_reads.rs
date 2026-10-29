@@ -286,7 +286,7 @@ pub async fn run_read(
                 })),
             },
         };
-        admit_read_output(&route.definition, value)
+        admit_read_output(&route.definition, &args, value)
     }, |answer| match answer {
         Ok(value) => (crate::ToolCallOutput::success(value.clone()), value.to_string().len()),
         Err(failure) => (failure.output(), 0),
@@ -313,25 +313,16 @@ pub async fn run_read(
 
 fn admit_read_output(
     definition: &ToolDefinition,
+    args: &serde_json::Value,
     value: serde_json::Value,
 ) -> Result<serde_json::Value, ReadFailure> {
-    crate::ToolCallOutput::success(value.clone())
-        .settled(
-            definition.manifest.declaration(),
-            &definition.contract.output_schema.canonical,
-        )
-        .map_err(|refusal| {
-            ReadFailure::Tool(Box::new(
-                crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Internal,
-                    "tool_outcome_not_declared",
-                    format!(
-                        "tool `{}` returned an outcome its declaration does not admit: {refusal}",
-                        definition.manifest.id
-                    ),
-                )
-                .with_cause(crate::ToolFailureCause::Declaration { refusal }),
-            ))
-        })?;
+    crate::tool_dispatch::output::settle(
+        crate::ToolCallOutput::success(value.clone()),
+        definition.manifest.declaration(),
+        &definition.contract,
+        args,
+        &definition.manifest.tool(),
+    )
+    .map_err(ReadFailure::Tool)?;
     Ok(value)
 }

@@ -6,6 +6,7 @@ mod context;
 mod execution;
 mod hooks;
 mod intent_executor;
+pub(crate) mod output;
 mod pending_resolver;
 mod preparation;
 mod production;
