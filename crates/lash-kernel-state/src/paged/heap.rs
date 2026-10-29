@@ -45,10 +45,6 @@ pub enum ObjectKind {
 /// A fresh entity's initial contents, in page form: what projection
 /// installs for an arena object.
 #[derive(Clone, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one transient constructor carries its bounded semantic site by value; retained closure records use paged trees"
-)]
 pub enum ObjectInit {
     List(Vec<PageValue>),
     Map(Vec<(PageValue, PageValue)>),

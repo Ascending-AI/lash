@@ -61,7 +61,9 @@
                 "completed": "null"
               },
               "dropped": true
-            },
+            }
+          ],
+          [
             {
               "request": 2,
               "outcome": {
@@ -79,7 +81,7 @@
             "text": "cancelled"
           }
         },
-        "parks": 2,
+        "parks": 3,
         "trace": [
           {
             "effect": {
