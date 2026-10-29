@@ -285,6 +285,7 @@ impl Publication {
 }
 
 pub(super) struct Tasks {
+    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
     rows: Tree<TaskRecord>,
     cache: Vec<Option<(u64, Box<Task>)>>,
     /// Dirty counters outlive eviction of a task's execution coordinates.
@@ -301,12 +302,14 @@ pub(super) struct Tasks {
 }
 impl Tasks {
     pub(super) fn open(
+        logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
         rows: Tree<TaskRecord>,
         access: Access<'static>,
         arena: SharedArena,
         exe: Arc<Executable>,
     ) -> Self {
         Self {
+            logical,
             rows,
             unprojected: BTreeMap::new(),
             protected: None,
@@ -319,8 +322,13 @@ impl Tasks {
             exe,
         }
     }
-    pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(false), access, arena, exe)
+    pub(super) fn new(
+        logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+        access: Access<'static>,
+        arena: SharedArena,
+        exe: Arc<Executable>,
+    ) -> Self {
+        Self::open(logical, Tree::new(false), access, arena, exe)
     }
     /// Visits every arena value the cached tasks' frames hold.
     /// What the canonical walk starts from in the tasks the next
@@ -478,13 +486,14 @@ impl Tasks {
             Some(counters) => counters,
             None => Occurrences::open(&mut record.occurrences, &self.exe, &self.access)?,
         };
-        let frames = Frames::open(
+        let mut frames = Frames::open(
             std::mem::replace(&mut record.frames, Tree::new(true)),
             self.access.clone(),
             std::rc::Rc::clone(&self.arena),
             Arc::clone(&self.exe),
             frames::arrival(&record.state),
         );
+        frames.logical_context(TaskId(index), self.logical.clone());
         self.cache[slot] = Some((
             index,
             Box::new(Task {
@@ -499,6 +508,8 @@ impl Tasks {
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
         self.invalidate_active();
         let index = self.rows.len();
+        task.frames
+            .logical_context(TaskId(index), self.logical.clone());
         let slot = self.replacement(index)?;
         self.evict(slot)?;
         self.rows
@@ -880,6 +891,22 @@ impl super::KernelMachine {
         task: TaskId,
         outcome: Result<Value, Value>,
     ) -> Result<(), Halt> {
+        use lash_kernel_state::kernel_internals::logical::{Owner, SourceValue};
+        let owner = if task == TaskId::MAIN {
+            Owner::Incoming(task)
+        } else {
+            Owner::Ended(task)
+        };
+        if task != TaskId::MAIN {
+            self.logical.replace(Owner::Incoming(task), None);
+        }
+        self.logical.replace(
+            owner,
+            Some(SourceValue::Value(
+                *outcome.as_ref().unwrap_or_else(|value| value),
+            )),
+        );
+        self.logical_flush()?;
         self.identify_session()?;
         let pages = self.heap.pages().clone();
         let result = {
@@ -949,6 +976,7 @@ impl super::KernelMachine {
 
     /// Makes a waiting task ready, at the back of the queue (`K-TASK-005`).
     pub(super) fn wake(&mut self, task: TaskId, incoming: Incoming) -> Result<(), Halt> {
+        self.logical_incoming(task, &incoming)?;
         let woken = self.task(task)?;
         woken.wake(incoming, false);
         self.ready.push_back(task)?;

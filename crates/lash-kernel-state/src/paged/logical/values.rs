@@ -12,6 +12,36 @@ fn arena_fault(error: lash_kernel_doc::NativeError) -> HeapFault {
 }
 
 impl Holding {
+    pub(super) fn heap_body(
+        heap: &super::super::heap_impl::PagedHeap,
+        entity: EntityId,
+    ) -> Result<Self, HeapFault> {
+        use super::super::directory::Body as StoredBody;
+        let head = heap
+            .current_head(entity)?
+            .ok_or_else(|| invalid("source identity is absent from the heap"))?;
+        let mut holding = Self::scalar(head.cost());
+        let access = heap.pages();
+        let mut value = |value: &PageValue| {
+            stream_value_edges(access, value, &mut |target| {
+                holding.add_edge(target, 1, access)
+            })
+        };
+        match &head.body {
+            StoredBody::Variable(member) => value(member)?,
+            StoredBody::List { rows, .. } => visit_tree(rows, access, &mut value)?,
+            StoredBody::Table { rows, .. } => visit_tree(rows, access, &mut |entry| {
+                value(&entry.key)?;
+                value(&entry.value)
+            })?,
+            StoredBody::Closure { captures, .. } => {
+                visit_tree(captures, access, &mut |(_, entity)| {
+                    holding.add_edge(Identity::Object(*entity), 1, access)
+                })?
+            }
+        }
+        Ok(holding)
+    }
     /// A cold value already carries its complete occurrence price. Only
     /// immutable edges are read; scalar payload pages and entity bodies stay cold.
     pub fn from_page(access: &Access<'_>, value: &PageValue) -> Result<Self, HeapFault> {

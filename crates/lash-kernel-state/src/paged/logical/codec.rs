@@ -44,6 +44,7 @@ pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
         Owner::Session(key) => [vec![1], key.to_vec()].concat(),
         Owner::Incoming(task) => [vec![2], task.0.to_be_bytes().to_vec()].concat(),
         Owner::Ended(task) => [vec![3], task.0.to_be_bytes().to_vec()].concat(),
+        Owner::Saved(key) => [vec![4], key.to_vec()].concat(),
     }
 }
 impl TokenCodec for Slot {
@@ -99,6 +100,10 @@ impl TokenCodec for Owner {
                 out.sum(4, 1);
                 task.encode(out);
             }
+            Self::Saved(key) => {
+                out.sum(5, 1);
+                out.bytes(key);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -106,7 +111,7 @@ impl TokenCodec for Owner {
         let expected = match tag {
             0 => 2,
             1 => 3,
-            2..=4 => 1,
+            2..=5 => 1,
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         };
         TokenReader::expect_fields(fields, expected)?;
@@ -126,7 +131,13 @@ impl TokenCodec for Owner {
                 })?)
             }
             3 => Self::Incoming(TaskId::decode(input)?),
-            _ => Self::Ended(TaskId::decode(input)?),
+            4 => Self::Ended(TaskId::decode(input)?),
+            _ => Self::Saved(
+                input
+                    .bytes()?
+                    .try_into()
+                    .map_err(|_| TokenError::Invalid("source saved key is not 32 bytes".into()))?,
+            ),
         })
     }
 }

@@ -120,6 +120,7 @@ impl KernelMachine {
     /// deferred.
     #[inline]
     pub(super) fn capacity_check(&mut self) -> Result<(), Halt> {
+        self.logical_flush()?;
         #[cfg(any(test, feature = "perf-witness"))]
         if let Some(observer) = crate::perf_witness::memory_observer() {
             observer(self.memory_ledger());

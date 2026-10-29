@@ -826,7 +826,7 @@ pub(crate) struct Code {
     pub(crate) params: Vec<Local>,
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
-    pub(crate) slots_by_at: Vec<u32>,
+    pub(crate) slots_by_at: Arc<[u32]>,
     /// Where each variable sits, in the order of its name's key: the order
     /// a projection walks a frame's bindings in, whatever the layout
     /// (seam C).
@@ -1003,6 +1003,7 @@ pub(crate) use expr::{NestedCallee, NestedKind};
 /// One statement: its ops in its stream, how many registers they use, and
 /// what the machine's control needs of its shape.
 pub(crate) struct Stmt {
+    pub(crate) site: Site,
     /// Its document ordinal, or None for a library statement. The main body
     /// owns ordinal zero, so a statement's rank is always nonzero. Keeping
     /// this in the metadata already read at dispatch avoids another table

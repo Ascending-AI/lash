@@ -57,7 +57,10 @@ impl Ledger {
             match value {
                 RootValue::Value(value) => handles.extend(value.handle()),
                 RootValue::Capture(handle) => handles.push(*handle),
-                RootValue::Existing(_) | RootValue::Frame => {}
+                RootValue::Existing(_)
+                | RootValue::Frame
+                | RootValue::Page(_)
+                | RootValue::Frozen(_) => {}
             }
         }
         let mut remove = Holding::scalar(0);
@@ -168,4 +171,20 @@ fn entry(
         holding.add_edge(edge.target, edge.count, access)
     })?;
     Ok(holding)
+}
+pub(super) fn occurrence(
+    arena: &mut Arena,
+    access: &Access<'_>,
+    value: Option<crate::arena::MemberEntry>,
+) -> Result<Holding, HeapFault> {
+    use crate::arena::MemberEntry;
+    match value {
+        None => Ok(Holding::scalar(0)),
+        Some(MemberEntry::Value(value)) => Holding::from_native(arena, access, &value),
+        Some(MemberEntry::Pair { key, value, record }) => entry(arena, access, key, value, record)
+            .map_err(|error| match error {
+                MemberFault::Heap(error) => error,
+                MemberFault::Native(error) => invalid(&error.to_string()),
+            }),
+    }
 }

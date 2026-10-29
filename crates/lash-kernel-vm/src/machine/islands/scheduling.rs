@@ -70,7 +70,7 @@ impl KernelMachine {
             for (reg, value) in values {
                 self.put(reg as usize, value);
             }
-            self.source_begin(running.stream, running.stmt, pc)?;
+            self.source_begin(running.task, running.stream, running.stmt, pc)?;
             let outcome = (|| {
                 let flow = match running.stream.ops[pc as usize] {
                     Op::Act => {

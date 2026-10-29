@@ -745,6 +745,7 @@ impl super::Arena {
         }
         self.hold(&value);
         self.unhold(&old);
+        self.note_member(handle, Some(old), Some(value))?;
         Ok(Some(seq))
     }
 
@@ -800,6 +801,7 @@ impl super::Arena {
         };
         if unchanged {
             Self::mark_resident(facts, &mut self.dirty, handle, Some(seq / CARD));
+            self.note_member(handle, Some(old), Some(value))?;
             return Ok(true);
         }
         if !set {
@@ -808,6 +810,7 @@ impl super::Arena {
         self.hold(&value);
         self.unhold(&old);
         self.mark(handle, Some(seq / CARD))?;
+        self.note_member(handle, Some(old), Some(value))?;
         Ok(true)
     }
 
@@ -822,6 +825,7 @@ impl super::Arena {
         key: Value,
         value: Value,
     ) -> Result<u64, NativeError> {
+        let record = matches!(self.body(handle)?, Body::Record(_));
         let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let seq = index.next();
@@ -866,6 +870,11 @@ impl super::Arena {
         self.update_table_flat(handle, None, Some((&key, &value)));
         self.hold(&key);
         self.hold(&value);
+        self.note_entry(
+            handle,
+            None,
+            Some(super::member_events::MemberEntry::Pair { key, value, record }),
+        )?;
         Ok(seq)
     }
 
@@ -876,6 +885,7 @@ impl super::Arena {
         handle: ArenaHandle,
         key: &Key,
     ) -> Result<Option<(u64, Value)>, NativeError> {
+        let record = matches!(self.body(handle)?, Body::Record(_));
         let flat = self.facts(handle)?.flat;
         let (table, index) = self.table_parts(handle)?;
         let Some(place) = find(handle, table, index, key)? else {
@@ -898,6 +908,15 @@ impl super::Arena {
         self.update_table_flat(handle, Some((&removed, &value)), None);
         self.unhold(&removed);
         self.unhold(&value);
+        self.note_entry(
+            handle,
+            Some(super::member_events::MemberEntry::Pair {
+                key: removed,
+                value,
+                record,
+            }),
+            None,
+        )?;
         Ok(Some((seq, value)))
     }
 

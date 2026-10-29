@@ -89,6 +89,22 @@ fn reusable(value: &Value) -> bool {
 }
 
 impl Registers {
+    pub(super) fn source_context(&mut self, roots: Option<super::logical_held::BankRoots>) {
+        self.source.context(roots);
+    }
+    pub(super) fn source_entry_roots(
+        &mut self,
+        lifecycle: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    ) {
+        self.source.entry_roots(lifecycle);
+    }
+    pub(super) fn take_source_arguments(
+        &mut self,
+        start: usize,
+        count: usize,
+    ) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
+        self.source.take_arguments(start, count)
+    }
     /// The statement's static kill set is the dense interval the lowering
     /// gives it. Calls put their live roles in frames before this set dies.
     pub(super) fn statement(&mut self, registers: u32) {

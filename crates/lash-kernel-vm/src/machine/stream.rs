@@ -164,7 +164,7 @@ impl KernelMachine {
         mut pc: usize,
     ) -> Eval<Ran> {
         self.regs.statement(running.stmt.regs);
-        self.source_begin(running.stream, running.stmt, pc as u32)?;
+        self.source_begin(running.task, running.stream, running.stmt, pc as u32)?;
         let ops = running.stream.ops.as_slice();
         let task = running.task;
         loop {

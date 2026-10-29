@@ -141,15 +141,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return None;
         }
         state.link = active.callee.link;
-        state
-            .control
-            .resize_with(active.control.len(), || Control::Block {
-                block: active.callee.compiled.blocks[0].id,
-                next: 0,
-            });
-        for (position, target) in active.control.iter().zip(&mut state.control) {
-            position.project(active.callee.compiled, target);
-        }
+        state.control.replace(
+            active
+                .control
+                .iter()
+                .map(|position| {
+                    let mut control = Control::Block {
+                        block: active.callee.compiled.blocks[0].id,
+                        next: 0,
+                    };
+                    position.project(active.callee.compiled, &mut control);
+                    control
+                })
+                .collect(),
+        );
         for (at, slot) in active.slots.iter().enumerate() {
             state.set_slot(at as u32, *slot);
         }

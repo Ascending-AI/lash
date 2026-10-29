@@ -178,6 +178,8 @@ impl Machine for KernelMachine {
         pending.phase = WaitPhase::Committed(frozen);
         let task = pending.task;
         self.waits.write(key, pending, self.heap.pages())?;
+        self.logical_incoming(task, &Incoming::Outcome(wait))?;
+        self.logical_flush()?;
         let requeue = self
             .frame(task)
             .map(|frame| super::actions::then_yields(&exe, frame))
@@ -189,6 +191,7 @@ impl Machine for KernelMachine {
         Ok(Delivered::Accepted)
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        self.logical_flush().map_err(SealError::Heap)?;
         let sealed = self.seal_projection(budget)?;
         self.projecting = sealed.is_none();
         Ok(sealed)
@@ -356,7 +359,11 @@ impl KernelMachine {
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
         arena.borrow_mut().grow_control(exe.admission_bytes());
+        arena.borrow_mut().watch_logical_members();
+        let logical =
+            lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
         let mut machine = Self {
+            logical: logical.clone(),
             active_link: program.link,
             closure: root.closure,
             owner: root.owner,
@@ -368,6 +375,7 @@ impl KernelMachine {
             capacity_floor,
             limits,
             tasks: tasks::Tasks::open(
+                logical.clone(),
                 heap.task_root().clone(),
                 access.clone(),
                 std::rc::Rc::clone(&arena),
@@ -387,7 +395,7 @@ impl KernelMachine {
             functions: root.functions,
             host: root.host.clone(),
             heap,
-            session: Default::default(),
+            session: super::session::Session::with_lifecycle(logical),
             pins: Pins::default(),
             projecting: false,
             charging: true,
@@ -581,6 +589,7 @@ impl KernelMachine {
             .seal(PageKind::CHECKPOINT_ROOT, tokens, children)
             .map_err(SealError::Heap)?;
         self.tasks = tasks::Tasks::open(
+            self.logical.clone(),
             self.heap.task_root().clone(),
             access,
             std::rc::Rc::clone(&self.arena),

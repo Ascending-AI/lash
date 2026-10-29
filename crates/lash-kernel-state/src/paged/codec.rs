@@ -87,6 +87,7 @@ record!(AccountingCertificate {
 });
 units!(AccountingMetric { Capacity = 0, Unmetered = 1 });
 record!(HeapRoot {
+    logical: super::logical::LedgerRoot,
     directory: KeyedRoot,
     families: KeyedRoot,
     next_ordinal: u64,

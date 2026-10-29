@@ -756,7 +756,7 @@ impl KernelMachine {
             frame.public_result = Some(exe.lib(lib).header.signature.result.clone());
         }
         frame.link = level.link;
-        frame.control = level.control;
+        frame.control.replace(level.control);
         if let Some(stmt) = action {
             frame.awaiting = Some(stmt);
         }
@@ -768,8 +768,11 @@ impl KernelMachine {
             frame.awaiting = Some(stmt);
         }
         if let Some(frame) = new {
+            let code = frame.code;
             self.task(task)?.frames.push(frame);
+            self.logical_enter_frame(task, exe, code, &[])?;
         }
+        self.logical_flush()?;
         self.grown();
         Ok(top)
     }

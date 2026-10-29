@@ -438,6 +438,7 @@ pub mod execution {
     }
     #[derive(Clone)]
     pub struct FrameRecord {
+        pub invocation: u64,
         pub capture_names: Vec<lash_kernel_value::names::Name>,
         pub convention: Option<lash_kernel_doc::StartConvention>,
         pub public_result: Option<lash_kernel_value::types::Type>,
@@ -506,6 +507,7 @@ pub mod execution {
     impl FrameRecord {
         pub fn fresh(link: lash_kernel_value::content_ids::LinkId, statement: SiteRef) -> Self {
             Self {
+                invocation: 0,
                 capture_names: Vec::new(),
                 link,
                 convention: None,
@@ -853,7 +855,8 @@ pub mod execution {
     }
     impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(12);
+            out.seq(13);
+            self.invocation.encode(out);
             self.capture_names.encode(out);
             self.link.encode(out);
             self.convention.encode(out);
@@ -868,8 +871,9 @@ pub mod execution {
             self.pending.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(12)?;
+            input.expect_struct(13)?;
             Ok(Self {
+                invocation: input.unsigned()?,
                 capture_names: Vec::<lash_kernel_value::names::Name>::decode(input)?,
                 link: lash_kernel_value::content_ids::LinkId::decode(input)?,
                 convention: Option::<lash_kernel_doc::StartConvention>::decode(input)?,

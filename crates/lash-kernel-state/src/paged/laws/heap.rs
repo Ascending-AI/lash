@@ -1131,4 +1131,66 @@ fn every_seal_saves_the_counted_capacity_and_reopens_it() {
         assert_eq!(cold.certificate(), sealed);
         assert_eq!(heap.certificate(), sealed);
     }
+    // The persistent ledger adds owner, ended and entity roots beside the
+    // directory. Header work includes every child reference in its budget.
+    {
+        use crate::paged::logical::{Lifecycle, Owner, SourceValue};
+        use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
+        let (mut heap, pages) = fresh();
+        let list = heap
+            .allocate_object(ObjectInit::List(vec![int(7)]))
+            .unwrap();
+        let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
+        let lifecycle = Lifecycle::new(heap.logical_ledger());
+        lifecycle.replace(
+            Owner::session(&Name::new("live")),
+            Some(SourceValue::Page(PageValue::List(list))),
+        );
+        lifecycle.replace(
+            Owner::Ended(lash_kernel_doc::TaskId(1)),
+            Some(SourceValue::Page(PageValue::List(list))),
+        );
+        lifecycle.flush(&mut arena, &heap).unwrap();
+        let mut root = heap
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .unwrap()
+            .unwrap()
+            .root;
+        let children = [
+            root.directory.page(),
+            root.families.page(),
+            root.logical.owners.page(),
+            root.logical.ended.page(),
+            root.logical.entities.page(),
+        ]
+        .into_iter()
+        .flatten()
+        .count();
+        assert_eq!(
+            children, 4,
+            "the fixture exercises more than the old header's three-reference allowance"
+        );
+        heap.record_capacity(1);
+        root.accounting.capacity = 1;
+        let mut tokens = TokenWriter::new();
+        tokens.sum(0, 1);
+        root.encode(&mut tokens);
+        let bytes = tokens.into_bytes().len() as u64 + children as u64 * 32 + 32;
+        let sealed = pages.borrow().seals;
+        assert!(
+            heap.seal(SealBudget {
+                pages: 1,
+                bytes: bytes - 1
+            })
+            .unwrap()
+            .is_none(),
+            "an undersized header budget yields before publishing"
+        );
+        assert_eq!(pages.borrow().seals, sealed);
+        assert!(heap.seal(SealBudget { pages: 1, bytes }).unwrap().is_some());
+        assert_eq!(pages.borrow().seals, sealed + 1);
+    }
 }

@@ -466,6 +466,13 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
     let crate::End::Finished(finished) = first.run_to_end(&[]) else {
         panic!("the first cell finishes")
     };
+    let held = first.machine.logical_balance().unwrap();
+    assert_eq!(held.entities, 1, "carried aliases share one ledger entity");
+    assert_eq!(held.entity_local_bytes, 66);
+    assert_eq!(
+        held.root_and_control_bytes, 65,
+        "two aliases, computed n and the terminal null own their occurrences"
+    );
     let dropped: Vec<&str> = finished
         .not_carried
         .iter()
@@ -505,6 +512,15 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
             Box::new(Census::restore(certificate).unwrap()),
         )
         .unwrap();
+        let cold = next.machine.logical_balance().unwrap();
+        assert_eq!(
+            cold.entity_local_bytes, 66,
+            "unread cold session bodies have their complete cost"
+        );
+        assert_eq!(
+            cold.root_and_control_bytes, 113,
+            "the old result retires and the new frame enters without rereading session values"
+        );
         assert!(matches!(next.run(), Step::Parked(_)));
         let sealed = next
             .machine

@@ -17,6 +17,8 @@ pub use dependencies::Dependencies;
 mod graph;
 mod invocations;
 pub use invocations::Invocation;
+mod lifecycle;
+pub use lifecycle::{Lifecycle, SourceValue};
 mod members;
 mod ownership;
 mod publication;
@@ -54,10 +56,22 @@ pub enum Owner {
         slot: Slot,
     },
     Session([u8; 32]),
+    Saved([u8; 32]),
     Incoming(TaskId),
     Ended(TaskId),
 }
 impl Owner {
+    pub fn session(name: &lash_kernel_value::Name) -> Self {
+        Self::Session(lash_kernel_value::tokens::logical_digest(
+            &lash_kernel_value::tokens::encode_body(name),
+        ))
+    }
+    pub fn saved(name: &lash_kernel_value::Name) -> Self {
+        let Self::Session(key) = Self::session(name) else {
+            unreachable!()
+        };
+        Self::Saved(key)
+    }
     fn transient(self) -> bool {
         matches!(
             self,
@@ -322,6 +336,22 @@ pub struct Prepared {
 }
 pub struct Accepted(Prepared);
 impl Prepared {
+    /// Exact source terminal normalization stays in the unpublished draft.
+    /// A trace failure publishes neither root replacement nor partial sweep.
+    pub fn normalize(
+        mut self,
+        access: &Access<'_>,
+        limits: crate::paged::census_impl::TraceLimits,
+    ) -> Result<Self, HeapFault> {
+        let mut draft = Ledger {
+            state: self.next,
+            identity: Rc::clone(&self.identity),
+            revision: self.revision,
+        };
+        draft.normalize(access, limits)?;
+        self.next = draft.state;
+        Ok(self)
+    }
     pub fn peak(&self) -> u64 {
         self.peak
     }
@@ -577,6 +607,22 @@ impl Ledger {
         access: &Access<'_>,
         budget: SealBudget,
     ) -> Result<Option<LedgerRoot>, HeapFault> {
+        self.seal_with(access, &mut SealWork::new(budget))
+    }
+    pub(super) fn sealed_root(&self) -> Result<LedgerRoot, HeapFault> {
+        Ok(LedgerRoot {
+            owners: keyed(&self.state.owners)?,
+            ended: keyed(&self.state.ended)?,
+            entities: keyed(&self.state.entities)?,
+            refinements: self.state.refinements,
+            next_invocation: self.state.next_invocation,
+        })
+    }
+    pub(super) fn seal_with(
+        &mut self,
+        access: &Access<'_>,
+        work: &mut SealWork,
+    ) -> Result<Option<LedgerRoot>, HeapFault> {
         // A seal ends the active borrowed execution view even if its budget
         // yields. Outstanding admissions cannot survive the handoff.
         self.handoff()?;
@@ -584,10 +630,9 @@ impl Ledger {
             return Err(invalid("transient source owners at seal"));
         }
         let mut state = self.state.clone();
-        let mut work = SealWork::new(budget);
-        if !state.owners.seal(access, &mut work)?
-            || !state.ended.seal(access, &mut work)?
-            || !state.entities.seal(access, &mut work)?
+        if !state.owners.seal(access, work)?
+            || !state.ended.seal(access, work)?
+            || !state.entities.seal(access, work)?
         {
             return Ok(None);
         }

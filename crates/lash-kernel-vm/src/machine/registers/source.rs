@@ -1,7 +1,8 @@
 //! Values owned by source occurrences, independent of register mirrors.
 use crate::compile::{Stmt, Stream};
-use crate::machine::logical_held::{Held, Projection};
+use crate::machine::logical_held::{BankRoots, Held, Projection};
 use lash_kernel_doc::{Value, heap::HeapFault};
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, Slot, SourceValue};
 fn invalid(problem: &str) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
@@ -11,6 +12,8 @@ use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct Operands {
+    roots: Option<BankRoots>,
+    entry_roots: Option<Lifecycle>,
     values: Vec<Operand>,
     positions: Vec<usize>,
     atoms: Vec<Held>,
@@ -25,9 +28,59 @@ struct Operand {
     held: Held,
 }
 impl Operands {
+    pub(super) fn context(&mut self, roots: Option<BankRoots>) {
+        self.clear();
+        self.roots = roots;
+    }
+    pub(super) fn entry_roots(&mut self, lifecycle: Lifecycle) {
+        for (index, held) in self.entry.iter_mut().enumerate() {
+            let owner = Owner::Value {
+                task: lash_kernel_doc::TaskId::MAIN,
+                invocation: 0,
+                slot: Slot::Argument(index as u32),
+            };
+            lifecycle.replace(owner, Some(SourceValue::Value(held.value)));
+            held.owner = Some(owner);
+        }
+        self.entry_roots = Some(lifecycle);
+    }
+    pub(super) fn take_arguments(&mut self, start: usize, count: usize) -> Vec<Owner> {
+        if self.entry_active {
+            return self
+                .entry
+                .iter_mut()
+                .skip(start)
+                .take(count)
+                .filter_map(|held| held.owner.take())
+                .collect();
+        }
+        (start..start + count)
+            .filter_map(|at| {
+                self.remove_value(Reg(at as u32))
+                    .and_then(|operand| operand.held.owner)
+            })
+            .collect()
+    }
     pub(super) fn clear(&mut self) {
         for operand in &self.values {
+            if let (Some(roots), Some(owner)) = (&self.roots, operand.held.owner) {
+                roots.release(owner);
+            }
             self.positions[operand.reg.ix()] = usize::MAX;
+        }
+        if let Some(roots) = &self.roots {
+            for held in &self.atoms {
+                if let Some(owner) = held.owner {
+                    roots.release(owner);
+                }
+            }
+        }
+        if let Some(lifecycle) = self.entry_roots.take() {
+            for held in &self.entry {
+                if let Some(owner) = held.owner {
+                    lifecycle.replace(owner, None);
+                }
+            }
         }
         self.values.clear();
         self.atoms.clear();
@@ -78,6 +131,9 @@ impl Operands {
             .source_roles_at(stream, pc)
             .ok_or_else(|| invalid("source resume has no operand projection"))?;
         for (reg, site) in roles.iter() {
+            if let Some(roots) = &self.roots {
+                roots.release(roots.continuation(site)?);
+            }
             self.put(Operand {
                 reg: *reg,
                 site: Arc::clone(site),
@@ -106,7 +162,18 @@ impl Operands {
         if self.atom_site.is_none() || self.atoms.len() != index {
             return Err(invalid("action atom has no ordered source role"));
         }
-        self.atoms.push(projection.hold(value)?);
+        let mut held = projection.hold(value)?;
+        if let Some(roots) = &self.roots {
+            let owner = roots.atom(
+                self.atom_site
+                    .as_ref()
+                    .ok_or_else(|| invalid("source atom has no site"))?,
+                index as u32,
+            )?;
+            roots.acquire(owner, value);
+            held.owner = Some(owner);
+        }
+        self.atoms.push(held);
         Ok(())
     }
 
@@ -129,6 +196,13 @@ impl Operands {
             return Ok(());
         }
         if matches!(op, Op::Act) {
+            if let Some(roots) = &self.roots {
+                for held in &self.atoms {
+                    if let Some(owner) = held.owner {
+                        roots.release(owner);
+                    }
+                }
+            }
             self.atoms.clear();
             self.atom_site = None;
         }
@@ -181,12 +255,20 @@ impl Operands {
                 if operand.site != join.from {
                     return Err(invalid("source join names another operand"));
                 }
+                if let Some(roots) = &self.roots {
+                    if let Some(owner) = operand.held.owner {
+                        roots.release(owner);
+                    }
+                    let owner = roots.operand(&join.to)?;
+                    roots.acquire(owner, operand.held.value);
+                    operand.held.owner = Some(owner);
+                }
                 operand.site = Arc::clone(&join.to);
             }
         }
         Ok(())
     }
-    fn put(&mut self, operand: Operand) -> Result<(), HeapFault> {
+    fn put(&mut self, mut operand: Operand) -> Result<(), HeapFault> {
         let at = self
             .positions
             .get_mut(operand.reg.ix())
@@ -195,10 +277,22 @@ impl Operands {
             return Err(invalid("source output overwrites an unconsumed operand"));
         }
         *at = self.values.len();
+        if let Some(roots) = &self.roots {
+            let owner = roots.operand(&operand.site)?;
+            roots.acquire(owner, operand.held.value);
+            operand.held.owner = Some(owner);
+        }
         self.values.push(operand);
         Ok(())
     }
     fn remove(&mut self, reg: Reg) -> Option<Operand> {
+        let operand = self.remove_value(reg)?;
+        if let (Some(roots), Some(owner)) = (&self.roots, operand.held.owner) {
+            roots.release(owner);
+        }
+        Some(operand)
+    }
+    fn remove_value(&mut self, reg: Reg) -> Option<Operand> {
         let at = *self.positions.get(reg.ix())?;
         if at == usize::MAX {
             return None;
@@ -222,10 +316,16 @@ impl Operands {
         if operand.site.as_ref() != site {
             return Err(invalid("continuation names another source operand"));
         }
-        Ok(self
+        let mut held = self
             .remove(reg)
             .ok_or_else(|| invalid("continuation source operand disappeared"))?
-            .held)
+            .held;
+        if let Some(roots) = &self.roots {
+            let owner = roots.continuation(site)?;
+            roots.acquire(owner, held.value);
+            held.owner = Some(owner);
+        }
+        Ok(held)
     }
 
     pub(super) fn each_value(&self, visit: &mut dyn FnMut(&Value)) {

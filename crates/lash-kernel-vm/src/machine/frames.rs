@@ -304,6 +304,9 @@ impl Frame {
 
     #[inline]
     pub(super) fn set_slot(&mut self, at: u32, value: SlotState) {
+        if let Some(logical) = &self.logical {
+            logical.replace(at, self.slots.values[at as usize], value);
+        }
         let at = at as usize;
         self.slots.values[at] = value;
         if !self.slots.changed[at] {
@@ -433,6 +436,10 @@ impl Frame {
         }
         if stored.convention != self.convention {
             stored.convention = self.convention.clone();
+            changed = true;
+        }
+        if stored.invocation != self.invocation {
+            stored.invocation = self.invocation;
             changed = true;
         }
         if stored.public_result != self.public_result {
@@ -727,6 +734,10 @@ pub(super) struct Frames {
     placed: u64,
     access: Access<'static>,
     arena: SharedArena,
+    logical: Option<(
+        lash_kernel_doc::TaskId,
+        lash_kernel_state::kernel_internals::logical::Lifecycle,
+    )>,
     exe: Arc<Executable>,
     arrival: Arrival,
 }
@@ -745,6 +756,13 @@ pub(crate) fn take_most_visited() -> usize {
 }
 
 impl Frames {
+    pub(super) fn logical_context(
+        &mut self,
+        task: lash_kernel_doc::TaskId,
+        lifecycle: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    ) {
+        self.logical = Some((task, lifecycle));
+    }
     pub(super) fn new(access: Access<'static>, arena: SharedArena, exe: Arc<Executable>) -> Self {
         Self::open(Tree::new(true), access, arena, exe, Arrival::Fresh)
     }
@@ -765,6 +783,7 @@ impl Frames {
             placed: len,
             access,
             arena,
+            logical: None,
             exe,
             arrival,
         }
@@ -807,13 +826,23 @@ impl Frames {
         let index = self.len - 1;
         if self.cache.last().is_none_or(|(at, _)| *at != index) {
             let record = row(&self.rows, index, &self.access)?;
-            let frame = restore_frame(
+            let mut frame = restore_frame(
                 &record,
                 self.arrival,
                 &self.access,
                 &self.exe,
                 &mut self.arena.borrow_mut(),
             )?;
+            if let Some((task, lifecycle)) = &self.logical {
+                frame.logical = Some(super::logical_held::FrameRoots::restore(
+                    lifecycle.clone(),
+                    *task,
+                    &frame,
+                    &self.exe,
+                    &self.access,
+                )?);
+                frame.control.activate();
+            }
             self.arena
                 .borrow_mut()
                 .grow_control(resident::frame_bytes(&frame));

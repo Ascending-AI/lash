@@ -66,6 +66,8 @@ pub(crate) enum Owner {
     Departure(Site),
     PendingDeparture(Site),
     ActiveDeparture(Site),
+    LoopCursor(Site),
+    LoopHeader(Site),
     Departures(Site),
     HookArgument { at: Site, phase: Phase, index: u32 },
     HookResult { at: Site, phase: Phase },
@@ -627,7 +629,12 @@ impl Source {
         self.owners
             .get_or_init(|| {
                 let mut owners = std::collections::BTreeSet::new();
+                owners.insert(Owner::ActiveDeparture(self.site.clone()));
                 for event in self.room.peak_extra.values() {
+                    if event.point.phase == Phase::Test && matches!(&event.output, Some(Owner::Binding { declared, .. }) if *declared == child(&event.point.site, 1)) {
+                        owners.insert(Owner::LoopCursor(event.point.site.clone()));
+                        owners.insert(Owner::LoopHeader(event.point.site.clone()));
+                    }
                     owners.extend(event.inputs.iter().cloned());
                     owners.extend(event.output.iter().cloned());
                     owners.extend(event.entities.iter().cloned());

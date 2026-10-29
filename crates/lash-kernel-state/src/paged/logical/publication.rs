@@ -16,7 +16,7 @@ pub struct PreparedPublication<'a> {
     registration: Registration<'a>,
     dependencies: Dependencies,
     prepared: Prepared,
-    member: Option<MemberEdit>,
+    members: Vec<MemberEdit>,
 }
 pub struct AcceptedPublication<'a>(PreparedPublication<'a>);
 
@@ -43,7 +43,7 @@ impl Ledger {
                 registration,
                 dependencies,
                 prepared,
-                member: None,
+                members: Vec::new(),
             },
         ))
     }
@@ -60,7 +60,7 @@ impl Ledger {
             registration,
             dependencies,
             prepared,
-            member: None,
+            members: Vec::new(),
         })
     }
     pub fn prepare_publication<'a>(
@@ -76,7 +76,7 @@ impl Ledger {
             registration,
             dependencies,
             prepared,
-            member: None,
+            members: Vec::new(),
         })
     }
     #[expect(clippy::too_many_arguments, reason = "one atomic source member event")]
@@ -107,16 +107,29 @@ impl Ledger {
             registration,
             dependencies,
             prepared,
-            member: Some(MemberEdit {
+            members: vec![MemberEdit {
                 handle,
                 member,
                 next,
-            }),
+            }],
         })
     }
 }
 
 impl<'a> PreparedPublication<'a> {
+    pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
+        self.view().holding(owner, access)
+    }
+    pub fn release_cost(&self, owners: &[Owner], access: &Access<'_>) -> Result<u64, HeapFault> {
+        self.view().release_cost(owners, access)
+    }
+    fn view(&self) -> Ledger {
+        Ledger {
+            state: self.prepared.next.clone(),
+            identity: Rc::clone(&self.prepared.identity),
+            revision: self.prepared.revision,
+        }
+    }
     pub fn peak(&self) -> u64 {
         self.prepared.peak()
     }
@@ -151,6 +164,52 @@ impl<'a> PreparedPublication<'a> {
         self.dependencies.extend(next)?;
         Ok(self)
     }
+    /// Independently staged targets may share one pure publication. Repeated
+    /// writes to a target require a committed successor frontier: the canonical
+    /// arena still contains its original member until this journal publishes.
+    #[expect(clippy::too_many_arguments, reason = "one source member frontier")]
+    pub fn then_member(
+        mut self,
+        ledger: &Ledger,
+        access: &Access<'_>,
+        handle: ArenaHandle,
+        member: Member,
+        next: Option<Value>,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<Self, MemberFault> {
+        if !self.is_current(ledger) || self.members.iter().any(|edit| edit.handle == handle) {
+            return Err(invalid("member publication needs a successor frontier").into());
+        }
+        let staged = Ledger {
+            state: self.prepared.next,
+            identity: self.prepared.identity,
+            revision: self.prepared.revision,
+        };
+        let PreparedMember {
+            mut prepared,
+            dependencies,
+        } = staged.prepare_member_ownership(
+            &mut self.registration,
+            access,
+            handle,
+            member,
+            next,
+            inputs,
+            outputs,
+        )?;
+        prepared.before = self.prepared.before;
+        prepared.peak = prepared.peak.max(self.prepared.peak);
+        prepared.projected.extend(self.prepared.projected);
+        self.prepared = prepared;
+        self.dependencies.extend(dependencies)?;
+        self.members.push(MemberEdit {
+            handle,
+            member,
+            next,
+        });
+        Ok(self)
+    }
     pub fn admit(self, bound: u64) -> Result<AcceptedPublication<'a>, Box<Self>> {
         if self.prepared.peak() <= bound {
             Ok(AcceptedPublication(self))
@@ -166,19 +225,19 @@ impl AcceptedPublication<'_> {
     pub fn publish(
         self,
         ledger: &mut Ledger,
-        semantic: impl FnOnce(&mut Arena, Option<MemberEdit>),
+        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>),
     ) -> Result<(), HeapFault> {
         let PreparedPublication {
             mut registration,
             dependencies,
             prepared,
-            member,
+            members,
         } = self.0;
         if !dependencies.is_current(ledger, registration.arena()) {
             return Err(invalid("stale source publication"));
         }
         ledger.publish(Accepted(prepared), || {
-            semantic(registration.arena(), member);
+            semantic(registration.arena(), members);
             registration.commit();
         })
     }
@@ -194,7 +253,10 @@ fn projection_dependencies(
         match value {
             RootValue::Value(value) => handles.extend(value.handle()),
             RootValue::Capture(handle) => handles.push(*handle),
-            RootValue::Existing(_) | RootValue::Frame => {}
+            RootValue::Existing(_)
+            | RootValue::Frame
+            | RootValue::Page(_)
+            | RootValue::Frozen(_) => {}
         }
     }
     // New entity membership was read from resident bodies. Bind each of those

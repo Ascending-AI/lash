@@ -26,6 +26,8 @@ thread_local! {
 }
 
 pub struct PagedHeap {
+    logical: Rc<RefCell<super::logical::Ledger>>,
+    header_logical: Option<super::logical::Stamp>,
     pub(super) access: Access<'static>,
     pub(super) limits: lash_kernel_value::data_limits::KernelDataLimits,
     pub(super) directory: Tree<ObjectHead>,
@@ -111,9 +113,22 @@ impl PagedHeap {
         if let Some(p) = root.families.page_mut() {
             super::tree::grant(p, &answer.children)?;
         }
+        for tree in [
+            &mut root.logical.owners,
+            &mut root.logical.ended,
+            &mut root.logical.entities,
+        ] {
+            if let Some(page) = tree.page_mut() {
+                super::tree::grant(page, &answer.children)?;
+            }
+        }
+        let logical = super::logical::Ledger::open(root.logical)?;
+        let header_logical = Some(logical.stamp());
         let directory = Tree::of_keyed(&root.directory);
         let families = Tree::of_keyed(&root.families);
         Ok(Self {
+            logical: Rc::new(RefCell::new(logical)),
+            header_logical,
             access,
             limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory,
@@ -139,6 +154,10 @@ impl PagedHeap {
     }
     pub fn set_data_limits(&mut self, limits: lash_kernel_value::data_limits::KernelDataLimits) {
         self.limits = limits;
+    }
+    /// One ledger belongs to this heap across frame/cache and source adapters.
+    pub fn logical_ledger(&self) -> Rc<RefCell<super::logical::Ledger>> {
+        Rc::clone(&self.logical)
     }
     /// Select the unaccounted heap at run entry. No census is installed.
     pub fn without_memory_accounting(&mut self) {
@@ -228,6 +247,7 @@ impl PagedHeap {
             ));
         }
         Ok(HeapRoot {
+            logical: self.logical.borrow().sealed_root()?,
             directory: keyed(&self.directory)?,
             families: keyed(&self.families)?,
             next_ordinal: self.next_ordinal,
@@ -560,6 +580,8 @@ impl PagedHeap {
 impl SemanticHeap for PagedHeap {
     fn fresh(source: Box<dyn PageSource>, epoch: EditEpoch) -> Self {
         Self {
+            logical: Rc::new(RefCell::new(super::logical::Ledger::fresh())),
+            header_logical: None,
             access: Access::new(source),
             limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory: Tree::new(false),
@@ -592,6 +614,8 @@ impl SemanticHeap for PagedHeap {
         epoch: EditEpoch,
     ) -> Result<Self, HeapFault> {
         Ok(Self {
+            logical: Rc::new(RefCell::new(super::logical::Ledger::open(root.logical)?)),
+            header_logical: None,
             access: Access::new(source),
             limits: lash_kernel_value::data_limits::KernelDataLimits::standard(),
             directory: Tree::of_keyed(&root.directory),
@@ -816,9 +840,15 @@ impl SemanticHeap for PagedHeap {
         #[cfg(feature = "perf-witness")]
         let _seal = crate::perf_witness::SealScope::enter();
         if self.header.is_some()
+            && self
+                .header_logical
+                .as_ref()
+                .is_some_and(|stamp| self.logical.borrow().is_current(stamp))
             && self.header_state
                 == Some((self.accounting, self.population, self.collection_entities))
         {
+            self.logical.borrow_mut().handoff()?;
+            self.header_logical = Some(self.logical.borrow().stamp());
             return Ok(Some(SealedHeap {
                 root: self.heap_root()?,
                 sealed_pages: 0,
@@ -829,6 +859,11 @@ impl SemanticHeap for PagedHeap {
         let mut work = SealWork::new(budget);
         if !self.directory.seal(&self.access, &mut work)?
             || !self.families.seal(&self.access, &mut work)?
+            || self
+                .logical
+                .borrow_mut()
+                .seal_with(&self.access, &mut work)?
+                .is_none()
         {
             return Ok(None);
         }
@@ -837,15 +872,22 @@ impl SemanticHeap for PagedHeap {
         out.sum(0, 1);
         root.encode(&mut out);
         let tokens = out.into_bytes();
-        let children = [root.directory.page(), root.families.page()]
-            .into_iter()
-            .flatten()
-            .collect();
-        if !work.take(tokens.len() as u64 + 128) {
+        let children: Vec<_> = [
+            root.directory.page(),
+            root.families.page(),
+            root.logical.owners.page(),
+            root.logical.ended.page(),
+            root.logical.entities.page(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !work.take(tokens.len() as u64 + children.len() as u64 * 32 + 32) {
             return Ok(None);
         }
         self.header = Some(self.access.seal(PageKind::KEYED_LEAF, tokens, children)?);
         self.header_state = Some((root.accounting, root.population, root.collection_entities));
+        self.header_logical = Some(self.logical.borrow().stamp());
         self.epoch.0 = self
             .epoch
             .0
@@ -866,7 +908,11 @@ impl SemanticHeap for PagedHeap {
         Ok(())
     }
     fn sealed_root(&self) -> Option<PageRef> {
-        self.header
+        self.header.filter(|_| {
+            self.header_logical
+                .as_ref()
+                .is_some_and(|stamp| self.logical.borrow().is_current(stamp))
+        })
     }
 }
 impl PagedHeap {

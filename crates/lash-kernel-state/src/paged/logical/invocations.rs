@@ -43,6 +43,27 @@ impl Ledger {
         inputs: &[Owner],
         bindings: &[(Slot, RootValue<'_>)],
     ) -> Result<(Invocation, Prepared), HeapFault> {
+        self.prepare_enter_from(task, arena, access, inputs, bindings, None)
+    }
+    pub fn prepare_source_enter(
+        &self,
+        task: TaskId,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        bindings: &[(Slot, RootValue<'_>)],
+    ) -> Result<(Invocation, Prepared), HeapFault> {
+        self.prepare_enter_from(task, arena, heap.pages(), inputs, bindings, Some(heap))
+    }
+    fn prepare_enter_from(
+        &self,
+        task: TaskId,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        inputs: &[Owner],
+        bindings: &[(Slot, RootValue<'_>)],
+        heap: Option<&super::super::heap_impl::PagedHeap>,
+    ) -> Result<(Invocation, Prepared), HeapFault> {
         let id = self.state.next_invocation;
         let next = id
             .checked_add(1)
@@ -60,13 +81,20 @@ impl Ledger {
             }
             let value = match value {
                 RootValue::Value(value) => RootValue::Value(value),
+                RootValue::Page(value) => RootValue::Page(value),
+                RootValue::Frozen(_) => {
+                    return Err(invalid("a frame cannot borrow an incoming frozen value"));
+                }
                 RootValue::Existing(from) => RootValue::Existing(*from),
                 RootValue::Capture(handle) => RootValue::Capture(*handle),
                 RootValue::Frame => return Err(invalid("binding cannot own a frame header")),
             };
             outputs.push((invocation.owner(*slot), value));
         }
-        let mut prepared = self.prepare_ownership(arena, access, inputs, &outputs)?;
+        let mut prepared = match heap {
+            Some(heap) => self.prepare_source_ownership(arena, heap, inputs, &outputs)?,
+            None => self.prepare_ownership(arena, access, inputs, &outputs)?,
+        };
         prepared.next.next_invocation = next;
         Ok((invocation, prepared))
     }

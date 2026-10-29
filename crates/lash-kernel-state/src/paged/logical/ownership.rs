@@ -9,12 +9,63 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy)]
 pub enum RootValue<'a> {
     Value(&'a Value),
+    Page(&'a lash_kernel_doc::heap::PageValue),
+    Frozen(&'a crate::paged::FrozenRef),
     Existing(Owner),
     Frame,
     Capture(ArenaHandle),
 }
 
 impl Ledger {
+    /// Runtime ownership uses resident bodies when present and canonical heap
+    /// descriptors otherwise. Reading cold edges never warms arena buffers.
+    pub fn prepare_source_ownership(
+        &self,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<Prepared, HeapFault> {
+        self.prepare_source_event(arena, heap, inputs, outputs, &[])
+    }
+    pub(super) fn prepare_source_event(
+        &self,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+        members: &[crate::arena::MemberEvent],
+    ) -> Result<Prepared, HeapFault> {
+        let access = heap.pages();
+        let mut pending = Vec::new();
+        let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
+        let mut mutations = Vec::new();
+        for event in members {
+            if self.entity_holding(event.entity, access)?.is_none() {
+                // Include fresh mutated identities even when their final
+                // external owner was elided. Self-cycles remain source-retained.
+                pending.push(event.entity);
+                continue;
+            }
+            let remove = members::occurrence(arena, access, event.remove)?;
+            let add = members::occurrence(arena, access, event.add)?;
+            add.each_edge(access, &mut |edge| {
+                if let Identity::Object(entity) = edge.target {
+                    pending.push(entity);
+                }
+                Ok(())
+            })?;
+            mutations.push(Change::Members {
+                entity: event.entity,
+                remove,
+                add: Box::new(add),
+            });
+        }
+        let mut changes = self.allocate_membership_from(arena, access, pending, Some(heap))?;
+        changes.extend(mutations);
+        changes.push(Change::Roots(roots));
+        self.prepare_event(changes, access)
+    }
     pub fn prepare_ownership_at(
         &self,
         stamp: &Stamp,
@@ -74,6 +125,12 @@ impl Ledger {
             }
             let holding = match value {
                 RootValue::Frame if matches!(owner, Owner::Frame { .. }) => Holding::frame(),
+                RootValue::Frozen(value) if matches!(owner, Owner::Incoming(_)) => Holding::scalar(
+                    super::super::family_impl::frozen_holding_cost(access, value)?,
+                ),
+                RootValue::Page(value) if !matches!(owner, Owner::Frame { .. }) => {
+                    Holding::from_page(access, value)?
+                }
                 RootValue::Value(value) if !matches!(owner, Owner::Frame { .. }) => {
                     Holding::from_native(arena, access, value)?
                 }
@@ -107,7 +164,16 @@ impl Ledger {
         &self,
         arena: &mut Arena,
         access: &Access<'_>,
+        pending: Vec<EntityId>,
+    ) -> Result<Vec<Change>, HeapFault> {
+        self.allocate_membership_from(arena, access, pending, None)
+    }
+    fn allocate_membership_from(
+        &self,
+        arena: &mut Arena,
+        access: &Access<'_>,
         mut pending: Vec<EntityId>,
+        heap: Option<&super::super::heap_impl::PagedHeap>,
     ) -> Result<Vec<Change>, HeapFault> {
         let mut bodies = BTreeMap::new();
         while let Some(entity) = pending.pop() {
@@ -120,10 +186,16 @@ impl Ledger {
             {
                 continue;
             }
-            let handle = arena
-                .logical_handle(entity)
-                .ok_or_else(|| invalid("new source identity has no supplied body"))?;
-            let body = Holding::native_body(arena, access, handle)?;
+            let body = if arena.holds_resident(entity) {
+                let handle = arena
+                    .logical_handle(entity)
+                    .ok_or_else(|| invalid("resident source identity has no body"))?;
+                Holding::native_body(arena, access, handle)?
+            } else if let Some(heap) = heap {
+                Holding::heap_body(heap, entity)?
+            } else {
+                return Err(invalid("new source identity has no supplied body"));
+            };
             body.each_edge(access, &mut |edge| {
                 if let Identity::Object(child) = edge.target {
                     pending.push(child);

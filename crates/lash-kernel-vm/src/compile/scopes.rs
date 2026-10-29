@@ -182,7 +182,7 @@ impl Compiler<'_> {
             params,
             body,
             slots: scopes.slots,
-            slots_by_at,
+            slots_by_at: slots_by_at.into(),
             ats_by_name,
             captures,
             free,

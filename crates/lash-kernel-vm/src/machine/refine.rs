@@ -162,6 +162,7 @@ impl KernelMachine {
     /// advances the sweep generation. It retires the results of the ended
     /// tasks nothing reaches only when `retires` (FIG-6791).
     pub(super) fn refine_resident(&mut self, retires: bool) -> Result<(), Halt> {
+        self.logical_flush()?;
         // A changed object's members are read from its body: one partly on
         // its pages is decoded first.
         let cold = self.arena.borrow().changed_cold();
@@ -274,6 +275,7 @@ mod laws {
             ..Default::default()
         };
         let stmt = Stmt {
+            site: lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
             ordinal: None,
             ops: OpRange { start: 0, len: 2 },
             regs: 64,
@@ -281,7 +283,9 @@ mod laws {
             source_roles: std::sync::Mutex::new(Default::default()),
         };
         machine.regs.statement(stmt.regs);
-        machine.source_begin(&stream, &stmt, 0).unwrap();
+        machine
+            .source_begin(lash_kernel_doc::TaskId::MAIN, &stream, &stmt, 0)
+            .unwrap();
         assert_eq!(normalized_operands(machine), baseline, "unwritten storage");
         let held = machine.arena.borrow_mut().create_list(&[Value::Null]);
         machine.regs.put(19, held);

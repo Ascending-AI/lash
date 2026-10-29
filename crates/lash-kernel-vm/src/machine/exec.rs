@@ -248,6 +248,15 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
+            self.logical_departure(
+                task,
+                match &departure {
+                    Completion::Return(value)
+                    | Completion::ReturnVia { value, .. }
+                    | Completion::Throw(value) => Some(**value),
+                    Completion::Normal | Completion::Break | Completion::Continue => None,
+                },
+            )?;
             match &departure {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it
@@ -511,6 +520,7 @@ impl KernelMachine {
         exe: &Executable,
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
+        self.logical_flush_controls(task, exe)?;
         let Some(frame) = self.task(task)?.frames.pop()? else {
             return Err(fault("a task with no frame returned"));
         };
@@ -568,6 +578,7 @@ impl KernelMachine {
                 )
             );
         self.observe(Event::Pop { task });
+        self.logical_leave_frame(&frame, task, *result.as_ref().unwrap_or_else(|error| error))?;
         self.recycle(frame);
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
@@ -638,7 +649,9 @@ impl KernelMachine {
 
     /// Drop all guest holdings before retaining the activation's storage.
     pub(super) fn recycle(&mut self, mut frame: Box<Frame>) {
-        frame.control.clear();
+        frame.invocation = 0;
+        frame.logical = None;
+        frame.control.reset();
         frame.slots.clear();
         frame.pending.clear();
         frame.awaiting = None;
@@ -833,6 +846,8 @@ impl KernelMachine {
                 #[cfg(test)]
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
+                    invocation: 0,
+                    logical: None,
                     link: self.program.link,
                     code: code_id,
                     charging: code.charging,
@@ -840,7 +855,7 @@ impl KernelMachine {
                     slots: super::frames::Slots::default(),
                     statement: entry.clone(),
                     pending: super::frames::Continuation::default(),
-                    control: Vec::new(),
+                    control: Default::default(),
                     awaiting: None,
                     nested: None,
                     library: None,
@@ -861,6 +876,8 @@ impl KernelMachine {
         call: Call<'_>,
         admission: Option<super::operation_entry::OperationEntry>,
     ) -> Eval<()> {
+        self.logical_flush_controls(task, exe)?;
+        self.logical_flush()?;
         let Call {
             library,
             link,
@@ -966,6 +983,8 @@ impl KernelMachine {
                 self.bind(task, param.at, param.shared, value)?;
             }
         }
+        let inputs = self.regs.take_source_arguments(base, given);
+        self.logical_enter_frame(task, exe, code_id, &inputs)?;
         Ok(())
     }
 
@@ -1274,6 +1293,11 @@ impl KernelMachine {
         // therefore publish together at the statement's safe point.
         self.waits.remove(&key, self.heap.pages())?;
         let value = self.admit_page(&value)?;
+        self.logical.replace(
+            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
+            Some(lash_kernel_state::kernel_internals::logical::SourceValue::Value(value)),
+        );
+        self.logical_flush()?;
         if failed {
             self.wait_raised(task, wait, &value);
             Err(Interrupt::raised(value))
@@ -1403,6 +1427,10 @@ impl KernelMachine {
         value: Value,
         origin: ResultOrigin,
     ) -> Eval<(StmtId, Ran)> {
+        self.logical.replace(
+            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
+            None,
+        );
         let frame = self.frame(task)?;
         let Some(id) = frame.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());

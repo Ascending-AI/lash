@@ -130,6 +130,9 @@ tree_root!(SequenceRoot);
 /// A heap's persistent root.
 #[derive(Clone, Copy, Debug)]
 pub struct HeapRoot {
+    /// The source-owned graph and activation cursor. The physical census
+    /// remains separate while guest bound decisions migrate to this ledger.
+    pub logical: super::logical::LedgerRoot,
     /// The object directory: [`EntityId`] to object head (kind, inline or
     /// paged body, local cost, identity-edge summary). It is the
     /// allocation census: it may hold entities no root reaches (S7).

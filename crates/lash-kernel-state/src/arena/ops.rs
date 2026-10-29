@@ -206,6 +206,7 @@ impl Arena {
         if let Some(old) = old {
             self.unhold(&old);
         }
+        self.note_member(handle, old, Some(value))?;
         self.mark(handle, Some(index / CARD))
     }
 
@@ -253,6 +254,7 @@ impl Arena {
         }
         self.update_flat(handle, Some(&old), None);
         self.unhold(&old);
+        self.note_member(handle, Some(old), None)?;
         Ok(())
     }
 
@@ -407,10 +409,12 @@ impl Arena {
         let old = std::mem::replace(held, value);
         if old.handle().is_none() && value.handle().is_none() {
             Self::mark_resident(facts, &mut self.dirty, handle, None);
+            self.note_member(handle, Some(old), Some(value))?;
             return Ok(());
         }
         self.hold(&value);
         self.unhold(&old);
+        self.note_member(handle, Some(old), Some(value))?;
         self.mark(handle, None)
     }
 

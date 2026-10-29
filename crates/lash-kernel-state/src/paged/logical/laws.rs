@@ -349,7 +349,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .admit(146)
             .unwrap_or_else(|_| panic!("66-byte entity must fit its exact event"));
         accepted
-            .publish(&mut cold, |_, edit| assert!(edit.is_none()))
+            .publish(&mut cold, |_, edit| assert!(edit.is_empty()))
             .unwrap();
     }
     assert_eq!(cold.balance().unwrap().total().unwrap(), 146);
@@ -396,7 +396,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     prepared
         .admit(146)
         .unwrap_or_else(|_| panic!("only the header and result reference grow"))
-        .publish(&mut cold, |_, edit| assert!(edit.is_none()))
+        .publish(&mut cold, |_, edit| assert!(edit.is_empty()))
         .unwrap();
     let third = lash_kernel_doc::Value::Int(3);
     let prepared = cold
@@ -439,7 +439,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
                 handle,
                 member,
                 next,
-            } = edit.unwrap();
+            } = edit.into_iter().next().unwrap();
             let Member::List(index) = member else {
                 panic!("list member");
             };
@@ -474,7 +474,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     attempt
         .admit(163)
         .unwrap_or_else(|_| panic!("entry fits"))
-        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .publish(&mut frames, |_, edit| assert!(edit.is_empty()))
         .unwrap();
     let exit = frames
         .prepare_leave_publication(
@@ -489,7 +489,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         .unwrap();
     exit.admit(163)
         .unwrap_or_else(|_| panic!("return transfers its result"))
-        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .publish(&mut frames, |_, edit| assert!(edit.is_empty()))
         .unwrap();
     assert_eq!(frames.balance().unwrap().total().unwrap(), 99);
     let sealed = frames.seal(&access, budget()).unwrap().unwrap();
@@ -503,7 +503,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     attempt
         .admit(179)
         .unwrap_or_else(|_| panic!("second alias has one body"))
-        .publish(&mut frames, |_, edit| assert!(edit.is_none()))
+        .publish(&mut frames, |_, edit| assert!(edit.is_empty()))
         .unwrap();
     assert!(
         frames
@@ -514,6 +514,137 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         frames.invocation_owners(&second, &access).unwrap(),
         [second.frame(), second.owner(Slot::Binding(0))]
     );
+    // The live heap owns the ledger. A cached physical certificate cannot
+    // hide a newer source-root publication when sealing the same heap again.
+    {
+        use crate::paged::{EditEpoch, SemanticHeap};
+        let (mut live, pages) = fresh();
+        let mut arena = crate::arena::Arena::new();
+        let lifecycle = Lifecycle::new(live.logical_ledger());
+        let invocation = lifecycle
+            .enter(
+                TaskId::MAIN,
+                &mut arena,
+                &live,
+                &[],
+                &[(
+                    Slot::Binding(0),
+                    SourceValue::Value(lash_kernel_doc::Value::Int(7)),
+                )],
+            )
+            .unwrap();
+        live.seal(budget()).unwrap().unwrap();
+        let original = live.sealed_root().unwrap();
+        lifecycle.replace(
+            invocation.owner(Slot::Binding(0)),
+            Some(SourceValue::Value(lash_kernel_doc::Value::Int(0))),
+        );
+        lifecycle.flush(&mut arena, &live).unwrap();
+        assert!(
+            live.sealed_root().is_none(),
+            "a source publication invalidates the old heap header"
+        );
+        live.seal(budget()).unwrap().unwrap();
+        assert_ne!(original, live.sealed_root().unwrap());
+        let reads = pages.borrow().payload_reads;
+        let restored = crate::paged::heap_impl::PagedHeap::open_header(
+            live.sealed_root().unwrap(),
+            Box::new(Source(pages.clone())),
+            EditEpoch(2),
+        )
+        .unwrap();
+        assert_eq!(
+            restored
+                .logical_ledger()
+                .borrow()
+                .balance()
+                .unwrap()
+                .total()
+                .unwrap(),
+            80
+        );
+        assert_eq!(
+            pages.borrow().payload_reads,
+            reads,
+            "ledger restore reads no scalar payloads"
+        );
+        assert!(
+            restored
+                .logical_ledger()
+                .borrow()
+                .invocation(TaskId::MAIN, invocation.id(), restored.pages())
+                .is_ok()
+        );
+        // Canonical arena writes report member occurrences even when no root
+        // changes. A later root overwrite retains the self-cycle until trace.
+        arena.watch_logical_members();
+        let cycle = arena.create_list(&[]);
+        lifecycle.replace(
+            invocation.owner(Slot::Binding(0)),
+            Some(SourceValue::Value(cycle)),
+        );
+        lifecycle.flush(&mut arena, &live).unwrap();
+        arena.list_set(cycle.handle().unwrap(), 0, cycle).unwrap();
+        lifecycle.flush(&mut arena, &live).unwrap();
+        lifecycle.replace(
+            invocation.owner(Slot::Binding(0)),
+            Some(SourceValue::Value(lash_kernel_doc::Value::Null)),
+        );
+        lifecycle.flush(&mut arena, &live).unwrap();
+        assert_eq!(
+            live.logical_ledger()
+                .borrow()
+                .balance()
+                .unwrap()
+                .entity_local_bytes,
+            48,
+            "runtime member events retain the cyclic component"
+        );
+        live.logical_ledger()
+            .borrow_mut()
+            .normalize(
+                live.pages(),
+                crate::paged::census_impl::TraceLimits::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            live.logical_ledger()
+                .borrow()
+                .balance()
+                .unwrap()
+                .entity_local_bytes,
+            0
+        );
+        // Quiet execution may discard the external occurrence before its
+        // adapter flushes. The canonical mutation still owns a cycle identity.
+        let elided = arena.create_list(&[]);
+        arena.list_set(elided.handle().unwrap(), 0, elided).unwrap();
+        lifecycle.flush(&mut arena, &live).unwrap();
+        assert_eq!(
+            live.logical_ledger()
+                .borrow()
+                .balance()
+                .unwrap()
+                .entity_local_bytes,
+            48,
+            "elided roots cannot erase cyclic membership"
+        );
+        live.logical_ledger()
+            .borrow_mut()
+            .normalize(
+                live.pages(),
+                crate::paged::census_impl::TraceLimits::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            live.logical_ledger()
+                .borrow()
+                .balance()
+                .unwrap()
+                .entity_local_bytes,
+            0
+        );
+    }
 }
 
 /// K-BND-003 / K-MACH-008: source-retained cycles and unreferenced ended
@@ -570,7 +701,7 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
                         handle,
                         member,
                         next,
-                    } = edit.unwrap();
+                    } = edit.into_iter().next().unwrap();
                     let Member::List(index) = member else {
                         panic!("list edit");
                     };

@@ -13,6 +13,7 @@ mod actions;
 mod callable_capture;
 mod catches;
 mod checkpoint;
+mod controls;
 mod exec;
 mod export_abi;
 mod foreign;
@@ -309,6 +310,8 @@ struct Storage {
 }
 
 struct Frame {
+    invocation: u64,
+    logical: Option<logical_held::FrameRoots>,
     convention: Option<lash_kernel_doc::StartConvention>,
     public_result: Option<lash_kernel_value::types::Type>,
     link: lash_kernel_value::content_ids::LinkId,
@@ -325,7 +328,7 @@ struct Frame {
     /// The continuation it saved where it stands at an action nested in
     /// its statement (`K-EVAL-008`).
     pending: frames::Continuation,
-    control: Vec<Control>,
+    control: controls::Controls,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
     /// The action nested in the awaited statement the frame stands at, by
@@ -364,6 +367,7 @@ struct Task {
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with
 /// `run` and `deliver`.
 pub struct KernelMachine {
+    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
     program: Program,
     active_link: lash_kernel_value::content_ids::LinkId,
     /// The document's identity, which a parked run pins, once it has been
@@ -666,10 +670,20 @@ impl KernelMachine {
 
     #[inline(never)]
     fn resolve_frame(&mut self, task: TaskId) -> Result<&mut Frame, Halt> {
-        self.task(task)?
+        let lifecycle = self.logical.clone();
+        let exe = Arc::clone(&self.exe);
+        let access = self.heap.pages().clone();
+        let frame = self
+            .task(task)?
             .frames
             .last_mut()?
-            .ok_or_else(|| fault("a running task has no frame"))
+            .ok_or_else(|| fault("a running task has no frame"))?;
+        if frame.logical.is_none() && frame.invocation != 0 {
+            frame.logical = Some(logical_held::FrameRoots::restore(
+                lifecycle, task, frame, &exe, &access,
+            )?);
+        }
+        Ok(frame)
     }
 
     /// The task table, with the rows of a refinement since the last lookup
@@ -714,6 +728,7 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
+        self.logical_flush()?;
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.identify(coordinates)?;
@@ -1020,6 +1035,10 @@ impl KernelMachine {
         if self.bounds.memory_meter != crate::MemoryMeter::Off {
             self.pins.clear();
         }
+        if result.is_ok() {
+            self.logical_flush_controls(task, exe)?;
+            self.logical_flush()?;
+        }
         self.tasks.protect(None);
         result
     }
@@ -1077,7 +1096,12 @@ impl KernelMachine {
         exe: &Executable,
         incoming: Incoming,
     ) -> Eval<Completion> {
-        let value = self.resume(task, exe, incoming)?;
+        let value = self.resume(task, exe, incoming);
+        self.logical.replace(
+            lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
+            None,
+        );
+        let value = value?;
         let ran = self.finish_action(task, host, exe, value, exec::ResultOrigin::Delivered)?;
         self.resumed(task, exe, ran)
     }

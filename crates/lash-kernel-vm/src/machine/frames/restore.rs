@@ -311,6 +311,8 @@ pub(super) fn frame(
         };
     }
     Ok(Box::new(Frame {
+        invocation: record.invocation,
+        logical: None,
         link: record.link,
         convention: record.convention.clone(),
         public_result: record.public_result.clone(),
@@ -327,7 +329,7 @@ pub(super) fn frame(
             },
             pending,
         },
-        control,
+        control: control.into(),
         awaiting,
         nested,
         library,

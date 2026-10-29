@@ -465,6 +465,7 @@ impl Compiler<'_> {
         self.live.truncate(live);
         self.stmt_depth = outer_depth;
         Stmt {
+            site: self.site(),
             ordinal: None,
             ops: range,
             regs: ops.regs,

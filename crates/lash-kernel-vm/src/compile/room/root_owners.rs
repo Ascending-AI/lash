@@ -93,9 +93,7 @@ impl OwnerSlots {
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {
         let owner = self.aliases.get(owner).unwrap_or(owner);
         if let Owner::SessionCell { name, .. } = owner {
-            return Some(Root::Session(lash_kernel_value::tokens::logical_digest(
-                &lash_kernel_value::tokens::encode_body(name),
-            )));
+            return Some(Root::session(name));
         }
         if let Owner::Frame(at) = owner {
             return (at == &self.source).then_some(Root::Frame { task, invocation });
@@ -118,6 +116,7 @@ impl OwnerSlots {
             Owner::Binding { .. } => Slot::Binding(index),
             Owner::HookArgument { .. } => Slot::Argument(index),
             Owner::HookResult { .. } => Slot::Control(index),
+            Owner::LoopCursor(_) | Owner::LoopHeader(_) => Slot::Control(index),
             Owner::Departure(_) | Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => {
                 Slot::Departure(index)
             }
@@ -145,7 +144,9 @@ impl OwnerSlots {
                 Owner::Operands(at),
                 Owner::Atom { at: site, .. }
                 | Owner::HookArgument { at: site, .. }
-                | Owner::HookResult { at: site, .. },
+                | Owner::HookResult { at: site, .. }
+                | Owner::LoopCursor(site)
+                | Owner::LoopHeader(site),
             ) => at.unit == site.unit && site.path.starts_with(&at.path),
             (
                 Owner::Departures(at),

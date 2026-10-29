@@ -54,6 +54,8 @@ mod tables;
 mod texts;
 mod versions;
 pub use versions::{ContentVersion, Registration};
+mod member_events;
+pub(crate) use member_events::{MemberEntry, MemberEvent};
 
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
@@ -222,6 +224,8 @@ pub struct Chilled {
 pub struct Arena {
     identity: std::rc::Rc<()>,
     registering: bool,
+    watching_members: bool,
+    member_events: Vec<MemberEvent>,
     objects: Objects,
     keys: keys::KeyCache,
     facts: Vec<Facts>,
@@ -1334,6 +1338,7 @@ impl Arena {
     fn mark_roots(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) -> Vec<ArenaHandle> {
         let mut visited = Vec::new();
         roots(&mut |value| visited.extend(value.handle()));
+        self.pending_member_handles(&mut visited);
         let mut rooted = Vec::with_capacity(visited.len());
         for handle in visited {
             if self.objects.get(handle).is_none() {
@@ -1390,6 +1395,7 @@ impl Arena {
     pub fn collect_cycles(&mut self, roots: &mut dyn FnMut(&mut Visit<'_>)) {
         let mut pending: Vec<ArenaHandle> = Vec::new();
         roots(&mut |value| pending.extend(value.handle()));
+        self.pending_member_handles(&mut pending);
         for (index, facts) in self.facts.iter().enumerate() {
             if facts.dirty
                 && facts.entity.is_some()

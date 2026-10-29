@@ -1,4 +1,5 @@
 use super::*;
+use crate::Machine;
 use crate::compile::{Form, SourceJoin};
 use lash_kernel_exec::{ConstIx, OpRange, RegRange};
 use lash_kernel_value::sites::Unit;
@@ -50,6 +51,7 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         ..Default::default()
     };
     let stmt = Stmt {
+        site: root.clone(),
         ordinal: None,
         ops: OpRange { start: 0, len: 3 },
         regs: 64,
@@ -100,4 +102,220 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         matches!(registers[3], Value::Int(11)),
         "the physical mirror can remain initialized"
     );
+    let mut live = crate::laws::embedder::Embedder::new(
+        "main {
+if true {
+let a = [1]
+let b = a
+return b
+}
+return null
+}",
+    );
+    assert_eq!(
+        live.machine
+            .heap
+            .logical_ledger()
+            .borrow()
+            .balance()
+            .unwrap()
+            .total()
+            .unwrap(),
+        64,
+        "a logical frame enters before its first instruction"
+    );
+    let end = live.run_to_end(&[]);
+    assert!(matches!(end, crate::End::Finished(_)));
+    live.machine.logical_flush().unwrap();
+    let balance = live
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(balance.entities, 1, "runtime aliases own one entity body");
+    assert_eq!(balance.entity_local_bytes, 49);
+    assert_eq!(
+        balance.root_and_control_bytes, 16,
+        "return releases the logical frame and its bindings"
+    );
+    // A pending return is owned through finally and survives a cold handoff.
+    let mut cleanup = crate::laws::embedder::Embedder::new(
+        "main {
+try { return [7] } finally { do perform 0(\"cleanup\") as Any }
+}",
+    );
+    assert!(matches!(cleanup.run(), crate::Step::Parked(_)));
+    cleanup.machine.logical_flush().unwrap();
+    let held = cleanup
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(
+        held.entities, 1,
+        "finally retains the pending returned list"
+    );
+    assert_eq!(held.entity_local_bytes, 49);
+    assert_eq!(
+        held.root_and_control_bytes, 80,
+        "one frame and the pending departure own the parked prefix"
+    );
+    cleanup.reopen(crate::Layout::default(), false);
+    assert_eq!(
+        cleanup
+            .machine
+            .heap
+            .logical_ledger()
+            .borrow()
+            .balance()
+            .unwrap(),
+        held
+    );
+    cleanup.deliver("cleanup");
+    let delivered = cleanup
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(
+        delivered.root_and_control_bytes, 103,
+        "the committed frozen text adds its complete 23-byte occurrence"
+    );
+    cleanup.reopen(crate::Layout::default(), false);
+    assert_eq!(
+        cleanup
+            .machine
+            .heap
+            .logical_ledger()
+            .borrow()
+            .balance()
+            .unwrap(),
+        delivered
+    );
+    assert!(matches!(cleanup.run_to_end(&[]), crate::End::Finished(_)));
+    cleanup.machine.logical_flush().unwrap();
+    assert_eq!(
+        cleanup
+            .machine
+            .heap
+            .logical_ledger()
+            .borrow()
+            .balance()
+            .unwrap()
+            .root_and_control_bytes,
+        16
+    );
+
+    let mut looping = crate::laws::embedder::Embedder::new(
+        "main {
+for x in [[7]] {
+do perform 0(\"loop\") as Any
+return x
+}
+return null
+}",
+    );
+    assert!(matches!(looping.run(), crate::Step::Parked(_)));
+    looping.machine.logical_flush().unwrap();
+    let held = looping
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(
+        held.entities, 2,
+        "the cold loop cursor reaches its original nested list"
+    );
+    assert_eq!(held.entity_local_bytes, 97);
+    assert_eq!(
+        held.root_and_control_bytes, 96,
+        "frame, loop binding and cursor are distinct source owners"
+    );
+    looping.reopen(crate::Layout::default(), false);
+    looping.deliver("loop");
+    assert!(matches!(looping.run_to_end(&[]), crate::End::Finished(_)));
+    looping.machine.logical_flush().unwrap();
+    let held = looping
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(
+        held.entities, 1,
+        "leaving the loop releases its cursor and outer list"
+    );
+    assert_eq!(held.entity_local_bytes, 49);
+    assert_eq!(held.root_and_control_bytes, 16);
+    let mut incoming = crate::laws::embedder::Embedder::new(
+        "main {
+if true {
+let value = perform 0(\"payload\") as Any
+return value
+}
+return null
+}",
+    );
+    assert!(matches!(incoming.run(), crate::Step::Parked(_)));
+    let wait = crate::laws::embedder::wait_of(incoming.requests.last().unwrap());
+    incoming
+        .machine
+        .deliver(
+            wait,
+            crate::Outcome::Completed(lash_kernel_doc::Datum::List(vec![
+                crate::laws::embedder::int(1),
+                crate::laws::embedder::int(2),
+            ])),
+        )
+        .unwrap();
+    let frozen = incoming
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(
+        frozen.entities, 0,
+        "delivery owns frozen data before a mutable family exists"
+    );
+    assert_eq!(
+        frozen.root_and_control_bytes, 146,
+        "one frame plus a frozen root and 66-byte list"
+    );
+    incoming.reopen(crate::Layout::default(), false);
+    assert_eq!(
+        incoming
+            .machine
+            .heap
+            .logical_ledger()
+            .borrow()
+            .balance()
+            .unwrap(),
+        frozen
+    );
+    assert!(matches!(incoming.run_to_end(&[]), crate::End::Finished(_)));
+    incoming.machine.logical_flush().unwrap();
+    let family = incoming
+        .machine
+        .heap
+        .logical_ledger()
+        .borrow()
+        .balance()
+        .unwrap();
+    assert_eq!(family.entities, 1);
+    assert_eq!(
+        family.entity_local_bytes, 66,
+        "instantiation transfers the complete frozen price to its cold family"
+    );
+    assert_eq!(family.root_and_control_bytes, 16);
 }

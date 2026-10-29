@@ -125,6 +125,15 @@ impl TokenCodec for FrozenHeader {
         })
     }
 }
+/// An incoming frozen value owns its authenticated complete immutable tree.
+/// Instantiation later transfers that occurrence into fresh family membership.
+/// The ordinary frozen header already sums the canonical value/body algebra.
+pub(super) fn frozen_holding_cost(
+    access: &Access<'_>,
+    frozen: &FrozenRef,
+) -> Result<u64, HeapFault> {
+    Ok(read_header(access, frozen)?.summary.cost.0)
+}
 fn read_header(access: &Access<'_>, frozen: &FrozenRef) -> Result<FrozenHeader, HeapFault> {
     decode_header(&access.read(frozen.root)?, frozen)
 }

@@ -921,8 +921,10 @@ impl KernelMachine {
             }
             Err(halt) => return Err(halt),
         }
+        let incoming = Incoming::Value(PageValue::Task(child));
+        self.logical_incoming(task, &incoming)?;
         let spawner = self.task(task)?;
-        spawner.wake(Incoming::Value(PageValue::Task(child)), false);
+        spawner.wake(incoming, false);
         self.frame(task)?.awaiting = Some(stmt);
         self.ready.push_front(task)?;
         // A child whose plan already waits in its `perform` (FIG-6916) has
@@ -1101,9 +1103,11 @@ impl KernelMachine {
         let Some(wait) = self.task(target)?.wait() else {
             // The raise replaces what a ready task resumes with; a
             // delivered one still takes its turn first (`K-TASK-005`).
+            let incoming = Incoming::Raise(cancelled());
+            self.logical_incoming(target, &incoming)?;
             let ready = self.task(target)?;
             let requeue = ready.owes_turn();
-            ready.wake(Incoming::Raise(cancelled()), requeue);
+            ready.wake(incoming, requeue);
             return Ok(());
         };
         // A `then yield` wait the cancel withdraws takes its turn too.
@@ -1141,8 +1145,9 @@ impl KernelMachine {
                 }
             }
         }
-        self.task(target)?
-            .wake(Incoming::Raise(cancelled()), requeue);
+        let incoming = Incoming::Raise(cancelled());
+        self.logical_incoming(target, &incoming)?;
+        self.task(target)?.wake(incoming, requeue);
         self.ready.push_back(target)?;
         Ok(())
     }
