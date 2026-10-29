@@ -68,7 +68,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "the page grammar beneath the parked-state and code mode snapshot surfaces, which the manifest reports; a semantic admission records it beside the kernel version"
-pub const PAGE_FORMAT: u32 = 4;
+pub const PAGE_FORMAT: u32 = 5;
 
 /// A semantic page kind: a generic envelope kind number in the range the
 /// node registry reserved for a complete object graph, 1000 to 1999.

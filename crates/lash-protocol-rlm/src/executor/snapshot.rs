@@ -17,7 +17,7 @@ use thiserror::Error;
 /// version_unguarded = "the session descriptor is an unversioned semantic graph page; kernel admission and the page grammar govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
-pub const CODEMODE_SNAPSHOT_VERSION: u32 = 5;
+pub const CODEMODE_SNAPSHOT_VERSION: u32 = 6;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 26's shape; its `Lift::Decoder` row admits N's
@@ -26,7 +26,7 @@ pub const CODEMODE_SNAPSHOT_VERSION: u32 = 5;
 /// version_unguarded = "the session descriptor is an unversioned semantic graph page; kernel admission and the page grammar govern compatibility, not record upcasters"
 /// version_surface = "migrate"
 /// format_manifest = "CodeModeSnapshotEnvelope"
-pub const CODEMODE_SNAPSHOT_VERSION: u32 = 6;
+pub const CODEMODE_SNAPSHOT_VERSION: u32 = 7;
 
 /// Why a saved code mode session could not be restored. No bindings are
 /// adopted when any check fails.
