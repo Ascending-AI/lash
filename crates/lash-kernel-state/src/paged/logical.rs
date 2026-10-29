@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 mod codec;
 mod dependencies;
+mod member_batch;
 pub use dependencies::Dependencies;
 mod graph;
 mod invocations;
@@ -528,7 +529,8 @@ impl Ledger {
         };
         let mut peak = before;
         let mut projected = Vec::new();
-        for change in changes {
+        let mut changes = changes.into_iter().peekable();
+        while let Some(change) = changes.next() {
             match change {
                 Change::Roots(changes) => edit.roots(changes)?,
                 Change::Move { from, to } => edit.transfer(from, to, false)?,
@@ -558,6 +560,10 @@ impl Ledger {
                     remove,
                     add,
                 } => {
+                    if !frontiers && changes.size_hint().0 >= 32 {
+                        edit.member_batch(entity, remove, *add, &mut changes)?;
+                        continue;
+                    }
                     let key = entity_key(entity);
                     if remove.bytes == add.bytes
                         && remove.links.is_empty()

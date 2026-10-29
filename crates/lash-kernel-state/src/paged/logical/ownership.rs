@@ -2,7 +2,7 @@
 use super::*;
 use crate::arena::Arena;
 use lash_kernel_doc::{Value, arena::ArenaHandle};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Outputs name semantic owners. A copy uses the ledger's existing Holding;
 /// a new value uses the canonical value projection, never a caller's byte delta.
@@ -40,8 +40,20 @@ impl Ledger {
         let mut pending = Vec::new();
         let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
         let mut mutations = Vec::new();
+        let mut membership = HashMap::<EntityId, bool, foldhash::fast::RandomState>::default();
         for event in members {
-            if self.entity_holding(event.entity, access)?.is_none() {
+            let present = if members.len() >= 32 {
+                if let Some(present) = membership.get(&event.entity) {
+                    *present
+                } else {
+                    let present = self.entity_holding(event.entity, access)?.is_some();
+                    membership.insert(event.entity, present);
+                    present
+                }
+            } else {
+                self.entity_holding(event.entity, access)?.is_some()
+            };
+            if !present {
                 // Include fresh mutated identities even when their final
                 // external owner was elided. Self-cycles remain source-retained.
                 pending.push(event.entity);

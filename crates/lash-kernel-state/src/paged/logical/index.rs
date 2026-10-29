@@ -10,7 +10,7 @@ use std::rc::Rc;
 #[derive(Clone)]
 enum Node<T: Cell> {
     Leaf {
-        key: Box<[u8]>,
+        key: Rc<[u8]>,
         value: Option<T>,
     },
     Branch {
@@ -360,6 +360,45 @@ impl<T: Cell> Index<T> {
     }
     pub fn task_edges(&self) -> u64 {
         self.totals.tasks
+    }
+    pub(super) fn read_task_edges(&mut self, access: &Access<'_>) -> Result<u64, HeapFault> {
+        self.ready(access)?;
+        Ok(self.totals.tasks)
+    }
+    pub(super) fn write_batch(
+        &mut self,
+        mut rows: Vec<(Vec<u8>, T)>,
+        access: &Access<'_>,
+    ) -> Result<(), HeapFault> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        if rows.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(invalid("source batch replaces a row twice"));
+        }
+        self.ready(access)?;
+        let mut totals = self.totals;
+        for (key, _) in &rows {
+            let old = self
+                .get_with(key, access, |row| row.map(Totals::row))?
+                .ok_or_else(|| invalid("source batch row is absent"))?;
+            totals = totals.replace(old, Totals::default())?;
+        }
+        for (_, row) in &rows {
+            totals = totals.replace(Totals::default(), Totals::row(row))?;
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| invalid("source index revision overflow"))?;
+        for (key, row) in rows {
+            self.insert(&key, Some(row));
+        }
+        self.totals = totals;
+        self.revision = revision;
+        self.nested_pages = false;
+        Ok(())
     }
     pub fn live_members(&self, access: &Access<'_>) -> Result<u64, HeapFault> {
         if self.known {
