@@ -54,6 +54,8 @@ lash_store_sql::statements! {
                  RETURNING graph_root_ref
              ), cancel AS (
                  DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
+             ), call_cancels AS (
+                 DELETE FROM tool_call_cancel_requests WHERE session_id = ?1 AND run = ?2
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,

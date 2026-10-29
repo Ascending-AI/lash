@@ -507,6 +507,11 @@ pub(super) fn apply(
             }
             cached_execute(
                 tx,
+                SQL.delete_call_cancels.sql(),
+                rusqlite::params![session.as_str(), run.as_str()],
+            )?;
+            cached_execute(
+                tx,
                 SQL.delete_cancel.sql(),
                 rusqlite::params![session.as_str(), run.as_str()],
             )?;

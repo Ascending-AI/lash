@@ -542,18 +542,41 @@ impl Lifecycle {
         }
     }
 
+    fn read_host_cancels(&mut self, tx: &lash_durable::ActorTx, folded: &RunFold) {
+        for request in tx.call_cancels() {
+            let owns = match folded.rounds().next().map(|view| view.owner()) {
+                Some(
+                    lash_durable::domain::OwnerKey::Turn(session, run)
+                    | lash_durable::domain::OwnerKey::Cell(session, run, _),
+                ) => session == &request.session && run == &request.run,
+                _ => false,
+            };
+            if owns {
+                let mut cancellation = crate::ToolCancellation::runtime(
+                    request
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "the host cancelled this call".to_owned()),
+                )
+                .with_origin(crate::CancelOrigin::OperatorRequested);
+                cancellation.raw = Some(crate::ToolValue::untrusted_json(serde_json::json!({
+                    "request_id": request.request_id, "origin": request.origin,
+                })));
+                self.request_cancel(request.call.clone(), cancellation);
+            }
+        }
+    }
+
     async fn commit_cancels(
         &mut self,
         folded: &RunFold,
         attempt: Option<&lash_durable::ActorTx>,
     ) -> Result<Option<Act>, RoundError> {
-        if self.cancel_requests.is_empty() && self.fence.is_none() {
-            return Ok(None);
-        }
         let mut tx = match attempt {
             Some(tx) => tx.clone(),
             None => self.cx.begin().await?,
         };
+        self.read_host_cancels(&tx, folded);
         if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
             self.request_cancels_before(
                 folded,
@@ -628,6 +651,7 @@ impl Lifecycle {
             None => self.cx.begin().await?,
         };
         // The stop may have arrived since commit_cancels read its transaction.
+        self.read_host_cancels(&tx, folded);
         if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
             self.request_cancels_before(
                 folded,
@@ -635,6 +659,13 @@ impl Lifecycle {
                 crate::ToolCancellation::runtime("the owning turn stopped")
                     .with_origin(crate::CancelOrigin::TurnStopped),
             );
+            return Ok(Some(Act::Refused));
+        }
+        if self.final_requests.keys().any(|id| {
+            folded
+                .admitted(id)
+                .is_some_and(|execution| self.cancel_requests.contains_key(execution.call()))
+        }) {
             return Ok(Some(Act::Refused));
         }
         let mut staged = Vec::new();

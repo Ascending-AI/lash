@@ -1006,6 +1006,17 @@ CREATE TABLE IF NOT EXISTS lash_model_call_records (
 );
 CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON lash_model_call_records(record_ref);
 
+CREATE TABLE IF NOT EXISTS lash_tool_call_cancel_requests (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    origin TEXT,
+    reason TEXT,
+    PRIMARY KEY (session_id, run, call_id),
+    FOREIGN KEY (session_id, run) REFERENCES lash_session_runs(session_id, run) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS lash_run_records (
     owner_key TEXT COLLATE "C" NOT NULL,
     run_seq BIGINT NOT NULL,

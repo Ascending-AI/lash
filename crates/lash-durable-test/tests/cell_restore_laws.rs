@@ -114,6 +114,7 @@ use lash_kernel_value::tool_contract::ExecutionPolicy;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::claims::ObligationToken;
 use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::RunIdCoreSupport as _;
 use serde_json::{Value, json};
 
 use dialect::Dialect;
@@ -185,6 +186,7 @@ enum Cell {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CancelSource {
+    Host,
     Python,
 }
 
@@ -227,6 +229,16 @@ impl Cell {
             Self::Race => "const w = await Promise.race([tools.extFast({ x: 1 }), \
                  tools.extSlow({ x: 2 })]);\nconsole.log(w);"
                 .to_owned(),
+            Self::ExplicitCancel(case) if case.source == CancelSource::Host => {
+                let join = if case.explicit {
+                    "try { await a; } catch (e) { if (e.data && e.data.origin === 'operator_requested' && e.data.message === 'cancel the selected call' && e.data.raw.request_id === 'host-call-cancel' && e.data.raw.origin === 'host-race-loser') { await tools.extWrite({ x: 4 }); } }"
+                } else {
+                    ""
+                };
+                format!(
+                    "const a = tools.extSlow({{ x: 1 }});\nconst b = tools.extSlow({{ x: 2 }});\nawait tools.extFast({{}});\n{join}\nawait tools.extWrite({{ x: 3 }});\nawait sleep(60000);\nconsole.log('cell stayed alive');"
+                )
+            }
             Self::ExplicitCancel(case) => r#"import asyncio
 async def selected():
     try:
@@ -296,7 +308,7 @@ const STRETCH_SLICE: u64 = 20_000;
 
 /// The outside world: every body entry of every host call, by call. It
 /// survives every node.
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct ExternalWorld {
     entries: Mutex<BTreeMap<ToolCallId, Vec<(String, Value)>>>,
     /// The process `ext_handle` hands out.
@@ -317,6 +329,7 @@ struct ExternalWorld {
     cleanup_signals: Mutex<Option<Vec<i64>>>,
     cancel_case: Mutex<Option<CancelCase>>,
     cancel_backend: Mutex<Option<Backend>>,
+    cancel_host: Mutex<Option<(lash::DurableSession, lash::RunId)>>,
     cleanup_children: Mutex<Option<Vec<(i64, bool)>>>,
     ready: Mutex<std::collections::BTreeSet<i64>>,
     changed: tokio::sync::Notify,
@@ -479,6 +492,9 @@ impl StaticToolExecute for ExtTools {
                     } else {
                         changed.await;
                     }
+                }
+                if case.source == CancelSource::Host && case.explicit {
+                    call_cancel::host_request(&self.world).await;
                 }
                 self.world
                     .fast_returned
@@ -1259,8 +1275,7 @@ impl CellTurn {
                                             entries.iter().any(|(tool, _)| tool == FAST).then_some(id));
                                         let fast_outcome = trace.iter().rposition(|write| write.committed()
                                             && write.facts.rows.iter().any(|row| row.kind == lash_durable::domain::RunFactKind::XOutcome && row.call == fast));
-                                        if fast_outcome.is_some_and(|at| trace.iter().skip(at + 1).any(|write|
-                                            write.committed() && write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT)) { break; }
+                                        if fast_outcome.is_some() { break; }
                                         let settled = trace.iter().filter(|write| write.stored != Stored::Pending).count();
                                         nodes.script().settled(settled + 1).await;
                                     }
@@ -1310,6 +1325,18 @@ impl CellTurn {
             .send(lash::TurnInput::text("run the cell"))
             .await
             .map_err(|error| format!("send the turn's input: {error}"))?;
+        if matches!(self.cell, Cell::ExplicitCancel(case) if case.source == CancelSource::Host)
+            && let Some(run) = handle.id().cloned()
+        {
+            let host = self
+                .core()
+                .session(self::session())
+                .durable()
+                .await
+                .map_err(|error| format!("resolve the cancel host: {error}"))?;
+            *self.world.cancel_host.lock_recover() =
+                Some((host, lash_vocabulary::identity::RunId::from_turn_id(run)));
+        }
         *self.run.lock_recover() = handle.id().cloned();
         *self.cancel.turn.lock_recover() = handle.id().cloned().map(|run| (self.backend(), run));
         Ok(())
@@ -1713,10 +1740,14 @@ impl Scenario for CellTurn {
     }
 
     async fn done(&self, nodes: &SimNodes) -> bool {
-        matches!(
+        let done = matches!(
             nodes.database().actor(&actor()).await,
             Ok(Some(snapshot)) if snapshot.state == ActorState::Idle
-        )
+        );
+        if done {
+            self.world.cancel_host.lock_recover().take();
+        }
+        done
     }
 
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {

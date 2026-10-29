@@ -1374,6 +1374,12 @@ pub enum CancelTarget {
     /// A logical run, including the run a queued input will open. The same
     /// atomic request withdraws that input or cancels its admitted run.
     Run(lash_vocabulary::identity::RunId),
+    /// One admitted call in this session and run, including a cell's calls.
+    /// Take `call` from a tool-call observation, never a provider call id.
+    ToolCall {
+        run: lash_vocabulary::identity::RunId,
+        call: crate::ToolCallId,
+    },
 }
 
 /// Builder for one cancel (ADR 0039).
@@ -1381,15 +1387,22 @@ pub enum CancelTarget {
 pub struct CancelBuilder {
     target: SendTarget,
     subject: Subject,
+    call: Option<crate::ToolCallId>,
+    run_options: bool,
     request: cancel::CancelRequestSpec,
 }
 
 impl CancelBuilder {
     pub(crate) fn new(target: SendTarget, cancel: CancelTarget) -> Self {
-        let CancelTarget::Run(run) = cancel;
+        let (run, call) = match cancel {
+            CancelTarget::Run(run) => (run, None),
+            CancelTarget::ToolCall { run, call } => (run, Some(call)),
+        };
         Self {
             target,
             subject: Subject::Run(run.turn_id().clone()),
+            call,
+            run_options: false,
             request: cancel::CancelRequestSpec::default(),
         }
     }
@@ -1398,11 +1411,14 @@ impl CancelBuilder {
         Self {
             target,
             subject: Subject::Input(receipt),
+            call: None,
+            run_options: false,
             request: cancel::CancelRequestSpec::default(),
         }
     }
 
-    /// The cancel request's id; defaults to `cancel:run:{id}`.
+    /// The cancel request's id; defaults to `cancel:run:{id}` for runs and
+    /// `cancel:call:{run}:{call}` for calls.
     pub fn request_id(mut self, id: impl Into<String>) -> Self {
         self.request.request_id = Some(id.into());
         self
@@ -1420,17 +1436,31 @@ impl CancelBuilder {
     }
 
     pub fn mode(mut self, mode: TurnCancelMode) -> Self {
+        self.run_options = true;
         self.request.mode = mode;
         self
     }
 
     pub fn undelivered(mut self, policy: TurnCancelUndeliveredInputPolicy) -> Self {
+        self.run_options = true;
         self.request.undelivered = policy;
         self
     }
 
     async fn apply(self) -> Result<CancelReceipt> {
         let context = self.target.context().await?;
+        if let Some(call) = self.call {
+            if self.run_options {
+                return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::InvalidTurnCancelRequest,
+                    "mode and undelivered-input policy apply only to run cancellation",
+                )));
+            }
+            let Subject::Run(run) = self.subject else {
+                unreachable!("a call target names its run")
+            };
+            return cancel::apply_call(&context.parts, run, call, self.request).await;
+        }
         cancel::apply(&context.parts, &self.subject, self.request).await
     }
 }
@@ -1444,10 +1474,37 @@ impl std::future::IntoFuture for CancelBuilder {
     }
 }
 
+/// The host request's durable disposition, separate from physical termination.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum ToolCallCancelOutcome {
+    /// The owner was woken with a durable request; its decision is pending.
+    Requested,
+    /// An earlier host request is retained unchanged.
+    AlreadyRequested {
+        request_id: String,
+        origin: Option<String>,
+        reason: Option<String>,
+    },
+    /// Cancellation committed. Its discharge may still be pending.
+    Cancelled,
+    /// This call already committed an outcome.
+    AlreadyDecided,
+    /// A committed final won; its result and declarations are protected.
+    FinalWon,
+}
+
 /// What a cancel did.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum CancelReceipt {
+    /// Acceptance or the already committed decision of one admitted call.
+    /// Acceptance does not prove physical termination of its body.
+    ToolCall {
+        run: lash_vocabulary::identity::RunId,
+        call: crate::ToolCallId,
+        outcome: ToolCallCancelOutcome,
+    },
     /// The atomic request withdrew queued work before a run applied it.
     /// An input's send handle answers [`SendOutcome::Withdrawn`]. A plugin
     /// task's command is withdrawn only while no run entered it; the cancel

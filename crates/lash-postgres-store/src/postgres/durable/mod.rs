@@ -891,6 +891,13 @@ async fn apply_mail_domain(
                 woken.into_iter().collect(),
             )
         }
+        MailDomainWrite::RequestToolCallCancel(request) => {
+            let (answer, woken) = run_records::request_call_cancel(tx, request, now).await?;
+            (
+                MailAnswer::RequestToolCallCancel(answer),
+                woken.into_iter().collect(),
+            )
+        }
         MailDomainWrite::RequestTurnCancel(request) => {
             let (answer, woken) = turns::request_cancel(tx, request, now).await?;
             (
@@ -1358,7 +1365,13 @@ impl DurableStore for PostgresDurableStore {
                 });
             }
         }
-        Ok(ActorTx::opened(opened))
+        let requests = self
+            .read(|tx| {
+                let actor = actor.clone();
+                Box::pin(async move { run_records::call_cancels(tx, &actor).await })
+            })
+            .await?;
+        Ok(ActorTx::opened(opened).with_call_cancels(requests))
     }
 
     async fn begin_retained(

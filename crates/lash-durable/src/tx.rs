@@ -106,6 +106,7 @@ pub struct ActorTx {
     mail: Vec<Mail>,
     opened_at: DurableInstant,
     turn_cancel: Option<TurnCancelRequest>,
+    call_cancels: Vec<crate::domain::ToolCallCancelRequest>,
     prompt_postimage: Option<lash_core_store::prompt_sections::OwnerPromptState>,
     domain: Vec<DomainWrite>,
     root_leases: Vec<RootLeaseRequest>,
@@ -164,6 +165,7 @@ impl ActorTx {
             mail: read.mail,
             opened_at: read.at,
             turn_cancel: read.turn_cancel,
+            call_cancels: Vec::new(),
             prompt_postimage: None,
             domain: Vec::new(),
             root_leases: Vec::new(),
@@ -309,6 +311,21 @@ impl ActorTx {
     #[must_use]
     pub fn turn_cancel(&self) -> Option<&TurnCancelRequest> {
         self.turn_cancel.as_ref()
+    }
+
+    /// Attach the durable call requests read by the storage adapter.
+    #[must_use]
+    pub fn with_call_cancels(
+        mut self,
+        requests: Vec<crate::domain::ToolCallCancelRequest>,
+    ) -> Self {
+        self.call_cancels = requests;
+        self
+    }
+
+    /// The immutable host requests visible to this owner read.
+    pub fn call_cancels(&self) -> &[crate::domain::ToolCallCancelRequest] {
+        &self.call_cancels
     }
 
     /// Whether `fenced`, the cancel request a commit's fence read for this

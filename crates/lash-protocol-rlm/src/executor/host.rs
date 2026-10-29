@@ -737,9 +737,12 @@ impl KernelEffects for CellHost<'_> {
                 }
             }
             lash_core::ToolCallOutcome::Failure(failure) => Outcome::Failed(tool_failed(failure)),
-            lash_core::ToolCallOutcome::Cancelled(cancelled) => {
-                Outcome::Failed(refused(EFFECT_CANCELLED, cancelled.message.clone()))
-            }
+            lash_core::ToolCallOutcome::Cancelled(cancelled) => Outcome::Failed(ErrorDatum {
+                kind: EFFECT_CANCELLED.to_owned(),
+                message: cancelled.message.clone(),
+                data: datum_from_json(&cancelled.to_json_value().to_string())
+                    .unwrap_or_else(|_| Datum::Text(cancelled.to_json_value().to_string())),
+            }),
         };
         if matches!(
             output,

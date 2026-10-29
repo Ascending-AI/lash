@@ -841,6 +841,14 @@ fn apply_mail_domain(
                 )
             })
         }
+        MailDomainWrite::RequestToolCallCancel(request) => {
+            run_records::request_call_cancel(tx, request, now)?.map(|(answer, woken)| {
+                (
+                    MailAnswer::RequestToolCallCancel(answer),
+                    woken.into_iter().collect(),
+                )
+            })
+        }
         MailDomainWrite::RequestTurnCancel(request) => turns::request_cancel(tx, request, now)?
             .map(|(answer, woken)| {
                 (
@@ -1298,7 +1306,11 @@ impl DurableStore for SqliteDurableStore {
                         Err(error) => return Ok(Err(error)),
                     };
                 }
-                Ok(Ok(ActorTx::opened(opened)))
+                let requests = match run_records::call_cancels(connection, &opened.actor)? {
+                    Ok(requests) => requests,
+                    Err(error) => return Ok(Err(error)),
+                };
+                Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
             })
             .await
             .map_err(store_failure)?
@@ -1405,7 +1417,11 @@ impl DurableStore for SqliteDurableStore {
                 if partial {
                     opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
                 }
-                Ok(Ok(ActorTx::opened(opened)))
+                let requests = match run_records::call_cancels(connection, &opened.actor)? {
+                    Ok(requests) => requests,
+                    Err(error) => return Ok(Err(error)),
+                };
+                Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
             })
             .await
             .map_err(store_failure)?

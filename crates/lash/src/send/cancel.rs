@@ -145,3 +145,46 @@ async fn cancel_run(
         },
     })
 }
+
+pub(super) async fn apply_call(
+    parts: &SendParts,
+    run: TurnId,
+    call: crate::ToolCallId,
+    request: CancelRequestSpec,
+) -> Result<CancelReceipt> {
+    use super::ToolCallCancelOutcome as O;
+    use lash_core::durable_port::domain::{ToolCallCancelAnswer as A, ToolCallCancelRequest};
+    let request_id = request
+        .request_id
+        .unwrap_or_else(|| format!("cancel:call:{run}:{call}"));
+    let answer = lash_core::runtime::turn_control::request_tool_call_cancel(
+        parts.effect_host.backend(),
+        ToolCallCancelRequest {
+            session: parts.session_id.clone(),
+            run: run.clone(),
+            call: call.clone(),
+            request_id,
+            origin: request.origin,
+            reason: request.reason,
+        },
+    )
+    .await
+    .map_err(EmbedError::Durable)?;
+    let outcome = match answer {
+        A::Requested => O::Requested,
+        A::AlreadyRequested { accepted } => O::AlreadyRequested {
+            request_id: accepted.request_id,
+            origin: accepted.origin,
+            reason: accepted.reason,
+        },
+        A::Cancelled => O::Cancelled,
+        A::AlreadyDecided => O::AlreadyDecided,
+        A::FinalWon => O::FinalWon,
+        A::UnknownOrRevoked => return Ok(CancelReceipt::UnknownOrRevoked),
+    };
+    Ok(CancelReceipt::ToolCall {
+        run: lash_vocabulary::identity::RunId::from_turn_id(run),
+        call,
+        outcome,
+    })
+}

@@ -590,3 +590,26 @@ pub enum TurnCancelAnswer {
     /// The turn is not the session's unfinished turn; nothing was written.
     AlreadyEnded,
 }
+
+/// A host request for one admitted call. The first request survives retries;
+/// only the owning actor can commit the final-or-cancel decision.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ToolCallCancelRequest {
+    pub session: SessionId,
+    pub run: TurnId,
+    pub call: lash_protocol_types::ToolCallId,
+    pub request_id: String,
+    pub origin: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// Durable acceptance is distinct from the actor's decision and physical stop.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ToolCallCancelAnswer {
+    Requested,
+    AlreadyRequested { accepted: ToolCallCancelRequest },
+    Cancelled,
+    AlreadyDecided,
+    FinalWon,
+    UnknownOrRevoked,
+}

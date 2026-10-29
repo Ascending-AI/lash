@@ -106,6 +106,12 @@ impl PostgresDurableStore {
         if partial {
             opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
         }
-        Ok(ActorTx::opened(opened))
+        let requests = self
+            .read(|tx| {
+                let actor = actor.clone();
+                Box::pin(async move { super::run_records::call_cancels(tx, &actor).await })
+            })
+            .await?;
+        Ok(ActorTx::opened(opened).with_call_cancels(requests))
     }
 }

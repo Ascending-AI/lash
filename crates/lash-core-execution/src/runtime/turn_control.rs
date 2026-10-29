@@ -463,3 +463,25 @@ pub fn close_requested_in(tx: &ActorTx) -> bool {
 fn store_error(error: DurableError) -> RuntimeError {
     RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, error.to_string())
 }
+
+/// Persist one host call request, resolving membership before waking its owner.
+/// A receipt reports acceptance or an already committed decision, not physical
+/// termination of a non-cooperative body.
+pub async fn request_tool_call_cancel(
+    backend: &Backend,
+    request: lash_durable::domain::ToolCallCancelRequest,
+) -> Result<lash_durable::domain::ToolCallCancelAnswer, DurableError> {
+    let mut tx = MailTx::new();
+    tx.write(MailDomainWrite::RequestToolCallCancel(request));
+    let mut commit = backend
+        .commit_mail(tx, CommitLabel::CALL_CANCEL_REQUEST)
+        .await?;
+    match commit.answers.pop() {
+        Some(MailAnswer::RequestToolCallCancel(answer)) if commit.answers.is_empty() => Ok(answer),
+        other => Err(DurableError::Store(lash_durable::StoreFailure {
+            code: None,
+            kind: lash_durable::StoreFailureKind::Corrupt,
+            message: format!("a call cancel request was answered with {other:?}"),
+        })),
+    }
+}

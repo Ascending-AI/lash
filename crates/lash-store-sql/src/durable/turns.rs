@@ -175,6 +175,7 @@ crate::statements! {
         /// Drop the cancel request run `?2` of session `?1` accepted, in the
         /// transaction that ends it.
         delete_cancel = "DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
+        delete_call_cancels = "DELETE FROM tool_call_cancel_requests WHERE session_id = ?1 AND run = ?2";
 
         /// Record run `?2` of session `?1`'s first cancel request: request id
         /// `?3`, origin `?4`, reason `?5`, disposition `?6`, mode `?7`.

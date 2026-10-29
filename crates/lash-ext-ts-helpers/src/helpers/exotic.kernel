@@ -85,10 +85,12 @@ body {
       if same(kind(properties), "record") {
         if record.contains(properties, key) { return properties[key] }
         if same(key, "message") { return "" }
+        return absent
       }
     }
     # Host errors carry typed cause data, not guest Error property slots.
     if same(key, "message") { return target.message }
+    if same(key, "data") { return target.data }
     return absent
   }
   if same(k, "record") {

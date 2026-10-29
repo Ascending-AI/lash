@@ -1,5 +1,6 @@
 //! The explicit cancellation law's durable-record and external-world oracle.
 use super::*;
+use lash_vocabulary::identity::RunIdCoreSupport as _;
 
 impl CellTurn {
     pub(super) async fn cancellation_laws(
@@ -51,9 +52,11 @@ impl CellTurn {
             .values()
             .flatten()
             .any(|(tool, args)| tool == WRITE && written_x(args) == Some(4));
-        if observed_exception != case.explicit {
+        let exception_expected = case.explicit
+            && (case.source == CancelSource::Python || case.order == CommitOrder::CancelFirst);
+        if observed_exception != exception_expected {
             violations.push(format!(
-                "the Python task's CancelledError handler ran={observed_exception}, explicit={}",
+                "the guest cancellation handler ran={observed_exception}, explicit={}",
                 case.explicit
             ));
         }
@@ -122,6 +125,24 @@ impl CellTurn {
                         "call {call} retried or declared after cancellation"
                     ));
                 }
+                if case.source == CancelSource::Host
+                    && case.explicit
+                    && row.kind == Kind::XCancel
+                    && Some(call) == selected.as_ref()
+                    && let RoundFact::Cancel { cancellation, .. } =
+                        RoundFact::load(&mut decoder, row.record).unwrap()
+                {
+                    let value = cancellation.to_json_value();
+                    if value["origin"] != "operator_requested"
+                        || value["message"] != "cancel the selected call"
+                        || value["raw"]["request_id"] != "host-call-cancel"
+                        || value["raw"]["origin"] != "host-race-loser"
+                    {
+                        violations.push(format!(
+                            "the first host request's provenance was lost: {value}"
+                        ));
+                    }
+                }
                 if row.kind == Kind::XOutcome {
                     if outcomes.insert(call.clone(), ()).is_some() {
                         violations.push(format!("call {call} committed two outcomes"));
@@ -181,7 +202,26 @@ impl CellTurn {
 }
 
 pub(super) async fn run_law() {
+    let host = |order, hint, explicit| CancelCase {
+        source: CancelSource::Host,
+        order,
+        hint,
+        explicit,
+    };
     for case in [
+        host(CommitOrder::CancelFirst, None, true),
+        host(CommitOrder::FinalFirst, None, true),
+        host(
+            CommitOrder::CancelFirst,
+            Some(lash_core::CancelHint::CancelExternalWork),
+            true,
+        ),
+        host(
+            CommitOrder::CancelFirst,
+            Some(lash_core::CancelHint::Ignore),
+            true,
+        ),
+        host(CommitOrder::CancelFirst, None, false),
         CancelCase::python(CommitOrder::CancelFirst, None, true),
         CancelCase::python(CommitOrder::FinalFirst, None, true),
         CancelCase::python(
@@ -199,6 +239,7 @@ pub(super) async fn run_law() {
         let report = Matrix::new()
             .labels(&[
                 CommitLabel::CELL_SNAPSHOT_ADMIT,
+                CommitLabel::CALL_CANCEL_REQUEST,
                 CommitLabel::CALL_CANCEL,
                 CommitLabel::CALL_FINAL,
                 CommitLabel::ROUND_OUTCOME,
@@ -246,4 +287,147 @@ pub(super) fn increment_reducer() -> lash::plugins::StateReducer {
                 + reduction.input.as_u64().unwrap_or(0)
         )))
     })
+}
+
+/// Exercise the public host target, including foreign/unknown and retry
+/// requests. The durable rows and external log remain the decision oracle.
+pub(super) async fn host_request(world: &ExternalWorld) {
+    let (host, run) = world.cancel_host.lock_recover().clone().unwrap();
+    let call = world
+        .entries()
+        .into_iter()
+        .find_map(|(id, entries)| {
+            entries
+                .iter()
+                .any(|(tool, args)| tool == SLOW && written_x(args) == Some(1))
+                .then_some(id)
+        })
+        .unwrap();
+    for (run, call) in [
+        (run.clone(), call.child(987)),
+        (
+            lash_vocabulary::identity::RunId::from_turn_id(
+                lash_vocabulary::identity::TurnId::try_from("foreign-run".to_owned()).unwrap(),
+            ),
+            call.clone(),
+        ),
+    ] {
+        assert!(matches!(
+            host.cancel(lash::CancelTarget::ToolCall { run, call })
+                .await
+                .unwrap(),
+            lash::CancelReceipt::UnknownOrRevoked
+        ));
+    }
+    let target = lash::CancelTarget::ToolCall { run, call };
+    let invalid_mode = host
+        .cancel(target.clone())
+        .mode(lash::TurnCancelMode::Immediate)
+        .await;
+    let invalid_undelivered = host
+        .cancel(target.clone())
+        .undelivered(lash::TurnCancelUndeliveredInputPolicy::Defer)
+        .await;
+    for result in [invalid_mode, invalid_undelivered] {
+        assert!(matches!(result, Err(lash::EmbedError::Runtime(error))
+            if error.code == lash::runtime::RuntimeErrorCode::InvalidTurnCancelRequest));
+    }
+    let nodes = world.nodes.lock_recover().upgrade().unwrap();
+    let lash::CancelTarget::ToolCall {
+        run: target_run,
+        call: target_call,
+    } = &target
+    else {
+        unreachable!()
+    };
+    let request = lash_durable::domain::ToolCallCancelRequest {
+        session: session(),
+        run: target_run.turn_id().clone(),
+        call: target_call.clone(),
+        request_id: "host-call-cancel".to_owned(),
+        origin: Some("host-race-loser".to_owned()),
+        reason: Some("cancel the selected call".to_owned()),
+    };
+    loop {
+        let mut tx = lash_durable::MailTx::new();
+        tx.write(lash_durable::domain::MailDomainWrite::RequestToolCallCancel(request.clone()));
+        let producer = nodes.producer("host");
+        let next = 1 + nodes
+            .script()
+            .trace()
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::CALL_CANCEL_REQUEST)
+            .count();
+        let recovery = async {
+            let cut = nodes.script().first_cut().await;
+            if cut.point.label != CommitLabel::CALL_CANCEL_REQUEST
+                || cut.point.nth != next
+                || !cut.fault.kills()
+            {
+                std::future::pending::<()>().await;
+            }
+            loop {
+                let trace = nodes.script().trace();
+                if trace
+                    .iter()
+                    .any(|write| write.point == cut.point && write.stored != Stored::Pending)
+                {
+                    break;
+                }
+                let settled = trace
+                    .iter()
+                    .filter(|write| write.stored != Stored::Pending)
+                    .count();
+                nodes.script().settled(settled + 1).await;
+            }
+        };
+        tokio::select! {
+            result = producer.commit_mail(tx, CommitLabel::CALL_CANCEL_REQUEST) => {
+                if result.is_ok() { break; }
+            }
+            _ = recovery => {}
+        }
+    }
+    let receipt = host
+        .cancel(target.clone())
+        .request_id("host-call-cancel")
+        .origin("host-race-loser")
+        .reason("cancel the selected call")
+        .await
+        .unwrap();
+    let repeated = host
+        .cancel(target)
+        .request_id("do-not-replace-the-first")
+        .origin("wrong-origin")
+        .reason("wrong-reason")
+        .await
+        .unwrap();
+    let case = world.cancel_case.lock_recover().unwrap();
+    let expected_final = case.order == CommitOrder::FinalFirst;
+    for receipt in [&receipt, &repeated] {
+        match receipt {
+            lash::CancelReceipt::ToolCall {
+                outcome: lash::ToolCallCancelOutcome::FinalWon,
+                ..
+            } if expected_final => {}
+            lash::CancelReceipt::ToolCall {
+                outcome: lash::ToolCallCancelOutcome::Cancelled,
+                ..
+            } if !expected_final => {}
+            lash::CancelReceipt::ToolCall {
+                outcome:
+                    lash::ToolCallCancelOutcome::AlreadyRequested {
+                        request_id,
+                        origin,
+                        reason,
+                    },
+                ..
+            } if !expected_final => {
+                assert_eq!(request_id, "host-call-cancel");
+                assert_eq!(origin.as_deref(), Some("host-race-loser"));
+                assert_eq!(reason.as_deref(), Some("cancel the selected call"));
+            }
+            other => panic!("the host receipt disagrees with the committed order: {other:?}"),
+        }
+    }
 }

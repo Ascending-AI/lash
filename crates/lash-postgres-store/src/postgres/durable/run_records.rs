@@ -19,6 +19,14 @@ use sqlx::{PgConnection, Row};
 use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, corrupt, integer, node_ref, sqlx_failure};
 
+lash_store_sql::statements! {
+    struct CallCancelPostgresStatements @ "durable_call_cancel_postgres" {
+        lock_call_cancel = "SELECT actor_key FROM actors WHERE actor_key = ?1 FOR UPDATE";
+    }
+}
+static SQL_POSTGRES: LazyLock<CallCancelPostgresStatements> =
+    LazyLock::new(|| CallCancelPostgresStatements::render(Dialect::postgres()));
+
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(Dialect::postgres()));
 
@@ -279,4 +287,108 @@ pub(super) async fn delete_under(
         .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await
+}
+
+/// Read requests even after a phase acknowledged their wake.
+pub(super) async fn call_cancels(
+    tx: &mut PgConnection,
+    actor: &lash_durable::ActorKey,
+) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
+    use lash_durable::domain::ToolCallCancelRequest;
+    if actor.kind() != lash_durable::ActorKind::Session {
+        return Ok(Vec::new());
+    }
+    let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
+        .map_err(|_| corrupt("call cancel session", actor.id()))?;
+    let rows = crate::observed_sql::query(SQL.call_cancels.sql())
+        .bind(actor.id())
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await
+        .map_err(sqlx_failure)?;
+    rows.into_iter()
+        .map(|row| {
+            let run: String = row.try_get(0).map_err(sqlx_failure)?;
+            let call: String = row.try_get(1).map_err(sqlx_failure)?;
+            Ok(ToolCallCancelRequest {
+                session: session.clone(),
+                run: lash_vocabulary::identity::TurnId::try_from(run.clone())
+                    .map_err(|_| corrupt("call cancel run", &run))?,
+                call: ToolCallId::try_from(call.as_str())
+                    .map_err(|_| corrupt("call cancel id", &call))?,
+                request_id: row.try_get(2).map_err(sqlx_failure)?,
+                origin: row.try_get(3).map_err(sqlx_failure)?,
+                reason: row.try_get(4).map_err(sqlx_failure)?,
+            })
+        })
+        .collect()
+}
+
+pub(super) async fn request_call_cancel(
+    tx: &mut PgConnection,
+    request: &lash_durable::domain::ToolCallCancelRequest,
+    now: lash_durable::DurableInstant,
+) -> Result<
+    (
+        lash_durable::domain::ToolCallCancelAnswer,
+        Option<lash_durable::Woken>,
+    ),
+    DurableError,
+> {
+    use lash_durable::domain::ToolCallCancelAnswer as A;
+    let turn = OwnerKey::Turn(request.session.clone(), request.run.clone());
+    let actor = turn.actor();
+    // Serialize request retries with the owner commit before inspecting its
+    // immutable membership and decision. Lock order is actor, then request.
+    crate::observed_sql::query(SQL_POSTGRES.lock_call_cancel.sql())
+        .bind(actor.as_str())
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let cells = lash_durable::domain::ExecKey::turn_cells(&request.session, &request.run);
+    let decision: Option<String> = crate::observed_sql::query_scalar(SQL.call_decision.sql())
+        .bind(turn.stored())
+        .bind(cells)
+        .bind(request.call.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    match decision.as_deref() {
+        Some("x_final") => return Ok((A::FinalWon, None)),
+        Some("x_cancel") => return Ok((A::Cancelled, None)),
+        Some("x_outcome") => return Ok((A::AlreadyDecided, None)),
+        None => return Ok((A::UnknownOrRevoked, None)),
+        _ => {}
+    }
+    if let Some(row) = crate::observed_sql::query(SQL.call_cancel.sql())
+        .bind(request.session.as_str())
+        .bind(request.run.as_str())
+        .bind(request.call.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?
+    {
+        return Ok((
+            A::AlreadyRequested {
+                accepted: lash_durable::domain::ToolCallCancelRequest {
+                    request_id: row.try_get(0).map_err(sqlx_failure)?,
+                    origin: row.try_get(1).map_err(sqlx_failure)?,
+                    reason: row.try_get(2).map_err(sqlx_failure)?,
+                    ..request.clone()
+                },
+            },
+            None,
+        ));
+    }
+    crate::observed_sql::query(SQL.insert_call_cancel.sql())
+        .bind(request.session.as_str())
+        .bind(request.run.as_str())
+        .bind(request.call.as_str())
+        .bind(&request.request_id)
+        .bind(&request.origin)
+        .bind(&request.reason)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let (woken, _) = super::wake_within(tx, &actor, true, now).await?;
+    Ok((A::Requested, Some(woken)))
 }

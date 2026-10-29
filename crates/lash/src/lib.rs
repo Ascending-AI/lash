@@ -292,7 +292,8 @@ pub use crate::error::{EmbedError, Result, RetiredConfigObserverRefusal, SendErr
 pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
 pub use crate::send::{
     BatchInput, CancelBuilder, CancelReceipt, CancelTarget, Forsaking, ParkedTurn, RunHandle,
-    SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, TurnEvents, TurnStatus,
+    SendBatchBuilder, SendBuilder, SendHandle, SendOutcome, ToolCallCancelOutcome, TurnEvents,
+    TurnStatus,
 };
 pub use crate::session::{
     FeedStart, LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,

@@ -72,8 +72,8 @@ pub use session_mail::{
 pub use snapshots::SnapshotRev;
 pub use turns::{
     ModelCall, ModelPin, PhaseAdvance, RunValuesWrite, SessionCommitWrite, StoredNamespaceWrite,
-    StoredValues, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace, TurnNamespaceWrite,
-    TurnRow, TurnWrite, UnfinishedPhase,
+    StoredValues, ToolCallCancelAnswer, ToolCallCancelRequest, TurnCancelAnswer, TurnCancelRequest,
+    TurnEnd, TurnNamespace, TurnNamespaceWrite, TurnRow, TurnWrite, UnfinishedPhase,
 };
 pub use waits::{
     CANCEL_MAIL, ResolveAnswer, StoredWait, TIMER_DIGEST, WAIT_ROW_FORMAT_VERSION, WaitId,
@@ -165,6 +165,8 @@ pub enum MailDomainWrite {
     /// opened yet, whose input is still queued session mail, has that input
     /// withdrawn instead, with a wake (FIG-5262).
     RequestTurnCancel(TurnCancelRequest),
+    /// Request cancellation of one durably admitted tool call.
+    RequestToolCallCancel(ToolCallCancelRequest),
     /// L3s: cancel a plugin task's operation run (FIG-5343): a command no
     /// run entered yet is withdrawn, with a wake; an entered one records the
     /// request (the first wins) with a control wake, so its running handler
@@ -188,6 +190,8 @@ pub enum MailAnswer {
     RequestProcessCancel(CancelAnswer),
     /// The answer to [`MailDomainWrite::RequestTurnCancel`].
     RequestTurnCancel(TurnCancelAnswer),
+    /// The answer to a per-call cancellation request.
+    RequestToolCallCancel(ToolCallCancelAnswer),
     /// The answer to [`MailDomainWrite::RequestOperationCancel`].
     RequestOperationCancel(OperationCancelAnswer),
     /// The answer to [`MailDomainWrite::Redrive`].

@@ -138,3 +138,23 @@ adds a second coordination protocol beside the fenced commit.
 - [Cancel modes and input policy](../../crates/lash-protocol-types/src/session_model/mod.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+
+## Explicit host call cancellation
+
+`cancel(CancelTarget::ToolCall { run, call })` addresses an admitted
+`ToolCallId` from call observations. The mailbox transaction resolves it
+through the run's durable membership, including cell calls. Unknown ids and
+calls belonging to another session or run cancel nothing. Provider ids and
+worker handles grant no authority.
+
+The first host request is immutable and wakes the owning actor. Its wake may
+be acknowledged without deleting the request. The actor arbitrates against
+`x_final`, commits `x_cancel` before signalling only that call, and retains
+CancelHint discharge debt through recovery. Request retries preserve the
+accepted request id, origin and reason. Receipts distinguish pending request
+acceptance, an already decided call, and a winning committed final. None
+proves physical termination or rollback of external work.
+
+`mode` and `undelivered` apply only to run targets; a call target rejects those
+options. A call cancellation never closes its run or cell. Aggregate selection
+and handle loss still cancel nothing.
