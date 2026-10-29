@@ -664,7 +664,10 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
         assert_eq!(failure["class"], "parked");
         assert_eq!(failure["payload"]["refused"], expected, "{refusal}");
         if build == Build::Unmapped {
-            assert_eq!(failure["payload"]["refusal"]["reason"], "correspondence");
+            assert_eq!(
+                failure["payload"]["refusal"]["kind"], "correspondence",
+                "{refusal}"
+            );
         }
         assert_eq!(parked.formats, formats);
         let after = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
