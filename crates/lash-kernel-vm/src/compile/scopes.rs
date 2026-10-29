@@ -167,7 +167,8 @@ impl Compiler<'_> {
                     index: index as u32,
                     borrowed: captures
                         .iter()
-                        .any(|capture| capture.inner as usize == index),
+                        .any(|capture| capture.inner as usize == index)
+                        || free.iter().any(|(_, local)| local.slot as usize == index),
                 })
                 .collect(),
             Arc::clone(&self.resolve.library.registry),

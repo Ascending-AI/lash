@@ -62,17 +62,18 @@ impl Host for Answering {
     }
 }
 
-/// Nothing committed: a fresh cell reads only what it stages.
-struct Uncommitted;
+/// Admitted code nodes are committed; execution pages are freshly staged.
+#[derive(Default)]
+struct Committed(BTreeMap<NodeId, Arc<[u8]>>);
 
-impl CommittedPages for Uncommitted {
-    fn page(&self, _page: &NodeId) -> Option<Arc<[u8]>> {
-        None
+impl CommittedPages for Committed {
+    fn page(&self, page: &NodeId) -> Option<Arc<[u8]>> {
+        self.0.get(page).cloned()
     }
 }
 
 #[derive(Clone)]
-struct SharedPages(Rc<RefCell<LocalPages<Uncommitted>>>);
+struct SharedPages(Rc<RefCell<LocalPages<Committed>>>);
 impl PageSource for SharedPages {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         self.0.borrow_mut().read(pages)
@@ -117,7 +118,15 @@ fn run_in(
     answer: &Result<Datum, ErrorDatum>,
     strategy: lash_kernel_vm::testing::ExecutionStrategy,
 ) -> Ran {
-    run_scripted(program, effect, read, answer, strategy, &BTreeMap::new())
+    run_scripted(
+        program,
+        effect,
+        read,
+        answer,
+        strategy,
+        &BTreeMap::new(),
+        false,
+    )
 }
 fn run_scripted(
     program: &Program,
@@ -126,6 +135,7 @@ fn run_scripted(
     answer: &Result<Datum, ErrorDatum>,
     strategy: lash_kernel_vm::testing::ExecutionStrategy,
     replies: &BTreeMap<EffectName, Result<Datum, ErrorDatum>>,
+    reopen: bool,
 ) -> Ran {
     let instance = &program.instances[&program.link];
     let slot = program
@@ -161,7 +171,11 @@ fn run_scripted(
         EffectModes::new()
     };
     let start = CellStart {
-        owner: PageId([0; 32]),
+        owner: if reopen {
+            program.closure
+        } else {
+            PageId([0; 32])
+        },
         target: Target::Main,
         args: Vec::new(),
         session: None,
@@ -180,8 +194,38 @@ fn run_scripted(
         requests_per_park: 16,
         join_members: 16,
     };
+    let committed = if reopen {
+        let stored = program
+            .documents
+            .values()
+            .flat_map(|document| document.functions.iter())
+            .map(|(id, definition)| (*id, Arc::new(definition.clone())))
+            .collect();
+        let closure = lash_vm_broker::kernel::closure::derive(
+            program
+                .functions
+                .iter()
+                .chain(&program.document.requires.natives)
+                .copied(),
+            program.library.registry(),
+            &stored,
+            program.helpers(),
+            &program.document.library,
+        )
+        .expect("the admitted closure derives");
+        assert_eq!(closure.reference().0, program.closure.0);
+        Committed(
+            closure
+                .nodes()
+                .iter()
+                .map(|(id, node)| (*id, Arc::clone(&node.bytes)))
+                .collect(),
+        )
+    } else {
+        Committed::default()
+    };
     let pages = SharedPages(Rc::new(RefCell::new(LocalPages::new(
-        Uncommitted,
+        committed,
         Box::new(spools.spool(next_stage_lease()).expect("spool")),
     ))));
     let mut machine = lash_kernel_vm::testing::start(
@@ -220,6 +264,23 @@ fn run_scripted(
             }
             Step::Parked(park) => {
                 parks += 1;
+                if reopen {
+                    let sealed = machine
+                        .seal(lash_kernel_state::paged::SealBudget {
+                            pages: u64::MAX,
+                            bytes: u64::MAX,
+                        })
+                        .expect("the parked cell seals")
+                        .expect("unbounded seal");
+                    machine = lash_kernel_vm::testing::open(
+                        program.clone(),
+                        bounds,
+                        &sealed.checkpoint(),
+                        Box::new(pages.clone()),
+                        strategy,
+                    )
+                    .expect("the discovery cell reopens");
+                }
                 for request in park.requests {
                     let Request::Effect(request) = request;
                     host.calls.push(request.args.clone());
@@ -304,6 +365,7 @@ fn lowered_against(
 
 #[test]
 fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
+    cenote_parallel_discovery();
     cenote_read_loop();
     figments_workflow_loop();
     let typescript = (
@@ -358,6 +420,105 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
                 (&recorded.end, &recorded.prints, recorded.charged),
                 "{dialect}, {what}: a read ends, prints and is charged as the same perform recorded"
             );
+        }
+    }
+}
+
+// Cenote's parallel discovery cells must retain the same source owners when
+// their spawned calls resume from a cold checkpoint.
+fn cenote_parallel_discovery() {
+    let describe = EffectName::new("tools.describe").expect("describe operation");
+    let find = EffectName::new("tools.find").expect("find operation");
+    let signature = |input, output| {
+        lash_kernel_value::json_schema::tool_signature(
+            &lash_kernel_value::JsonSchema::admit(input).expect("input schema"),
+            &lash_kernel_value::JsonSchema::admit(output).expect("output schema"),
+        )
+    };
+    let effects = BTreeMap::from([
+        (
+            describe.clone(),
+            signature(
+                serde_json::json!({"type":"string"}),
+                serde_json::json!({"type":"object", "properties":{"contract":{"type":"string"}}, "required":["contract"]}),
+            ),
+        ),
+        (
+            find.clone(),
+            signature(
+                serde_json::json!({"type":"object", "properties":{"query":{"type":"string"}}, "required":["query"]}),
+                serde_json::json!({"type":"object", "properties":{"found":{"type":"array", "items":{"type":"string"}}}, "required":["found"]}),
+            ),
+        ),
+    ]);
+    let described = Ok(Datum::Record(vec![(
+        "contract".into(),
+        Datum::Text("contract".into()),
+    )]));
+    let replies = BTreeMap::from([(
+        find,
+        Ok(Datum::Record(vec![(
+            "found".into(),
+            Datum::List(vec![Datum::Text("workflows.sdk".into())]),
+        )])),
+    )]);
+    let cells = [
+        (
+            "const details = await Promise.all([tools.describe('blocks.add'), tools.find({query:'workflows.sdk'})]); console.log(JSON.stringify(details));",
+            vec![Datum::Text(
+                r#"[{"contract":"contract"},{"found":["workflows.sdk"]}]"#.into(),
+            )],
+            replies,
+        ),
+        (
+            "const descs = await Promise.all([tools.describe('cenote.startBlockRun'),tools.describe('cenote.readBlock')]); for (const d of descs) { const s=d.contract; console.log(s.slice(0,5000)); }",
+            vec![Datum::Text("contract".into()); 2],
+            BTreeMap::new(),
+        ),
+    ];
+    for (source, prints, replies) in cells {
+        let program = lowered_against("typescript", source, &effects, &BTreeMap::new());
+        // A synchronous read may settle a spawned task before its join, so
+        // compare exact source charges within each scheduling mode.
+        let mut baselines = [None, None];
+        for strategy in [
+            lash_kernel_vm::testing::ExecutionStrategy::Optimized,
+            lash_kernel_vm::testing::ExecutionStrategy::Interpreted,
+        ] {
+            let mut program = program.clone();
+            program.library = lash_kernel_vm::testing::library(&program.library, strategy);
+            for as_read in [true, false] {
+                let ran = run_scripted(
+                    &program, &describe, as_read, &described, strategy, &replies, true,
+                );
+                let End::Finished(finished) = ran.end else {
+                    panic!("{strategy:?}, read={as_read}: {:?}", ran.end)
+                };
+                assert_eq!(
+                    ran.calls.len(),
+                    2,
+                    "both discovery calls execute exactly once"
+                );
+                assert_eq!(ran.prints, prints);
+                let observation = (
+                    finished.result,
+                    finished.finish,
+                    finished.not_carried,
+                    ran.carry,
+                    ran.prints,
+                    ran.calls,
+                    ran.charged,
+                );
+                let baseline = &mut baselines[usize::from(as_read)];
+                if let Some(baseline) = baseline {
+                    assert_eq!(
+                        &observation, baseline,
+                        "parallel discovery preserves exact charge across execution strategies"
+                    );
+                } else {
+                    *baseline = Some(observation);
+                }
+            }
         }
     }
 }
@@ -524,7 +685,9 @@ await control.finish("WORKFLOW_CHECK_PASSED");"#;
         let mut program = program.clone();
         program.library = lash_kernel_vm::testing::library(&program.library, strategy);
         for as_read in [true, false] {
-            let ran = run_scripted(&program, &read, as_read, &workflow, strategy, &replies);
+            let ran = run_scripted(
+                &program, &read, as_read, &workflow, strategy, &replies, false,
+            );
             let End::Finished(finished) = ran.end else {
                 panic!("{strategy:?}, read={as_read}: {:?}", ran.end)
             };

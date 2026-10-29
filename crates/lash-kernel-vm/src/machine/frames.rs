@@ -464,11 +464,7 @@ impl Frame {
                 SlotState::Value(value) => BoundRecord::Value(project(arena, access, value)?),
                 SlotState::Cell(cell) => {
                     let id = project_cell(arena, *cell)?;
-                    if code
-                        .captures
-                        .iter()
-                        .any(|capture| capture.inner_at as usize == at)
-                    {
+                    if code.borrows_binding(at as u32) {
                         BoundRecord::Captured(id)
                     } else {
                         BoundRecord::Shared(id)

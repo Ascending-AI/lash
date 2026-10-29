@@ -287,13 +287,14 @@ pub(super) fn frame(
     slots.fresh(code.slots_by_at.len());
     for (at, value) in slots.values.iter_mut().enumerate() {
         let info = &code.slots[code.slots_by_at[at] as usize];
-        let borrowed = code
+        let required = code
             .captures
             .iter()
             .any(|capture| capture.inner_at as usize == at);
+        let borrowed = code.borrows_binding(at as u32);
         let bound = record.bindings.get(&info.key, access)?.map(|row| row.value);
         *value = match bound {
-            None if !borrowed => SlotState::Empty,
+            None if !required => SlotState::Empty,
             Some(BoundRecord::Value(value)) if !borrowed && !info.shared => {
                 SlotState::Value(admit(arena, access, &value)?)
             }

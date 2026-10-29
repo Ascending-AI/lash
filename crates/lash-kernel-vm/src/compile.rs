@@ -848,6 +848,22 @@ pub(crate) struct Code {
     pub(crate) paced: bool,
 }
 
+impl Code {
+    /// Lifted closure bodies name their borrowed cells as free variables.
+    /// Their source owner is the same as in the enclosing lexical compilation.
+    pub(crate) fn borrows_binding(&self, at: u32) -> bool {
+        use lash_kernel_state::kernel_internals::logical::{Owner, Slot};
+        matches!(
+            self.source_room
+                .binding_root(self.slots_by_at[at as usize], doc::TaskId::MAIN, 0),
+            Some(Owner::Value {
+                slot: Slot::Capture(_),
+                ..
+            })
+        )
+    }
+}
+
 pub(crate) struct SlotInfo {
     pub(crate) key: Vec<u8>,
     pub(crate) name: Name,

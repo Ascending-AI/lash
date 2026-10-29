@@ -82,12 +82,7 @@ impl Frames {
                     for (at, slot) in frame.slots.values.iter().enumerate() {
                         match slot {
                             super::SlotState::Value(value) => add(value)?,
-                            super::SlotState::Cell(cell)
-                                if !code
-                                    .captures
-                                    .iter()
-                                    .any(|capture| capture.inner_at as usize == at) =>
-                            {
+                            super::SlotState::Cell(cell) if !code.borrows_binding(at as u32) => {
                                 add(&lash_kernel_doc::Value::ObjectRef(*cell))?;
                             }
                             super::SlotState::Cell(_) | super::SlotState::Empty => {}
