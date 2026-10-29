@@ -1895,15 +1895,15 @@ export_file(
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v1.d.ts",
-    src = "host-schemas/turn-activity/v1.d.ts",
+    name = "host-schemas/turn-activity/v2.d.ts",
+    src = "host-schemas/turn-activity/v2.d.ts",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v1.schema.json",
-    src = "host-schemas/turn-activity/v1.schema.json",
+    name = "host-schemas/turn-activity/v2.schema.json",
+    src = "host-schemas/turn-activity/v2.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
