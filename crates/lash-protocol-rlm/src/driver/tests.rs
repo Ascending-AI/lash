@@ -719,12 +719,15 @@ pub(crate) fn native_context(event: &SessionHistoryRecord) -> SessionHistoryReco
     let SessionHistoryRecord::Protocol(event) = event else {
         panic!("expected a trajectory")
     };
-    let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(step)) = Some(
-        serde_json::from_value::<lash_rlm_types::RlmProtocolEvent>(event.payload["event"].clone())
-            .expect("typed fixture"),
-    ) else {
-        panic!("expected a cell")
-    };
+    #[derive(serde::Deserialize)]
+    struct Context {
+        id: String,
+        code: String,
+    }
+    // The projector must still decode the complete stored event itself.
+    let step: Context =
+        serde::Deserialize::deserialize(&event.payload["event"]["RlmTrajectoryEntry"])
+            .expect("typed context fields");
     SessionHistoryRecord::Conversation(lash_core::session_model::ConversationRecord::from_message(
         crate::native::transport::cell_context_message(
             &lash_vocabulary::identity::TurnId::from("turn"),
