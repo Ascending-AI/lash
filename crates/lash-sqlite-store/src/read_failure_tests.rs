@@ -36,7 +36,9 @@ fn assert_artifact_storage_failure<T>(
 ) {
     match result {
         Err(lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
-            lash_core::store::StoreFault::StorageFailure { backend, message },
+            lash_core::store::StoreFault::StorageFailure {
+                backend, message, ..
+            },
         )) => {
             assert_eq!(backend, "sqlite", "the artifact port preserves the backend");
             assert!(

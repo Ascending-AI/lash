@@ -116,6 +116,7 @@ pub(super) fn apply(
                 ) {
                     return Ok(Err(lash_durable::DurableError::Store(
                         lash_durable::StoreFailure {
+                            code: error.storage_code().cloned(),
                             kind: lash_durable::StoreFailureKind::Unavailable,
                             message: error.to_string(),
                         },

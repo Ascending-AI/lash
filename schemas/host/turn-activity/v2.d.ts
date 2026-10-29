@@ -3496,6 +3496,20 @@ export type StartKey = string;
 export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "await");
 
 /**
+ * A native database error code, independent of diagnostic message text.
+ */
+export type StorageCode = ({
+  "backend": "postgres";
+  "class": string;
+  "sqlstate": string;
+  [key: string]: unknown;
+} | {
+  "backend": "sqlite";
+  "extended_code": number;
+  [key: string]: unknown;
+});
+
+/**
  * A fault of the storage substrate that stays typed past the store, with
  * the same fields as its store error. A plugin error is cloned and
  * journaled, so it carries this rather than the store error: the identical
@@ -3512,6 +3526,10 @@ export type StoreFault = ({
   [key: string]: unknown;
 } | {
   "backend": string;
+  /**
+   * Native database code; absent for driver, pool, I/O or decode failures.
+   */
+  "code"?: (StorageCode | null);
   "message": string;
   "type": "storage_failure";
   [key: string]: unknown;

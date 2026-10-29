@@ -317,6 +317,7 @@ pub(crate) async fn delay_node_statements_for_testing(
 /// commit in it landed is unknown.
 fn deadline_failure(deadline: std::time::Duration) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: format!(
             "durable operation did not finish within its {} ms deadline",
@@ -342,6 +343,7 @@ fn store_failure(error: StoreError) -> DurableError {
         _ => StoreFailureKind::Unavailable,
     };
     DurableError::Store(StoreFailure {
+        code: error.storage_code().cloned(),
         kind,
         message: error.to_string(),
     })
@@ -351,6 +353,7 @@ fn sqlx_failure(error: sqlx::Error) -> DurableError {
     match error {
         sqlx::Error::ColumnDecode { .. } | sqlx::Error::Decode(_) => {
             DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Corrupt,
                 message: error.to_string(),
             })
@@ -368,6 +371,7 @@ fn integer<T>(value: impl TryInto<T, Error: std::fmt::Display>) -> Result<T, Dur
 
 fn corrupt(what: &str, value: &str) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("stored {what} `{value}` does not decode"),
     })

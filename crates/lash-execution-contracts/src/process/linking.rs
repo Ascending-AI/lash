@@ -290,10 +290,18 @@ impl From<lash_durable::DurableError> for EnginePortError {
                 fault: crate::store::StoreFault::Contended,
             },
             DurableError::Store(StoreFailure {
+                code,
                 kind: StoreFailureKind::Unavailable,
                 message,
             }) => Self::StoreUnavailable {
-                fault: crate::store::StoreFault::Backend { message },
+                fault: match code {
+                    Some(code) => crate::store::StoreFault::StorageFailure {
+                        backend: code.backend().to_owned(),
+                        message,
+                        code: Some(code),
+                    },
+                    None => crate::store::StoreFault::Backend { message },
+                },
             },
             error => Self::Unavailable {
                 message: error.to_string(),

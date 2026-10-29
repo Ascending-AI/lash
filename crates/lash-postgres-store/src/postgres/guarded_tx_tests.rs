@@ -540,3 +540,82 @@ async fn cancelled_history_begin_does_not_poison_the_next_observer_snapshot() {
     assert_eq!(snapshot.head_revision, 0);
     pool.close().await;
 }
+
+/// FIG-7552: PostgreSQL's invalid-transaction-state code survives a poisoned
+/// snapshot read through the host fault and its serialized representation.
+#[tokio::test]
+async fn poisoned_history_read_preserves_sqlstate_in_host_fault() {
+    use lash_core_store::store::{SessionHistoryStore as _, StoreFault, WindowSelector};
+    let database = IsolatedDatabase::create(&crate::testing::required_database_url()).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("store");
+    let mut store = storage.store();
+    let session = SessionId::from("sqlstate-poisoned-history");
+    store
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session),
+        )
+        .await
+        .expect("create session");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .connect(database.url())
+        .await
+        .expect("one connection");
+    store.pool = pool.clone();
+    {
+        let mut connection = pool.acquire().await.expect("connection to poison");
+        // Reproduce the untracked transaction FIG-7551 left behind, including
+        // the catalog query that prevents changing its isolation level.
+        sqlx::query("BEGIN")
+            .execute(&mut *connection)
+            .await
+            .expect("untracked BEGIN");
+        sqlx::query("SELECT 1")
+            .execute(&mut *connection)
+            .await
+            .expect("establish snapshot");
+    }
+    let error = store
+        .load_session_window(&session, WindowSelector::Current)
+        .await
+        .expect_err("cannot change isolation after a query");
+    let fault = StoreFault::of_store_error(&error).expect("host store fault");
+    for through_engine in [false, true] {
+        let durable = lash_durable::DurableError::from(
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
+                fault.clone(),
+            ),
+        );
+        let forwarded = if through_engine {
+            lash_execution_contracts::plugin_error::PluginError::from(
+                lash_execution_contracts::process::linking::EnginePortError::from(durable),
+            )
+        } else {
+            lash_execution_contracts::plugin_error::registry_error(durable)
+        };
+        let lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+            fault: forwarded,
+        } = forwarded
+        else {
+            panic!("database fault lost its host classification: {forwarded:?}");
+        };
+        assert_eq!(forwarded.storage_code(), fault.storage_code());
+    }
+    let encoded = serde_json::to_value(&fault).expect("serialize host fault");
+    // PostgreSQL Appendix A defines 25001 as active_sql_transaction, class 25.
+    assert_eq!(
+        encoded["code"],
+        serde_json::json!({
+            "backend": "postgres", "sqlstate": "25001", "class": "25"
+        }),
+        "{error:?}"
+    );
+    assert_eq!(
+        serde_json::from_value::<StoreFault>(encoded).expect("decode fault"),
+        fault
+    );
+    pool.close().await;
+}

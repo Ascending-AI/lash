@@ -210,6 +210,7 @@ fn graph_refusal(error: DurableError) -> GraphRefusal {
         DurableError::OwnershipLost(_) => GraphRefusal::FenceLost,
         DurableError::Store(failure) => GraphRefusal::Backend(failure),
         other => GraphRefusal::Backend(crate::StoreFailure {
+            code: None,
             kind: crate::StoreFailureKind::Corrupt,
             message: other.to_string(),
         }),

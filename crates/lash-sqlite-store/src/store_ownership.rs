@@ -50,6 +50,7 @@ pub(crate) async fn exclusive(
 
 fn failure(message: String) -> StoreError {
     StoreError::StorageFailure {
+        code: None,
         backend: crate::SQLITE_BACKEND,
         message,
     }

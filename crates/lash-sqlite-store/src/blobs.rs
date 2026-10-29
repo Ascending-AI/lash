@@ -72,9 +72,14 @@ pub(crate) fn graph_store_error(
     refusal: lash_core_store::checkpoint_graph::GraphRefusal,
 ) -> StoreError {
     match refusal {
-        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => {
-            StoreError::Backend(failure.message)
-        }
+        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => match failure.code {
+            Some(code) => StoreError::StorageFailure {
+                backend: code.backend(),
+                code: Some(code),
+                message: failure.message,
+            },
+            None => StoreError::Backend(failure.message),
+        },
         refusal => stored_data_corrupt("SessionCheckpoint", refusal),
     }
 }

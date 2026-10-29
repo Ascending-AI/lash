@@ -724,6 +724,7 @@ fn head_unread(error: crate::StoreError) -> DurableError {
         _ => lash_durable::StoreFailureKind::Corrupt,
     };
     DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind,
         message: format!("the session's head does not read: {error}"),
     })
@@ -731,6 +732,7 @@ fn head_unread(error: crate::StoreError) -> DurableError {
 
 fn corrupt(record: &str, reason: &str) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: format!("{record} does not decode for its claim obligations: {reason}"),
     })

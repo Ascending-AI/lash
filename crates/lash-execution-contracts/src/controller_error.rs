@@ -364,6 +364,7 @@ mod tests {
         for (store_error, code) in [
             (
                 crate::StoreError::StorageFailure {
+                    code: None,
                     backend: "sqlite",
                     message: "database is locked".to_string(),
                 },

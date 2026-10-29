@@ -267,6 +267,7 @@ impl lash_durable::NodeWakes for FailFirstObserver {
         if self.opens.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err(lash_durable::DurableError::Store(
                 lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: "injected notification-source acquisition failure".into(),
                 },

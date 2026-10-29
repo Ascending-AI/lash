@@ -100,6 +100,7 @@ pub async fn park_of(
 ) -> Result<Option<ProcessParkReason>, DurableError> {
     let corrupt = |message: String| {
         DurableError::Store(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message,
         })

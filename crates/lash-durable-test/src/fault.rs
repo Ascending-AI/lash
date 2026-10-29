@@ -348,6 +348,7 @@ impl FaultStore {
             Fault::FailBefore => {
                 entry.finish(Stored::NotEntered);
                 Err(DurableError::Store(StoreFailure {
+                    code: None,
                     kind: StoreFailureKind::Unavailable,
                     message: format!("injected: {label} failed before it entered the store"),
                 }))
@@ -535,6 +536,7 @@ impl FaultStore {
     fn page_store(&self) -> Result<Arc<dyn PageStore>, DurableError> {
         self.inner.pages().ok_or_else(|| {
             DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Unavailable,
                 message: "the deployment's store publishes no heap pages".to_owned(),
             })
@@ -664,6 +666,7 @@ impl DurableStore for FaultStore {
             );
             entry.finish(Stored::NotEntered);
             return Err(DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Unavailable,
                 message: "injected: the node is partitioned from its lease".to_owned(),
             }));
@@ -867,6 +870,7 @@ impl DurableStore for FaultStore {
             return self
                 .read(async {
                     Err(DurableError::Store(StoreFailure {
+                        code: None,
                         kind: StoreFailureKind::Unavailable,
                         message: format!("injected: the read of {actor} failed"),
                     }))

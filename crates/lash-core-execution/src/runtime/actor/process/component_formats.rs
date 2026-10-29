@@ -145,6 +145,7 @@ impl ProcessActivation {
             }
             Err(error) => {
                 return Err(DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: error.to_string(),
                 }));

@@ -387,6 +387,7 @@ impl From<ArtifactStoreError> for lash_durable::DurableError {
             }
             ArtifactStoreError::StoreRefusal(refusal) => DurableError::StoreRefused(refusal),
             ArtifactStoreError::StoreFault(fault) => DurableError::Store(StoreFailure {
+                code: fault.storage_code().cloned(),
                 kind: if matches!(fault, crate::store::StoreFault::Contended) {
                     StoreFailureKind::Contended
                 } else {
@@ -395,6 +396,7 @@ impl From<ArtifactStoreError> for lash_durable::DurableError {
                 message: fault.to_string(),
             }),
             error => DurableError::Store(StoreFailure {
+                code: None,
                 kind: match &error {
                     ArtifactStoreError::Backend(_) | ArtifactStoreError::WorkerCheckoutTimedOut => {
                         StoreFailureKind::Unavailable

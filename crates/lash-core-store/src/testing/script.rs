@@ -600,6 +600,7 @@ impl After<'_> {
     /// storage failure instead of the reply.
     pub fn lose_reply(self) {
         let lost = || StoreError::StorageFailure {
+            code: None,
             backend: "script",
             message: "the reply was lost".to_string(),
         };

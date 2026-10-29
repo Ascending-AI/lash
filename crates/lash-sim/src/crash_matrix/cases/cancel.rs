@@ -76,6 +76,7 @@ impl Workload for CancelCase {
                         .await
                         .map_err(|error| {
                             lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                                code: None,
                                 kind: lash_durable::StoreFailureKind::Unavailable,
                                 message: error.to_string(),
                             })

@@ -700,7 +700,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
         .await
         .expect_err("immutable record refuses");
     assert!(
-        matches!(error, lash_durable::DurableError::Store(lash_durable::StoreFailure { kind: lash_durable::StoreFailureKind::Corrupt, ref message }) if message.contains("a sealed call cannot be replaced")),
+        matches!(error, lash_durable::DurableError::Store(lash_durable::StoreFailure { kind: lash_durable::StoreFailureKind::Corrupt, ref message, .. }) if message.contains("a sealed call cannot be replaced")),
         "the first refusal stays durable: {error}"
     );
     let requirements = store

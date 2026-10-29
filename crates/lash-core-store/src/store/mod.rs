@@ -110,7 +110,9 @@ pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
     ControlIntentStore, stored_intent_kind, stored_intent_state,
 };
-pub use error::{AnchorUnavailable, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation};
+pub use error::{
+    AnchorUnavailable, StorageCode, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation,
+};
 pub use fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
     fenced_write_applied, head_publication_verdict, require_fenced_write_applied,

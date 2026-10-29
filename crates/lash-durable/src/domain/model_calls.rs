@@ -100,6 +100,7 @@ pub fn pin_row(
 ) -> Result<ModelCallPinRow, crate::DurableError> {
     let invalid = || {
         crate::DurableError::Store(crate::StoreFailure {
+            code: None,
             kind: crate::StoreFailureKind::Corrupt,
             message: "invalid model call reservation".into(),
         })

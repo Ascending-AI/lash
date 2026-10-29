@@ -11251,6 +11251,50 @@
       ],
       "type": "string"
     },
+    "StorageCode": {
+      "description": "A native database error code, independent of diagnostic message text.",
+      "oneOf": [
+        {
+          "description": "PostgreSQL's five-character SQLSTATE and its two-character class.",
+          "properties": {
+            "backend": {
+              "const": "postgres",
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "sqlstate": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "backend",
+            "sqlstate",
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "SQLite's extended result code, including its primary result code.",
+          "properties": {
+            "backend": {
+              "const": "sqlite",
+              "type": "string"
+            },
+            "extended_code": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "backend",
+            "extended_code"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StoreFault": {
       "description": "A fault of the storage substrate that stays typed past the store, with\nthe same fields as its store error. A plugin error is cloned and\njournaled, so it carries this rather than the store error: the identical\noperation may succeed when it is made again, and nothing about it is the\noperation's answer.",
       "oneOf": [
@@ -11293,6 +11337,17 @@
           "properties": {
             "backend": {
               "type": "string"
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StorageCode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Native database code; absent for driver, pool, I/O or decode failures."
             },
             "message": {
               "type": "string"

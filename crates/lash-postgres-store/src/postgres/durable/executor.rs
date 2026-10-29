@@ -830,6 +830,7 @@ impl PostgresDurableStore {
     ) -> Result<ActorCommit, Attempt<DurableError>> {
         let pool = self.route(label.capacity()).pool;
         let retry = &self.pools.durable_retry;
+        let mut code = crate::support::storage_code(&lost);
         let mut last = format!("the connection was lost at the owner commit: {lost}");
         for read in 0..retry.attempts {
             if read > 0 {
@@ -849,6 +850,7 @@ impl PostgresDurableStore {
             match settled {
                 Ok(None) => {
                     return Err(Attempt::Aborted(DurableError::Store(StoreFailure {
+                        code: crate::support::storage_code(&lost),
                         kind: StoreFailureKind::Unavailable,
                         message: format!(
                             "the connection was lost at the owner commit, which never committed: \
@@ -859,10 +861,14 @@ impl PostgresDurableStore {
                 Ok(Some(recorded)) => {
                     return answer(tx.actor(), &recorded).map_err(Attempt::Failed);
                 }
-                Err(error) => last = format!("its outcome could not be read: {error}"),
+                Err(error) => {
+                    code = crate::support::storage_code(&error);
+                    last = format!("its outcome could not be read: {error}");
+                }
             }
         }
         Err(Attempt::Failed(DurableError::Store(StoreFailure {
+            code,
             kind: StoreFailureKind::Unavailable,
             message: format!("whether owner commit {token} committed is unknown: {last}"),
         })))

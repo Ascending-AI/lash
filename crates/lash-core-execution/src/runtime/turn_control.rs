@@ -321,6 +321,7 @@ impl TurnWorkDriver {
             other => {
                 return Err(store_error(DurableError::Store(
                     lash_durable::StoreFailure {
+                        code: None,
                         kind: lash_durable::StoreFailureKind::Corrupt,
                         message: format!("an operation cancel request was answered with {other:?}"),
                     },
@@ -430,6 +431,7 @@ pub async fn request_turn_cancel(
     match commit.answers.pop() {
         Some(MailAnswer::RequestTurnCancel(answer)) if commit.answers.is_empty() => Ok(answer),
         other => Err(DurableError::Store(lash_durable::StoreFailure {
+            code: None,
             kind: lash_durable::StoreFailureKind::Corrupt,
             message: format!("a turn cancel request was answered with {other:?}"),
         })),

@@ -438,6 +438,7 @@ pub(super) fn from_durable(error: DurableError) -> GraphRefusal {
         }
         DurableError::Domain(_) => GraphRefusal::RevisionConflict,
         other => GraphRefusal::Backend(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message: other.to_string(),
         }),
@@ -454,6 +455,7 @@ fn number<T>(value: impl TryInto<T, Error: std::fmt::Display>) -> Answer<T> {
 
 fn corrupt(what: &str, value: &str) -> GraphRefusal {
     GraphRefusal::Backend(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("stored {what} `{value}` does not decode"),
     })

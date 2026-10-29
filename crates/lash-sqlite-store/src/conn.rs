@@ -316,6 +316,7 @@ impl WriterFence {
         let Some(armed) = self.armed.get() else {
             return Err(crate::sqlite_conversion_error(
                 lash_core_store::store::StoreError::StorageFailure {
+                    code: None,
                     backend: crate::SQLITE_BACKEND,
                     message: "write on a SQLite connection whose database no installer admitted"
                         .to_owned(),

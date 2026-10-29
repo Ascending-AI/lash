@@ -62,6 +62,7 @@ pub(super) struct Current<'a> {
 
 fn unavailable(message: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: format!("carrying a process onto its successor: {message}"),
     })

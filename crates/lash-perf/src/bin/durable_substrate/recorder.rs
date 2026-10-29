@@ -760,6 +760,7 @@ impl RecordingStore {
     fn page_store(&self) -> Result<Arc<dyn PageStore>, DurableError> {
         self.inner.pages().ok_or_else(|| {
             DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Unavailable,
                 message: "the store publishes no heap pages".to_owned(),
             })

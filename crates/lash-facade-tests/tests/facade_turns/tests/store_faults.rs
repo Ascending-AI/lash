@@ -668,6 +668,7 @@ mod sweep {
         fn error(self) -> StoreError {
             match self {
                 Self::Transient | Self::LostReply => StoreError::StorageFailure {
+                    code: None,
                     backend: "store-fault-sweep",
                     message: "injected unavailable store".into(),
                 },

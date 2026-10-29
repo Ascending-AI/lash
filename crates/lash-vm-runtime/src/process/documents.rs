@@ -1517,6 +1517,7 @@ mod store_cause_laws {
         for fault in [
             StoreFault::Contended,
             StoreFault::StorageFailure {
+                code: None,
                 backend: "sqlite".into(),
                 message: "read interrupted".into(),
             },
@@ -1556,6 +1557,7 @@ mod store_cause_laws {
             assert_cause(
                 store_error(lash_durable::DurableError::Store(
                     lash_durable::StoreFailure {
+                        code: None,
                         kind,
                         message: "read interrupted".into(),
                     },

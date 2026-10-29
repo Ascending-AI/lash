@@ -484,6 +484,16 @@ impl EmbedError {
 
     /// Borrow the store error in a direct or session-wrapped store refusal.
     ///
+    /// A storage failure retains its backend diagnostic and optional native
+    /// [`StorageCode`](crate::persistence::StorageCode). PostgreSQL supplies a
+    /// five-character SQLSTATE and its two-character class, such as `40`
+    /// (transaction rollback), `08` (connection exception), or `25` (invalid
+    /// transaction state). SQLite supplies its extended result code. Hosts
+    /// may log or classify these codes without parsing diagnostic messages.
+    /// I/O, pool and decode failures without a database code carry `None`.
+    /// These codes are distinct from Lash runtime codes and do not change
+    /// [`Self::is_retryable`].
+    ///
     /// Runtime, plugin and durable cause chains are distinct and are not
     /// traversed by this accessor.
     pub fn store_error(&self) -> Option<&lash_core::StoreError> {
@@ -988,6 +998,7 @@ mod tests {
             EmbedError::Session(SessionError::Plugin(PluginError::Session("store".into()))),
             EmbedError::Durable(lash_core::durable_port::DurableError::Store(
                 lash_core::durable_port::StoreFailure {
+                    code: None,
                     kind: lash_core::durable_port::StoreFailureKind::Contended,
                     message: "store contention".into(),
                 },

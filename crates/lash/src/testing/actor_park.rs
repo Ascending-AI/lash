@@ -57,6 +57,7 @@ pub async fn park_process(
 
 fn invalid_actor(error: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: error.to_string(),
     })

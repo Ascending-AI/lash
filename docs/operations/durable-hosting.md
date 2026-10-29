@@ -624,6 +624,17 @@ stable `code()` (`pin_released`, `definition_missing`, `artifact_missing`,
 `conflict`, `definition_refused`). Operational failures return `None` and keep
 their typed cause and retryability. These codes do not choose HTTP statuses.
 
+Database failures retain their native code in
+`StoreError::StorageFailure { backend, message, code }` and the serialized
+`StoreFault::StorageFailure`. The optional `lash::persistence::StorageCode`
+is backend-specific: PostgreSQL carries its five-character SQLSTATE and
+its two-character class; SQLite carries its extended result code. Hosts may
+classify PostgreSQL class `40` as transaction rollback, `08` as a connection
+exception and `25` as invalid transaction state. Use these fields instead of
+parsing `message`. `None` means no database code was supplied, including
+pool, I/O and decode failures. These diagnostics do not change Lash's runtime
+error codes, contention classification or retry policy.
+
 ### Worked example: a 40-minute CI suite
 
 A tool `run_full_suite` runs a CI suite that takes about 40 minutes. That is

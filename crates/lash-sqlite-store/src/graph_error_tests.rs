@@ -117,3 +117,53 @@ fn sqlite_graph_collisions_use_transactional_identity() {
         "a UNIQUE error without either key occupied has no collision identity: {error:?}"
     );
 }
+
+/// FIG-7552: the real UNIQUE extended result code reaches the host fault.
+#[test]
+fn sqlite_constraint_preserves_extended_code_in_host_fault() {
+    use lash_core_store::store::StoreFault;
+    let conn = rusqlite::Connection::open_in_memory().expect("SQLite");
+    conn.execute_batch(
+        "CREATE TABLE codes (value TEXT UNIQUE); INSERT INTO codes VALUES ('same');",
+    )
+    .expect("constraint fixture");
+    let raw = conn
+        .execute("INSERT INTO codes VALUES ('same')", [])
+        .expect_err("duplicate value");
+    let error = sqlite_error(raw);
+    let fault = StoreFault::of_store_error(&error).expect("host store fault");
+    for through_engine in [false, true] {
+        let durable = lash_durable::DurableError::from(
+            lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
+                fault.clone(),
+            ),
+        );
+        let forwarded = if through_engine {
+            lash_execution_contracts::plugin_error::PluginError::from(
+                lash_execution_contracts::process::linking::EnginePortError::from(durable),
+            )
+        } else {
+            lash_execution_contracts::plugin_error::registry_error(durable)
+        };
+        let lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+            fault: forwarded,
+        } = forwarded
+        else {
+            panic!("database fault lost its host classification: {forwarded:?}");
+        };
+        assert_eq!(forwarded.storage_code(), fault.storage_code());
+    }
+    let encoded = serde_json::to_value(&fault).expect("serialize host fault");
+    // https://www.sqlite.org/rescode.html#constraint_unique defines 2067.
+    assert_eq!(
+        encoded["code"],
+        serde_json::json!({
+            "backend": "sqlite", "extended_code": 2067
+        }),
+        "{error:?}"
+    );
+    assert_eq!(
+        serde_json::from_value::<StoreFault>(encoded).expect("decode fault"),
+        fault
+    );
+}

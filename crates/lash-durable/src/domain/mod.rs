@@ -450,6 +450,7 @@ impl DurableError {
             }
             error if error.is_transient() => {
                 return Self::Store(crate::error::StoreFailure {
+                    code: error.storage_code().cloned(),
                     kind: if matches!(error, StoreError::Contended) {
                         crate::error::StoreFailureKind::Contended
                     } else {

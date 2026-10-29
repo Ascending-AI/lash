@@ -36,6 +36,12 @@ use crate::process_helpers::{
 /// substrate faults retain their typed classification for retry.
 fn registry_failure(error: &lash_execution_contracts::plugin_error::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: match error {
+            lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { fault } => {
+                fault.storage_code().cloned()
+            }
+            _ => None,
+        },
         kind: match error {
             lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
                 fault: lash_core_store::store::StoreFault::Contended,
@@ -233,6 +239,12 @@ async fn register_within(
             Err(refused(error.to_string()))
         }
         Err(error) => Err(DurableError::Store(StoreFailure {
+            code: match &error {
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { fault } => {
+                    fault.storage_code().cloned()
+                }
+                _ => None,
+            },
             kind: StoreFailureKind::Unavailable,
             message: error.to_string(),
         })),

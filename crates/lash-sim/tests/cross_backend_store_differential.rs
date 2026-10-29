@@ -1609,10 +1609,12 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
 #[test]
 fn normalized_store_errors_compare_typedness_and_variant_not_prose() {
     let sqlite_storage_failure = StoreError::StorageFailure {
+        code: None,
         backend: "sqlite",
         message: "disk I/O error".to_string(),
     };
     let postgres_storage_failure = StoreError::StorageFailure {
+        code: None,
         backend: "postgres",
         message: "connection closed".to_string(),
     };

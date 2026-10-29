@@ -209,6 +209,7 @@ impl ClaimPurpose {
     ) -> Result<Self, crate::DurableError> {
         let requires = parse_requires(requires).map_err(|error| {
             crate::DurableError::Store(crate::StoreFailure {
+                code: None,
                 kind: crate::StoreFailureKind::Corrupt,
                 message: format!("actor claim requirements: {error}"),
             })

@@ -378,6 +378,7 @@ async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
         crate::host::begin_unfenced(pool)
             .await
             .map_err(|error| StoreError::StorageFailure {
+                code: crate::support::storage_code(&error),
                 backend: "postgres",
                 message: error.to_string(),
             })?;
@@ -389,6 +390,7 @@ async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
     .execute(crate::observed_sql::executor(&mut *transaction))
     .await
     .map_err(|error| StoreError::StorageFailure {
+        code: crate::support::storage_code(&error),
         backend: "postgres",
         message: error.to_string(),
     })?;
@@ -442,6 +444,7 @@ fn read_failure(
         });
     }
     Err(StoreError::StorageFailure {
+        code: crate::support::storage_code(&error),
         backend: "postgres",
         message: error.to_string(),
     })

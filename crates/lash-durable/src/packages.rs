@@ -15,6 +15,7 @@ pub struct NodeCapability {
 
 fn corrupt(message: String) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message,
     })

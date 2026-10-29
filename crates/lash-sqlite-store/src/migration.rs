@@ -297,6 +297,7 @@ impl Stop {
 
 fn storage(message: String) -> StoreError {
     StoreError::StorageFailure {
+        code: None,
         backend: crate::SQLITE_BACKEND,
         message,
     }

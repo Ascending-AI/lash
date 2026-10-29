@@ -1573,10 +1573,18 @@ pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
             fault: crate::store::StoreFault::Contended,
         },
         lash_durable::DurableError::Store(StoreFailure {
+            code,
             kind: StoreFailureKind::Unavailable,
             message,
         }) => crate::PluginError::StoreUnavailable {
-            fault: crate::store::StoreFault::Backend { message },
+            fault: match code {
+                Some(code) => crate::store::StoreFault::StorageFailure {
+                    backend: code.backend().to_owned(),
+                    message,
+                    code: Some(code),
+                },
+                None => crate::store::StoreFault::Backend { message },
+            },
         },
         error => crate::PluginError::Session(error.to_string()),
     }

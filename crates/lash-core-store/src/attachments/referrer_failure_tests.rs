@@ -25,6 +25,7 @@ impl Cause {
     fn error(self) -> StoreError {
         match self {
             Self::Storage => StoreError::StorageFailure {
+                code: None,
                 backend: "referrers-probe",
                 message: "write unavailable".to_string(),
             },
@@ -45,7 +46,12 @@ impl Cause {
 
     fn assert_preserved(self, error: &StoreError) {
         match (self, error) {
-            (Self::Storage, StoreError::StorageFailure { backend, message }) => {
+            (
+                Self::Storage,
+                StoreError::StorageFailure {
+                    backend, message, ..
+                },
+            ) => {
                 assert_eq!(*backend, "referrers-probe");
                 assert_eq!(message, "write unavailable");
             }

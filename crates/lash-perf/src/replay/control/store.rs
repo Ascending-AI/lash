@@ -481,6 +481,7 @@ impl ObservedStore {
     fn page_store(&self) -> Result<Arc<dyn lash_durable::domain::pages::PageStore>, DurableError> {
         self.inner.pages().ok_or_else(|| {
             DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Corrupt,
                 message: "the observed page port disappeared".to_owned(),
             })

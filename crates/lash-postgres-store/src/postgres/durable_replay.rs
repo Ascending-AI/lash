@@ -273,14 +273,16 @@ impl PostgresDurableStore {
             Err(Uncommitted::RolledBack(error)) => Err(attempt(sqlx_failure(error))),
             Err(Uncommitted::Lost(error)) => {
                 Err(Attempt::Aborted(DurableError::Store(StoreFailure {
+                    code: crate::support::storage_code(&error),
                     kind: StoreFailureKind::Unavailable,
                     message: format!(
                         "the connection was lost at COMMIT, which rolled back: {error}"
                     ),
                 })))
             }
-            Err(Uncommitted::Unknown(message)) => {
+            Err(Uncommitted::Unknown { message, code }) => {
                 Err(Attempt::Failed(DurableError::Store(StoreFailure {
+                    code,
                     kind: StoreFailureKind::Unavailable,
                     message,
                 })))

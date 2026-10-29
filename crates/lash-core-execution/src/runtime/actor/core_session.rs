@@ -12,6 +12,7 @@ impl ActorContext {
         lash_core_ids::profile_history!(OwnerRetention, {
             if !self.inner.claim_live.load(Ordering::Acquire) {
                 return Err(DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: "session claim has ended".into(),
                 }));
@@ -37,6 +38,7 @@ impl ActorContext {
             let mut projection = self.inner.session_projection.lock().await?;
             let owner = projection.as_mut().ok_or_else(|| {
                 DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: "session claim has no projection".into(),
                 })
@@ -60,6 +62,7 @@ impl ActorContext {
         let mut projection = self.inner.session_projection.lock().await?;
         let owner = projection.as_mut().ok_or_else(|| {
             DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Unavailable,
                 message: "session claim has no projection".into(),
             })
@@ -82,6 +85,7 @@ impl ActorContext {
         lash_core_ids::profile_history!(OwnerRetention, {
             if tx.actor() != self.actor() || tx.epoch() != self.epoch() {
                 return Err(DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Corrupt,
                     message: "session hydration names another claim".into(),
                 }));

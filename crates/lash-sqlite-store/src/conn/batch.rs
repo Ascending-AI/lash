@@ -666,6 +666,7 @@ fn replicate(error: &rusqlite::Error) -> rusqlite::Error {
 
 fn storage_failure(message: &str) -> rusqlite::Error {
     crate::sqlite_conversion_error(lash_core_store::store::StoreError::StorageFailure {
+        code: None,
         backend: crate::SQLITE_BACKEND,
         message: message.to_owned(),
     })

@@ -247,6 +247,7 @@ fn session_actor(session: &SessionId) -> Result<lash_durable::ActorKey, crate::S
 
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("session mail {what} does not decode: {detail}"),
     })

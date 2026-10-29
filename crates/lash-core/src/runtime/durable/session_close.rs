@@ -114,6 +114,7 @@ pub async fn request_session_close(
             .await
             .map_err(|error| {
                 DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: format!("session {session} was not looked up: {error}"),
                 })

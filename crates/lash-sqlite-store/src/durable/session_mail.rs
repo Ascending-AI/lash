@@ -60,6 +60,7 @@ static SQLITE: std::sync::LazyLock<SqliteSessionMailStatements> = std::sync::Laz
 
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("session mail {what} does not decode: {detail}"),
     })
@@ -470,6 +471,7 @@ fn enqueue(
         Ok(_) => Ok(Ok(())),
         Err(lash_core_store::store::StoreError::Contended) => {
             Ok(Err(DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Contended,
                 message: "the owner's session mail contended".to_owned(),
             })))

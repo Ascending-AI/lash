@@ -115,6 +115,7 @@ async fn reclaim_tool_intent_submissions(
     for owner_id in candidates {
         let session_id =
             SessionId::parse(&owner_id).map_err(|error| StoreError::StorageFailure {
+                code: None,
                 backend: SQLITE_BACKEND,
                 message: format!(
                     "tool-intent submission names a malformed session owner `{owner_id}`: {error}"
@@ -128,6 +129,7 @@ async fn reclaim_tool_intent_submissions(
     }
     let deleted_owner_ids_json =
         serde_json::to_string(&deleted_owner_ids).map_err(|error| StoreError::StorageFailure {
+            code: None,
             backend: SQLITE_BACKEND,
             message: format!("encode deleted tool-intent owner ids: {error}"),
         })?;

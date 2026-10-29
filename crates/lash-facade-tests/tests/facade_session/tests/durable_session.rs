@@ -29,6 +29,7 @@ async fn catalog_contention_retains_its_type_and_retryability_across_existing_se
     let transient: [fn() -> StoreError; 4] = [
         || StoreError::Contended,
         || StoreError::StorageFailure {
+            code: None,
             backend: "facade-law",
             message: "the store is temporarily unavailable".to_string(),
         },

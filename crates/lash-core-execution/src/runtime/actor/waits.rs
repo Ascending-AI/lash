@@ -454,6 +454,7 @@ pub async fn resolve_ended_terminal(backend: &Backend, wait: &WaitRef) -> Result
         }) => return Ok(()),
         Err(error) => {
             return Err(DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Unavailable,
                 message: error.to_string(),
             }));
@@ -733,6 +734,7 @@ pub fn process_outcome(resolution: Resolution) -> Result<ProcessOutcome, Durable
 
 fn corrupt(message: &str) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: message.to_owned(),
     })

@@ -426,6 +426,7 @@ impl Backend {
     ) -> Result<(), DurableError> {
         let actor = lash_durable::ActorKey::session(session.as_str()).map_err(|error| {
             DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Corrupt,
                 message: format!("session {session} names no actor: {error}"),
             })
@@ -685,6 +686,7 @@ pub trait StoreSet: Send + Sync {
 /// An id no actor key can carry, as the store's refusal.
 fn corrupt_key(error: lash_durable::ActorKeyError) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: error.to_string(),
     })

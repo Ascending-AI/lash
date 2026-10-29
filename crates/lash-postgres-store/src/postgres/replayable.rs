@@ -104,7 +104,10 @@ pub(crate) enum Uncommitted {
     /// outcome says it rolled back.
     Lost(sqlx::Error),
     /// Whether it committed could not be learned.
-    Unknown(String),
+    Unknown {
+        message: String,
+        code: Option<lash_core_store::store::StorageCode>,
+    },
 }
 
 /// A transaction's id, by which a `COMMIT` whose answer was lost is
@@ -182,6 +185,7 @@ async fn reconcile(
     lost: sqlx::Error,
     settle: &Settle<'_>,
 ) -> Result<(), Uncommitted> {
+    let mut code = crate::support::storage_code(&lost);
     let mut last = format!("the connection was lost at COMMIT: {lost}");
     for read in 0..settle.retry.attempts {
         if read > 0 {
@@ -203,18 +207,24 @@ async fn reconcile(
             Ok(Some("aborted")) => return Err(Uncommitted::Lost(lost)),
             Ok(Some(other)) => last = format!("transaction {} is {other}", xact.0),
             Ok(None) => {
-                return Err(Uncommitted::Unknown(format!(
-                    "the server no longer records transaction {}",
-                    xact.0
-                )));
+                return Err(Uncommitted::Unknown {
+                    message: format!("the server no longer records transaction {}", xact.0),
+                    code,
+                });
             }
-            Err(error) => last = format!("its outcome could not be read: {error}"),
+            Err(error) => {
+                code = crate::support::storage_code(error);
+                last = format!("its outcome could not be read: {error}");
+            }
         }
     }
-    Err(Uncommitted::Unknown(format!(
-        "whether transaction {} committed is unknown: {last}",
-        xact.0
-    )))
+    Err(Uncommitted::Unknown {
+        message: format!(
+            "whether transaction {} committed is unknown: {last}",
+            xact.0
+        ),
+        code,
+    })
 }
 
 /// Read `xact`'s recorded outcome on a connection of the pool the commit

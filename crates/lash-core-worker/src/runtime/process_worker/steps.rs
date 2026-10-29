@@ -474,6 +474,7 @@ impl ProcessSteps for WorkerSteps {
         }
         let unavailable = |error: lash_execution_contracts::plugin_error::PluginError| {
             lash_core::durable_port::DurableError::Store(lash_core::durable_port::StoreFailure {
+                code: None,
                 kind: lash_core::durable_port::StoreFailureKind::Unavailable,
                 message: error.to_string(),
             })

@@ -160,6 +160,7 @@ impl BackendFaultScript {
                 BackendFault::Refused => {
                     let seed = arm.seed;
                     rule.before().fail(move || StoreError::StorageFailure {
+                        code: None,
                         backend: "lash-sim",
                         message: format!(
                             "arm {seed} refused the commit before it entered the store"

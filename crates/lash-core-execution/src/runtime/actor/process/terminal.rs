@@ -41,6 +41,7 @@ pub fn record_terminal(
 ) -> Result<(), DurableError> {
     let outcome_json = serde_json::to_string(&crate::Durable(outcome)).map_err(|error| {
         DurableError::Store(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message: format!("the terminal of process {process} does not encode: {error}"),
         })

@@ -342,6 +342,7 @@ pub(crate) type GraphAnswer<T> = rusqlite::Result<Result<T, GraphRefusal>>;
 
 fn corrupt(what: &str, value: &str) -> GraphRefusal {
     GraphRefusal::Backend(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("stored {what} `{value}` does not decode"),
     })
@@ -360,6 +361,7 @@ fn from_durable(error: DurableError) -> GraphRefusal {
         }
         DurableError::Domain(_) => GraphRefusal::RevisionConflict,
         other => GraphRefusal::Backend(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message: other.to_string(),
         }),

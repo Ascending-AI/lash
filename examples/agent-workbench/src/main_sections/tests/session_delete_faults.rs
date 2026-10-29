@@ -94,6 +94,7 @@ impl SessionDeleteFaults {
 
 fn close_refused() -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: "the close-mail store refused the request".to_string(),
     })

@@ -214,6 +214,7 @@ pub(crate) async fn commit_in(
                 (Some(head), None) if head.session == commit.session_id => Ok(head.receipt),
                 _ => Err(HeadCommitError::Owner(DurableError::Store(
                     lash_durable::StoreFailure {
+                        code: None,
                         kind: lash_durable::StoreFailureKind::Corrupt,
                         message: "head acknowledgement has no unique session result".into(),
                     },

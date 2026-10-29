@@ -284,11 +284,21 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
         rusqlite::Error::ToSqlConversionFailure(error) => match error.downcast::<StoreError>() {
             Ok(error) => *error,
             Err(error) => StoreError::StorageFailure {
+                code: None,
                 backend: "sqlite",
                 message: error.to_string(),
             },
         },
         err => StoreError::StorageFailure {
+            code: match &err {
+                rusqlite::Error::SqliteFailure(code, _)
+                | rusqlite::Error::SqlInputError { error: code, .. } => {
+                    Some(lash_core_store::store::StorageCode::Sqlite {
+                        extended_code: code.extended_code,
+                    })
+                }
+                _ => None,
+            },
             backend: "sqlite",
             message: err.to_string(),
         },
@@ -302,6 +312,7 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
     match error {
         tokio_rusqlite::Error::Error(error) => sqlite_error(error),
         error => StoreError::StorageFailure {
+            code: None,
             backend: "sqlite",
             message: error.to_string(),
         },

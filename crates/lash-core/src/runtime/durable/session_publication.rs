@@ -63,6 +63,7 @@ impl Publishes {
                         .await
                         .map_err(|error| {
                             DurableError::Store(lash_durable::StoreFailure {
+                                code: None,
                                 kind: lash_durable::StoreFailureKind::Unavailable,
                                 message: format!("the session's head: {error}"),
                             })
@@ -131,6 +132,7 @@ pub(crate) async fn commit(
                     .await
                     .map_err(|error| {
                         DurableError::Store(lash_durable::StoreFailure {
+                            code: None,
                             kind: lash_durable::StoreFailureKind::Unavailable,
                             message: format!("the session's execution candidate: {error}"),
                         })

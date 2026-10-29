@@ -379,6 +379,7 @@ impl DurableStore for HoldingDurableStore {
         let committed = self.inner.commit(tx, label).await?;
         let unobserved = |error: lash_core::store::StoreError| {
             DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Corrupt,
                 message: format!("the simulator could not observe a session commit: {error}"),
             })

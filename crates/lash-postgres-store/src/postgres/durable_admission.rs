@@ -77,6 +77,7 @@ impl PostgresDurableStore {
             .map(Some)
             .map_err(|_| {
                 DurableError::Store(StoreFailure {
+                    code: None,
                     kind: StoreFailureKind::Unavailable,
                     message: "the durable store's admission is closed".to_owned(),
                 })

@@ -180,6 +180,41 @@ impl std::fmt::Display for StoreRefusal {
 
 impl std::error::Error for StoreRefusal {}
 
+/// A native database error code, independent of diagnostic message text.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum StorageCode {
+    /// PostgreSQL's five-character SQLSTATE and its two-character class.
+    Postgres { sqlstate: String, class: String },
+    /// SQLite's extended result code, including its primary result code.
+    Sqlite { extended_code: i32 },
+}
+
+impl StorageCode {
+    /// Preserve a PostgreSQL SQLSTATE. Invalid codes are not database codes.
+    pub fn postgres(sqlstate: &str) -> Option<Self> {
+        (sqlstate.len() == 5
+            && sqlstate
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()))
+        .then(|| Self::Postgres {
+            sqlstate: sqlstate.to_owned(),
+            class: sqlstate[..2].to_owned(),
+        })
+    }
+
+    /// The database whose code this is.
+    pub fn backend(&self) -> &'static str {
+        match self {
+            Self::Postgres { .. } => "postgres",
+            Self::Sqlite { .. } => "sqlite",
+        }
+    }
+}
+
 /// A fault of the storage substrate that stays typed past the store, with
 /// the same fields as its store error. A plugin error is cloned and
 /// journaled, so it carries this rather than the store error: the identical
@@ -199,12 +234,25 @@ pub enum StoreFault {
         location: std::path::PathBuf,
     },
     /// The substrate failed the operation before it returned a value.
-    StorageFailure { backend: String, message: String },
+    StorageFailure {
+        backend: String,
+        message: String,
+        /// Native database code; absent for driver, pool, I/O or decode failures.
+        code: Option<StorageCode>,
+    },
     /// A backend failure with no typed cause.
     Backend { message: String },
 }
 
 impl StoreFault {
+    /// The native database code, when the database supplied one.
+    pub fn storage_code(&self) -> Option<&StorageCode> {
+        match self {
+            Self::StorageFailure { code, .. } => code.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Copy the fault, if this store error is a fault of the substrate.
     pub fn of_store_error(error: &StoreError) -> Option<Self> {
         match error {
@@ -215,7 +263,12 @@ impl StoreFault {
                     location: location.clone(),
                 })
             }
-            StoreError::StorageFailure { backend, message } => Some(Self::StorageFailure {
+            StoreError::StorageFailure {
+                backend,
+                message,
+                code,
+            } => Some(Self::StorageFailure {
+                code: code.clone(),
                 backend: (*backend).to_string(),
                 message: message.clone(),
             }),
@@ -249,7 +302,9 @@ impl std::fmt::Display for StoreFault {
                 },
                 formatter,
             ),
-            Self::StorageFailure { backend, message } => {
+            Self::StorageFailure {
+                backend, message, ..
+            } => {
                 write!(formatter, "{backend} storage failure: {message}")
             }
             Self::Backend { message } => {
@@ -969,6 +1024,8 @@ pub enum StoreError {
     StorageFailure {
         /// Stable backend name, such as `sqlite` or `postgres`.
         backend: &'static str,
+        /// Native database code; absent when no database supplied one.
+        code: Option<StorageCode>,
         /// Backend diagnostic for the failed storage operation.
         message: String,
     },
@@ -981,6 +1038,14 @@ pub enum StoreError {
 }
 
 impl StoreError {
+    /// The native database code, when the database supplied one.
+    pub fn storage_code(&self) -> Option<&StorageCode> {
+        match self {
+            Self::StorageFailure { code, .. } => code.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Advances a fence, generation, sequence, or revision without allowing
     /// wraparound or a silent no-op at the numeric ceiling.
     pub fn checked_monotonic_increment(counter: &'static str, current: u64) -> Result<u64, Self> {

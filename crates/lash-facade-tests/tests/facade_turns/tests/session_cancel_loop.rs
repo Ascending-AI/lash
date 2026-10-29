@@ -84,6 +84,7 @@ async fn a_close_that_fails_every_claim_parks_cancel_loop_and_runs_again_when_as
                 }
                 std::future::ready(if fails {
                     Err(DurableError::Store(StoreFailure {
+                        code: None,
                         kind: StoreFailureKind::Unavailable,
                         message: "cancel-loop: the close's cancel step fails".to_owned(),
                     }))

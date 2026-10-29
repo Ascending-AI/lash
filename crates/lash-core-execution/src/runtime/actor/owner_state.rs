@@ -188,6 +188,7 @@ impl<S> OwnerState<S> {
 
 fn invalid(message: &str) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: message.to_owned(),
     })

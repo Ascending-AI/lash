@@ -480,6 +480,7 @@ impl ActorTx {
     pub fn append(&mut self, held: Self) -> Result<&mut Self, crate::DurableError> {
         if self.actor != held.actor {
             return Err(crate::DurableError::Store(crate::StoreFailure {
+                code: None,
                 kind: crate::StoreFailureKind::Corrupt,
                 message: format!("cannot compose {} into {}", held.actor, self.actor),
             }));
@@ -506,6 +507,7 @@ impl ActorTx {
                 .is_some_and(|current| current != &preimage)
             {
                 return Err(crate::DurableError::Store(crate::StoreFailure {
+                    code: None,
                     kind: crate::StoreFailureKind::Corrupt,
                     message: "composed process preimages disagree".into(),
                 }));

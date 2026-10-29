@@ -1426,6 +1426,7 @@ async fn renewal_ended(ended: &watch::Receiver<Option<Stopped>>) -> Stopped {
 /// effect is unknown, and an unrenewed lease expires on its own.
 fn not_started(what: &str, settings: LeaseSettings) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: format!(
             "the node's {what} was not in place within startup ({:?})",

@@ -390,6 +390,7 @@ store_error_samples! {
         location: std::path::PathBuf::from("sampled"),
     },
     StorageFailure { .. } => StoreError::StorageFailure {
+        code: None,
         backend: "sampled",
         message: "sampled".to_string(),
     },

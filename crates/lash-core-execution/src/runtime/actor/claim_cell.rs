@@ -27,6 +27,7 @@ impl<T> ClaimCell<T> {
             drop(value);
             drop(released);
             return Err(DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Unavailable,
                 message: "session claim has ended".into(),
             }));

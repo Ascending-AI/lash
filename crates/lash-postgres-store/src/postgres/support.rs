@@ -66,11 +66,19 @@ pub(crate) fn clamp_sequence_bound(value: impl TryInto<i64>) -> i64 {
     value.try_into().unwrap_or(i64::MAX)
 }
 
+pub(crate) fn storage_code(error: &sqlx::Error) -> Option<lash_core_store::store::StorageCode> {
+    error
+        .as_database_error()
+        .and_then(|database| database.code())
+        .and_then(|code| lash_core_store::store::StorageCode::postgres(&code))
+}
+
 pub(crate) fn store_sqlx_error(err: sqlx::Error) -> StoreError {
     if is_contention_error(&err) {
         StoreError::Contended
     } else {
         StoreError::StorageFailure {
+            code: storage_code(&err),
             backend: "postgres",
             message: err.to_string(),
         }
@@ -504,9 +512,14 @@ pub(crate) fn graph_store_error(
     refusal: lash_core_store::checkpoint_graph::GraphRefusal,
 ) -> StoreError {
     match refusal {
-        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => {
-            StoreError::Backend(failure.message)
-        }
+        lash_core_store::checkpoint_graph::GraphRefusal::Backend(failure) => match failure.code {
+            Some(code) => StoreError::StorageFailure {
+                backend: code.backend(),
+                code: Some(code),
+                message: failure.message,
+            },
+            None => StoreError::Backend(failure.message),
+        },
         refusal => StoreError::StoredDataCorrupt {
             record_kind: "SessionCheckpoint",
             message: refusal.to_string(),
@@ -804,6 +817,7 @@ pub(crate) fn config_store_error(
             }
         }
         GraphRefusal::Backend(failure) => StoreError::StorageFailure {
+            code: failure.code,
             backend: "postgres",
             message: failure.message,
         },
@@ -916,6 +930,7 @@ mod contention_tests {
             StoreError::StorageFailure {
                 backend: "postgres",
                 ref message,
+                ..
             } if message.contains("broken wire frame")
         ));
     }

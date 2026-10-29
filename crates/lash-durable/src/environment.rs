@@ -87,6 +87,7 @@ pub trait EnvironmentStore: Send + Sync {
 
 pub fn corrupt(message: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("environment ownership: {message}"),
     })

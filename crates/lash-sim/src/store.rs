@@ -775,6 +775,7 @@ impl ModelStore {
                     operation,
                     *attempts,
                     &StoreError::StorageFailure {
+                        code: None,
                         backend: "sqlite",
                         message: "simulated transaction fault".to_string(),
                     },

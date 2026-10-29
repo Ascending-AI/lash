@@ -259,6 +259,7 @@ impl RuntimeTurnServices {
         use lash_core_execution::runtime::actor::round::{self, PolicyView};
         round::fold(facts, &PolicyView::new([]), &round::PinnedWaits::ledger()).map_err(|error| {
             lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Corrupt,
                 message: format!("the turn's tool records: {error}"),
             })

@@ -125,6 +125,7 @@ pub fn requirements_of(
     let mut requirements = ClaimRequirements::default();
     let corrupt = |error: serde_json::Error| {
         DurableError::Store(crate::StoreFailure {
+            code: None,
             kind: crate::StoreFailureKind::Corrupt,
             message: format!("execution requirements: {error}"),
         })

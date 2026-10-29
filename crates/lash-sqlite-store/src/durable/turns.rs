@@ -124,6 +124,7 @@ fn refuse<T>(refusal: DomainRefusal) -> Answer<T> {
 /// A store codec's refusal, as the durable port reports it.
 fn encoding(error: &lash_core_store::store::StoreError) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: error.to_string(),
     })

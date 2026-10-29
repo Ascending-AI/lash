@@ -1013,7 +1013,7 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
         .await
         .expect_err("SQLite must exhaust its pages");
     assert!(
-        matches!(&error, StoreError::StorageFailure { backend: "sqlite", message } if message == "database or disk is full"),
+        matches!(&error, StoreError::StorageFailure { backend: "sqlite", message, .. } if message == "database or disk is full"),
         "exact SQLite FULL refusal: {error:?}",
     );
     let after = store

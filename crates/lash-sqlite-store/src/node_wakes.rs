@@ -147,6 +147,7 @@ pub(crate) fn boot_lock(boot: &BootId) -> String {
 /// A liveness lock that could not be probed or taken.
 pub(crate) fn lock_failure(error: &std::io::Error) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: format!("a node liveness lock could not be read: {error}"),
     })
@@ -242,6 +243,7 @@ struct Opener {
 
 fn unavailable(message: String) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message,
     })

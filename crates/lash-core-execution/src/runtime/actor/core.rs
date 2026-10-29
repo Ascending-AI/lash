@@ -770,6 +770,7 @@ impl ActorContext {
                     |next, receipt| {
                         if refused_postimage {
                             return Err(DurableError::Store(lash_durable::StoreFailure {
+                                code: None,
                                 kind: lash_durable::StoreFailureKind::Corrupt,
                                 message: "writer acknowledged a refused turn postimage".into(),
                             }));
@@ -797,6 +798,7 @@ impl ActorContext {
             if !self.inner.claim_live.load(Ordering::Acquire) {
                 owner.poison();
                 return Err(DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: "session claim ended during commit".into(),
                 }));
@@ -812,6 +814,7 @@ impl ActorContext {
                 let runtime: Arc<dyn lash_core_store::store::RuntimeStore> = catalog;
                 let failed = |error: lash_core_store::store::StoreError| {
                     DurableError::Store(lash_durable::StoreFailure {
+                        code: None,
                         kind: lash_durable::StoreFailureKind::Corrupt,
                         message: error.to_string(),
                     })
@@ -864,6 +867,7 @@ impl ActorContext {
                     || adopted.turn != turn
                 {
                     return Err(DurableError::Store(lash_durable::StoreFailure {
+                        code: None,
                         kind: lash_durable::StoreFailureKind::Corrupt,
                         message: format!(
                             "acknowledged postimage differs from cold read at {} revision {}: warm turn {:?}, cold turn {:?}",
@@ -1033,6 +1037,7 @@ impl ActorContext {
     fn claimed_drain(&self) -> Result<&lash_durable::runner::Drain, DurableError> {
         self.inner.drain.as_ref().ok_or_else(|| {
             DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Unavailable,
                 message: "a context that owns no claim has no drain".to_owned(),
             })
@@ -1302,6 +1307,7 @@ impl ActorContext {
     pub fn pages(&self) -> Result<Arc<dyn lash_durable::domain::pages::PageStore>, DurableError> {
         self.durable()?.pages().ok_or_else(|| {
             DurableError::Store(lash_durable::StoreFailure {
+                code: None,
                 kind: lash_durable::StoreFailureKind::Unavailable,
                 message: "the store publishes no heap pages".to_owned(),
             })
@@ -1552,6 +1558,7 @@ impl ActorContext {
             .map(Backend::durable)
             .ok_or_else(|| {
                 DurableError::Store(lash_durable::StoreFailure {
+                    code: None,
                     kind: lash_durable::StoreFailureKind::Unavailable,
                     message: "this ActorContext has no durable store".to_owned(),
                 })

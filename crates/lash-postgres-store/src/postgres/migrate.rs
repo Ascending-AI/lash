@@ -1553,6 +1553,7 @@ async fn within_deadline(
             .await
             .unwrap_or_else(|_| {
                 Err(MigrateError::Store(StoreError::StorageFailure {
+                    code: None,
                     backend: crate::POSTGRES_BACKEND,
                     message: format!(
                         "migration did not finish within its {} ms deadline",

@@ -827,6 +827,7 @@ pub async fn read_process_tool_call(
 
     let corrupt = |message| {
         DurableError::Store(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message,
         })
@@ -919,6 +920,7 @@ pub async fn read_process_steps(
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let fold = round::fold(&rows, &PolicyView::new([]), &waits).map_err(|error| {
         DurableError::Store(StoreFailure {
+            code: None,
             kind: StoreFailureKind::Corrupt,
             message: format!("the process's step records: {error}"),
         })

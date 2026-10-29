@@ -777,6 +777,7 @@ mod tests {
         )
         .expect("corrupt encoding");
         let expected = GraphRefusal::Backend(lash_durable::StoreFailure {
+            code: None,
             kind: lash_durable::StoreFailureKind::Corrupt,
             message: "stored blob encoding `9` does not decode".into(),
         });

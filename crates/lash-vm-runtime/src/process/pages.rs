@@ -208,6 +208,7 @@ fn millis(ttl: Duration) -> i64 {
 
 fn fault(message: &str) -> KernelFailure {
     KernelFailure::Lease(DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: RunFault(message.to_owned()).to_string(),
     }))
@@ -227,6 +228,7 @@ pub(crate) struct RunCandidate {
 
 fn staging(fault: StageFault) -> DurableError {
     DurableError::Store(lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Unavailable,
         message: format!("the run's staging: {fault}"),
     })

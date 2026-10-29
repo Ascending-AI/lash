@@ -495,6 +495,7 @@ fn store_failure(error: rusqlite::Error) -> DurableError {
         _ => kind,
     };
     DurableError::Store(StoreFailure {
+        code: error.storage_code().cloned(),
         kind,
         message: error.to_string(),
     })
@@ -515,6 +516,7 @@ fn integer<T>(
 
 fn corrupt(what: &str, value: &str) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("stored {what} `{value}` does not decode"),
     })

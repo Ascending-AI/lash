@@ -383,6 +383,7 @@ impl DurableStore for CutStore {
         if fire {
             self.fired.store(true, Ordering::SeqCst);
             return Err(DurableError::Store(StoreFailure {
+                code: None,
                 kind: StoreFailureKind::Unavailable,
                 message: format!("the law cut the process before `{label}` committed"),
             }));

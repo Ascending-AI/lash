@@ -33,6 +33,12 @@ use crate::process_registry::actor::CancelRecorded;
 /// decode or refused, which the port reports as a store failure.
 fn registry_failure(error: &lash_execution_contracts::plugin_error::PluginError) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: match error {
+            lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { fault } => {
+                fault.storage_code().cloned()
+            }
+            _ => None,
+        },
         kind: StoreFailureKind::Corrupt,
         message: error.to_string(),
     })
@@ -326,6 +332,12 @@ fn register_within(
             Err(refused(error.to_string()))
         }
         Err(error) => Err(DurableError::Store(StoreFailure {
+            code: match &error {
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { fault } => {
+                    fault.storage_code().cloned()
+                }
+                _ => None,
+            },
             kind: StoreFailureKind::Unavailable,
             message: error.to_string(),
         })),

@@ -527,6 +527,7 @@ impl InstallEntry {
 #[must_use]
 pub fn stage_refusal(fault: &StageFault) -> GraphRefusal {
     GraphRefusal::Backend(lash_core_store::store_failure::StoreFailure {
+        code: None,
         kind: lash_core_store::store_failure::StoreFailureKind::Unavailable,
         message: format!("the candidate's manifest failed: {fault}"),
     })
@@ -913,6 +914,7 @@ impl<'a> CandidateInstall<'a> {
 
 fn corrupt(message: &str) -> GraphRefusal {
     GraphRefusal::Backend(lash_core_store::store_failure::StoreFailure {
+        code: None,
         kind: lash_core_store::store_failure::StoreFailureKind::Corrupt,
         message: message.to_owned(),
     })

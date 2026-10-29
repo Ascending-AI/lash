@@ -886,11 +886,13 @@ where
             Ok(()) => Ok(value),
             Err(Uncommitted::RolledBack(error)) => Err(attempt(store_sqlx_error(error))),
             Err(Uncommitted::Lost(error)) => Err(Attempt::Aborted(StoreError::StorageFailure {
+                code: crate::support::storage_code(&error),
                 backend: crate::POSTGRES_BACKEND,
                 message: format!("the connection was lost at COMMIT, which rolled back: {error}"),
             })),
-            Err(Uncommitted::Unknown(message)) => {
+            Err(Uncommitted::Unknown { message, code }) => {
                 Err(Attempt::Failed(StoreError::StorageFailure {
+                    code,
                     backend: crate::POSTGRES_BACKEND,
                     message,
                 }))
@@ -958,6 +960,7 @@ fn attempt(error: StoreError) -> Attempt<StoreError> {
 /// deadline: whether its last attempt committed is unknown.
 pub(crate) fn operation_deadline_exceeded(deadline: std::time::Duration) -> StoreError {
     StoreError::StorageFailure {
+        code: None,
         backend: crate::POSTGRES_BACKEND,
         message: format!(
             "operation did not finish within its {} ms deadline",

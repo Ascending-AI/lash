@@ -76,8 +76,8 @@ pub use lash_core_store::session_state::{
 pub use lash_core_store::store::ToolMaterialStore;
 pub use lash_core_store::store::commit_budget::RuntimeCommitBudgetMeasurement;
 pub use lash_core_store::store::{
-    DurableRecord, EnumerationSource, FrameTransition, ReadWindow, StoreFault, StoreRefusal,
-    StoredRunTerminal, SurfaceFormat, WriterPin,
+    DurableRecord, EnumerationSource, FrameTransition, ReadWindow, StorageCode, StoreFault,
+    StoreRefusal, StoredRunTerminal, SurfaceFormat, WriterPin,
 };
 pub use lash_core_store::surface_format;
 pub use lash_protocol_types::ConversationRecord;

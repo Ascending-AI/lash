@@ -592,6 +592,7 @@ pub(super) async fn consume_answered_cell(
 
 fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {
     lash_durable::StoreFailure {
+        code: None,
         kind: lash_durable::StoreFailureKind::Corrupt,
         message: format!("the settled round {run:?} is not in its fold"),
     }

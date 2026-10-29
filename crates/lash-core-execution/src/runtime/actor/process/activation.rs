@@ -258,6 +258,7 @@ impl Live {
 
 pub(super) fn corrupt(what: &str, error: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Corrupt,
         message: format!("{what}: {error}"),
     })
@@ -267,6 +268,7 @@ pub(crate) fn registry_failure(
     error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: error.to_string(),
     })
@@ -420,6 +422,7 @@ impl ProcessActivation {
                 // process ends Failed on the first one, and the next pass
                 // runs its cascade.
                 Err(DurableError::Store(StoreFailure {
+                    code: None,
                     kind: StoreFailureKind::Corrupt,
                     message,
                 })) => {
@@ -739,6 +742,7 @@ impl ProcessActivation {
             }
             Err(refusal) => {
                 return Err(DurableError::Store(StoreFailure {
+                    code: None,
                     kind: StoreFailureKind::Unavailable,
                     message: refusal.to_string(),
                 }));
@@ -1355,6 +1359,7 @@ fn commit_refused(message: &str) -> lash_execution_contracts::process::ProcessOu
 /// nothing, and the next one asks again.
 pub(super) fn unavailable(reason: String) -> DurableError {
     DurableError::Store(StoreFailure {
+        code: None,
         kind: StoreFailureKind::Unavailable,
         message: reason,
     })

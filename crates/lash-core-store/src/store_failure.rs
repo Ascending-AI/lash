@@ -22,6 +22,8 @@ pub enum StoreFailureKind {
 pub struct StoreFailure {
     /// What kind of failure.
     pub kind: StoreFailureKind,
+    /// Native database code retained through intermediate durable ports.
+    pub code: Option<crate::store::StorageCode>,
     /// The driver's account of it.
     pub message: String,
 }
