@@ -8,6 +8,32 @@
   },
   "cpu": "pinned:0",
   "geometry": {
+    "kernel/typescript/object_sort_200k": {
+      "source_hash": "d92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b",
+      "trips": [
+        20000,
+        200000
+      ],
+      "operations": [
+        20000,
+        200000
+      ],
+      "runs": 1,
+      "warmups": 1
+    },
+    "kernel/python/object_sort_200k": {
+      "source_hash": "11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664",
+      "trips": [
+        20000,
+        200000
+      ],
+      "operations": [
+        20000,
+        200000
+      ],
+      "runs": 1,
+      "warmups": 1
+    },
     "kernel/typescript/empty_loop": {
       "source_hash": "5db9a4e816911a041294fc70bfe29a990b83571e7af5b6f851f5a455cfbbfa8e",
       "trips": [
@@ -476,6 +502,8 @@
     }
   },
   "rows": {
+    "kernel/typescript/object_sort_200k": 269115.16414444445,
+    "kernel/python/object_sort_200k": 178992.51409444446,
     "kernel/typescript/empty_loop": 423.9960202020202,
     "kernel/python/empty_loop": 7969.972101010101,
     "kernel/typescript/prop_read": 2164.5016262626264,
@@ -658,6 +686,8 @@
     }
   },
   "noise": {
+    "kernel/typescript/object_sort_200k": 0,
+    "kernel/python/object_sort_200k": 0,
     "kernel/typescript/empty_loop": 0.0,
     "kernel/python/empty_loop": 0.0,
     "kernel/typescript/prop_read": 0.0,
@@ -700,6 +730,8 @@
     "replay/py-codemode/worker": 0.0
   },
   "ceilings": {
+    "kernel/typescript/object_sort_200k": 269115.16414444445,
+    "kernel/python/object_sort_200k": 178992.51409444446,
     "kernel/typescript/empty_loop": 423.9960202020202,
     "kernel/python/empty_loop": 7969.972101010101,
     "kernel/typescript/prop_read": 2164.5016262626264,
@@ -742,6 +774,18 @@
     "replay/py-codemode/worker": 12608808.0
   },
   "row_provenance": {
+    "kernel/typescript/object_sort_200k": {
+      "commit": "4b950209a72ce86dd271576c894deb47a37e7887",
+      "recorded_at": "2026-10-29T23:35:43.223827867+00:00",
+      "run_id": "compare-151146",
+      "executable_sha256": "0715324f973ca4df3cddc31f8622e7232aa9a49cdf74903d13c58748853c2fc9"
+    },
+    "kernel/python/object_sort_200k": {
+      "commit": "4b950209a72ce86dd271576c894deb47a37e7887",
+      "recorded_at": "2026-10-29T23:35:43.223827867+00:00",
+      "run_id": "compare-151146",
+      "executable_sha256": "0715324f973ca4df3cddc31f8622e7232aa9a49cdf74903d13c58748853c2fc9"
+    },
     "kernel/python/json_transform": {
       "commit": "1bf1039a89aca0bd03d3206e644818e06908a29f",
       "recorded_at": "2026-10-27T16:42:16.794309733+00:00",
