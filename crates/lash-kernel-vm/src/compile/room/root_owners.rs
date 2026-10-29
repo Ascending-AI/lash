@@ -49,6 +49,9 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
     }
     let mut aliases = BTreeMap::new();
     for owner in owners {
+        if let Owner::Selected(at) = owner {
+            aliases.insert(owner.clone(), Owner::Operand(at.clone()));
+        }
         if let Owner::Visible { at, name } = owner {
             let selected = scopes
                 .iter()
@@ -168,6 +171,8 @@ impl OwnerSlots {
                 .keys()
                 .filter(|owner| included(owner))
                 .filter_map(|owner| self.root(owner, task, invocation))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .collect(),
         )
     }

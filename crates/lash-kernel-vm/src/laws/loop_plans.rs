@@ -770,8 +770,44 @@ fn room_unpooled_immutable_growth() {
 #[test]
 fn source_room_retained_delta_has_source_owners() {
     room_finally_departure();
-    use crate::compile::room::Refused;
+    use crate::compile::room::{Owner, Refused};
+    let selected_count = std::cell::Cell::new(0);
     source_rooms(|source| {
+        let slots = source.owner_slots().unwrap();
+        for selected in source
+            .room
+            .peak_extra
+            .values()
+            .flat_map(|event| &event.inputs)
+        {
+            if let Owner::Selected(at) = selected {
+                selected_count.set(selected_count.get() + 1);
+                assert_eq!(
+                    slots.root(selected, lash_kernel_doc::TaskId::MAIN, 73),
+                    slots.root(
+                        &Owner::Operand(at.clone()),
+                        lash_kernel_doc::TaskId::MAIN,
+                        73
+                    ),
+                    "a conditional selection transfers its occurrence into the result owner"
+                );
+            }
+        }
+        let group = slots
+            .group(
+                &Owner::Operands(source.site.clone()),
+                lash_kernel_doc::TaskId::MAIN,
+                73,
+            )
+            .unwrap();
+        assert_eq!(
+            group.len(),
+            group
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            "source owner aliases occur once in a release group"
+        );
         for point in source.room.retained_delta.keys() {
             let mut understated = source.room.clone();
             understated
@@ -791,6 +827,10 @@ fn source_room_retained_delta_has_source_owners() {
             }
         }
     });
+    assert!(
+        selected_count.get() > 0,
+        "the corpus exercises conditional selections"
+    );
 }
 
 #[test]
