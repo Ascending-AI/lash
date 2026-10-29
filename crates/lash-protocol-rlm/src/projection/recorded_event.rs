@@ -11,6 +11,10 @@ use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(remote = "RlmProtocolEvent")]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "serde remote derive must match the public RlmProtocolEvent variant names"
+)]
 enum Event {
     RlmTrajectoryEntry(#[serde(with = "cell")] Arc<CellRecord>),
     RlmGlobalsPatch(RlmGlobalsPatchPluginBody),
