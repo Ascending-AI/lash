@@ -528,7 +528,6 @@ pub mod prelude {
 /// recovery for host frontends. Entry point: [`LashSession::observe`] /
 /// [`ObservableSession`].
 pub mod observe {
-    pub use crate::session::FeedStart;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     /// The stream trait a live replay subscription's tail and the session
     /// feed implement: a custom [`LiveReplayStore`] builds its

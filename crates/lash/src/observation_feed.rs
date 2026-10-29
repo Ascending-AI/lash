@@ -129,6 +129,35 @@ impl FeedSource {
             .map_or(SessionRevision::new(0), SessionRevision::of_durable_head))
     }
 
+    /// A commit wake can precede its publication. Retry after this node's
+    /// publication window closes, keeping the existing live tail meanwhile.
+    async fn recover_retained_commit(&self, held: SessionRevision) -> Result<FeedRecovery> {
+        let head = self.durable_revision().await?;
+        if head <= held {
+            return Ok(FeedRecovery::Unchanged);
+        }
+        loop {
+            let window = self.published_heads.window(&self.session_id, head);
+            let cursor = self.live_replay.current_cursor(&self.session_id, held);
+            match self
+                .live_replay
+                .subscribe_after_cursor(&cursor)
+                .await
+                .map_err(live_replay_error)?
+            {
+                LiveReplaySubscribeOutcome::Subscribed(live) => {
+                    if live.bridges_to(head) {
+                        return Ok(FeedRecovery::Replayed { cursor, live });
+                    }
+                }
+                LiveReplaySubscribeOutcome::Gap(_) => return Ok(FeedRecovery::Gap),
+            }
+            if !window.closed().await {
+                return Ok(FeedRecovery::Unchanged);
+            }
+        }
+    }
+
     /// The durable head's revision and read view, from one window read.
     async fn durable_head(&self) -> Result<Option<(SessionRevision, SessionReadView)>> {
         Ok(
@@ -622,6 +651,7 @@ impl SessionObservationStream {
                 live: None,
                 changes,
                 opening_error,
+                recovery: None,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -704,6 +734,17 @@ enum Delivery {
     Diverged,
 }
 
+enum FeedRecovery {
+    Unchanged,
+    Replayed {
+        cursor: SessionCursor,
+        live: LiveReplaySubscription,
+    },
+    Gap,
+}
+
+type RecoveryStep = BoxFuture<'static, (SessionRevision, Result<FeedRecovery>)>;
+
 struct FeedState {
     source: FeedSource,
     /// Where the feed stands: the last delivered or skipped event's live
@@ -716,11 +757,21 @@ struct FeedState {
     live: Option<LiveReplaySubscription>,
     changes: Option<lash_durable::runner::KeyWatch>,
     opening_error: Option<EmbedError>,
+    /// One recovery read or publication wait, retained across live delivery.
+    recovery: Option<RecoveryStep>,
 }
 
 impl FeedState {
     fn set_live(&mut self, live: Option<LiveReplaySubscription>) {
         self.live = live;
+        self.recovery = None;
+    }
+
+    fn start_recovery(&mut self) {
+        self.recovery = self.delivered.map(|held| {
+            let source = self.source.clone();
+            async move { (held, source.recover_retained_commit(held).await) }.boxed()
+        });
     }
 
     async fn next(
@@ -761,24 +812,43 @@ impl FeedState {
             };
             let item = tokio::select! {
                 biased;
+                (held, recovered) = async {
+                    match &mut self.recovery {
+                        Some(recovery) => recovery.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    self.recovery = None;
+                    if recovered.is_ok() && self.delivered != Some(held) {
+                        // Live delivery advanced while this read was in flight.
+                        // Recheck from that revision without losing its wake.
+                        self.start_recovery();
+                        continue;
+                    }
+                    match recovered {
+                        Ok(FeedRecovery::Unchanged) => {},
+                        Ok(FeedRecovery::Replayed { cursor, live }) => {
+                            self.cursor = cursor;
+                            self.set_live(Some(live));
+                        }
+                        Ok(FeedRecovery::Gap) => {
+                            self.rewind_to_held_revision();
+                            self.set_live(None);
+                        }
+                        Err(error) => return Some(Err(error)),
+                    }
+                    continue;
+                },
                 () = async {
                     match &mut self.changes {
                         Some(changes) => changes.changed().await,
                         None => std::future::pending().await,
                     }
-                } => {
+                }, if self.recovery.is_none() => {
                     if let Some(changes) = &mut self.changes {
                         changes.seen();
                     }
-                    match self.source.durable_revision().await {
-                        Ok(head) if self.delivered.is_none_or(|held| head > held) => {
-                            if let Err(error) = self.recover_retained_commit(head).await {
-                                return Some(Err(error));
-                            }
-                        }
-                        Ok(_) => {},
-                        Err(error) => return Some(Err(error)),
-                    }
+                    self.start_recovery();
                     continue;
                 },
                 item = live.next() => item,
@@ -805,37 +875,6 @@ impl FeedState {
                 Some(Err(error)) => return Some(Err(live_replay_error(error))),
             }
         }
-    }
-
-    /// Recover a commit whose live notification was lost without dropping
-    /// the live tail while another core is still publishing that commit.
-    async fn recover_retained_commit(&mut self, head: SessionRevision) -> Result<()> {
-        let Some(held) = self.delivered else {
-            return Ok(());
-        };
-        let cursor = self
-            .source
-            .live_replay
-            .current_cursor(&self.source.session_id, held);
-        match self
-            .source
-            .live_replay
-            .subscribe_after_cursor(&cursor)
-            .await
-            .map_err(live_replay_error)?
-        {
-            LiveReplaySubscribeOutcome::Subscribed(subscription) => {
-                if subscription.bridges_to(head) {
-                    self.cursor = cursor;
-                    self.set_live(Some(subscription));
-                }
-            }
-            LiveReplaySubscribeOutcome::Gap(_) => {
-                self.rewind_to_held_revision();
-                self.set_live(None);
-            }
-        }
-        Ok(())
     }
 
     /// Auxiliary traffic can pass a commit whose live notification was

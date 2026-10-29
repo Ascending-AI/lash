@@ -39,6 +39,11 @@ durable head; if it advanced beyond the last delivered commit, the feed
 resubscribes at that delivered revision, rewinding its live position before
 newer retained commits when auxiliary traffic passed them. This
 recovers retained commits whose live notification was missed without a timer.
+The recovery read runs alongside the existing live tail so store latency
+does not block queued events. If this node is still publishing the head,
+recovery waits for that publication window to close and retries the replay.
+Live delivery may advance meanwhile; recovery then checks from the revision
+the consumer now holds without consuming another wake.
 Auxiliary events advance the live position but never the revision the
 consumer holds. The backend's existing listener carries the same hints across
 processes; replay retention still determines whether continuation is possible.
