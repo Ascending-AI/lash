@@ -48,7 +48,21 @@ pub type Keep = Vec<Box<dyn std::any::Any + Send>>;
 /// fixture start declaration names, or `None` for a PostgreSQL leg the run
 /// was handed no server for.
 pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
-    let (stores, keep) = unseeded(tier).await?;
+    stores_on_clock(tier, None).await
+}
+
+pub async fn stores_with_clock(
+    tier: Tier,
+    clock: Arc<dyn lash_core::Clock>,
+) -> Option<(Arc<dyn StoreSet>, Keep)> {
+    stores_on_clock(tier, Some(clock)).await
+}
+
+async fn stores_on_clock(
+    tier: Tier,
+    clock: Option<Arc<dyn lash_core::Clock>>,
+) -> Option<(Arc<dyn StoreSet>, Keep)> {
+    let (stores, keep) = unseeded(tier, clock).await?;
     lash_execution_contracts::testing::process_execution_env_fixture(
         stores.process_env_store().as_ref(),
     )
@@ -56,21 +70,38 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
     Some((stores, keep))
 }
 
-async fn unseeded(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
+async fn unseeded(
+    tier: Tier,
+    clock: Option<Arc<dyn lash_core::Clock>>,
+) -> Option<(Arc<dyn StoreSet>, Keep)> {
     match tier {
         Tier::SqliteMemory => {
-            let stores = lash_sqlite_store::SqliteStoreSet::memory()
-                .await
-                .expect("an in-memory store set opens");
+            let stores = match clock {
+                Some(clock) => lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock).await,
+                None => lash_sqlite_store::SqliteStoreSet::memory().await,
+            }
+            .expect("an in-memory store set opens");
             Some((Arc::new(stores), Vec::new()))
         }
         Tier::SqliteFile => {
             let dir = tempfile::tempdir().expect("a temporary directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(
-                dir.path().join("lash.db"),
-                lash_sqlite_store::SqliteSynchronous::Normal,
-            )
-            .await
+            let stores = match clock {
+                Some(clock) => {
+                    lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                        dir.path().join("lash.db"),
+                        lash_sqlite_store::SqliteSynchronous::Normal,
+                        clock,
+                    )
+                    .await
+                }
+                None => {
+                    lash_sqlite_store::SqliteStoreSet::open(
+                        dir.path().join("lash.db"),
+                        lash_sqlite_store::SqliteSynchronous::Normal,
+                    )
+                    .await
+                }
+            }
             .expect("a file store set opens");
             Some((Arc::new(stores), vec![Box::new(dir)]))
         }
@@ -88,16 +119,21 @@ async fn unseeded(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
             // PostgreSQL stores attachment references, while the host supplies
             // the bytes port. Keep it alive beside the isolated database.
             let attachments = tempfile::tempdir().expect("an attachment directory");
-            let stores = lash_postgres_store::PostgresStoreSet::new(
-                &storage,
-                lash_sqlite_store::SqliteStoreSet::open(
-                    (attachments.path()).join("attachments.db"),
-                    lash_sqlite_store::SqliteSynchronous::Normal,
-                )
-                .await
-                .expect("SQLite attachment store")
-                .attachment_store(),
-            );
+            let attachment_store = lash_sqlite_store::SqliteStoreSet::open(
+                (attachments.path()).join("attachments.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store();
+            let stores = match clock {
+                Some(clock) => lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
+                    &storage,
+                    attachment_store,
+                    clock,
+                ),
+                None => lash_postgres_store::PostgresStoreSet::new(&storage, attachment_store),
+            };
             Some((
                 Arc::new(stores),
                 vec![Box::new(isolated), Box::new(attachments)],

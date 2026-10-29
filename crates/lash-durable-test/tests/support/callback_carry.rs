@@ -287,7 +287,10 @@ fn run_callback_on(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>> {
     Box::pin(async move {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (stores, _keep) = served::stores(tier).await.unwrap();
+        let clock = lash_durable_test::SimClock::new();
+        let (stores, _keep) = served::stores_with_clock(tier, clock.clone())
+            .await
+            .unwrap();
         let first = core_with(
             Arc::clone(&stores),
             "before",
@@ -365,13 +368,26 @@ fn run_callback_on(
                     record.terminal().is_none(),
                     "the predecessor ended before parking: {record:?}"
                 );
-                if !record.waits().is_empty()
-                    && (discovery == Discovery::None
-                        || calls.load(std::sync::atomic::Ordering::SeqCst) > 0)
+                if record.waits().iter().any(|wait| {
+                    matches!(
+                        &wait.kind,
+                        lash_execution_contracts::process::WaitKind::Call {
+                            tool_id,
+                            resume_at_ms: Some(_),
+                            ..
+                        } if tool_id.as_str() == "typescript.sleep"
+                    ) && wait.site.as_ref().is_some_and(|site| {
+                        site.origin.unit == lash_kernel_value::sites::Unit::Main
+                    })
+                }) && (discovery == Discovery::None
+                    || calls.load(std::sync::atomic::Ordering::SeqCst) > 0)
                 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
+                clock
+                    .advance_to(clock.logical_ms().saturating_add(10))
+                    .await;
             }
         })
         .await
@@ -657,10 +673,19 @@ fn run_callback_on(
                 "a pinned target requires no retired discovery callback: {missing:?}"
             );
         }
-        let output = tokio::time::timeout(
-            Duration::from_secs(30),
-            second.processes().await_output(&process),
-        )
+        let output = tokio::time::timeout(Duration::from_secs(30), async {
+            let processes = second.processes();
+            let output = processes.await_output(&process);
+            tokio::pin!(output);
+            loop {
+                tokio::select! {
+                    result = &mut output => break result,
+                    _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                        clock.advance_to(clock.logical_ms().saturating_add(10)).await;
+                    }
+                }
+            }
+        })
         .await
         .unwrap()
         .unwrap();
