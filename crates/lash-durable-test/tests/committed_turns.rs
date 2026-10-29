@@ -921,3 +921,110 @@ tiered_laws!(
     a_coalesced_turns_rows_include_every_user_row,
     a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_after_recovery,
 );
+
+/// FIG-7551: yielding a live event cannot park a recovery transaction in
+/// each of the work pool's two connections while the host reads settlement.
+#[tokio::test]
+async fn postgres_feed_delivery_releases_work_for_input_settlement_facts() {
+    use lash::observe::Stream as _;
+    use lash::persistence::{FollowFacts, FollowSubject, SessionStore};
+    use std::pin::Pin;
+    use std::task::Poll;
+
+    let url = lash_postgres_store::testing::required_database_url();
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let config = lash_postgres_store::testing::work_pool_of(2);
+    assert_eq!(config.roles.max_store_operations, 2);
+    let storage = lash_postgres_store::testing::connect_with(database.url(), &config)
+        .await
+        .expect("open a two-connection work pool");
+    let attachments = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+    let stores =
+        lash_postgres_store::PostgresStoreSet::new(&storage, attachments.attachment_store());
+    let backend = served::backend(Arc::new(stores));
+    let core = lash::LashCore::standard_builder(backend.clone())
+        .data_retention(lash::DataRetention::standard())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("small-pool-observer"),
+            lash::persistence::LeaseIncarnationId::new("small-pool-boot"),
+        ))
+        .unwrap();
+    let id = lash_kernel_value::identity::SessionId::from("small-pool-observation");
+    let session = core
+        .session(id.clone())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .unwrap();
+    let observed = core.session(id.clone()).open().await.unwrap();
+    let (_, first) = observed
+        .observe()
+        .follow(lash::FeedStart::Head)
+        .await
+        .unwrap();
+    let (_, second) = observed
+        .observe()
+        .follow(lash::FeedStart::Head)
+        .await
+        .unwrap();
+    let mut feeds = [first, second];
+    let pool = storage.pool();
+    // Warm both physical connections before establishing the subscriptions.
+    let warm = [pool.acquire().await.unwrap(), pool.acquire().await.unwrap()];
+    drop(warm);
+    for feed in &mut feeds {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            std::future::poll_fn(|cx| {
+                while let Poll::Ready(item) = Pin::new(&mut *feed).poll_next(cx) {
+                    item.expect("feed stays open").expect("initial live event");
+                }
+                if pool.num_idle() == 2 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }),
+        )
+        .await
+        .expect("establish the live subscription");
+    }
+    let handle = session
+        .send(lash::TurnInput::text("finish beside the observers"))
+        .await
+        .unwrap();
+    let input = handle.input_id().clone();
+    handle.outcome().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while pool.num_idle() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the commit returned its work connection");
+
+    for feed in &mut feeds {
+        // On this current-thread runtime neither spawned BEGIN can run
+        // between selecting recovery and returning the already queued event.
+        let item = std::future::poll_fn(|cx| Poll::Ready(Pin::new(&mut *feed).poll_next(cx))).await;
+        let Poll::Ready(Some(Ok(_))) = item else {
+            panic!("a queued live event must pass the in-flight recovery read: {item:?}");
+        };
+    }
+    let runtime = SessionStore::new(backend.session_store_factory(), id).unwrap();
+    let facts = tokio::time::timeout(
+        Duration::from_secs(5),
+        runtime.follow_facts(&FollowSubject::Input(input)),
+    )
+    .await
+    .expect("two delivered feeds must not strand both work checkouts")
+    .expect("read input settlement facts without polling either feed again");
+    assert!(matches!(facts, FollowFacts::Input(_)));
+    drop(feeds);
+    drop(observed);
+    core.shutdown().await.unwrap();
+}

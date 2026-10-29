@@ -757,7 +757,8 @@ struct FeedState {
     live: Option<LiveReplaySubscription>,
     changes: Option<lash_durable::runner::KeyWatch>,
     opening_error: Option<EmbedError>,
-    /// One recovery read or publication wait, retained across live delivery.
+    /// One owned recovery task, driven even while the consumer handles a
+    /// delivered item. Dropping the future aborts the task.
     recovery: Option<RecoveryStep>,
 }
 
@@ -770,7 +771,25 @@ impl FeedState {
     fn start_recovery(&mut self) {
         self.recovery = self.delivered.map(|held| {
             let source = self.source.clone();
-            async move { (held, source.recover_retained_commit(held).await) }.boxed()
+            // A paused inline read can retain a work checkout after live
+            // delivery. Complete the read independently so a consumer can
+            // query settlement facts before polling this feed again.
+            let recovery = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                (held, source.recover_retained_commit(held).await)
+            }));
+            async move {
+                match recovery.await {
+                    Ok(result) => result,
+                    Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+                    Err(error) => (
+                        held,
+                        Err(live_replay_error(LiveReplayStoreError::Store(format!(
+                            "joining session feed recovery: {error}"
+                        )))),
+                    ),
+                }
+            }
+            .boxed()
         });
     }
 

@@ -40,7 +40,13 @@ resubscribes at that delivered revision, rewinding its live position before
 newer retained commits when auxiliary traffic passed them. This
 recovers retained commits whose live notification was missed without a timer.
 The recovery read runs alongside the existing live tail so store latency
-does not block queued events. If this node is still publishing the head,
+does not block queued events. The feed owns one task that drives the read
+through completion even while the consumer handles a delivered item. A
+paused consumer must not retain a recovery checkout and block its own
+settlement reads on a small pool (FIG-7551). Dropping the feed aborts that
+task; pooled BEGIN acknowledgement and rollback retain their completion
+owner. No host-side ordering restriction is required.
+If this node is still publishing the head,
 recovery waits for that publication window to close and retries the replay.
 Live delivery may advance meanwhile; recovery then checks from the revision
 the consumer now holds without consuming another wake.
