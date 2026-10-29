@@ -309,13 +309,18 @@ async fn l06_closing_lets_a_cooperative_loser_finish_its_own_work() -> Result<()
     Ok(())
 }
 
-/// L06: the cooperative loser's record is its own cancellation, attributed
-/// to the run's closing rather than to a turn that never stopped.
+/// L06 / ADR 0099: Closing commits its cancellation before signalling the
+/// body. The cooperative answer finishes its cleanup without replacing
+/// that committed cancellation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn l06_closing_lets_a_cooperative_loser_record_its_own_cancellation() -> Result<()> {
-    let (_, completion) = closing_race(Loser::Cooperative).await?;
+async fn l06_closing_keeps_its_committed_cancellation_after_the_loser_answers() -> Result<()> {
+    let (settled, completion) = closing_race(Loser::Cooperative).await?;
+    assert!(settled, "closing dropped the loser's body after its stop");
     let cancelled = cancellation(&completion);
-    assert_eq!(cancelled.message, "A observed its stop", "{completion:?}");
+    assert_eq!(
+        cancelled.message, "the owning Run closed before the call ended",
+        "{completion:?}"
+    );
     assert_eq!(
         cancelled.origin,
         Some(lash_core::CancelOrigin::RunClosing),
