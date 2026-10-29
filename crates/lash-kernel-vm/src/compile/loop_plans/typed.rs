@@ -95,8 +95,8 @@ pub(crate) struct Headroom {
 
 impl Headroom {
     #[inline(always)]
-    fn budget(self) -> Option<crate::machine::islands::admission::RepeatBudget> {
-        crate::machine::islands::admission::Window::new(self.charged, self.bound, self.slice_end)
+    fn budget(self) -> Option<crate::admission::RepeatBudget> {
+        crate::admission::Window::new(self.charged, self.bound, self.slice_end)
             .repeating(self.iteration_max)
     }
 }

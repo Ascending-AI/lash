@@ -124,6 +124,7 @@
 //!   `linked_carry::a_foreign_linked_kernel_or_closure_refuses_before_rewriting_on_sqlite`,
 //!   `paged_carry::a_paged_carry_commits_one_consistent_side_and_resumes_after_retirement_on_sqlite`.
 
+mod admission;
 mod compile;
 mod costs;
 mod crossing;

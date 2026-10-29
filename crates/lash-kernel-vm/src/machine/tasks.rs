@@ -124,6 +124,11 @@ pub(crate) struct Occurrences {
     dirty: Vec<usize>,
     marked: Box<[bool]>,
 }
+impl crate::admission::Counters for Occurrences {
+    fn can_advance(&self, occurrences: &[usize]) -> bool {
+        self.can_advance(occurrences)
+    }
+}
 impl Occurrences {
     fn new(exe: &Executable) -> Self {
         Self {

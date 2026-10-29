@@ -52,6 +52,8 @@ mod reach;
 mod sizes;
 mod tables;
 mod texts;
+mod versions;
+pub use versions::{ContentVersion, Registration};
 
 pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
@@ -126,6 +128,8 @@ pub struct Facts {
     /// removes or moves an entry, or replaces the body: a value written
     /// over a table entry keeps it.
     revision: u64,
+    /// Invalidates ledger size/value facts even when table positions survive.
+    content_revision: u64,
     mark: bool,
 }
 
@@ -216,6 +220,8 @@ pub struct Chilled {
 /// The objects of one run and their facts.
 #[derive(Debug, Default)]
 pub struct Arena {
+    identity: std::rc::Rc<()>,
+    registering: bool,
     objects: Objects,
     keys: keys::KeyCache,
     facts: Vec<Facts>,
@@ -430,6 +436,7 @@ impl Arena {
             .get_mut(handle)
             .ok_or_else(|| malformed("a stale handle reached the machine"))?;
         facts.revision = facts.revision.saturating_add(1);
+        facts.content_revision = facts.content_revision.saturating_add(1);
         facts.flat = None;
         Ok((body, facts))
     }
@@ -672,6 +679,7 @@ impl Arena {
         handle: ArenaHandle,
         card: Option<u64>,
     ) {
+        facts.content_revision = facts.content_revision.saturating_add(1);
         if facts.based
             && let Some(card) = card
             && let Err(at) = facts.cards.binary_search(&card)
@@ -977,6 +985,7 @@ impl Arena {
         self.unhold_members(&placeholder);
         let facts = self.facts_mut(handle)?;
         facts.revision = facts.revision.saturating_add(1);
+        facts.content_revision = facts.content_revision.saturating_add(1);
         if index.is_some() {
             facts.index = index;
         }

@@ -32,7 +32,7 @@ impl<I: ExactSizeIterator<Item = Value>> ExactSizeIterator for MapEntries<I> {
 pub(super) struct HeapAnswer {
     pub(super) value: Value,
     events: Option<Vec<Weight>>,
-    admission: super::admission::Accepted<()>,
+    admission: crate::admission::Accepted<()>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -208,7 +208,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let strict = strict && cx.body_paths;
         // Cx cannot change these source bounds. Read them after the arena
         // operation so its physical frame need not retain another window.
-        let window = super::admission::Window::new(self.charged, self.bound, self.slice_end);
+        let window = crate::admission::Window::new(self.charged, self.bound, self.slice_end);
         let accepted = answer.and_then(|value| {
             let admission = window.admit(
                 (),

@@ -1,0 +1,234 @@
+//! Member journals read the canonical original entry. Callers never provide
+//! its old price, spelling, edges or a final numeric body delta.
+use super::*;
+use crate::arena::{Arena, Registration};
+use lash_kernel_doc::{
+    NativeError, Value,
+    arena::{ArenaHandle, Body},
+};
+
+#[derive(Clone, Copy, Debug)]
+pub enum Member {
+    List(u64),
+    Table(Value),
+    Variable,
+}
+#[derive(Debug, thiserror::Error)]
+pub enum MemberFault {
+    #[error(transparent)]
+    Heap(#[from] HeapFault),
+    #[error(transparent)]
+    Native(#[from] NativeError),
+}
+/// All graph work is staged. The storage owner separately reserves or keeps
+/// its rollback until this journal is accepted and published.
+pub struct PreparedMember {
+    prepared: Prepared,
+    dependencies: Dependencies,
+    handle: ArenaHandle,
+    member: Member,
+    next: Option<Value>,
+}
+pub struct AcceptedMember(PreparedMember);
+impl PreparedMember {
+    pub fn peak(&self) -> u64 {
+        self.prepared.peak()
+    }
+    pub fn balance(&self) -> Result<Balance, HeapFault> {
+        self.prepared.balance()
+    }
+    pub fn admit(self, bound: u64) -> Result<AcceptedMember, Box<Self>> {
+        if self.prepared.peak() <= bound {
+            Ok(AcceptedMember(self))
+        } else {
+            Err(Box::new(self))
+        }
+    }
+}
+impl AcceptedMember {
+    /// The callback is the canonical, fully staged storage owner. It receives
+    /// the same target/key/value bound by admission. It must publish without
+    /// fallible work; an abandoned or stale journal invokes no storage edit.
+    pub fn publish(
+        self,
+        ledger: &mut Ledger,
+        mut registration: Registration<'_>,
+        storage: impl FnOnce(&mut Arena, ArenaHandle, Member, Option<Value>),
+    ) -> Result<(), HeapFault> {
+        let PreparedMember {
+            prepared,
+            dependencies,
+            handle,
+            member,
+            next,
+        } = self.0;
+        if !dependencies.is_current(ledger, registration.arena()) {
+            return Err(invalid("stale member facts"));
+        }
+        let accepted = prepared
+            .admit(u64::MAX)
+            .map_err(|_| invalid("admitted member overflow"))?;
+        ledger.publish(accepted, || {
+            storage(registration.arena(), handle, member, next);
+            registration.commit();
+        })
+    }
+}
+impl Ledger {
+    pub fn prepare_member(
+        &self,
+        registration: &mut Registration<'_>,
+        access: &Access<'_>,
+        handle: ArenaHandle,
+        member: Member,
+        next: Option<Value>,
+    ) -> Result<PreparedMember, MemberFault> {
+        self.prepare_member_ownership(registration, access, handle, member, next, &[], &[])
+    }
+    /// A member write and its evaluated operands share one source frontier.
+    /// Consuming an RHS transfers its occurrence into the member. A result or
+    /// binding alias is separately named, with its own canonical occurrence.
+    #[expect(clippy::too_many_arguments, reason = "one atomic source member event")]
+    pub fn prepare_member_ownership(
+        &self,
+        registration: &mut Registration<'_>,
+        access: &Access<'_>,
+        handle: ArenaHandle,
+        member: Member,
+        next: Option<Value>,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<PreparedMember, MemberFault> {
+        let arena = registration.arena();
+        let entity = arena.identify(handle)?;
+        if self.entity_holding(entity, access)?.is_none() {
+            return Err(invalid("member owner is absent").into());
+        }
+        let mut handles = vec![handle];
+        if let Some(handle) = next.and_then(|value| value.handle()) {
+            handles.push(handle);
+        }
+        if let Member::Table(key) = member
+            && let Some(handle) = key.handle()
+        {
+            handles.push(handle);
+        }
+        for (_, value) in outputs {
+            match value {
+                RootValue::Value(value) => handles.extend(value.handle()),
+                RootValue::Capture(handle) => handles.push(*handle),
+                RootValue::Existing(_) | RootValue::Frame => {}
+            }
+        }
+        let mut remove = Holding::scalar(0);
+        let mut add = Holding::scalar(0);
+        match member {
+            Member::List(index) => {
+                let len = match arena.body(handle)? {
+                    Body::List(sequence) => sequence.len,
+                    _ => return Err(NativeError::Decline.into()),
+                };
+                let old = arena.item(handle, index)?;
+                if index > len || (old.is_none() && next.is_none()) {
+                    return Err(invalid("member position is absent").into());
+                }
+                if let Some(value) = old {
+                    remove = Holding::from_native(arena, access, &value)?;
+                }
+                if let Some(value) = next {
+                    add = Holding::from_native(arena, access, &value)?;
+                }
+            }
+            Member::Variable => {
+                let old = arena.cell(handle)?;
+                let next = next.ok_or_else(|| invalid("a variable cannot remove its member"))?;
+                remove = Holding::from_native(arena, access, &old)?;
+                add = Holding::from_native(arena, access, &next)?;
+            }
+            Member::Table(key) => {
+                let record = match arena.body(handle)? {
+                    Body::Record(_) => true,
+                    Body::Map(_) | Body::Set(_) => false,
+                    _ => return Err(NativeError::Decline.into()),
+                };
+                let old = arena.logical_entry(handle, &key)?;
+                match (old, next) {
+                    (Some((old_key, value)), None) => {
+                        remove = entry(arena, access, old_key, value, record)?;
+                    }
+                    (None, Some(value)) => {
+                        add = entry(arena, access, key, value, record)?;
+                    }
+                    (Some((_, old)), Some(value)) => {
+                        remove = Holding::from_native(arena, access, &old)?;
+                        add = Holding::from_native(arena, access, &value)?;
+                    }
+                    (None, None) => {}
+                }
+            }
+        }
+        let mut pending = Vec::new();
+        add.each_edge(access, &mut |edge| {
+            if let Identity::Object(entity) = edge.target {
+                pending.push(entity);
+            }
+            Ok(())
+        })?;
+        let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
+        let mut changes = self.allocate_membership(arena, access, pending)?;
+        changes.push(Change::Members {
+            entity,
+            remove,
+            add,
+        });
+        changes.push(Change::Roots(roots));
+        // Bind every body actually projected by this journal, including fresh
+        // descendants of an immutable result. The registration borrow prevents
+        // foreign mutation, but its owner can still edit staging before publish.
+        for change in &changes {
+            if let Change::Mutate { entity, .. } = change {
+                handles.push(
+                    arena
+                        .logical_handle(*entity)
+                        .ok_or_else(|| invalid("projected body disappeared"))?,
+                );
+            }
+        }
+        let dependencies = Dependencies::capture(self, arena, &handles)
+            .ok_or_else(|| invalid("member facts are unavailable"))?;
+        Ok(PreparedMember {
+            prepared: self.prepare_event(changes, access)?,
+            dependencies,
+            handle,
+            member,
+            next,
+        })
+    }
+}
+fn entry(
+    arena: &mut Arena,
+    access: &Access<'_>,
+    key: Value,
+    value: Value,
+    record: bool,
+) -> Result<Holding, MemberFault> {
+    if record && !matches!(key, Value::Text(_) | Value::LongText(_)) {
+        return Err(NativeError::Decline.into());
+    }
+    let mut holding = Holding::from_native(arena, access, &key)?;
+    if record {
+        holding.bytes = holding
+            .bytes
+            .checked_sub(Cost::REFERENCE)
+            .ok_or_else(|| invalid("field price underflow"))?;
+    }
+    let value = Holding::from_native(arena, access, &value)?;
+    holding.bytes = holding
+        .bytes
+        .checked_add(value.bytes)
+        .ok_or_else(|| invalid("entry price overflow"))?;
+    value.each_edge(access, &mut |edge| {
+        holding.add_edge(edge.target, edge.count, access)
+    })?;
+    Ok(holding)
+}

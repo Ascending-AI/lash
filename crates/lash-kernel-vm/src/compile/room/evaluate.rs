@@ -1,12 +1,18 @@
-//! Evaluate the source control tree, never a fast path's instruction schedule.
+//! Source control is walked only while forming a checked path. Runtime interval
+//! evaluation uses cached ledger algebra, independently of executor scheduling.
 use super::*;
 
-pub(super) fn prefix(
+pub(super) trait Events {
+    fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
+    fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
+}
+
+pub(super) fn walk(
     source: &Source,
     at: &Site,
-    execution: &mut impl Execution,
+    events: &mut impl Events,
     budget: usize,
-) -> Result<CheckedRoom, Refused> {
+) -> Result<ExitKind, Refused> {
     if at.unit != source.site.unit || !at.path.starts_with(&source.site.path) {
         return Err(Refused::Path);
     }
@@ -14,36 +20,47 @@ pub(super) fn prefix(
     for index in &at.path[source.site.path.len()..] {
         node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
     }
-    let mut run = Run {
+    Run {
+        source,
+        events,
+        budget,
+    }
+    .node(node, at)
+}
+
+pub(super) fn prefix(
+    source: &Source,
+    at: &Site,
+    execution: &mut impl Execution,
+    budget: usize,
+) -> Result<CheckedRoom, Refused> {
+    let mut prices = Prices {
         source,
         execution,
-        budget,
         balance: 0,
         peak: 0,
     };
-    let exit = run.node(node, at)?;
+    let exit = walk(source, at, &mut prices, budget)?;
     Ok(CheckedRoom {
         owner: source.owner,
         native: false,
         whole: at == &source.site,
         native_contract: None,
         balance: Balance {
-            peak_extra: u64::try_from(run.peak.max(0)).map_err(|_| Refused::Facts)?,
-            retained_delta: run.balance,
+            peak_extra: u64::try_from(prices.peak.max(0)).map_err(|_| Refused::Facts)?,
+            retained_delta: prices.balance,
         },
         exit,
     })
 }
-struct Run<'a, E> {
+struct Prices<'a, E> {
     source: &'a Source,
     execution: &'a mut E,
-    budget: usize,
     balance: i128,
     peak: i128,
 }
-impl<E: Execution> Run<'_, E> {
+impl<E: Execution> Events for Prices<'_, E> {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
-        self.budget = self.budget.checked_sub(1).ok_or(Refused::Path)?;
         let at = point(site, phase);
         let e = self.source.room.peak_extra.get(&at).ok_or(Refused::Path)?;
         let facts = self.execution.event(&at).ok_or(Refused::Facts)?;
@@ -99,6 +116,20 @@ impl<E: Execution> Run<'_, E> {
     }
     fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
         self.execution.choose(site).ok_or(Refused::Facts)
+    }
+}
+struct Run<'a, E> {
+    source: &'a Source,
+    events: &'a mut E,
+    budget: usize,
+}
+impl<E: Events> Run<'_, E> {
+    fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
+        self.budget = self.budget.checked_sub(1).ok_or(Refused::Path)?;
+        self.events.step(site, phase)
+    }
+    fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
+        self.events.choose(site)
     }
     fn child(
         &mut self,

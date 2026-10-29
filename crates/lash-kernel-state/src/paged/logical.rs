@@ -12,8 +12,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 mod codec;
+mod dependencies;
+pub use dependencies::Dependencies;
 mod graph;
+mod members;
 mod ownership;
+pub use members::{AcceptedMember, Member, MemberFault, PreparedMember};
 pub use ownership::RootValue;
 mod values;
 pub(crate) use values::stream_value_edges;
@@ -123,6 +127,55 @@ impl Holding {
             .ok_or_else(|| invalid("edge count overflow"))?;
         self.links.write(key, Edge { target, count }, access)
     }
+    fn replace_members(
+        &self,
+        remove: &Self,
+        add: &Self,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        let mut next = self.clone();
+        next.bytes = self
+            .bytes
+            .checked_sub(remove.bytes)
+            .and_then(|bytes| bytes.checked_add(add.bytes))
+            .filter(|bytes| *bytes >= Cost::OBJECT)
+            .ok_or_else(|| invalid("member cost overflow or missing header"))?;
+        remove.each_edge(access, &mut |edge| {
+            let key = identity_key(edge.target);
+            let old = next
+                .links
+                .get(&key, access)?
+                .ok_or_else(|| invalid("removed member edge is absent"))?;
+            let count = old
+                .count
+                .checked_sub(edge.count)
+                .ok_or_else(|| invalid("member edge underflow"))?;
+            if count == 0 {
+                next.links.remove(&key, access)?;
+            } else {
+                next.links.write(
+                    key,
+                    Edge {
+                        target: edge.target,
+                        count,
+                    },
+                    access,
+                )?;
+            }
+            Ok(())
+        })?;
+        add.each_edge(access, &mut |edge| {
+            next.add_edge(edge.target, edge.count, access)
+        })?;
+        Ok(next)
+    }
+    pub fn visit_edges(
+        &self,
+        access: &Access<'_>,
+        visit: &mut dyn FnMut(Identity, u64) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        self.each_edge(access, &mut |edge| visit(edge.target, edge.count))
+    }
     fn each_edge(
         &self,
         access: &Access<'_>,
@@ -205,7 +258,8 @@ impl State {
     }
 }
 
-/// Source changes within one indivisible event, in source evaluation order.
+/// Source changes in source evaluation order. Each entry is a frontier unless
+/// assembled by a checked indivisible-event builder such as prepare_ownership.
 /// A Roots change transfers ownership atomically: new edges are retained
 /// before old ones are released, including self-aliasing replacements.
 pub enum Change {
@@ -228,6 +282,12 @@ pub enum Change {
         entity: EntityId,
         body: Holding,
     },
+    /// A checked member edit changes only its local occurrences and edges.
+    Members {
+        entity: EntityId,
+        remove: Holding,
+        add: Holding,
+    },
 }
 
 pub struct Ledger {
@@ -235,6 +295,15 @@ pub struct Ledger {
     identity: Rc<()>,
     revision: u64,
 }
+/// A process-local dependency stamp. Every committed owner, member, departure
+/// or normalization change invalidates it. It cannot authenticate another run
+/// or survive opening a sealed root. Arena facts carry their own content stamps.
+#[derive(Clone)]
+pub struct Stamp {
+    identity: Rc<()>,
+    revision: u64,
+}
+
 /// A complete staged operation. No semantic tree has changed yet.
 pub struct Prepared {
     identity: Rc<()>,
@@ -297,6 +366,51 @@ impl Ledger {
     pub fn balance(&self) -> Result<Balance, HeapFault> {
         self.state.balance()
     }
+    pub fn stamp(&self) -> Stamp {
+        Stamp {
+            identity: Rc::clone(&self.identity),
+            revision: self.revision,
+        }
+    }
+    pub fn is_current(&self, stamp: &Stamp) -> bool {
+        Rc::ptr_eq(&self.identity, &stamp.identity) && self.revision == stamp.revision
+    }
+    pub fn entity_holding(
+        &self,
+        entity: EntityId,
+        access: &Access<'_>,
+    ) -> Result<Option<Holding>, HeapFault> {
+        Ok(self
+            .state
+            .entities
+            .get(&entity_key(entity), access)?
+            .map(|entity| entity.body))
+    }
+    /// The exact source-retained release of a group at this frontier. Aliases
+    /// release a body once; a cycle remains itemized until normalization.
+    pub fn release_cost(&self, owners: &[Owner], access: &Access<'_>) -> Result<u64, HeapFault> {
+        let before = self.balance()?.total()?;
+        let prepared = self.prepare(
+            [Change::Roots(
+                owners.iter().map(|owner| (*owner, None)).collect(),
+            )],
+            access,
+        )?;
+        before
+            .checked_sub(prepared.balance()?.total()?)
+            .ok_or_else(|| invalid("release increased holdings"))
+    }
+    pub fn prepare_at(
+        &self,
+        stamp: &Stamp,
+        changes: impl IntoIterator<Item = Change>,
+        access: &Access<'_>,
+    ) -> Result<Prepared, HeapFault> {
+        if !self.is_current(stamp) {
+            return Err(invalid("stale source facts"));
+        }
+        self.prepare(changes, access)
+    }
     /// A callback, cold load or safe-point handoff expires outstanding
     /// capabilities even when no logical holding changes. Price stays constant.
     pub fn handoff(&mut self) -> Result<(), HeapFault> {
@@ -317,6 +431,23 @@ impl Ledger {
         &self,
         changes: impl IntoIterator<Item = Change>,
         access: &Access<'_>,
+    ) -> Result<Prepared, HeapFault> {
+        self.prepare_changes(changes, access, true)
+    }
+    /// Headers, member edges and consumed operands are mechanical parts of
+    /// one source event. Their staging order creates no guest-visible peak.
+    fn prepare_event(
+        &self,
+        changes: impl IntoIterator<Item = Change>,
+        access: &Access<'_>,
+    ) -> Result<Prepared, HeapFault> {
+        self.prepare_changes(changes, access, false)
+    }
+    fn prepare_changes(
+        &self,
+        changes: impl IntoIterator<Item = Change>,
+        access: &Access<'_>,
+        frontiers: bool,
     ) -> Result<Prepared, HeapFault> {
         let before = self.balance()?.total()?;
         let mut edit = Edit {
@@ -350,6 +481,22 @@ impl Ledger {
                     edit.retain(&body)?;
                     edit.fresh.push(entity);
                 }
+                Change::Members {
+                    entity,
+                    remove,
+                    add,
+                } => {
+                    let key = entity_key(entity);
+                    let mut record = edit
+                        .state
+                        .entities
+                        .get(&key, access)?
+                        .ok_or_else(|| invalid("mutated entity is absent"))?;
+                    record.body = record.body.replace_members(&remove, &add, access)?;
+                    edit.state.entities.write(key, record, access)?;
+                    edit.retain(&add)?;
+                    edit.release(&remove, false)?;
+                }
                 Change::Mutate { entity, body } => {
                     if body.bytes < Cost::OBJECT {
                         return Err(invalid("entity has no logical header"));
@@ -366,10 +513,13 @@ impl Ledger {
                     edit.release(&old, false)?;
                 }
             }
-            peak = peak.max(edit.state.balance()?.total()?);
+            if frontiers {
+                peak = peak.max(edit.state.balance()?.total()?);
+            }
         }
         edit.zero.extend(std::mem::take(&mut edit.fresh));
         edit.release_zero(false)?;
+        peak = peak.max(edit.state.balance()?.total()?);
         Ok(Prepared {
             identity: Rc::clone(&self.identity),
             revision: self.revision,

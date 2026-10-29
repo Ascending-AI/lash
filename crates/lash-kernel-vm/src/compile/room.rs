@@ -14,6 +14,9 @@ use std::sync::{Arc, OnceLock};
 mod bulk;
 mod derive;
 mod evaluate;
+mod interval;
+mod root_owners;
+pub(crate) use interval::{CompiledInterval, Selection};
 mod verify;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -127,43 +130,44 @@ impl Amount {
     }
     fn evaluate(&self, facts: &dyn Facts) -> Option<i128> {
         self.terms.iter().try_fold(self.fixed, |sum, (m, c)| {
-            let value = match m {
-                Measure::CallPeak { at, callee } => i128::from(
-                    facts
-                        .call(at, *callee)?
-                        .for_call(*callee, facts.resolved(at))?
-                        .peak_extra,
-                ),
-                Measure::CallDelta { at, callee } => {
-                    facts
-                        .call(at, *callee)?
-                        .for_call(*callee, facts.resolved(at))?
-                        .retained_delta
-                }
-                Measure::MemberGrowth(at) => {
-                    facts.measure(&Measure::MemberDelta(at.clone()))?.max(0)
-                }
-                Measure::NativeScratch { at, function } => {
-                    let call = facts.call(at, CallSource::Native(*function))?;
-                    call.for_call(CallSource::Native(*function), None)?;
-                    i128::from(call.native_contract.as_ref()?.peak_scratch_bytes()?)
-                }
-                Measure::NativeRelease { at, callee, owners } => {
-                    let called = facts.call(at, *callee)?;
-                    called.for_call(*callee, facts.resolved(at))?;
-                    if called.native {
-                        facts.measure(&Measure::Release(owners.clone()))?
-                    } else {
-                        0
-                    }
-                }
-                _ => facts.measure(m)?,
-            };
-            if value < 0 && !matches!(m, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
-                return None;
-            }
-            sum.checked_add(value.checked_mul(*c)?)
+            sum.checked_add(Self::measure(m, facts)?.checked_mul(*c)?)
         })
+    }
+    fn measure(m: &Measure, facts: &dyn Facts) -> Option<i128> {
+        let value = match m {
+            Measure::CallPeak { at, callee } => i128::from(
+                facts
+                    .call(at, *callee)?
+                    .for_call(*callee, facts.resolved(at))?
+                    .peak_extra,
+            ),
+            Measure::CallDelta { at, callee } => {
+                facts
+                    .call(at, *callee)?
+                    .for_call(*callee, facts.resolved(at))?
+                    .retained_delta
+            }
+            Measure::MemberGrowth(at) => facts.measure(&Measure::MemberDelta(at.clone()))?.max(0),
+            Measure::NativeScratch { at, function } => {
+                let call = facts.call(at, CallSource::Native(*function))?;
+                call.for_call(CallSource::Native(*function), None)?;
+                i128::from(call.native_contract.as_ref()?.peak_scratch_bytes()?)
+            }
+            Measure::NativeRelease { at, callee, owners } => {
+                let called = facts.call(at, *callee)?;
+                called.for_call(*callee, facts.resolved(at))?;
+                if called.native {
+                    facts.measure(&Measure::Release(owners.clone()))?
+                } else {
+                    0
+                }
+            }
+            _ => facts.measure(m)?,
+        };
+        if value < 0 && !matches!(m, Measure::MemberDelta(_) | Measure::CallDelta { .. }) {
+            return None;
+        }
+        Some(value)
     }
 }
 
@@ -233,13 +237,23 @@ pub(crate) struct SourceRoom {
 
 /// Immutable source authority retained separately from the projections. The
 /// verifier reads this tree, not a second consumer of SourceRoom's formulas.
+pub(super) struct BindingSlot {
+    pub(super) declared: Site,
+    pub(super) name: Name,
+    pub(super) shared: bool,
+    pub(super) index: u32,
+    pub(super) borrowed: bool,
+}
+
 pub(crate) struct Source {
+    bindings: Box<[BindingSlot]>,
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) site: Site,
     description: OnceLock<Box<Description>>,
     seed: Option<Seed>,
     verified: OnceLock<Result<(), Refused>>,
     owners: OnceLock<Result<Arc<OwnerSlots>, Refused>>,
+    intervals: std::sync::Mutex<BTreeMap<interval::Key, Arc<CompiledInterval>>>,
 }
 
 /// Source selectors receive stable indices within this exact immutable body.
@@ -249,6 +263,9 @@ pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
     slots: BTreeMap<Owner, u32>,
+    scopes: BTreeMap<Owner, Site>,
+    aliases: BTreeMap<Owner, Owner>,
+    binding_slots: BTreeMap<Owner, (u32, bool)>,
 }
 impl OwnerSlots {
     pub(crate) fn get(&self, owner: &Owner) -> Option<u32> {
@@ -262,7 +279,6 @@ impl OwnerSlots {
 struct Seed {
     unit: UnitBody,
     params: Box<[Name]>,
-    shared: Vec<((Site, Name), bool)>,
     catalog: Arc<doc::FunctionRegistry>,
     private: std::collections::BTreeSet<Name>,
 }
@@ -408,7 +424,15 @@ impl std::ops::Deref for Source {
                 self.site.clone(),
                 body,
                 &seed.params,
-                seed.shared.iter().cloned().collect(),
+                self.bindings
+                    .iter()
+                    .map(|binding| {
+                        (
+                            (binding.declared.clone(), binding.name.clone()),
+                            binding.shared,
+                        )
+                    })
+                    .collect(),
                 seed.catalog.as_ref(),
                 &seed.private,
             ))
@@ -416,6 +440,24 @@ impl std::ops::Deref for Source {
     }
 }
 impl Source {
+    pub(crate) fn binding_root(
+        &self,
+        index: u32,
+        task: doc::TaskId,
+        invocation: u64,
+    ) -> Option<lash_kernel_state::kernel_internals::logical::Owner> {
+        use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
+        let binding = self.bindings.get(index as usize)?;
+        (binding.index == index).then_some(Root::Value {
+            task,
+            depth: invocation,
+            slot: if binding.borrowed {
+                Slot::Capture(index)
+            } else {
+                Slot::Binding(index)
+            },
+        })
+    }
     #[cfg(test)]
     pub(crate) fn is_derived(&self) -> bool {
         self.description.get().is_some()
@@ -426,20 +468,21 @@ impl Source {
         site: Site,
         unit: UnitBody,
         params: &[Name],
-        shared: Vec<((Site, Name), bool)>,
+        bindings: Vec<BindingSlot>,
         catalog: Arc<doc::FunctionRegistry>,
         private: &std::collections::BTreeSet<Name>,
     ) -> Self {
         Self {
             owner,
             site,
+            bindings: bindings.into(),
             description: OnceLock::new(),
             verified: OnceLock::new(),
             owners: OnceLock::new(),
+            intervals: Default::default(),
             seed: Some(Seed {
                 unit,
                 params: params.into(),
-                shared,
                 catalog,
                 private: private.clone(),
             }),
@@ -466,10 +509,12 @@ impl Source {
         Self {
             owner,
             site,
+            bindings: Box::new([]),
             description: OnceLock::from(Box::new(description)),
             seed: None,
             verified: OnceLock::new(),
             owners: OnceLock::new(),
+            intervals: Default::default(),
         }
     }
     fn form(
@@ -602,6 +647,27 @@ impl Source {
                 for exit in &self.room.exits {
                     owners.extend(exit.owners.iter().cloned());
                 }
+                for binding in &self.bindings {
+                    owners.insert(Owner::Binding {
+                        declared: binding.declared.clone(),
+                        name: binding.name.clone(),
+                    });
+                }
+                for name in &self.params {
+                    owners.insert(Owner::Binding {
+                        declared: self.site.clone(),
+                        name: name.clone(),
+                    });
+                }
+                for ((declared, name), shared) in &self.shared {
+                    if *shared && declared == &self.site {
+                        owners.insert(Owner::Binding {
+                            declared: declared.clone(),
+                            name: name.clone(),
+                        });
+                    }
+                }
+                let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
                 let slots = owners
                     .into_iter()
                     .enumerate()
@@ -613,6 +679,9 @@ impl Source {
                     owner: self.owner,
                     source: self.site.clone(),
                     slots,
+                    scopes,
+                    aliases,
+                    binding_slots,
                 }))
             })
             .clone()

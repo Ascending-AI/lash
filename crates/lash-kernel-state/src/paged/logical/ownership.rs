@@ -14,6 +14,19 @@ pub enum RootValue<'a> {
 }
 
 impl Ledger {
+    pub fn prepare_ownership_at(
+        &self,
+        stamp: &Stamp,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<Prepared, HeapFault> {
+        if !self.is_current(stamp) {
+            return Err(invalid("stale source facts"));
+        }
+        self.prepare_ownership(arena, access, inputs, outputs)
+    }
     /// Stage one source ownership frontier and newly reached entity membership.
     /// Inputs must exist. Replacing a destination must consume its old owner.
     /// This does not refresh existing mutable bodies from resident storage:
@@ -25,6 +38,20 @@ impl Ledger {
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<Prepared, HeapFault> {
+        let mut pending = Vec::new();
+        let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
+        let mut changes = self.allocate_membership(arena, access, pending)?;
+        changes.push(Change::Roots(roots));
+        self.prepare_event(changes, access)
+    }
+    pub(super) fn ownership_changes(
+        &self,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+        pending: &mut Vec<EntityId>,
+    ) -> Result<Vec<(Owner, Option<Holding>)>, HeapFault> {
         let mut consumed = BTreeSet::new();
         let mut roots = BTreeMap::new();
         for owner in inputs {
@@ -37,7 +64,6 @@ impl Ledger {
             roots.insert(*owner, None);
         }
         let mut produced = BTreeSet::new();
-        let mut pending = Vec::new();
         for (owner, value) in outputs {
             if !produced.insert(*owner) {
                 return Err(invalid("source output occurs twice"));
@@ -74,6 +100,14 @@ impl Ledger {
             })?;
             roots.insert(*owner, Some(holding));
         }
+        Ok(roots.into_iter().collect())
+    }
+    pub(super) fn allocate_membership(
+        &self,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        mut pending: Vec<EntityId>,
+    ) -> Result<Vec<Change>, HeapFault> {
         let mut bodies = BTreeMap::new();
         while let Some(entity) = pending.pop() {
             if bodies.contains_key(&entity)
@@ -109,7 +143,30 @@ impl Ledger {
         for (entity, body) in bodies {
             changes.push(Change::Mutate { entity, body });
         }
-        changes.push(Change::Roots(roots.into_iter().collect()));
-        self.prepare(changes, access)
+        Ok(changes)
+    }
+}
+
+impl Prepared {
+    /// Extend an unpublished source journal. Each event sees its predecessor's
+    /// itemized graph, while the accepted frontier stays the original ledger's.
+    pub fn then_ownership(
+        self,
+        arena: &mut Arena,
+        access: &Access<'_>,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<Self, HeapFault> {
+        let staged = Ledger {
+            state: self.next,
+            identity: self.identity,
+            revision: self.revision,
+        };
+        let next = staged.prepare_ownership(arena, access, inputs, outputs)?;
+        Ok(Self {
+            before: self.before,
+            peak: self.peak.max(next.peak),
+            ..next
+        })
     }
 }

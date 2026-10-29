@@ -124,7 +124,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         left: u64,
         right: u64,
         room: u64,
-    ) -> Option<super::super::admission::Accepted> {
+    ) -> Option<crate::admission::Accepted> {
         self.direct_resources(
             super::super::admission::DepthNeed::Compiled(site.depth),
             room,

@@ -674,6 +674,18 @@ impl super::Arena {
         Ok((table, index))
     }
 
+    pub(crate) fn logical_entry(
+        &self,
+        handle: ArenaHandle,
+        key: &Value,
+    ) -> Result<Option<(Value, Value)>, NativeError> {
+        let key = self.key(key)?;
+        let (table, index) = self.table_view(handle)?;
+        find(handle, table, index, &key)?
+            .map(|place| pair(table, place).map(|pair| (pair[0], pair[1])))
+            .transpose()
+    }
+
     /// Writes `value` over the entry under `key`, if the table holds one:
     /// the key keeps its first spelling and position (`K-KEY-003`). A
     /// value write moves no entry, so the table's position proofs stand.
@@ -726,6 +738,8 @@ impl super::Arena {
             .get_mut(place.at * 2 + 1)
             .ok_or(NativeError::Malformed("a table's index names no entry"))?;
         let old = std::mem::replace(held, value);
+        let facts = self.facts_mut(handle)?;
+        facts.content_revision = facts.content_revision.saturating_add(1);
         if !set {
             self.update_flat(handle, Some(&old), Some(&value));
         }
@@ -1206,9 +1220,35 @@ mod tests {
             arena.table_get(floats, &Value::Int(1)).unwrap(),
             Some(Value::Int(12))
         ));
+        let position_version = arena.table_version(words).unwrap();
+        let content_version = arena.content_version(words).unwrap();
+        assert!(arena.content_is(&content_version));
+        let mut foreign = Arena::new();
+        map(
+            &mut foreign,
+            vec![
+                (Value::Int(1), Value::Int(10)),
+                (Value::Int(2), Value::Int(20)),
+            ],
+        );
+        assert!(
+            !foreign.content_is(&content_version),
+            "facts cannot cross arenas"
+        );
         arena
             .table_write(words, float(2.0), Value::Int(22))
             .unwrap();
+        assert_eq!(
+            arena.table_version(words).unwrap(),
+            position_version,
+            "replacing a value preserves entry positions"
+        );
+        assert_ne!(
+            arena.content_version(words).unwrap(),
+            content_version,
+            "ledger facts expire when a value changes at the same position"
+        );
+        assert!(!arena.content_is(&content_version));
         assert_eq!(layout(&arena, words), layout(&arena, floats));
         assert_eq!(keys(&arena, words), ["0:1", "1:2"]);
         assert!(matches!(

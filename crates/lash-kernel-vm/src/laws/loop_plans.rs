@@ -373,6 +373,30 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
                 )
                 .unwrap_or_else(|_| panic!("room corpus compiles"));
             for index in 0..exe.code_count() {
+                let code = exe.code(CodeId(index as u32));
+                use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
+                for slot in 0..code.slots.len() {
+                    let borrowed = code
+                        .captures
+                        .iter()
+                        .any(|capture| capture.inner as usize == slot);
+                    assert_eq!(
+                        code.source_room.binding_root(
+                            slot as u32,
+                            lash_kernel_doc::TaskId::MAIN,
+                            73
+                        ),
+                        Some(Root::Value {
+                            task: lash_kernel_doc::TaskId::MAIN,
+                            depth: 73,
+                            slot: if borrowed {
+                                Slot::Capture(slot as u32)
+                            } else {
+                                Slot::Binding(slot as u32)
+                            }
+                        })
+                    );
+                }
                 assert!(
                     !exe.code(CodeId(index as u32)).source_room.is_derived(),
                     "compilation must not derive source memory programs on the worker path"
@@ -382,6 +406,21 @@ fn source_rooms(check: impl Fn(&crate::compile::room::Source)) {
             for index in 0..exe.code_count() {
                 let code = exe.code(CodeId(index as u32));
                 code.source_room.verify().unwrap();
+                let owners = code.source_room.owner_slots().unwrap();
+                for (index, slot) in code.slots.iter().enumerate() {
+                    let selector = crate::compile::room::Owner::Binding {
+                        declared: slot.declared.clone(),
+                        name: slot.name.clone(),
+                    };
+                    assert_eq!(
+                        owners.root(&selector, lash_kernel_doc::TaskId::MAIN, 73),
+                        code.source_room.binding_root(
+                            index as u32,
+                            lash_kernel_doc::TaskId::MAIN,
+                            73
+                        )
+                    );
+                }
                 let key = (code.source_room.owner, code.source_room.site.clone());
                 let mut sites = std::collections::BTreeMap::new();
                 let mut joins = std::collections::BTreeMap::new();
@@ -554,6 +593,38 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             retained_delta: 16
         }
     );
+    let compiled = source
+        .compile_interval(&source.site, &execution.route, 100)
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &compiled,
+        &source
+            .compile_interval(&source.site, &execution.route, 100)
+            .unwrap()
+    ));
+    assert_eq!(
+        compiled
+            .evaluate_interval(&mut RoomExecution::default())
+            .unwrap()
+            .balance(),
+        Balance {
+            peak_extra: 160,
+            retained_delta: 16
+        }
+    );
+    let mut wrong_path = execution.route.clone();
+    wrong_path.remove(1);
+    assert!(matches!(
+        source.compile_interval(&source.site, &wrong_path, 100),
+        Err(Refused::Exit | Refused::Path)
+    ));
+    assert!(matches!(
+        compiled.evaluate_interval(&mut RoomExecution {
+            tests: 1,
+            ..Default::default()
+        }),
+        Err(Refused::Path)
+    ));
     assert_eq!(
         execution.tests, 2,
         "both source tests execute, including exhaustion"
@@ -810,6 +881,7 @@ fn room_numeric_source() -> crate::compile::room::Source {
 #[derive(Default)]
 struct RoomExecution {
     tests: usize,
+    route: Vec<crate::compile::room::Selection>,
     visited: Vec<crate::compile::room::Point>,
 }
 impl crate::compile::room::Execution for RoomExecution {
@@ -818,11 +890,24 @@ impl crate::compile::room::Execution for RoomExecution {
         point: &crate::compile::room::Point,
     ) -> Option<Box<dyn crate::compile::room::Facts + '_>> {
         self.visited.push(point.clone());
+        self.route.push(crate::compile::room::Selection::Event {
+            at: point.clone(),
+            exit: if point.phase == crate::compile::room::Phase::Commit && point.site.path == [2] {
+                crate::compile::room::ExitKind::Return
+            } else {
+                crate::compile::room::ExitKind::Normal
+            },
+        });
         Some(Box::new(RoomFacts))
     }
-    fn choose(&mut self, _: &lash_kernel_value::sites::Site) -> Option<bool> {
+    fn choose(&mut self, site: &lash_kernel_value::sites::Site) -> Option<bool> {
         self.tests += 1;
-        Some(self.tests == 1)
+        let taken = self.tests == 1;
+        self.route.push(crate::compile::room::Selection::Branch {
+            at: site.clone(),
+            taken,
+        });
+        Some(taken)
     }
 }
 struct RoomFacts;

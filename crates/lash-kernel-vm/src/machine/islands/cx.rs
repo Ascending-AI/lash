@@ -143,7 +143,7 @@ impl Cx<'_> {
     /// reference's member write makes it; `false`, having written nothing,
     /// where the arena must decode first, so that the statement misses.
     #[inline]
-    pub(super) fn commit_write(&mut self, _admission: &super::admission::Accepted<()>) -> bool {
+    pub(super) fn commit_write(&mut self, _admission: &crate::admission::Accepted<()>) -> bool {
         match self.held.take() {
             Some(held) => {
                 self.transient = self.transient.saturating_sub(held.bound);

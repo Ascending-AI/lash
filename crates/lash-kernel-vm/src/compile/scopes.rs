@@ -159,7 +159,16 @@ impl Compiler<'_> {
             scopes
                 .slots
                 .iter()
-                .map(|s| ((s.declared.clone(), s.name.clone()), s.shared))
+                .enumerate()
+                .map(|(index, slot)| room::BindingSlot {
+                    declared: slot.declared.clone(),
+                    name: slot.name.clone(),
+                    shared: slot.shared,
+                    index: index as u32,
+                    borrowed: captures
+                        .iter()
+                        .any(|capture| capture.inner as usize == index),
+                })
                 .collect(),
             Arc::clone(&self.resolve.library.registry),
             self.private,
