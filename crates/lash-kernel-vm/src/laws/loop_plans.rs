@@ -6,6 +6,7 @@
 //! occurrences state it. A closure an island calls keeps the code it found
 //! by its site, as an ordinary call keeps it (FIG-6844).
 
+mod interval;
 mod publication;
 
 use super::embedder::{Embedder, Setup};
@@ -586,6 +587,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     use crate::compile::room::{Balance, Phase, Refused};
     room_shared_binding_growth();
     room_unpooled_immutable_growth();
+    interval::member_read_suffix();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
     assert_eq!(
@@ -613,6 +615,25 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             peak_extra: 160,
             retained_delta: 16
         }
+    );
+    let departure = source
+        .compile_between(
+            &crate::compile::room::Point {
+                site: source.site.child(2),
+                phase: Phase::Commit,
+            },
+            &crate::compile::room::Point {
+                site: source.site.clone(),
+                phase: Phase::Leave,
+            },
+            &execution.route,
+            100,
+        )
+        .unwrap();
+    assert_eq!(
+        departure.exit(),
+        compiled.exit(),
+        "scope exit preserves the pending return"
     );
     let enter = crate::compile::room::Point {
         site: source.site.clone(),

@@ -11,6 +11,7 @@ pub(crate) enum Selection {
 pub(super) struct Key {
     event: bool,
     at: Site,
+    bounds: Option<(Point, Point)>,
     selected: Box<[Selection]>,
 }
 
@@ -124,6 +125,87 @@ pub(crate) struct CompiledInterval {
     whole: bool,
 }
 impl Source {
+    /// Compile the first unpaid event `from` through the included `through`
+    /// exit. `selected` starts at the endpoint sites' lowest common ancestor
+    /// and ends at `through`. Its evaluated prefix authenticates control only
+    /// and is never replayed. The first occurrence of `from` is the entry;
+    /// `through` is the last selected event.
+    pub(crate) fn compile_between(
+        &self,
+        from: &Point,
+        through: &Point,
+        selected: &[Selection],
+        budget: usize,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.verify()?;
+        if selected.len() > budget.min(4096)
+            || !self.room.peak_extra.contains_key(from)
+            || !self.room.peak_extra.contains_key(through)
+            || !matches!(selected.last(), Some(Selection::Event { at, .. }) if at == through)
+        {
+            return Err(Refused::Path);
+        }
+        let key = Key {
+            event: false,
+            at: from.site.clone(),
+            bounds: Some((from.clone(), through.clone())),
+            selected: selected.into(),
+        };
+        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
+        if let Some(interval) = cache.get(&key) {
+            return Ok(Arc::clone(interval));
+        }
+        if cache.keys().filter(|key| !key.event).count() >= 128 {
+            return Err(Refused::Path);
+        }
+        let mut context = from.site.clone();
+        let common = from
+            .site
+            .path
+            .iter()
+            .zip(&through.site.path)
+            .take_while(|(a, b)| a == b)
+            .count();
+        context.path.truncate(common);
+        let mut trace = Trace {
+            source: self,
+            selected,
+            cursor: 0,
+            events: Vec::new(),
+            stop: true,
+        };
+        let exit = evaluate::walk_to(self, &context, &mut trace, budget)?;
+        if trace.cursor != selected.len() {
+            return Err(Refused::Path);
+        }
+        let first = trace
+            .events
+            .iter()
+            .position(|(event, _)| event.point == *from)
+            .ok_or(Refused::Path)?;
+        let route = selected
+            .iter()
+            .position(|selection| matches!(selection, Selection::Event { at, .. } if at == from))
+            .ok_or(Refused::Path)?;
+        let mut variables = 0;
+        let mut steps = Vec::with_capacity(trace.events.len() - first);
+        for (event, selected) in trace.events.into_iter().skip(first) {
+            steps.push(Step::compile(self, event, selected, &mut variables)?);
+        }
+        let interval = Arc::new(CompiledInterval {
+            owner: self.owner,
+            source: self.site.clone(),
+            at: from.site.clone(),
+            route: selected[route..].into(),
+            steps: steps.into(),
+            variables,
+            exit,
+            whole: false,
+        });
+        cache.insert(key, Arc::clone(&interval));
+        Ok(interval)
+    }
+
     /// Exact execution is already at this authenticated source point. Compile
     /// its one event, never a helper body or a numeric replacement for a path.
     /// The finite source event set is cached separately from selected routes.
@@ -144,6 +226,7 @@ impl Source {
         let key = Key {
             event: true,
             at: at.site.clone(),
+            bounds: None,
             selected: vec![Selection::Event {
                 at: at.clone(),
                 exit: selected,
@@ -183,6 +266,7 @@ impl Source {
         let key = Key {
             event: false,
             at: at.clone(),
+            bounds: None,
             selected: selected.into(),
         };
         let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
@@ -197,6 +281,7 @@ impl Source {
             selected,
             cursor: 0,
             events: Vec::new(),
+            stop: false,
         };
         let exit = evaluate::walk(self, at, &mut trace, budget)?;
         if trace.cursor != selected.len() {
@@ -226,8 +311,12 @@ struct Trace<'a> {
     selected: &'a [Selection],
     cursor: usize,
     events: Vec<(Event, ExitKind)>,
+    stop: bool,
 }
 impl evaluate::Events for Trace<'_> {
+    fn selected_end(&self) -> bool {
+        self.stop && self.cursor == self.selected.len()
+    }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
         let expected = point(site, phase);
         let Some(Selection::Event { at, exit }) = self.selected.get(self.cursor) else {

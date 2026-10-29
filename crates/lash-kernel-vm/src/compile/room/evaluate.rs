@@ -5,6 +5,19 @@ use super::*;
 pub(super) trait Events {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
     fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
+    fn selected_end(&self) -> bool {
+        false
+    }
+}
+
+enum Stop {
+    Refused(Refused),
+    Selected(ExitKind),
+}
+impl From<Refused> for Stop {
+    fn from(refused: Refused) -> Self {
+        Self::Refused(refused)
+    }
 }
 
 pub(super) fn walk(
@@ -13,8 +26,35 @@ pub(super) fn walk(
     events: &mut impl Events,
     budget: usize,
 ) -> Result<ExitKind, Refused> {
+    match run(source, at, events, budget) {
+        Ok(exit) => Ok(exit),
+        Err(Stop::Refused(refused)) => Err(refused),
+        Err(Stop::Selected(_)) => Err(Refused::Path),
+    }
+}
+
+/// Validate the ordinary source path until its selected event boundary.
+/// An internal stop is distinct from a guest return, raise or suspension.
+pub(super) fn walk_to(
+    source: &Source,
+    at: &Site,
+    events: &mut impl Events,
+    budget: usize,
+) -> Result<ExitKind, Refused> {
+    match run(source, at, events, budget) {
+        Err(Stop::Selected(exit)) => Ok(exit),
+        Err(Stop::Refused(refused)) => Err(refused),
+        Ok(_) => Err(Refused::Path),
+    }
+}
+fn run(
+    source: &Source,
+    at: &Site,
+    events: &mut impl Events,
+    budget: usize,
+) -> Result<ExitKind, Stop> {
     if at.unit != source.site.unit || !at.path.starts_with(&source.site.path) {
-        return Err(Refused::Path);
+        return Err(Refused::Path.into());
     }
     let mut node = doc::Node::Block(&source.body);
     for index in &at.path[source.site.path.len()..] {
@@ -124,25 +164,32 @@ struct Run<'a, E> {
     budget: usize,
 }
 impl<E: Events> Run<'_, E> {
-    fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
-        self.budget = self.budget.checked_sub(1).ok_or(Refused::Path)?;
-        self.events.step(site, phase)
+    fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Stop> {
+        self.step_departure(site, phase, None)
     }
-    fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
-        self.events.choose(site)
-    }
-    fn child(
+    fn step_departure(
         &mut self,
-        node: doc::Node<'_>,
         site: &Site,
-        index: usize,
-    ) -> Result<ExitKind, Refused> {
+        phase: Phase,
+        departure: Option<ExitKind>,
+    ) -> Result<ExitKind, Stop> {
+        self.budget = self.budget.checked_sub(1).ok_or(Refused::Path)?;
+        let exit = self.events.step(site, phase)?;
+        if self.events.selected_end() {
+            return Err(Stop::Selected(departure.unwrap_or(exit)));
+        }
+        Ok(exit)
+    }
+    fn choose(&mut self, site: &Site) -> Result<bool, Stop> {
+        self.events.choose(site).map_err(Stop::Refused)
+    }
+    fn child(&mut self, node: doc::Node<'_>, site: &Site, index: usize) -> Result<ExitKind, Stop> {
         self.node(
             *node.children().get(index).ok_or(Refused::Path)?,
             &child(site, index),
         )
     }
-    fn node(&mut self, node: doc::Node<'_>, site: &Site) -> Result<ExitKind, Refused> {
+    fn node(&mut self, node: doc::Node<'_>, site: &Site) -> Result<ExitKind, Stop> {
         if matches!(node, doc::Node::Block(_)) {
             self.step(site, Phase::Enter)?;
             let mut exit = ExitKind::Normal;
@@ -160,7 +207,7 @@ impl<E: Events> Run<'_, E> {
             if exit == ExitKind::Normal && *site == self.source.site {
                 self.step(site, Phase::Fallthrough)?;
             }
-            self.step(site, Phase::Leave)?;
+            self.step_departure(site, Phase::Leave, Some(exit))?;
             return Ok(exit);
         }
         match node {
@@ -289,13 +336,18 @@ impl<E: Events> Run<'_, E> {
                         return Ok(cleanup);
                     }
                     if suspended {
-                        self.step(
+                        self.step_departure(
                             site,
                             if cleanup == ExitKind::Normal {
                                 Phase::Restore
                             } else {
                                 Phase::Supersede
                             },
+                            Some(if cleanup == ExitKind::Normal {
+                                exit
+                            } else {
+                                cleanup
+                            }),
                         )?;
                     }
                     if cleanup != ExitKind::Normal {
