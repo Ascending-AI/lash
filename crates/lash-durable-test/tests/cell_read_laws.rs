@@ -1003,7 +1003,7 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
         .iter()
         .filter(|event| event["execution"] == "read")
         .collect();
-    for pair in read_events.chunks_exact(2) {
+    for pair in read_events.as_chunks::<2>().0 {
         let id = pair[0]["call_id"].as_str().unwrap();
         assert_eq!(pair[0]["call_id"], pair[1]["call_id"]);
         assert!(ids.insert(id));

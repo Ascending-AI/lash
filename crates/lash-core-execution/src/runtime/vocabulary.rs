@@ -330,7 +330,7 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
         execution: ToolCallExecution,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        read: Option<ToolReadMetadata>,
+        read: Option<Box<ToolReadMetadata>>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
@@ -348,7 +348,7 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
         execution: ToolCallExecution,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        read: Option<ToolReadMetadata>,
+        read: Option<Box<ToolReadMetadata>>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.

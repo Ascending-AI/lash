@@ -199,7 +199,7 @@ pub async fn observe_tool_read<T>(
     if let Some(observe) = observe {
         observe(crate::TurnEvent::ToolCallStarted {
             execution: crate::ToolCallExecution::Read,
-            read: Some(read.clone()),
+            read: Some(Box::new(read.clone())),
             call_id: call_id.clone(),
             provider_call_id: None,
             name: name.clone(),
@@ -221,7 +221,7 @@ pub async fn observe_tool_read<T>(
             output,
             duration_ms: Some(read.elapsed_us / 1000),
             graph_key: read.graph_key(),
-            read: Some(read),
+            read: Some(Box::new(read)),
         });
     }
     result
