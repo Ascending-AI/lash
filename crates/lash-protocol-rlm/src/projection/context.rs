@@ -4,7 +4,7 @@ use lash_rlm_types::RlmProtocolEvent;
 /// version_surface = "migrate"
 /// format_manifest = "RlmProtocolEvent"
 /// version_guard(roots(RlmEventEnvelope))
-pub const RLM_PROTOCOL_EVENT_VERSION: u32 = 2;
+pub const RLM_PROTOCOL_EVENT_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

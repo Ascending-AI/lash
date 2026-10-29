@@ -186,6 +186,6 @@ pub use llm::types::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "TurnCheckpoint"
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 
 pub mod engine_fault;

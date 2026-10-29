@@ -99,84 +99,18 @@
       "minimum": 0,
       "type": "integer"
     },
-    "PageRefusal": {
-      "description": "Why the parent refused a page exchange. Every refusal ends the\nactivation as infrastructure; none is a guest outcome.",
-      "oneOf": [
-        {
-          "enum": [
-            "unauthorized",
-            "lease_lost",
-            "missing",
-            "corrupt",
-            "deadline",
-            "store_unavailable"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "batch_too_large": {
-              "properties": {
-                "bytes": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "pages": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "pages",
-                "bytes"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "batch_too_large"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "staging_exhausted": {
-              "properties": {
-                "bytes": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "bytes"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "staging_exhausted"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "PageReply": {
-      "description": "The parent's reply.",
+    "PageRequest": {
+      "description": "A worker's page request.",
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "Each demanded page or its own fault, in request order. A later\nfault never discards a successful prefix.",
+          "description": "Read these pages: at most the protocol's batch page and byte bounds.",
           "properties": {
             "read": {
               "properties": {
                 "pages": {
                   "items": {
-                    "$ref": "#/$defs/Result_of_ReadPage_or_PageRefusal"
+                    "$ref": "#/$defs/PageCapability"
                   },
                   "type": "array"
                 }
@@ -194,90 +128,39 @@
         },
         {
           "additionalProperties": false,
-          "description": "A stage capability for each sealed page, in request order.",
+          "description": "Seal these pages into the activation's staging. Each child of each\nenvelope must be authorized by a capability in `children` or be an\nearlier page of this batch.",
           "properties": {
-            "sealed": {
+            "seal": {
               "properties": {
-                "pages": {
+                "children": {
                   "items": {
                     "$ref": "#/$defs/PageCapability"
+                  },
+                  "type": "array"
+                },
+                "pages": {
+                  "items": {
+                    "$ref": "#/$defs/PageEnvelope"
                   },
                   "type": "array"
                 }
               },
               "required": [
-                "pages"
+                "pages",
+                "children"
               ],
               "type": "object"
             }
           },
           "required": [
-            "sealed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "refused": {
-              "$ref": "#/$defs/PageRefusal"
-            }
-          },
-          "required": [
-            "refused"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "ReadPage": {
-      "additionalProperties": false,
-      "description": "One page read, with a capability for each child its envelope declares,\nascending by digest.",
-      "properties": {
-        "children": {
-          "items": {
-            "$ref": "#/$defs/PageCapability"
-          },
-          "type": "array"
-        },
-        "page": {
-          "$ref": "#/$defs/PageEnvelope"
-        }
-      },
-      "required": [
-        "page",
-        "children"
-      ],
-      "type": "object"
-    },
-    "Result_of_ReadPage_or_PageRefusal": {
-      "oneOf": [
-        {
-          "properties": {
-            "Ok": {
-              "$ref": "#/$defs/ReadPage"
-            }
-          },
-          "required": [
-            "Ok"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "Err": {
-              "$ref": "#/$defs/PageRefusal"
-            }
-          },
-          "required": [
-            "Err"
+            "seal"
           ],
           "type": "object"
         }
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/worker-page-reply/v3",
+  "$id": "https://lash.dev/schemas/worker-page-request/v4",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "maxItems": 2,
   "minItems": 2,
@@ -286,11 +169,11 @@
       "$ref": "#/$defs/PageExchangeId"
     },
     {
-      "$ref": "#/$defs/PageReply"
+      "$ref": "#/$defs/PageRequest"
     }
   ],
-  "title": "Tuple_of_PageExchangeId_and_PageReply",
+  "title": "Tuple_of_PageExchangeId_and_PageRequest",
   "type": "array",
-  "x-lash-schema-version": 3,
+  "x-lash-schema-version": 4,
   "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
 }

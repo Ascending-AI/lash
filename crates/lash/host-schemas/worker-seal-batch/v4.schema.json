@@ -94,7 +94,7 @@
       "type": "array"
     }
   },
-  "$id": "https://lash.dev/schemas/worker-seal-batch/v3",
+  "$id": "https://lash.dev/schemas/worker-seal-batch/v4",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Pages a worker sealed that cross with the frame that hands its run to\nthe parent (a `Parked`, `Sealed` or `Ended`) instead of in a page\nexchange of their own (FIG-6288). The parent admits them exactly as a\n[`PageRequest::Seal`] of the same pages and children, and returns their\nstage capabilities on the run's next `Run`.",
@@ -118,6 +118,6 @@
   ],
   "title": "SealBatch",
   "type": "object",
-  "x-lash-schema-version": 3,
+  "x-lash-schema-version": 4,
   "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
 }
