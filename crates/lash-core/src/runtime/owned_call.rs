@@ -130,7 +130,11 @@ impl OwnedCall<'_> {
         let reads = self.cx.durable_reads().map_err(live)?;
         let now = self.cx.durable_now().await.map_err(live)?;
         let now_ms = u64::try_from(now.0).unwrap_or(0);
-        let per_request = self.budgets.provider().per_request();
+        let per_request = self
+            .budgets
+            .provider()
+            .per_request()
+            .bounded_by(self.budgets.model_total());
         match load_admitted_call(reads, &self.key).await {
             Ok(Some(admitted)) => {
                 // A resend: the stored template under the pinned deadline.

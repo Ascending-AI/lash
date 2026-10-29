@@ -97,7 +97,7 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
         .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
         .with_options(ProviderOptions {
             reliability: crate::CodexProvider::reliability()
-                .request_timeout_ms(Some(5_000))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(5_000.try_into().expect("positive timeout")))
                 .stream_chunk_timeout_ms(Some(2_000)),
             ..ProviderOptions::default()
         });
@@ -338,7 +338,9 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
                 .with_endpoint_urls("http://127.0.0.1:9/unused-sse", server.url.clone())
                 .with_options(ProviderOptions {
                     reliability: CodexProvider::reliability()
-                        .request_timeout_ms(Some(5_000))
+                        .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                            5_000.try_into().expect("positive timeout"),
+                        ))
                         .stream_chunk_timeout_ms(Some(2_000))
                         .base_delay_ms(0)
                         .max_delay_ms(0),
@@ -353,7 +355,7 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             Some(lash_core::provider::StreamTermination::RequireTerminalEvidence);
         let mut config = lash::ExecutionBudgetsConfig::recommended();
         config.provider = lash::ProviderAttemptLimits::new(
-            Duration::from_secs(5),
+            lash_protocol_types::RequestBound::Bounded(Duration::from_secs(5)),
             Duration::from_secs(5),
             Duration::from_secs(2),
             max_attempts,

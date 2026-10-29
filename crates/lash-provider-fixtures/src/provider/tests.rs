@@ -205,7 +205,9 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout_ms(Some(1))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    1.try_into().expect("positive timeout"),
+                ))
                 .stream_chunk_timeout_ms(Some(1)),
             ..ProviderOptions::default()
         })
@@ -255,6 +257,133 @@ async fn scripted_transport_response_start_gate_timeout_uses_production_timeout_
     assert!(exchanges[0].response.event_names.is_empty());
 }
 
+/// FIG-7559: a producing stream may outlive the inherited 60 s request bound.
+#[tokio::test(start_paused = true)]
+async fn unbounded_request_allows_progress_past_sixty_seconds() {
+    for kind in ["openai-compatible", "openai", "anthropic", "google_oauth"] {
+        let start = tokio::time::Instant::now();
+        let response = unbounded_scripted_call(kind, false)
+            .await
+            .expect("an active unbounded stream completes");
+        assert_eq!(response.response.full_text(), "answer", "{kind}");
+        assert!(start.elapsed() > Duration::from_secs(60), "{kind}");
+    }
+}
+
+/// FIG-7559: disabling the request timer must preserve the idle timeout cause.
+#[tokio::test(start_paused = true)]
+async fn unbounded_request_still_fails_on_chunk_idle() {
+    for kind in ["openai-compatible", "openai", "anthropic", "google_oauth"] {
+        let start = tokio::time::Instant::now();
+        let failure = unbounded_scripted_call(kind, true)
+            .await
+            .expect_err("a silent stream times out");
+        assert_eq!(failure.error.kind, ProviderFailureKind::Timeout, "{kind}");
+        assert_eq!(
+            failure.error.code,
+            Some(lash_core::FailureCode::lash(TurnFailureCode::Timeout)),
+            "{kind}"
+        );
+        assert!(
+            failure.error.message.contains("chunk"),
+            "{kind}: {}",
+            failure.error.message
+        );
+        assert!(failure.error.is_retryable(), "{kind}");
+        assert_eq!(start.elapsed(), Duration::from_secs(110), "{kind}");
+    }
+}
+
+async fn unbounded_scripted_call(
+    kind: &str,
+    stall: bool,
+) -> Result<
+    lash_core::provider::ProviderCompletion,
+    Box<lash_core::provider::ProviderCompletionError>,
+> {
+    use crate::runtime_providers::{runtime_provider_components, runtime_script_value_for_text};
+    let mut script = runtime_script_value_for_text(kind, "answer").unwrap();
+    script["request_match"] = json!({"any": true});
+    // SSE comments are real transport chunks, independent of each vendor's protocol.
+    let mut timeline = vec![script["timeline"][0].clone()];
+    timeline[0]["at"] = json!(0);
+    for at in [20_000, 40_000, 60_000, 80_000] {
+        timeline.push(json!({"at": at, "event": "chunk", "payload": {"data": ": keepalive\n\n"}}));
+    }
+    for (index, event) in script["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .enumerate()
+    {
+        let mut event = event.clone();
+        event["at"] = json!(if stall { 120_000 } else { 80_001 } + index as u64);
+        timeline.push(event);
+    }
+    script["timeline"] = json!(timeline);
+    let script = ProviderWireScript::from_json_str(&script.to_string()).unwrap();
+    let schedule = ScriptedTransportSchedule::new();
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts([script.clone()])
+            .unwrap()
+            .with_event_schedule(schedule.clone()),
+    );
+    let (mut handle, metadata, _) = runtime_provider_components(kind, &transport).unwrap();
+    handle = handle.with_clock(Arc::new(StreamTestClock));
+    handle.set_options(ProviderOptions {
+        reliability: ProviderReliability::disabled()
+            .request_timeout(lash_core::provider::RequestTimeout::Unbounded),
+        ..Default::default()
+    });
+    let mut request = request(Some(LlmEventSender::new(|_| {})));
+    request.model = lash_protocol_types::llm_profile::LlmProfileConfig::new(
+        lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
+            lash_protocol_types::llm_profile::LlmProfileKey::new("request-bound"),
+            metadata,
+        ),
+    );
+    let budgets =
+        lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
+            provider: lash_protocol_types::ProviderAttemptLimits::new(
+                lash_protocol_types::RequestBound::Unbounded,
+                Duration::from_secs(10),
+                Duration::from_secs(30),
+                1,
+            )
+            .unwrap(),
+            ..lash_protocol_types::ExecutionBudgetsConfig::recommended()
+        })
+        .unwrap();
+    let mut task = tokio::spawn(async move {
+        handle
+            .complete(
+                request,
+                lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                    max_unsafe_retries: 1,
+                    max_duplicate_cost_tokens: None,
+                },
+                budgets,
+                &lash_core::provider::NoSlotDeliveries,
+            )
+            .await
+    });
+    let release = async {
+        let mut previous = 0;
+        for (index, event) in script.timeline().iter().enumerate() {
+            schedule.wait_until_blocked(0, index).await;
+            tokio::time::sleep(Duration::from_millis(event.at() - previous)).await;
+            schedule.release(0, index, event.event_name(), event.at());
+            previous = event.at();
+        }
+    };
+    let result = tokio::select! {
+        result = &mut task => result.unwrap(),
+        () = release => task.await.unwrap(),
+    };
+    result.map_err(Box::new)
+}
+
 #[tokio::test]
 async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
     let schedule = ScriptedTransportSchedule::new();
@@ -276,7 +405,9 @@ async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
     let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout_ms(Some(1))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    1.try_into().expect("positive timeout"),
+                ))
                 .stream_chunk_timeout_ms(Some(1)),
             ..ProviderOptions::default()
         })
@@ -822,7 +953,9 @@ async fn stalled_stream_retains_transport_evidence() {
         handle = handle.with_clock(Arc::new(StreamTestClock));
         handle.set_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout_ms(Some(1000))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    1000.try_into().expect("positive timeout"),
+                ))
                 .stream_chunk_timeout_ms(Some(100)),
             ..Default::default()
         });

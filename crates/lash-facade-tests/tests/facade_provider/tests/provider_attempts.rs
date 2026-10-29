@@ -722,7 +722,9 @@ mod facade_settings {
             let mut options = ProviderOptions::standard();
             options.reliability = ProviderReliability::standard()
                 .response_start_timeout_ms(Some(7))
-                .request_timeout_ms(Some(7));
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    7.try_into().expect("positive timeout"),
+                ));
             options.response_body_bytes = body_limit;
             options.sse_event_bytes = event_limit;
             options.sse_total_bytes = total_limit;
@@ -1276,7 +1278,7 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     let budgets = lash::ExecutionBudgets::new(lash::ExecutionBudgetsConfig {
         model_total: std::time::Duration::from_secs(2),
         provider: lash::ProviderAttemptLimits::new(
-            std::time::Duration::from_secs(2),
+            lash_protocol_types::RequestBound::Bounded(std::time::Duration::from_secs(2)),
             std::time::Duration::from_secs(2),
             std::time::Duration::from_secs(2),
             1,

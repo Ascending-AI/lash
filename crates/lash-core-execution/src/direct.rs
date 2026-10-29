@@ -844,8 +844,13 @@ mod tests {
         let short = std::time::Duration::from_millis(50);
         let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
             model_total: short,
-            provider: crate::ProviderAttemptLimits::new(short, short, short, 1)
-                .expect("valid provider limits"),
+            provider: crate::ProviderAttemptLimits::new(
+                lash_protocol_types::RequestBound::Bounded(short),
+                short,
+                short,
+                1,
+            )
+            .expect("valid provider limits"),
             ..crate::ExecutionBudgetsConfig::recommended()
         })
         .expect("valid budgets");

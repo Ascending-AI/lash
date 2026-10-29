@@ -561,6 +561,7 @@ pub use lash_protocol_types::PartKind;
 pub use lash_protocol_types::PluginMessage;
 pub use lash_protocol_types::PluginRuntimeEvent;
 pub use lash_protocol_types::ProviderAttemptLimits;
+pub use lash_protocol_types::RequestBound;
 pub use lash_protocol_types::RetainedOutput;
 pub use lash_protocol_types::RetainedValue;
 pub use lash_protocol_types::SessionAppendNode;

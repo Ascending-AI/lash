@@ -160,7 +160,9 @@ fn websocket_test_provider_with_timeouts(
     .with_transport(transport)
     .with_options(ProviderOptions {
         reliability: crate::CodexProvider::reliability()
-            .request_timeout_ms(Some(request_timeout_ms))
+            .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                request_timeout_ms.try_into().expect("positive timeout"),
+            ))
             .stream_chunk_timeout_ms(chunk_timeout_ms),
         ..ProviderOptions::default()
     })
@@ -1514,7 +1516,11 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
         "ws://127.0.0.1:9/unused".to_string(),
     )
     .with_options(ProviderOptions {
-        reliability: crate::CodexProvider::reliability().request_timeout_ms(Some(5_000)),
+        reliability: crate::CodexProvider::reliability().request_timeout(
+            lash_core::provider::RequestTimeout::Bounded(
+                5_000.try_into().expect("positive timeout"),
+            ),
+        ),
         ..ProviderOptions::default()
     });
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -1593,7 +1599,9 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
         websocket_test_provider(CodexTransport::Websocket, http.url.clone(), ws.url.clone())
             .with_options(ProviderOptions {
                 reliability: crate::CodexProvider::reliability()
-                    .request_timeout_ms(Some(5_000))
+                    .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                        5_000.try_into().expect("positive timeout"),
+                    ))
                     .stream_chunk_timeout_ms(Some(50))
                     .max_attempts(Some(2))
                     .base_delay_ms(0)

@@ -343,7 +343,7 @@ async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
         turn_hook_phase: std::time::Duration::from_secs(9),
         stop_grace: std::time::Duration::from_secs(1),
         provider: crate::ProviderAttemptLimits::new(
-            std::time::Duration::from_secs(30),
+            lash_protocol_types::RequestBound::Bounded(std::time::Duration::from_secs(30)),
             std::time::Duration::from_secs(10),
             std::time::Duration::from_secs(10),
             2,

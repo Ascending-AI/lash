@@ -176,7 +176,7 @@ async fn a_provider_gets_one_terminal_per_attempt_and_both_cancellation_waits_ar
                 model_total: Duration::from_secs(1),
                 stop_grace: Duration::from_millis(500),
                 provider: lash_protocol_types::ProviderAttemptLimits::new(
-                    Duration::from_secs(1),
+                    lash_protocol_types::RequestBound::Bounded(Duration::from_secs(1)),
                     Duration::from_secs(1),
                     Duration::from_secs(1),
                     2,

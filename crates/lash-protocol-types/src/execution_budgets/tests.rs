@@ -25,7 +25,7 @@ fn default_budgets_construct_and_every_refusal_fires() {
             provider.chunk_idle(),
             provider.max_attempts()
         ),
-        (5 * MIN, 2 * MIN, 2 * MIN, 4)
+        (RequestBound::Bounded(5 * MIN), 2 * MIN, 2 * MIN, 4)
     );
 
     let refused = |config: ExecutionBudgetsConfig| {
@@ -87,9 +87,21 @@ fn default_budgets_construct_and_every_refusal_fires() {
         );
     }
 
+    for (start, idle, field) in [
+        (Duration::ZERO, MIN, "provider.response_start"),
+        (MIN, Duration::ZERO, "provider.chunk_idle"),
+        (MAX_EXECUTION_BUDGET + MIN, MIN, "provider.response_start"),
+        (MIN, MAX_EXECUTION_BUDGET + MIN, "provider.chunk_idle"),
+    ] {
+        assert!(matches!(
+            ProviderAttemptLimits::new(RequestBound::Unbounded, start, idle, 1),
+            Err(ExecutionBudgetsError::OutOfRange { field: found, .. }) if found == field
+        ));
+    }
+
     for attempts in [0, MAX_PROVIDER_ATTEMPTS + 1, u32::MAX] {
         assert_eq!(
-            ProviderAttemptLimits::new(5 * MIN, 2 * MIN, 2 * MIN, attempts),
+            ProviderAttemptLimits::new(RequestBound::Bounded(5 * MIN), 2 * MIN, 2 * MIN, attempts),
             Err(ExecutionBudgetsError::UnboundedRetry {
                 value: attempts,
                 max: MAX_PROVIDER_ATTEMPTS
@@ -97,14 +109,14 @@ fn default_budgets_construct_and_every_refusal_fires() {
         );
     }
     assert!(matches!(
-        ProviderAttemptLimits::new(MIN, 2 * MIN, MIN, 4),
+        ProviderAttemptLimits::new(RequestBound::Bounded(MIN), 2 * MIN, MIN, 4),
         Err(ExecutionBudgetsError::DefaultExceedsCeiling {
             default: "provider.response_start",
             ..
         })
     ));
     assert!(matches!(
-        ProviderAttemptLimits::new(Duration::ZERO, MIN, MIN, 4),
+        ProviderAttemptLimits::new(RequestBound::Bounded(Duration::ZERO), MIN, MIN, 4),
         Err(ExecutionBudgetsError::OutOfRange {
             field: "provider.per_request",
             ..

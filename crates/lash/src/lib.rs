@@ -364,6 +364,7 @@ pub use lash_core::ReasoningRefused;
 pub use lash_core::RecordedLlmProfile;
 pub use lash_core::RegisteredLlmProfile;
 pub use lash_core::RegistrationError;
+pub use lash_core::RequestBound;
 pub use lash_core::Resolution;
 pub use lash_core::ResolveOutcome;
 pub use lash_core::SessionEntry;
@@ -1310,7 +1311,8 @@ pub mod provider {
         CacheRetention, DefaultProviderFailureClassifier, LlmProfileRequestDefaults,
         ProviderCompletion, ProviderCompletionError, ProviderFailureClassifier,
         ProviderRateLimitPermit, ProviderRateLimitPolicy, ProviderRateLimiter, ProviderRateWindow,
-        ProviderReliability, ProviderRetryPolicy, RouteBound, RouteBoundAboveBudget,
+        ProviderReliability, ProviderRetryPolicy, RequestTimeout, RouteBound,
+        RouteBoundAboveBudget,
     };
     pub use lash_core::{
         AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

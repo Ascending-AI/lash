@@ -108,7 +108,7 @@ fn budgets() -> lash_protocol_types::ExecutionBudgets {
     lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
         model_total: 60 * SECOND,
         provider: lash_protocol_types::ProviderAttemptLimits::new(
-            40 * SECOND,
+            lash_protocol_types::RequestBound::Bounded(40 * SECOND),
             20 * SECOND,
             20 * SECOND,
             4,
@@ -269,11 +269,22 @@ impl Provider for RecordingProvider {
 async fn complete_route(
     reliability: ProviderReliability,
 ) -> (ProviderCompletionError, Vec<LlmTimeouts>) {
+    complete_route_with_bound(
+        reliability,
+        lash_protocol_types::RequestBound::Bounded(40 * SECOND),
+    )
+    .await
+}
+
+async fn complete_route_with_bound(
+    reliability: ProviderReliability,
+    request_bound: lash_protocol_types::RequestBound,
+) -> (ProviderCompletionError, Vec<LlmTimeouts>) {
     let budgets =
         lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
             model_total: 600 * SECOND,
             provider: lash_protocol_types::ProviderAttemptLimits::new(
-                40 * SECOND,
+                request_bound,
                 15 * SECOND,
                 10 * SECOND,
                 3,
@@ -322,6 +333,43 @@ async fn complete_route(
 /// attempt, typed, instead of running under a clipped bound.
 #[tokio::test(start_paused = true)]
 async fn an_unset_route_bound_is_the_runtimes_and_one_above_it_is_refused() {
+    for policy in [
+        crate::provider::RequestTimeout::Inherit,
+        crate::provider::RequestTimeout::Unbounded,
+    ] {
+        let (_, sent) = complete_route_with_bound(
+            ProviderReliability::default()
+                .request_timeout(policy)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            lash_protocol_types::RequestBound::Unbounded,
+        )
+        .await;
+        assert_eq!(
+            sent,
+            vec![
+                LlmTimeouts {
+                    request_timeout: None,
+                    response_start_timeout: Some(15 * SECOND),
+                    chunk_timeout: Some(10 * SECOND),
+                };
+                3
+            ]
+        );
+    }
+    for invalid in [
+        serde_json::json!(null),
+        serde_json::json!(0),
+        serde_json::json!(60000),
+        serde_json::json!({"policy":"bounded", "milliseconds":0}),
+    ] {
+        assert!(
+            serde_json::from_value::<ProviderReliability>(
+                serde_json::json!({"request_timeout":invalid})
+            )
+            .is_err()
+        );
+    }
     let (_, sent) = complete_route(
         ProviderReliability::default()
             .base_delay_ms(0)
@@ -341,7 +389,9 @@ async fn an_unset_route_bound_is_the_runtimes_and_one_above_it_is_refused() {
 
     let (_, sent) = complete_route(
         ProviderReliability::default()
-            .request_timeout_ms(Some(30_000))
+            .request_timeout(crate::provider::RequestTimeout::Bounded(
+                30_000.try_into().expect("positive timeout"),
+            ))
             .base_delay_ms(0)
             .max_delay_ms(0),
     )
@@ -354,7 +404,16 @@ async fn an_unset_route_bound_is_the_runtimes_and_one_above_it_is_refused() {
 
     for (route, bound) in [
         (
-            ProviderReliability::default().request_timeout_ms(Some(41_000)),
+            ProviderReliability::default()
+                .request_timeout(crate::provider::RequestTimeout::Unbounded),
+            RouteBound::RequestTimeout,
+        ),
+        (
+            ProviderReliability::default().request_timeout(
+                crate::provider::RequestTimeout::Bounded(
+                    41_000.try_into().expect("positive timeout"),
+                ),
+            ),
             RouteBound::RequestTimeout,
         ),
         (

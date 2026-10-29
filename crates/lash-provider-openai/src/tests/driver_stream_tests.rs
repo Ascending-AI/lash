@@ -352,7 +352,9 @@ async fn slow_stream_start_uses_response_start_timeout_classification() {
     let mut provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout_ms(Some(300_000))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    300_000.try_into().expect("positive timeout"),
+                ))
                 .response_start_timeout_ms(Some(20_000))
                 .stream_chunk_timeout_ms(Some(120_000)),
             ..ProviderOptions::default()
@@ -389,7 +391,9 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
     let mut provider = openrouter_provider()
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
-                .request_timeout_ms(Some(300_000))
+                .request_timeout(lash_core::provider::RequestTimeout::Bounded(
+                    300_000.try_into().expect("positive timeout"),
+                ))
                 .response_start_timeout_ms(Some(20_000))
                 .stream_chunk_timeout_ms(Some(1_000)),
             ..ProviderOptions::default()

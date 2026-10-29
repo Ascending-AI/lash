@@ -228,7 +228,10 @@ pub(super) fn start(
             let limit = ExecutionLimit::starting_at(
                 now_ms,
                 Duration::from_millis(millis(pin.deadline).saturating_sub(now_ms)),
-                budgets.provider().per_request(),
+                budgets
+                    .provider()
+                    .per_request()
+                    .bounded_by(budgets.model_total()),
             );
             Ok(ModelStart::Send {
                 pin: ModelPin {
@@ -244,7 +247,10 @@ pub(super) fn start(
                 ExecutionLimit::starting_at(
                     now_ms,
                     Duration::from_millis(millis(deadline).saturating_sub(now_ms)),
-                    budgets.provider().per_request(),
+                    budgets
+                        .provider()
+                        .per_request()
+                        .bounded_by(budgets.model_total()),
                 )
             });
             let limit = budgets.model_call_limit(now_ms, enclosing.as_ref());

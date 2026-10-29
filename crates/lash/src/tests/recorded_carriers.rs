@@ -13,7 +13,7 @@ fn stated_budgets() -> crate::ExecutionBudgets {
         turn_hook_phase: std::time::Duration::from_secs(9),
         stop_grace: std::time::Duration::from_secs(1),
         provider: crate::ProviderAttemptLimits::new(
-            std::time::Duration::from_secs(30),
+            lash_protocol_types::RequestBound::Bounded(std::time::Duration::from_secs(30)),
             std::time::Duration::from_secs(10),
             std::time::Duration::from_secs(10),
             2,

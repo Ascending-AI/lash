@@ -52,13 +52,13 @@ impl std::fmt::Display for RouteBound {
 /// A provider route states a bound above the runtime's provider attempt
 /// limit for it: the call is refused, never run under a silently clipped
 /// bound.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("the provider route's {bound} of {route} is above the runtime's limit of {budget}")]
 pub struct RouteBoundAboveBudget {
     /// Which bound.
     pub bound: RouteBound,
     /// What the route states.
-    pub route: u64,
+    pub route: String,
     /// The runtime's limit for it.
     pub budget: u64,
 }
@@ -405,16 +405,33 @@ impl ResolvedGenerationPolicy {
     }
 }
 
+/// A route's whole-request timeout policy. Milliseconds must be positive.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "policy",
+    content = "milliseconds",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum RequestTimeout {
+    /// Use the runtime's [`lash_protocol_types::ProviderAttemptLimits::per_request`].
+    #[default]
+    Inherit,
+    /// Bound the entire request, including all streamed chunks.
+    Bounded(std::num::NonZeroU64),
+    /// Disable the whole-request timer, subject to the runtime allowing it.
+    Unbounded,
+}
+
 /// A provider route's reliability. Every unset bound is the runtime's: its
 /// [`ExecutionBudgets`](lash_protocol_types::ExecutionBudgets)' provider attempt
 /// limits. A set bound above its limit refuses the call
 /// ([`RouteBoundAboveBudget`]); it is never clipped.
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProviderReliability {
-    /// Whole-request timeout in milliseconds. `None` (or `0`) is the
-    /// runtime's per-request limit.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_timeout: Option<u64>,
+    /// Whole-request policy. Omission inherits the runtime's attempt limit.
+    #[serde(default)]
+    pub request_timeout: RequestTimeout,
     /// Streaming response-start timeout in milliseconds. `None` (or `0`) is
     /// the runtime's response-start limit. Once the response starts, only
     /// the whole-request and inter-chunk timeouts apply. "Start" is the
@@ -434,10 +451,9 @@ pub struct ProviderReliability {
     pub rate_limits: ProviderRateLimitPolicy,
 }
 
-fn whole_millis(duration: Duration) -> u64 {
-    u64::try_from(duration.as_millis())
-        .unwrap_or(u64::MAX)
-        .max(1)
+fn whole_millis(duration: Duration) -> std::num::NonZeroU64 {
+    std::num::NonZeroU64::new(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(std::num::NonZeroU64::MIN)
 }
 
 impl ProviderReliability {
@@ -473,25 +489,49 @@ impl ProviderReliability {
             Some(route) if route <= limit => Ok(route),
             Some(route) => Err(RouteBoundAboveBudget {
                 bound,
-                route,
+                route: route.to_string(),
                 budget: limit,
             }),
         };
         let mut resolved = self.clone();
-        resolved.request_timeout = Some(bound(
-            RouteBound::RequestTimeout,
-            self.request_timeout,
-            whole_millis(limits.per_request()),
-        )?);
+        resolved.request_timeout = match (self.request_timeout, limits.per_request()) {
+            (RequestTimeout::Inherit, lash_protocol_types::RequestBound::Bounded(limit)) => {
+                RequestTimeout::Bounded(whole_millis(limit))
+            }
+            (
+                RequestTimeout::Inherit | RequestTimeout::Unbounded,
+                lash_protocol_types::RequestBound::Unbounded,
+            ) => RequestTimeout::Unbounded,
+            (RequestTimeout::Bounded(route), lash_protocol_types::RequestBound::Unbounded) => {
+                let maximum = whole_millis(lash_protocol_types::MAX_EXECUTION_BUDGET).get();
+                bound(RouteBound::RequestTimeout, Some(route.get()), maximum)?;
+                RequestTimeout::Bounded(route)
+            }
+            (RequestTimeout::Bounded(route), lash_protocol_types::RequestBound::Bounded(limit))
+                if route <= whole_millis(limit) =>
+            {
+                RequestTimeout::Bounded(route)
+            }
+            (route, lash_protocol_types::RequestBound::Bounded(limit)) => {
+                return Err(RouteBoundAboveBudget {
+                    bound: RouteBound::RequestTimeout,
+                    route: match route {
+                        RequestTimeout::Bounded(value) => value.to_string(),
+                        _ => "unbounded".to_string(),
+                    },
+                    budget: whole_millis(limit).get(),
+                });
+            }
+        };
         resolved.response_start_timeout = Some(bound(
             RouteBound::ResponseStartTimeout,
             self.response_start_timeout,
-            whole_millis(limits.response_start()),
+            whole_millis(limits.response_start()).get(),
         )?);
         resolved.chunk_timeout = Some(bound(
             RouteBound::ChunkTimeout,
             self.chunk_timeout,
-            whole_millis(limits.chunk_idle()),
+            whole_millis(limits.chunk_idle()).get(),
         )?);
         resolved.retry.max_attempts = Some(if self.retry.enabled {
             let attempts = bound(
@@ -515,11 +555,14 @@ impl ProviderReliability {
             Some(
                 bound
                     .filter(|value| *value > 0)
-                    .map_or(window, |value| value.min(window)),
+                    .map_or(window.get(), |value| value.min(window.get())),
             )
         };
         Self {
-            request_timeout: clip(self.request_timeout),
+            request_timeout: match self.request_timeout {
+                RequestTimeout::Bounded(value) => RequestTimeout::Bounded(value.min(window)),
+                policy => policy,
+            },
             response_start_timeout: clip(self.response_start_timeout),
             chunk_timeout: clip(self.chunk_timeout),
             ..self.clone()
@@ -531,14 +574,18 @@ impl ProviderReliability {
         let bound =
             |value: Option<u64>| value.filter(|value| *value > 0).map(Duration::from_millis);
         LlmTimeouts {
-            request_timeout: bound(self.request_timeout),
+            request_timeout: match self.request_timeout {
+                RequestTimeout::Bounded(value) => Some(Duration::from_millis(value.get())),
+                RequestTimeout::Inherit | RequestTimeout::Unbounded => None,
+            },
             response_start_timeout: bound(self.response_start_timeout),
             chunk_timeout: bound(self.chunk_timeout),
         }
     }
 
-    pub fn request_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
-        self.request_timeout = timeout_ms;
+    /// Set a whole-request policy explicitly.
+    pub fn request_timeout(mut self, policy: RequestTimeout) -> Self {
+        self.request_timeout = policy;
         self
     }
 

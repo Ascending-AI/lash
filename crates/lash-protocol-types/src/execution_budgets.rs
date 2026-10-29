@@ -18,7 +18,7 @@ use std::time::Duration;
 /// an unbounded retry in all but name.
 pub const MAX_PROVIDER_ATTEMPTS: u32 = 16;
 
-/// The longest bound any budget may hold: 30 days. Every instant a budget is
+/// The longest finite bound any budget may hold: 30 days. Every instant a budget is
 /// added to stays representable in epoch milliseconds.
 pub const MAX_EXECUTION_BUDGET: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
@@ -96,12 +96,33 @@ fn not_above(
     Ok(())
 }
 
+/// Whether a provider attempt has its own whole-request timer.
+/// The enclosing model-call deadline still applies in either case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestBound {
+    /// A positive bound, validated by [`ProviderAttemptLimits::new`].
+    Bounded(Duration),
+    /// No whole-request timer. Response-start and chunk-idle timers remain finite.
+    Unbounded,
+}
+
+impl RequestBound {
+    /// The request's slice inside a finite enclosing stretch.
+    #[must_use]
+    pub fn bounded_by(self, enclosing: Duration) -> Duration {
+        match self {
+            Self::Bounded(bound) => bound.min(enclosing),
+            Self::Unbounded => enclosing,
+        }
+    }
+}
+
 /// The bounds of one provider attempt and the number of attempts a model
 /// call may make. Every bound is clipped to the call's remaining
 /// [`ExecutionBudgets::model_total`] before an attempt starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderAttemptLimits {
-    per_request: Duration,
+    per_request: RequestBound,
     response_start: Duration,
     chunk_idle: Duration,
     max_attempts: NonZeroU32,
@@ -112,25 +133,31 @@ impl ProviderAttemptLimits {
     ///
     /// # Errors
     ///
-    /// A bound out of range, a response-start or chunk-idle bound above the
-    /// whole request, or an attempt count outside `1..=MAX_PROVIDER_ATTEMPTS`.
+    /// A finite bound out of range, a response-start or chunk-idle bound above
+    /// a bounded whole request, or an attempt count outside `1..=MAX_PROVIDER_ATTEMPTS`.
+    /// `Unbounded` removes only the whole-request timer; both sub-bounds are
+    /// required and must remain between 1 ms and [`MAX_EXECUTION_BUDGET`].
     pub fn new(
-        per_request: Duration,
+        per_request: RequestBound,
         response_start: Duration,
         chunk_idle: Duration,
         max_attempts: u32,
     ) -> Result<Self, ExecutionBudgetsError> {
-        let per_request = bounded("provider.per_request", per_request)?;
+        if let RequestBound::Bounded(bound) = per_request {
+            bounded("provider.per_request", bound)?;
+        }
         let response_start = bounded("provider.response_start", response_start)?;
         let chunk_idle = bounded("provider.chunk_idle", chunk_idle)?;
-        not_above(
-            ("provider.response_start", response_start),
-            ("provider.per_request", per_request),
-        )?;
-        not_above(
-            ("provider.chunk_idle", chunk_idle),
-            ("provider.per_request", per_request),
-        )?;
+        if let RequestBound::Bounded(bound) = per_request {
+            not_above(
+                ("provider.response_start", response_start),
+                ("provider.per_request", bound),
+            )?;
+            not_above(
+                ("provider.chunk_idle", chunk_idle),
+                ("provider.per_request", bound),
+            )?;
+        }
         let max_attempts = NonZeroU32::new(max_attempts)
             .filter(|attempts| attempts.get() <= MAX_PROVIDER_ATTEMPTS)
             .ok_or(ExecutionBudgetsError::UnboundedRetry {
@@ -147,7 +174,7 @@ impl ProviderAttemptLimits {
 
     /// The whole-request bound of one attempt.
     #[must_use]
-    pub fn per_request(&self) -> Duration {
+    pub fn per_request(&self) -> RequestBound {
         self.per_request
     }
 
@@ -179,7 +206,7 @@ impl ProviderAttemptLimits {
     #[must_use]
     pub const fn recommended() -> Self {
         Self {
-            per_request: Duration::from_secs(5 * 60),
+            per_request: RequestBound::Bounded(Duration::from_secs(5 * 60)),
             response_start: Duration::from_secs(2 * 60),
             chunk_idle: Duration::from_secs(2 * 60),
             max_attempts: NonZeroU32::MIN.saturating_add(3),
@@ -271,10 +298,12 @@ impl ExecutionBudgets {
         bounded("stop_grace", stop_grace)?;
         // Construction through `ProviderAttemptLimits::new` is the only
         // way to a value, so it is already in range.
-        not_above(
-            ("provider.per_request", provider.per_request),
-            ("model_total", model_total),
-        )?;
+        if let RequestBound::Bounded(bound) = provider.per_request {
+            not_above(
+                ("provider.per_request", bound),
+                ("model_total", model_total),
+            )?;
+        }
         bounded_sum(("model_total", model_total), ("stop_grace", stop_grace))?;
         bounded_sum(
             ("tool_check_phase", tool_check_phase),
@@ -328,8 +357,11 @@ impl ExecutionBudgets {
         now_ms: u64,
         enclosing: Option<&ExecutionLimit>,
     ) -> ExecutionLimit {
-        let own =
-            ExecutionLimit::starting_at(now_ms, self.0.model_total, self.0.provider.per_request);
+        let own = ExecutionLimit::starting_at(
+            now_ms,
+            self.0.model_total,
+            self.0.provider.per_request.bounded_by(self.0.model_total),
+        );
         match enclosing {
             Some(enclosing) => enclosing.nested(now_ms, own),
             None => own,

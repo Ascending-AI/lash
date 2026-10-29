@@ -860,15 +860,33 @@ backs the preset's values. `ExecutionBudgets::new(config)` validates an
 
 `ProviderAttemptLimits::new(per_request, response_start, chunk_idle,
 max_attempts)` states the attempt limits; `ProviderAttemptLimits::recommended()`
-is 5 min per request, 2 min to the response start, 2 min of chunk silence and
-4 attempts. Each bound is clipped to the call's
-remaining `model_total`.
+is `RequestBound::Bounded(Duration::from_secs(300))`, 2 min to the response
+start, 2 min of chunk silence and 4 attempts. Select `RequestBound::Unbounded`
+to allow attempts with no whole-request timer. Response-start and chunk-idle
+bounds are still required and finite. Finite bounds are clipped to the call's
+remaining `model_total`; that separately recorded hard deadline always applies.
+
+A route's `ProviderReliability::request_timeout` is a `RequestTimeout` policy:
+`Inherit` uses the runtime request bound, `Bounded(NonZeroU64)` states positive
+milliseconds, and `Unbounded` explicitly disables that timer. Omission defaults
+to `Inherit`. A bounded runtime rejects an unbounded route, just as it rejects
+a route bound above its ceiling. For an interactive stream without a request
+timer, choose `RequestBound::Unbounded` on the runtime and either `Inherit` or
+`Unbounded` on its route. The `request_timeout(policy)` builder sets this field.
+
+The serialized field is now `{"policy":"inherit"}`,
+`{"policy":"bounded","milliseconds":60000}`, or `{"policy":"unbounded"}`.
+Numeric, null and zero request-timeout values are unsupported. Finite runtime
+and managed route request bounds have the existing 30-day safety maximum.
+`Unbounded` has no request-specific maximum; the finite `model_total` still
+limits the call. Response-start and idle failures keep their timeout causes
+and retry classification for every HTTP/SSE and Codex WebSocket adapter.
 
 `new` refuses with `ExecutionBudgetsError`:
 
 - `OutOfRange`: a bound below 1 ms or above `MAX_EXECUTION_BUDGET` (30 days);
-- `DefaultExceedsCeiling`: `provider.per_request` above
-  `model_total`, or a provider sub-bound above `per_request`;
+- `DefaultExceedsCeiling`: a bounded `provider.per_request` above
+  `model_total`, or a provider sub-bound above a bounded `per_request`;
 - `SumOverflows`: a stretch plus its grace exceeds the maximum;
 - `UnboundedRetry`: `max_attempts` is 0 or above `MAX_PROVIDER_ATTEMPTS` (16).
 
@@ -1639,7 +1657,7 @@ cap; the workbench's upload preset is 1 MiB.
 | S | ECMA regex compile admission | 4096 UTF-16 units, 32 group levels | `PatternLimits`, `Engine::with_limits` | Existing 4096 / 32 protect compiler stack and finite indexed program |
 | H | Model output tokens / reasoning tokens / stop sequences | Model/profile request choice | `LlmGenerationConfig`, model generation defaults and request overrides | Provider capability contract, typed wire refusal for unsupported settings |
 | H | Provider SSE event/line, total, buffered response | 8 MiB / 64 MiB / 16 MiB | `ProviderOptions.{sse_event_bytes,sse_total_bytes,response_body_bytes}` | `u64`, clamped to addressable bytes |
-| H | Provider response-start, total-request, retry, throttle time | Attempts and deadlines inherit runtime; backoff 2–10 s + 500 ms jitter; Retry-After 60 s; courtesy 90 s / 8 calls / ≥1 s | `ProviderOptions.reliability`, `LlmTimeouts`, `ProviderReliability` | Representable durations, explicit zero/none semantics |
+| H | Provider response-start, total-request, retry, throttle time | Attempts and deadlines inherit runtime; backoff 2–10 s + 500 ms jitter; Retry-After 60 s; courtesy 90 s / 8 calls / ≥1 s | `ProviderOptions.reliability`, `LlmTimeouts`, `ProviderReliability` | Finite bounds up to 30 days; `RequestTimeout` explicitly selects inherit, bounded or unbounded |
 | H | Stream content blocks | 1024 | `AnthropicStreamLimits`, provider `with_stream_limits` | Addressable count; checked before indexed allocation |
 | H | MCP catalog pages / items / bytes | 64 / 4096 / 8 MiB | `McpServerConfig.data_limits: McpDataLimits` | Addressable counts/bytes |
 | H | MCP inbound stdio message | 8 MiB | `McpServerConfig.data_limits.stdio_message_bytes` | Addressable bytes |

@@ -472,8 +472,13 @@ impl TurnServices for L3Services {
                 let total = Duration::from_secs(5);
                 ExecutionBudgets::new(ExecutionBudgetsConfig {
                     model_total: total,
-                    provider: ProviderAttemptLimits::new(total, total, total, 1)
-                        .expect("provider limits"),
+                    provider: ProviderAttemptLimits::new(
+                        lash_protocol_types::RequestBound::Bounded(total),
+                        total,
+                        total,
+                        1,
+                    )
+                    .expect("provider limits"),
                     ..ExecutionBudgetsConfig::recommended()
                 })
                 .expect("budgets")

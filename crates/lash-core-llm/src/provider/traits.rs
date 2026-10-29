@@ -229,7 +229,12 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         horizon: &LiveCallHorizon,
     ) -> Result<LlmResponse, LlmTransportError> {
         let timeout = self.options().llm_timeouts().request_timeout;
-        let valid_for = timeout.unwrap_or_else(|| horizon.limits.per_request());
+        let valid_for = timeout.unwrap_or_else(|| {
+            horizon
+                .limits
+                .per_request()
+                .bounded_by(lash_protocol_types::MAX_EXECUTION_BUDGET)
+        });
         let prepare = async {
             // A call outside admission is never lowered again.
             let template =

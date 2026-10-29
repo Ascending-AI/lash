@@ -182,8 +182,13 @@ fn tail_budgets(model_total: std::time::Duration) -> lash_core::ExecutionBudgets
     lash_core::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
         model_total,
         stop_grace: TAIL_STOP_GRACE,
-        provider: lash_core::ProviderAttemptLimits::new(model_total, model_total, model_total, 1)
-            .expect("provider limits"),
+        provider: lash_core::ProviderAttemptLimits::new(
+            lash_protocol_types::RequestBound::Bounded(model_total),
+            model_total,
+            model_total,
+            1,
+        )
+        .expect("provider limits"),
         ..lash_core::ExecutionBudgetsConfig::recommended()
     })
     .expect("tail budgets")
@@ -548,8 +553,13 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
             let budgets = lash_core::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
                 model_total: total,
                 stop_grace: TAIL_STOP_GRACE,
-                provider: lash_core::ProviderAttemptLimits::new(total, total, total, 2)
-                    .expect("provider limits"),
+                provider: lash_core::ProviderAttemptLimits::new(
+                    lash_protocol_types::RequestBound::Bounded(total),
+                    total,
+                    total,
+                    2,
+                )
+                .expect("provider limits"),
                 ..lash_core::ExecutionBudgetsConfig::recommended()
             })
             .expect("budgets");

@@ -67,7 +67,7 @@ pub use effect_identity::{
 };
 pub use execution_budgets::{
     ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
-    MAX_EXECUTION_BUDGET, MAX_PROVIDER_ATTEMPTS, ProviderAttemptLimits,
+    MAX_EXECUTION_BUDGET, MAX_PROVIDER_ATTEMPTS, ProviderAttemptLimits, RequestBound,
 };
 pub use frame_key::{FrameKey, FrameKeyError};
 pub use handle::{

@@ -87,7 +87,7 @@ async fn provider_handle_enforces_the_supplied_retry_limit_without_a_second_ceil
     let budgets =
         lash_protocol_types::ExecutionBudgets::new(lash_protocol_types::ExecutionBudgetsConfig {
             provider: lash_protocol_types::ProviderAttemptLimits::new(
-                Duration::from_secs(300),
+                lash_protocol_types::RequestBound::Bounded(Duration::from_secs(300)),
                 Duration::from_secs(120),
                 Duration::from_secs(120),
                 lash_protocol_types::MAX_PROVIDER_ATTEMPTS,
