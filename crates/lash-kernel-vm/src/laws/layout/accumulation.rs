@@ -56,11 +56,32 @@ fn probes(
 type Observation = (
     String,
     Vec<Datum>,
-    Vec<(&'static str, crate::Meters)>,
+    Vec<(&'static str, crate::Meters, [u64; 3])>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
+    Vec<Request>,
 );
 
 fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -> Observation {
+    run_selected(
+        source,
+        record,
+        slice,
+        bounds,
+        layout,
+        super::ExecutionMode::Specialized,
+        false,
+    )
+}
+
+fn run_selected(
+    source: &str,
+    record: bool,
+    slice: u64,
+    bounds: Bounds,
+    layout: Layout,
+    mode: super::ExecutionMode,
+    cold: bool,
+) -> Observation {
     let mut embedder = Embedder::with(
         source,
         Setup {
@@ -76,13 +97,37 @@ fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -
     }
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
     let end = loop {
+        match mode {
+            super::ExecutionMode::Source => embedder.machine.force_source_execution(),
+            super::ExecutionMode::Generic => embedder.machine.force_generic_packets(),
+            super::ExecutionMode::Specialized => {}
+        }
         let step = embedder.run();
         let kind = match &step {
             Step::Ended(_) => "ended",
             Step::Slice => "slice",
             Step::Parked(_) => "parked",
         };
-        stops.push((kind, embedder.machine.meters()));
+        let balance = embedder
+            .machine
+            .logical_balance()
+            .expect("source owner balance");
+        stops.push((
+            kind,
+            embedder.machine.meters(),
+            [
+                balance.entity_local_bytes,
+                balance.root_and_control_bytes,
+                balance.entities,
+            ],
+        ));
+        if cold && !matches!(step, Step::Ended(_)) {
+            checkpoints.push(embedder.machine.semantic_checkpoint());
+            embedder.reopen(layout, true);
+            if record {
+                embedder.machine.record_charges(crate::ChargeTape::new());
+            }
+        }
         match step {
             Step::Ended(End::Finished(finished)) => {
                 break format!("finished {:?}", finished.result);
@@ -90,12 +135,20 @@ fn run(source: &str, record: bool, slice: u64, bounds: Bounds, layout: Layout) -
             Step::Ended(other) => break format!("{other:?}"),
             Step::Slice => {}
             Step::Parked(_) => {
-                checkpoints.push(embedder.machine.semantic_checkpoint());
+                if !cold {
+                    checkpoints.push(embedder.machine.semantic_checkpoint());
+                }
                 embedder.deliver_next();
             }
         }
     };
-    (end, embedder.world.printed, stops, checkpoints)
+    (
+        end,
+        embedder.world.printed,
+        stops,
+        checkpoints,
+        embedder.requests,
+    )
 }
 
 /// K-CHG-001 / K-CHG-003 / K-MACH-008: accumulation retains every value, stop,
@@ -159,6 +212,66 @@ fn accumulations_agree() {
             run(true, u64::MAX, bounds),
             "memory {memory}"
         );
+    }
+    for slice in [u64::MAX, 1, 7, 31] {
+        let cold = slice != u64::MAX;
+        let expected = run_selected(
+            &source,
+            false,
+            slice,
+            super::super::embedder::ROOMY,
+            Layout(0),
+            super::ExecutionMode::Source,
+            cold,
+        );
+        for mode in [
+            super::ExecutionMode::Generic,
+            super::ExecutionMode::Specialized,
+        ] {
+            let actual = run_selected(
+                &source,
+                false,
+                slice,
+                super::super::embedder::ROOMY,
+                Layout(0),
+                mode,
+                cold,
+            );
+            assert_eq!(
+                actual.0, expected.0,
+                "owned append result {mode:?}, slice={slice}"
+            );
+            assert_eq!(
+                actual.1, expected.1,
+                "owned append prints {mode:?}, slice={slice}"
+            );
+            assert_eq!(
+                actual.4, expected.4,
+                "owned append requests {mode:?}, slice={slice}"
+            );
+            assert_eq!(actual.2.len(), expected.2.len(), "owned append stop count");
+            for (at, (actual, expected)) in actual.2.iter().zip(&expected.2).enumerate() {
+                assert_eq!(
+                    actual, expected,
+                    "owned append stop {at}, {mode:?}, slice={slice}"
+                );
+            }
+            assert_eq!(
+                actual.3.len(),
+                expected.3.len(),
+                "owned append cold boundary count"
+            );
+            for (at, (actual, expected)) in actual.3.iter().zip(&expected.3).enumerate() {
+                assert!(
+                    actual == expected,
+                    "owned append cold state {at}, {mode:?}, slice={slice}"
+                );
+            }
+            assert_eq!(
+                actual, expected,
+                "owned append {mode:?}, cold={cold}, slice={slice}"
+            );
+        }
     }
     let counts = witness::take();
     for exit in [Exit::Commit, Exit::Guard, Exit::Prefix] {

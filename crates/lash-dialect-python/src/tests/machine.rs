@@ -1851,6 +1851,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
 #[test]
 fn sequence_facts_agree_across_layouts_and_charge_bounds() {
     whole_path_packets_agree();
+    println!("whole Python packet checkpoint comparisons completed");
     use lash_kernel_vm::testing::{ExecutionStrategy, library};
     let source = r#"
 import json
@@ -1903,6 +1904,10 @@ await build()
     )
     .0;
     let mut optimized_held = Vec::new();
+    println!(
+        "broad Python sequence reference charge: {}",
+        reference.charged
+    );
     assert_eq!(
         execution_observation_with_meter(
             on.clone(),
@@ -1955,6 +1960,9 @@ await build()
         "a memory refusal keeps the same completed charge prefix",
     );
     for charge_limit in 0..=reference.charged {
+        if charge_limit.is_multiple_of(2048) {
+            println!("broad Python sequence charge bound {charge_limit}");
+        }
         let bounds = Bounds {
             charge_limit,
             ..BOUNDS
@@ -2131,6 +2139,9 @@ fn whole_path_packets_agree() {
     }
     for ((family, _, program), charged) in cases.iter().zip(charges) {
         for charge_limit in 0..charged {
+            if charge_limit.is_multiple_of(256) {
+                println!("Python {family:?} charge bound {charge_limit}/{charged}");
+            }
             let bounds = Bounds {
                 charge_limit,
                 ..BOUNDS
@@ -2144,6 +2155,7 @@ fn whole_path_packets_agree() {
                 );
             }
         }
+        println!("Python {family:?}: all {charged} finite charge limits agree");
     }
 }
 

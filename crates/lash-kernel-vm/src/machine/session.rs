@@ -81,6 +81,7 @@ pub(crate) fn start(
     }
     let mut machine = KernelMachine {
         logical: logical.clone(),
+        logical_memory: Default::default(),
         active_link: program.link,
         closure: program.closure,
         owner: start.owner,

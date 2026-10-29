@@ -4,6 +4,11 @@
 use super::super::compiled::{Destination, Operand};
 use super::*;
 
+enum ScalarMiss {
+    Guard,
+    Prefix,
+}
+
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
     pub(super) fn operand(&mut self, frame: &Values<'_, 'e>, arg: &Operand) -> Result<Value, Stop> {
@@ -39,12 +44,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     ) -> Result<Next, Stop> {
         let x = self.operand(frame, arg)?;
         let answer = if !OBSERVING && !self.accounting && self.admitted {
-            site.entry(self.exe).call(&[x]).map(Ok)
+            site.entry(self.exe).call(&[x]).map(|value| Ok(Ok(value)))
         } else if !OBSERVING {
             scalar(&x)
                 .then(|| site.entry(self.exe).call(&[x]))
                 .flatten()
-                .and_then(|value| {
+                .map(|value| {
                     let units = if scalar(&value) {
                         site.table(self.exe).units(sizes(&[x], &value))
                     } else {
@@ -55,8 +60,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             None
         };
-        let value = match answer {
-            Some(answer) => {
+        let value = match answer.unwrap_or(Err(ScalarMiss::Guard)) {
+            Ok(answer) => {
                 let value = match answer {
                     Ok(value) => {
                         witnessed!(Scalar, Commit);
@@ -72,8 +77,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 value
             }
-            None => {
-                witnessed!(Scalar, Guard);
+            Err(miss) => {
+                match miss {
+                    ScalarMiss::Guard => witnessed!(Scalar, Guard),
+                    ScalarMiss::Prefix => witnessed!(Scalar, Prefix),
+                }
                 self.covered = false;
                 self.retaining(&mut frame.state.transient, |island| {
                     island.operate(site, &[x])
@@ -109,12 +117,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let typed = site.pair(self.exe).and_then(|kernel| {
                 super::super::compiled::typed(site, &kernel, x, y, self.charging, self.exe)
             });
-            typed.and_then(|(value, units)| self.numeric_charge(site, value, units, covered))
+            typed.map(|(value, units)| self.numeric_charge(site, value, units, covered))
         } else {
             None
         };
-        let value = match answer {
-            Some(answer) => {
+        let value = match answer.unwrap_or(Err(ScalarMiss::Guard)) {
+            Ok(answer) => {
                 let value = match answer {
                     Ok(value) => {
                         witnessed!(Scalar, Commit);
@@ -130,8 +138,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 }
                 value
             }
-            None => {
-                witnessed!(Scalar, Guard);
+            Err(miss) => {
+                match miss {
+                    ScalarMiss::Guard => witnessed!(Scalar, Guard),
+                    ScalarMiss::Prefix => witnessed!(Scalar, Prefix),
+                }
                 self.covered = false;
                 self.retaining(&mut frame.state.transient, |island| {
                     island.operate(site, &[x, y])
@@ -148,18 +159,29 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         value: Value,
         units: Option<u64>,
         covered: bool,
-    ) -> Option<Answer> {
+    ) -> Result<Answer, ScalarMiss> {
         if !self.accounting && self.admitted {
-            Some(Ok(value))
+            Ok(Ok(value))
         } else if covered
             && self.covered
             && let Some(units) = units
         {
             self.charged += site.fixed;
             self.charged += units;
-            Some(Ok(value))
+            Ok(Ok(value))
         } else {
-            self.typed(site, value, units)
+            match self.typed(site, value, units) {
+                Some(answer) => Ok(answer),
+                None if units.is_some_and(|units| {
+                    site.fixed
+                        .checked_add(units)
+                        .is_none_or(|units| !self.fits(units))
+                }) =>
+                {
+                    Err(ScalarMiss::Prefix)
+                }
+                None => Err(ScalarMiss::Guard),
+            }
         }
     }
 

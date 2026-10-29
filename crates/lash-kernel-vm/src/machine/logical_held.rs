@@ -82,7 +82,14 @@ impl KernelMachine {
         Ok(())
     }
     pub(super) fn logical_flush(&self) -> Result<(), HeapFault> {
-        self.logical.flush(&mut self.arena.borrow_mut(), &self.heap)
+        self.logical
+            .flush(&mut self.arena.borrow_mut(), &self.heap)?;
+        self.publish_logical_meter()
+    }
+    pub(super) fn publish_logical_meter(&self) -> Result<(), HeapFault> {
+        self.logical_memory
+            .set(self.heap.logical_balance()?.total()?);
+        Ok(())
     }
     pub(super) fn hold_value(&self, value: Value) -> Result<Held, HeapFault> {
         Projection {

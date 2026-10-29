@@ -826,7 +826,7 @@ impl KernelMachine {
             self.logical_enter_frame(task, exe, code, &[])?;
         }
         self.logical_flush_continuation(task, exe)?;
-        self.logical_flush_controls(task, exe)?;
+        self.logical_reconstruct_controls(task, exe)?;
         self.logical_flush()?;
         self.grown();
         Ok(top)

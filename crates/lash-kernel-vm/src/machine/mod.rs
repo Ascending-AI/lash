@@ -368,6 +368,9 @@ struct Task {
 /// `run` and `deliver`.
 pub struct KernelMachine {
     logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    /// Last checked publication of the shared logical ledger. Meters remain
+    /// infallible; ledger faults are returned at the publication boundary.
+    logical_memory: std::cell::Cell<u64>,
     program: Program,
     active_link: lash_kernel_value::content_ids::LinkId,
     /// The document's identity, which a parked run pins, once it has been

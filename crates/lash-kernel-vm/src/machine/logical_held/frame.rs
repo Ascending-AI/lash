@@ -118,6 +118,7 @@ impl FrameRoots {
         &self,
         controls: &mut crate::machine::controls::Controls,
         cleaning: &Option<Result<Value, Value>>,
+        reconstructed: bool,
         exe: &Executable,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
@@ -133,7 +134,13 @@ impl FrameRoots {
                 stmt,
                 cursor,
                 header,
+                initial,
             } => {
+                // The physical cursor exists before its first source header
+                // accepts. A refused header must not publish an extra owner.
+                if reconstructed && initial && keep {
+                    return Ok(());
+                }
                 let site = &exe.stmt(stmt).site;
                 record(
                     Selector::LoopCursor(site.clone()),
@@ -203,10 +210,24 @@ impl KernelMachine {
         if let Some(frame) = self.task(task)?.frames.last_mut()?
             && let Some(roots) = &frame.logical
         {
-            roots.controls(&mut frame.control, &frame.cleaning, exe, &access)?;
+            roots.controls(&mut frame.control, &frame.cleaning, false, exe, &access)?;
         }
         Ok(())
     }
+    pub(in crate::machine) fn logical_reconstruct_controls(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+    ) -> Result<(), Halt> {
+        let access = self.heap.pages().clone();
+        if let Some(frame) = self.task(task)?.frames.last_mut()?
+            && let Some(roots) = &frame.logical
+        {
+            roots.controls(&mut frame.control, &frame.cleaning, true, exe, &access)?;
+        }
+        Ok(())
+    }
+
     /// Packet reconstruction installs the same saved operand owners that
     /// source capture transfers out of its register bank.
     pub(in crate::machine) fn logical_flush_continuation(

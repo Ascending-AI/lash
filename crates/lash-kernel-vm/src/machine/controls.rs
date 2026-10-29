@@ -10,6 +10,7 @@ pub(super) enum Roles {
         stmt: StmtId,
         cursor: Option<Value>,
         header: Option<Value>,
+        initial: bool,
     },
     Try {
         stmt: StmtId,
@@ -22,11 +23,13 @@ fn roles(control: &Control) -> Option<Roles> {
             stmt,
             cursor,
             header,
+            started,
             ..
         } => Some(Roles::For {
             stmt: *stmt,
             cursor: cursor.walked(),
             header: header.held(),
+            initial: *started == 0 && matches!(header, super::loops::Header::Body),
         }),
         Control::Try { stmt, phase } => Some(Roles::Try {
             stmt: *stmt,

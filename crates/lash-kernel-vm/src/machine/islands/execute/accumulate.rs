@@ -137,7 +137,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 0
             },
             self.accounting.then_some(site.close).flatten(),
-            false,
+            room != 0 && matches!(self.exe.lib(site.lib).run, LibRun::Body(_)),
         )
     }
 
@@ -277,7 +277,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return Some(Err(self.at_operands(site.pc, site.reg, values)));
         };
         let units = if self.accounting { units } else { 0 };
-        let Some(accepted) = self.source_admission(None, 0, units, None, false) else {
+        let body = matches!(self.exe.lib(site.lib).run, LibRun::Body(_));
+        let Some(accepted) = self.source_admission(None, 0, units, None, body) else {
             return Some(Err(self.at_operands(site.pc, site.reg, values)));
         };
         if let Err(stop) = self.commit_admission(accepted, None) {

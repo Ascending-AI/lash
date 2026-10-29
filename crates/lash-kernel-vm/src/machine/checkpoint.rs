@@ -93,6 +93,7 @@ impl Machine for KernelMachine {
         self.logical
             .handoff(&mut self.arena.borrow_mut(), &self.heap)
             .map_err(MachineError::Heap)?;
+        self.publish_logical_meter().map_err(MachineError::Heap)?;
         self.observe_phase(if matches!(result, Ok(Step::Parked(_))) {
             GuestPhase::Park
         } else {
@@ -205,7 +206,7 @@ impl Machine for KernelMachine {
             memory: if self.bounds.memory_meter == crate::MemoryMeter::Off {
                 0
             } else {
-                self.capacity_held()
+                self.logical_memory.get()
             },
             live_tasks: self.live_tasks,
         }
@@ -367,6 +368,7 @@ impl KernelMachine {
             lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
         let mut machine = Self {
             logical: logical.clone(),
+            logical_memory: Default::default(),
             active_link: program.link,
             closure: root.closure,
             owner: root.owner,
@@ -427,6 +429,7 @@ impl KernelMachine {
             function_origins: Default::default(),
             limiters: Limiters::default(),
         };
+        machine.publish_logical_meter().map_err(OpenError::Heap)?;
         machine.capacity_counted();
         Ok(machine)
     }

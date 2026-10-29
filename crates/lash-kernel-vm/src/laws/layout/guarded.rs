@@ -105,7 +105,7 @@ fn guarded_probes(
 type Guarded = (
     String,
     Vec<Datum>,
-    Vec<(&'static str, crate::Meters)>,
+    Vec<(&'static str, crate::Meters, [u64; 3])>,
     Vec<lash_kernel_state::semantic::Checkpoint>,
     Vec<Request>,
 );
@@ -166,7 +166,19 @@ fn guarded_mode(
             Step::Slice => "slice",
             Step::Parked(_) => "parked",
         };
-        stops.push((kind, embedder.machine.meters()));
+        let balance = embedder
+            .machine
+            .logical_balance()
+            .expect("source owner balance");
+        stops.push((
+            kind,
+            embedder.machine.meters(),
+            [
+                balance.entity_local_bytes,
+                balance.root_and_control_bytes,
+                balance.entities,
+            ],
+        ));
         match step {
             Step::Ended(End::Finished(finished)) => {
                 break format!("finished {:?}", finished.result);

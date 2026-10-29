@@ -607,6 +607,7 @@ pub struct BoundExceeded {
 pub struct Meters {
     /// None when charge metering is Off.
     pub charged: Option<u64>,
+    /// Published logical source holdings, including cold owners and bodies.
     pub memory: u64,
     pub live_tasks: u32,
 }

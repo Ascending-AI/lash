@@ -66,7 +66,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     args,
                     Some(deepest),
                     site.checked.into(),
-                    (before, site.root.is_some() && self.accounting),
+                    (before, self.accounting),
                     counted,
                 )
             })

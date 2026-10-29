@@ -617,6 +617,7 @@ struct ScalarSelection {
 type ScalarStops = Vec<(
     &'static str,
     crate::Meters,
+    [u64; 3],
     Option<lash_kernel_state::semantic::Checkpoint>,
 )>;
 
@@ -673,7 +674,20 @@ fn observe_scalar_selected(
             };
             let image =
                 (!matches!(&step, Step::Ended(_))).then(|| embedder.machine.semantic_checkpoint());
-            stops.push((kind, embedder.machine.meters(), image));
+            let balance = embedder
+                .machine
+                .logical_balance()
+                .expect("source owner balance");
+            stops.push((
+                kind,
+                embedder.machine.meters(),
+                [
+                    balance.entity_local_bytes,
+                    balance.root_and_control_bytes,
+                    balance.entities,
+                ],
+                image,
+            ));
         }
         if !record {
             registered += embedder
@@ -792,8 +806,47 @@ fn scalar_layouts_agree() {
             }
         }
     }
-    let counts = witness::take();
-    for exit in [Exit::Commit, Exit::Guard] {
+    let mut counts = witness::take();
+    // K-CHG-001 / PLAN-INDEP: this straight-line scalar cannot hide in a
+    // repeated graph. Every refused close retains the source operand owners.
+    let source = scalar_document(
+        "let left = 255 let right = 1 let answer = flat.add(left, right) do perform 0(answer) as Any return answer",
+    );
+    let reference = observe_scalar(&source, Layout(0), false, false, false);
+    let mut collect = |actual: witness::Counts| {
+        for (event, count) in actual {
+            *counts.entry(event).or_default() += count;
+        }
+    };
+    collect(packet_modes(
+        &source,
+        super::embedder::ROOMY,
+        u64::MAX,
+        false,
+        false,
+    ));
+    for slice in [1, 3, 11] {
+        collect(packet_modes(
+            &source,
+            super::embedder::ROOMY,
+            slice,
+            true,
+            false,
+        ));
+    }
+    for charge_limit in 0..reference.4 {
+        collect(packet_modes(
+            &source,
+            Bounds {
+                charge_limit,
+                ..super::embedder::ROOMY
+            },
+            u64::MAX,
+            false,
+            true,
+        ));
+    }
+    for exit in [Exit::Commit, Exit::Guard, Exit::Prefix] {
         assert!(
             counts.get(&(Family::Scalar, exit)).copied().unwrap_or(0) > 0,
             "scalar packets must reach {exit:?}: {counts:?}"
@@ -1208,7 +1261,7 @@ fn capture_scopes_agree() {
     }
 }
 
-fn repeated_modes(
+fn packet_modes(
     source: &str,
     bounds: Bounds,
     slice: u64,
@@ -1238,9 +1291,9 @@ fn repeated_modes(
         (observed, counts)
     };
     let source = run(ExecutionMode::Source).0;
-    assert_eq!(run(ExecutionMode::Generic).0, source, "generic recurrence");
+    assert_eq!(run(ExecutionMode::Generic).0, source, "generic packets");
     let (specialized, counts) = run(ExecutionMode::Specialized);
-    assert_eq!(specialized, source, "fixed recurrence");
+    assert_eq!(specialized, source, "specialized packets");
     counts
 }
 
@@ -1270,7 +1323,7 @@ fn typed_repeat_agrees() {
             "real typed iterations execute"
         );
         let compare = |bounds, slice, cold, record| {
-            collect(repeated_modes(&source, bounds, slice, cold, record))
+            collect(packet_modes(&source, bounds, slice, cold, record))
         };
         for record in [false, true] {
             compare(super::embedder::ROOMY, u64::MAX, false, record);
@@ -1304,7 +1357,7 @@ fn typed_repeat_agrees() {
     ] {
         let source = scalar_document(body);
         for record in [false, true] {
-            let counts = repeated_modes(&source, super::embedder::ROOMY, u64::MAX, false, record);
+            let counts = packet_modes(&source, super::embedder::ROOMY, u64::MAX, false, record);
             assert!(
                 counts
                     .get(&(Family::Repeated, Exit::Guard))
@@ -1322,7 +1375,7 @@ fn typed_repeat_agrees() {
                 );
             }
             collect(counts);
-            collect(repeated_modes(
+            collect(packet_modes(
                 &source,
                 super::embedder::ROOMY,
                 11,
