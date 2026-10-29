@@ -19197,6 +19197,7 @@ third_party_rust_library(
     },
     features = [
         "alloc",
+        "arbitrary_precision",
         "default",
         "float_roundtrip",
         "raw_value",
@@ -19241,6 +19242,7 @@ third_party_rust_binary(
     },
     features = [
         "alloc",
+        "arbitrary_precision",
         "default",
         "float_roundtrip",
         "raw_value",
@@ -19271,6 +19273,7 @@ third_party_buildscript_run(
     },
     features = [
         "alloc",
+        "arbitrary_precision",
         "default",
         "float_roundtrip",
         "raw_value",

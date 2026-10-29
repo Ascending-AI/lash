@@ -51,7 +51,7 @@ impl<'a> ser::Serializer for Compare<'a> {
     type SerializeTupleStruct = Sequence<'a>;
     type SerializeTupleVariant = Sequence<'a>;
     type SerializeMap = Object<'a>;
-    type SerializeStruct = Object<'a>;
+    type SerializeStruct = Structure<'a>;
     type SerializeStructVariant = Object<'a>;
     scalar!(
         serialize_bool(bool),
@@ -142,8 +142,21 @@ impl<'a> ser::Serializer for Compare<'a> {
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
         Ok(self.object())
     }
-    fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeStruct> {
-        Ok(self.object())
+    fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
+        // serde_json gives Number and RawValue structs scalar JSON semantics.
+        // Its serializer owns those feature-dependent encodings.
+        if name.starts_with("$serde_json::private::") {
+            Ok(Structure::Json {
+                expected: self.0,
+                fields: ser::Serializer::serialize_struct(
+                    serde_json::value::Serializer,
+                    name,
+                    len,
+                )?,
+            })
+        } else {
+            Ok(Structure::Object(self.object()))
+        }
     }
     fn serialize_struct_variant(
         self,
@@ -265,7 +278,38 @@ macro_rules! object {
         }
     };
 }
-object!(SerializeStruct);
+enum Structure<'a> {
+    Object(Object<'a>),
+    Json {
+        expected: Option<&'a Value>,
+        fields: <serde_json::value::Serializer as ser::Serializer>::SerializeStruct,
+    },
+}
+
+impl ser::SerializeStruct for Structure<'_> {
+    type Ok = bool;
+    type Error = Error;
+
+    fn serialize_field<T: Serialize + ?Sized>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<()> {
+        match self {
+            Self::Object(object) => object.value(object.key(key), value),
+            Self::Json { fields, .. } => ser::SerializeStruct::serialize_field(fields, key, value),
+        }
+    }
+
+    fn end(self) -> Result<bool> {
+        match self {
+            Self::Object(object) => object.finish(),
+            Self::Json { expected, fields } => {
+                Ok(expected == Some(&ser::SerializeStruct::end(fields)?))
+            }
+        }
+    }
+}
 object!(SerializeStructVariant);
 
 #[cfg(test)]
@@ -311,6 +355,16 @@ mod tests {
             changed["bytes"] = json!([255, 0]);
             assert!(!matches(&value, &changed));
         }
+        let json_numbers = json!({"integer":7,"float":1.5,"nested":[0]});
+        assert!(matches(&json_numbers, &json_numbers));
+        assert!(!matches(
+            &json_numbers,
+            &json!({"integer":8,"float":1.5,"nested":[0]})
+        ));
+        assert!(!matches(
+            &json_numbers,
+            &json!({"integer":{"$serde_json::private::Number":"7"},"float":1.5,"nested":[0]})
+        ));
         assert!(!matches(&1u64, &json!(1.0)));
         assert!(matches(&f64::NAN, &Value::Null));
         assert!(matches(

@@ -74,6 +74,16 @@ use serde_json::{Value, json};
 
 const SESSION: &str = "cell-read-session";
 const READ: &str = "ext_read";
+const DOCUMENT: &str = "019a0000-0000-7000-8000-000000000001";
+
+fn citation_args() -> Value {
+    json!({"document":{"doc_id":DOCUMENT}})
+}
+
+fn citation_output() -> Value {
+    json!({"ok":{"document":{"doc_id":DOCUMENT},"version":1,"text":"Pricing is per seat, billed monthly.","citation":{"uri":format!("cenote://document/{DOCUMENT}/version/1?start=3&end=3")}}})
+}
+
 const WRITE: &str = "ext_write";
 /// The plugin that registers the reading provider.
 const READER: &str = "cell-read-reader";
@@ -111,6 +121,7 @@ enum Cell {
     ModelInvalidOutput,
     Pending,
     ModelMixed,
+    ModelCitation,
     Bound,
     Hooked,
     HookedModel,
@@ -123,7 +134,7 @@ impl Cell {
             Self::Panic => "try { await reads.extRead({ x: -10 }); } catch (e) { await tools.extWrite({ x: 91 }); } await tools.extWrite({ x: 92 });".to_owned(),
             Self::InvalidOutput | Self::ModelInvalidOutput => "await reads.extRead({ x: -11 });".to_owned(),
             Self::Pending => "await reads.extRead({ x: -12 });".to_owned(),
-            Self::ModelMixed => String::new(),
+            Self::ModelMixed | Self::ModelCitation => String::new(),
             Self::Bound => "const sibling = tools.extWrite({ x: -20 }); await tools.extWrite({ x: 1 }); while (true) {}".to_owned(),
             Self::ReadWriteRead => "const a = await reads.extRead({ x: 1 });\n\
                  const w = await tools.extWrite({ x: a.v });\n\
@@ -236,6 +247,11 @@ struct WorldReads {
 #[async_trait::async_trait]
 impl lash::tools::ToolReads for WorldReads {
     async fn read(&self, call: lash::tools::ReadCall<'_>) -> Result<Value, lash::tools::ReadError> {
+        if call.manifest.tool() == "cenote.read_document" {
+            assert_eq!(*call.args, citation_args());
+            self.world.reads.lock_recover().push((1, 1));
+            return Ok(citation_output());
+        }
         assert_eq!(
             call.manifest.tool(),
             format!("reads.{READ}"),
@@ -315,6 +331,17 @@ fn model(cell: Cell) -> ProviderHandle {
             } else {
                 cell.source()
             };
+            if cell == Cell::ModelCitation && !answered {
+                return Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: "citation-read".into(),
+                        tool_name: "cenote__read_document".into(),
+                        input_json: citation_args().to_string(),
+                        replay: None,
+                    }],
+                    ..Default::default()
+                });
+            }
             if cell == Cell::ModelInvalidOutput && !answered {
                 return Ok(LlmResponse {
                     parts: vec![LlmOutputPart::ToolCall {
@@ -488,7 +515,13 @@ impl ReadTurn {
                 .with_worker_service(sim::workers(&clock));
                 let reads = Arc::new(StaticToolProvider::new(
                     vec![
-                        if matches!(self.cell, Cell::InvalidOutput | Cell::ModelInvalidOutput) {
+                        if self.cell == Cell::ModelCitation {
+                            lash_vocabulary::tool_contract::ToolDefinition::raw(
+                                "cenote_knowledge:read_document", "cenote.read_document", "Read a version and its citation.",
+                                json!({"type":"object","properties":{"document":{"type":"object","properties":{"doc_id":{"type":"string"}},"required":["doc_id"]}},"required":["document"]}),
+                                json!({"type":"object","properties":{"ok":{"type":"object","properties":{"version":{"type":"integer","minimum":0}}}}}),
+                            ).unwrap().with_execution(Duration::from_secs(30)).with_execution_policy(ExecutionPolicy::Read)
+                        } else if matches!(self.cell, Cell::InvalidOutput | Cell::ModelInvalidOutput) {
                             lash_vocabulary::tool_contract::ToolDefinition::raw(
                                 READ,
                                 "reads.ext_read",
@@ -526,7 +559,7 @@ impl ReadTurn {
                 ));
                 let builder = if matches!(
                     self.cell,
-                    Cell::ModelMixed | Cell::HookedModel | Cell::ModelInvalidOutput
+                    Cell::ModelCitation | Cell::ModelMixed | Cell::HookedModel | Cell::ModelInvalidOutput
                 ) {
                     lash::LashCore::standard_builder(backend.clone())
                 } else {
@@ -800,11 +833,33 @@ impl Scenario for ReadTurn {
             | Cell::ModelInvalidOutput
             | Cell::Pending
             | Cell::ModelMixed
+            | Cell::ModelCitation
             | Cell::Bound
             | Cell::Hooked
             | Cell::HookedModel => Vec::new(),
         };
         violations.extend(turn_ended(nodes).await);
+        if self.cell == Cell::ModelCitation {
+            if self.world.reads() != [(1, 1)] || !self.world.other_bodies().is_empty() {
+                violations.push("MODEL-READ-CANONICAL: the reader must run exactly once without a recorded body".into());
+            }
+            let durable = self.core().session(session()).durable().await.unwrap();
+            let transcript = durable.transcript().await.unwrap();
+            let turn = transcript
+                .entries()
+                .iter()
+                .find_map(|entry| entry.provenance.turn_id.clone())
+                .unwrap();
+            let calls = durable.read_turn_tool_calls(&turn).await.unwrap();
+            if calls.len() != 1
+                || calls[0].args != citation_args()
+                || calls[0].output.value_for_projection() != citation_output()
+            {
+                violations.push(format!(
+                    "MODEL-READ-CANONICAL: the saved version read changed: {calls:?}"
+                ));
+            }
+        }
         if self.cell == Cell::Bound {
             let checked = async {
                 let durable = self
@@ -1543,4 +1598,16 @@ async fn a_cell_charge_bound_retains_limit_observation_and_consumption_on_sqlite
         "the saved end must be taken over"
     );
     report.assert_held();
+}
+
+/// FIG-7548: a staged citation read must pass MODEL_DONE's canonical decode
+/// before the reader runs, then save its arguments and versioned answer.
+#[tokio::test]
+async fn a_model_citation_read_survives_canonical_plan_decode_on_sqlite_memory() {
+    Matrix::new()
+        .faults(&[])
+        .horizon(Duration::from_secs(30))
+        .run_test(|| ReadTurn::new(Cell::ModelCitation, Law::Counted))
+        .await
+        .assert_held();
 }
