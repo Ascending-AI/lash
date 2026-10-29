@@ -302,7 +302,7 @@ for (const [i, path] of pages.entries()) {
   try { await cenote.readDocument({ document: { collection: 'wiki', path } }); } catch {}
 }
 if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki', path: 'never' } });"#;
-    let effect = EffectName::new("cenote.readDocument").expect("the tool name");
+    let effect = EffectName::new("cenote.read_document").expect("the tool name");
     let program = lowered_with_schemas(
         "typescript",
         SOURCE,
