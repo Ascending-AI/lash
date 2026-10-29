@@ -242,8 +242,11 @@ fn fold_wrapper(
                     continue;
                 };
                 let success = member.output.is_success();
-                if success && let Some(turn @ ToolControl::Turn { .. }) = &member.output.control {
-                    control = Some(turn.clone());
+                if success
+                    && let Some(settled) = &member.output.control
+                    && (control.is_none() || matches!(control, Some(ToolControl::Turn { .. })))
+                {
+                    control = Some(settled.clone());
                     let (call_id, tool_name) = member.control_identity();
                     control_origin = lash_core::sansio::ToolControlOrigin::Forwarded {
                         call_id: call_id.clone(),

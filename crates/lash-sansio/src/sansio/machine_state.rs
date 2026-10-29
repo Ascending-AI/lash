@@ -226,6 +226,7 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) progress_boundaries: Vec<ProgressBoundary>,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
+    pub(super) consecutive_unproductive: usize,
     pub(super) cumulative_usage: LlmUsage,
     /// The usage the turn's last completed model call reported; `None`
     /// before its first.
@@ -541,6 +542,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) progress_boundaries: Vec<ProgressBoundary>,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
+    pub(super) consecutive_unproductive: usize,
     pub(super) cumulative_usage: LlmUsage,
     /// The usage the turn's last completed model call reported.
     pub(super) last_call_usage: Option<LlmUsage>,

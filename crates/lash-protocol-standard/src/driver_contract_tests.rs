@@ -376,31 +376,98 @@ fn a_failed_tool_outcome_control_is_not_taken_as_the_turn_outcome() {
 /// turn finishes with the call's value (FIG-5781).
 #[test]
 fn a_settled_control_call_finishes_the_turn_at_before_completion() {
-    let mut machine = machine(Some(4));
-    let effects = drain(&mut machine);
-    let effects = one_tool_round(
-        &mut machine,
-        &effects,
-        ToolCallOutput::finish(serde_json::json!("terminal value")),
-    );
-    assert_eq!(turn_outcomes(&effects), Vec::new(), "{effects:?}");
-    let (id, kind) = checkpoint(&effects)
-        .unwrap_or_else(|| panic!("expected a completion checkpoint, got {effects:?}"));
-    assert_eq!(kind, CheckpointKind::BeforeCompletion);
-    machine.handle_response(Response::Checkpoint {
-        id,
-        delivery: sansio::CheckpointDelivery::default(),
-    });
-    let effects = drain(&mut machine);
-    assert_eq!(
-        turn_outcomes(&effects),
-        vec![TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "probe".to_string(),
-            value: serde_json::json!("terminal value"),
-        })],
-        "{effects:?}"
-    );
-    assert!(machine.is_done());
+    for code in [false, true] {
+        for (turns, steer) in [(1, false), (1, true), (2, true)] {
+            let mut machine = TurnMachine::new(
+                loop_config(code, false, turns),
+                Vec::new(),
+                Default::default(),
+                7,
+            );
+            let ready = drain(&mut machine);
+            let output = ToolCallOutput::finish(serde_json::json!({"value": 1}));
+            let effects = if code {
+                let work = respond(
+                    &mut machine,
+                    &ready,
+                    vec![LlmOutputPart::ToolCall {
+                        call_id: "cell".into(),
+                        tool_name: "execute_code".into(),
+                        input_json: serde_json::json!({"code": "await finish({value: 1});"})
+                            .to_string(),
+                        replay: None,
+                    }],
+                );
+                answer_cell(
+                    &mut machine,
+                    &work,
+                    "finish",
+                    output,
+                    lash_core::CellOutcome::Controlled {
+                        tool_name: "finish".into(),
+                        call_id: lash_core::ToolCallId::fixture("demo-call"),
+                        control: lash_core::CellControl::Finish {
+                            value: serde_json::json!({"value": 1}).into(),
+                        },
+                    },
+                );
+                drain(&mut machine)
+            } else {
+                one_tool_round(&mut machine, &ready, output)
+            };
+            assert!(!machine.is_done());
+            assert!(turn_outcomes(&effects).is_empty());
+            let (id, kind) = checkpoint(&effects).expect("a declared completion checkpoints");
+            assert_eq!(kind, CheckpointKind::BeforeCompletion);
+            let saved = serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
+                .unwrap();
+            machine =
+                TurnMachine::restore_from_checkpoint(loop_config(code, false, turns), saved, None)
+                    .unwrap();
+            drain(&mut machine);
+            machine.handle_response(Response::Checkpoint {
+                id,
+                delivery: sansio::CheckpointDelivery {
+                    committed_user_messages: if steer {
+                        vec![Message {
+                            id: "steer".into(),
+                            role: MessageRole::User,
+                            parts: vec![Part::text("steer.p0".into(), "go on".into(), None)].into(),
+                            origin: None,
+                            reply_marker: None,
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                },
+            });
+            let effects = drain(&mut machine);
+            assert_eq!(machine.decided_completions().len(), 1);
+            if steer {
+                assert_eq!(
+                    machine.decided_completions()[0].disposition,
+                    lash_core::CompletionDisposition::Superseded
+                );
+                if turns == 1 {
+                    assert_eq!(
+                        turn_outcomes(&effects),
+                        vec![TurnOutcome::Stopped(TurnStop::MaxTurns)]
+                    );
+                } else {
+                    assert!(!machine.is_done());
+                    llm_call_id(&effects);
+                }
+            } else {
+                assert!(
+                    matches!(
+                        turn_outcomes(&effects).as_slice(),
+                        [TurnOutcome::Finished(_)]
+                    ),
+                    "a successful answer may finish on the last iteration: {effects:?}"
+                );
+            }
+        }
+    }
 }
 
 /// A driver whose synced surface's `finish` and `switch` end the turn
@@ -847,4 +914,280 @@ fn the_max_turns_budget_is_the_run_offset_plus_the_budget() {
         "protocol iteration 2 exhausts a budget of 2 turns from offset 0: {effects:?}"
     );
     assert!(machine.is_done());
+}
+
+fn loop_config(code: bool, batch: bool, turns: usize) -> TurnMachineConfig {
+    let mut config = machine_config(Some(turns));
+    config.no_progress_budget = lash_core::NoProgressBudget::bounded(2);
+    if batch {
+        config.protocol_driver = Arc::new(StandardDriver {
+            batch: BatchSugar::Enabled {
+                max_members: std::num::NonZeroUsize::new(8).unwrap(),
+            },
+            ..StandardDriver::default()
+        });
+    }
+    if code {
+        let factory = lash::rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1000))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(1))
+                .build(),
+            lash::rlm::CellDialect::typescript(),
+        );
+        let host = lash_core::facade_support::PluginHost::new(
+            vec![Arc::new(factory)],
+            lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock)),
+        );
+        let session = host
+            .build_session(lash_core::plugin::PluginSessionRequest::creation(
+                "loop-law",
+                lash_core::plugin::SessionAuthorityContext::fixture(),
+            ))
+            .unwrap();
+        let preamble = session
+            .protocol_driver()
+            .build_preamble(lash_core::ProtocolBuildInput {
+                tool_catalog: lash_core::testing::environment_projection(&session)
+                    .unwrap()
+                    .catalog,
+                plugin_extensions: Default::default(),
+                writer_formats: lash_core::build_newest_writer_formats(),
+            });
+        config.protocol_driver = preamble.config.protocol;
+        config.projector = preamble.config.projector;
+    }
+    config
+}
+
+fn demo_round(
+    machine: &mut TurnMachine,
+    effects: &[Effect],
+    code: bool,
+    productive: bool,
+    batch: bool,
+    caught: bool,
+) -> Vec<Effect> {
+    let operation = if productive && !caught {
+        "demo.ok"
+    } else {
+        "demo.fail"
+    };
+    let source = if caught && productive {
+        "try { await demo.fail({message: 'boom'}); } catch (_) {}".to_string()
+    } else {
+        format!("await {operation}({{message: 'boom'}});")
+    };
+    machine.handle_response(Response::LlmComplete {
+        id: llm_call_id(effects),
+        text_streamed: false,
+        result: Ok(if code {
+            LlmResponse {
+                parts: vec![LlmOutputPart::ToolCall {
+                    call_id: "cell".into(),
+                    tool_name: "execute_code".into(),
+                    input_json: serde_json::json!({"code": source}).to_string(),
+                    replay: None,
+                }],
+                ..Default::default()
+            }
+        } else if batch {
+            LlmResponse {
+                parts: vec![batch_call(
+                    "batch-fail",
+                    serde_json::json!([
+                        {"tool": operation.replace('.', "__"), "parameters": {"message": "boom"}},
+                        {"tool": "demo__fail", "parameters": {"message": "boom"}}
+                    ]),
+                )],
+                ..Default::default()
+            }
+        } else {
+            tool_call_response("unit", &operation.replace('.', "__"))
+        }),
+    });
+    let effects = drain(machine);
+    let output = if productive && !caught {
+        ToolCallOutput::success(serde_json::json!("ok"))
+    } else {
+        ToolCallOutput::failure(ToolFailure::tool(
+            ToolFailureClass::Execution,
+            "demo_failure",
+            "boom",
+        ))
+    };
+    if code {
+        answer_cell(
+            machine,
+            &effects,
+            operation,
+            output,
+            if productive {
+                lash_core::CellOutcome::Completed
+            } else {
+                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    "boom",
+                ))
+            },
+        );
+    } else {
+        let (id, calls) = tool_calls(&effects).expect("demo.fail dispatch");
+        machine.handle_response(Response::ToolResults {
+            id,
+            results: calls
+                .iter()
+                .enumerate()
+                .map(|(index, call)| {
+                    completed_call(
+                        call,
+                        if batch && index > 0 {
+                            failed("demo.fail")
+                        } else {
+                            output.clone()
+                        },
+                    )
+                })
+                .collect(),
+        });
+    }
+    drain(machine)
+}
+
+fn answer_cell(
+    machine: &mut TurnMachine,
+    effects: &[Effect],
+    tool: &str,
+    output: ToolCallOutput,
+    result: lash_core::CellOutcome,
+) {
+    let id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("cell");
+    machine.handle_response(Response::ExecResult {
+        id,
+        result: Ok(lash_core::ExecResponse {
+            consumption: Vec::new(),
+            prints: Vec::new(),
+            prints_retained: None,
+            calls: Vec::new(),
+            tool_calls: vec![lash_core::ToolCallRecord {
+                call_id: lash_core::ToolCallId::fixture("demo-call"),
+                provider_call_id: None,
+                tool: tool.into(),
+                args: serde_json::json!({"message": "boom"}),
+                output,
+            }],
+            printed_images: Vec::new(),
+            result,
+            retained_finish_value: None,
+            degraded_bindings: Vec::new(),
+            bindings: Default::default(),
+            suspended: false,
+        }),
+    });
+}
+
+/// FIG-7549: both drivers spend one persistent meter per unproductive iteration,
+/// reset it on productive execution, and prefer the silent turn limit.
+#[test]
+fn both_protocols_share_the_persistent_no_progress_meter() {
+    for (code, batch, caught) in [
+        (false, false, false),
+        (false, true, false),
+        (true, false, false),
+        (true, false, true),
+    ] {
+        for (units, turns, expected) in [
+            (vec![false, false], 100, 2),
+            (vec![false, true, false, false], 100, 4),
+            (vec![false, false], 2, 2),
+        ] {
+            for restore in [false, true] {
+                let mut machine = TurnMachine::new(
+                    loop_config(code, batch, turns),
+                    Vec::new(),
+                    Default::default(),
+                    7,
+                );
+                let mut effects = drain(&mut machine);
+                let mut calls = 0;
+                for productive in &units {
+                    effects = demo_round(&mut machine, &effects, code, *productive, batch, caught);
+                    calls += 1;
+                    if machine.is_done() {
+                        break;
+                    }
+                    let (id, kind) = checkpoint(&effects).expect("continuation admitted");
+                    assert_eq!(kind, CheckpointKind::AfterWork);
+                    if restore {
+                        let saved = serde_json::from_slice(
+                            &serde_json::to_vec(&machine.checkpoint()).unwrap(),
+                        )
+                        .unwrap();
+                        machine = TurnMachine::restore_from_checkpoint(
+                            loop_config(code, batch, turns),
+                            saved,
+                            None,
+                        )
+                        .unwrap();
+                        drain(&mut machine);
+                    }
+                    machine.handle_response(Response::Checkpoint {
+                        id,
+                        delivery: sansio::CheckpointDelivery {
+                            committed_user_messages: if restore {
+                                vec![Message {
+                                    id: format!("steer-{calls}"),
+                                    role: MessageRole::User,
+                                    parts: vec![Part::text(
+                                        format!("steer-{calls}.p0"),
+                                        "keep going".into(),
+                                        None,
+                                    )]
+                                    .into(),
+                                    origin: None,
+                                    reply_marker: None,
+                                }]
+                            } else {
+                                Vec::new()
+                            },
+                        },
+                    });
+                    effects = drain(&mut machine);
+                }
+                assert!(
+                    machine.is_done(),
+                    "code={code} restore={restore} calls={calls}"
+                );
+                assert_eq!(calls, expected);
+                assert_eq!(
+                    turn_outcomes(&effects),
+                    vec![TurnOutcome::Stopped(TurnStop::MaxTurns)]
+                );
+                let mut fresh = TurnMachine::new(
+                    loop_config(code, batch, 100),
+                    Vec::new(),
+                    machine.events(),
+                    17,
+                );
+                let ready = drain(&mut fresh);
+                let _ = demo_round(&mut fresh, &ready, code, false, batch, caught);
+                assert!(!fresh.is_done(), "a fresh turn has a fresh meter");
+                if turns == 2 {
+                    assert!(
+                        !serde_json::to_string(&machine.events())
+                            .unwrap()
+                            .contains("stop_no_progress"),
+                        "turn limit stays silent"
+                    );
+                }
+            }
+        }
+    }
 }

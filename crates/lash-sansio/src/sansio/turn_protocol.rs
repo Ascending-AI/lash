@@ -823,6 +823,17 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     /// Hand the host this work and wait for its answer.
     Start(PendingWork<M>),
     AdvanceProtocolIteration,
+    /// Apply core's iteration reduction and its admitted protocol feedback.
+    FinishIteration {
+        continuation: super::IterationContinuation,
+        feedback: Vec<SessionHistoryRecord<M::Event>>,
+    },
+    /// Core dispatches hard stops immediately and declared completions through
+    /// the checkpoint where arriving input may supersede them.
+    EndStep {
+        end: lash_protocol_types::StepEnd,
+        superseded: Vec<Message>,
+    },
     /// Finish for a cancellation whose host evidence was already observed.
     FinishCancelled {
         evidence: lash_protocol_types::TurnCancellationEvidence,
@@ -852,6 +863,8 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) events: &'a [SessionHistoryRecord<M::Event>],
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
+    pub(super) consecutive_unproductive: usize,
+    pub(super) successful_tool_execution: bool,
     pub(super) observed_cancellation: Option<&'a lash_protocol_types::TurnCancellationEvidence>,
     /// The environment the iteration synced.
     pub(super) environment: &'a ExecutionEnvironmentSync,
@@ -875,6 +888,12 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             use_tools,
             environment: self.environment,
         })
+    }
+
+    /// Whether any tool in this step executed successfully, before presentation
+    /// wrappers folded its results. Refused calls are never successful work.
+    pub fn successful_tool_execution(&self) -> bool {
+        self.successful_tool_execution
     }
 
     pub fn protocol_iteration(&self) -> usize {

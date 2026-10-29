@@ -39,6 +39,9 @@ pub trait TurnProtocol: Send + Sync + 'static {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct UnitTurnProtocol;
 
+mod iteration;
+pub use iteration::{ContinueDecision, IterationContinuation, IterationProgress};
+
 mod turn_protocol;
 use turn_protocol::AnsweredWork;
 pub use turn_protocol::{

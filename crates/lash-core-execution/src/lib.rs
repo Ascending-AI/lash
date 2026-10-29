@@ -533,6 +533,41 @@ pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
 pub use lash_vocabulary::tool_declaration::OutcomeShape;
 pub use lash_vocabulary::tool_declaration::ToolDeclaration;
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
+/// Classify a settled tool output without choosing a protocol checkpoint.
+/// Ordinary failures remain catchable; cancellation and terminal controls stop
+/// immediately, while a declared completion may be superseded by input.
+pub fn step_end_from_tool_output(
+    iteration: usize,
+    call_id: &ToolCallId,
+    tool_name: &str,
+    output: &ToolCallOutput,
+) -> lash_protocol_types::StepEnd {
+    use lash_protocol_types::StepEnd;
+    if output.cancels_turn() {
+        return StepEnd::Stop(TurnStop::Cancelled {
+            evidence: lash_protocol_types::TurnCancellationEvidence::internal(format!(
+                "tool-call-cancelled:{tool_name}"
+            )),
+        });
+    }
+    if !output.is_success() {
+        return StepEnd::Continue;
+    }
+    match output.control.as_ref() {
+        Some(ToolControl::Turn { control }) => StepEnd::Completion(CompletionCandidate::new(
+            iteration,
+            call_id.clone(),
+            tool_name,
+            control.clone(),
+        )),
+        Some(control) => match turn_stop_from_tool_control(tool_name, control) {
+            Some(TurnOutcome::Stopped(stop)) => StepEnd::Stop(stop),
+            _ => StepEnd::Continue,
+        },
+        None => StepEnd::Continue,
+    }
+}
+
 /// The stop a tool control other than a declared turn control ends the turn
 /// with: a tool-requested failure, or a plugin's abort. A declared turn
 /// control ([`ToolControl::Turn`]) is no stop: it records a

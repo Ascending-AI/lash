@@ -79,6 +79,7 @@ pub use lash_protocol_types::DegradedBinding;
 pub use lash_protocol_types::ModelToolOutcome;
 pub use lash_protocol_types::ModelToolReturn;
 pub use lash_protocol_types::SessionStreamEvent;
+pub use lash_protocol_types::StepEnd;
 pub use lash_protocol_types::StreamMessageKind;
 pub use lash_protocol_types::ToolContractResolver;
 pub use lash_sansio::CheckpointResumeAction;
@@ -99,6 +100,7 @@ pub use lash_sansio::TurnProtocol;
 pub use lash_sansio::UndecodableDriverState;
 pub use lash_sansio::UnitTurnProtocol;
 pub use lash_sansio::WriterFormats;
+pub use lash_sansio::sansio::{ContinueDecision, IterationContinuation, IterationProgress};
 /// The protocol-generic forms [`TurnDriverConfig`] and
 /// [`TurnDriverPreamble`] specialize to the host's turn protocol.
 pub use lash_sansio::{

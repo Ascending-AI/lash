@@ -1270,10 +1270,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     ) -> Vec<DriverAction> {
         let mut actions = Vec::new();
         let mut result_parts = Vec::new();
-        let mut terminal_outcome = None;
-        // The round's settled control call: the dispatcher admits at most
-        // one, after its siblings, so the first is the only one.
-        let mut candidate = None;
+        let progress = if ctx.successful_tool_execution() {
+            lash_sansio::sansio::IterationProgress::Productive
+        } else {
+            lash_sansio::sansio::IterationProgress::Unproductive
+        };
+        let mut end = lash_protocol_types::StepEnd::Continue;
 
         for mut outcome in completed {
             // The machine synthesizes this refusal after the tool-presenter boundary.
@@ -1283,22 +1285,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 outcome.model_return =
                     render::unexecuted_tool_return(outcome.tool_name.clone(), &outcome.output);
             }
-            if terminal_outcome.is_none() && outcome.output.is_success() {
-                match outcome.output.control.as_ref() {
-                    Some(lash_core::ToolControl::Turn { control }) if candidate.is_none() => {
-                        let (call_id, tool_name) = outcome.control_identity();
-                        candidate = Some(lash_core::CompletionCandidate::new(
-                            ctx.protocol_iteration(),
-                            call_id.clone(),
-                            tool_name,
-                            control.clone(),
-                        ));
-                    }
-                    Some(control) => {
-                        terminal_outcome =
-                            lash_core::turn_stop_from_tool_control(&outcome.tool_name, control);
-                    }
-                    None => {}
+            if !matches!(end, lash_protocol_types::StepEnd::Stop(_)) {
+                let (call_id, tool_name) = outcome.control_identity();
+                let settled = lash_core::step_end_from_tool_output(
+                    ctx.protocol_iteration(),
+                    call_id,
+                    tool_name,
+                    &outcome.output,
+                );
+                if matches!(settled, lash_protocol_types::StepEnd::Stop(_))
+                    || matches!(end, lash_protocol_types::StepEnd::Continue)
+                {
+                    end = settled;
                 }
             }
 
@@ -1325,49 +1323,28 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             )]));
         }
 
-        if let Some(outcome) = terminal_outcome {
-            actions.push(DriverAction::Finish(outcome));
-            return actions;
+        match end {
+            lash_protocol_types::StepEnd::Continue => {
+                actions.push(ctx.finish_iteration(progress, |_| Vec::new()))
+            }
+            end => {
+                let superseded = match &end {
+                    lash_protocol_types::StepEnd::Completion(candidate) => {
+                        vec![completion_superseded_message(
+                            standard_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "completion_superseded",
+                            ),
+                            ctx.turn_id(),
+                            candidate,
+                        )]
+                    }
+                    _ => Vec::new(),
+                };
+                actions.push(DriverAction::EndStep { end, superseded });
+            }
         }
-
-        // A settled control call does not end the turn here: its candidate
-        // is decided at BeforeCompletion, where arriving input supersedes
-        // it and the turn goes on.
-        if let Some(candidate) = candidate {
-            let superseded = completion_superseded_message(
-                standard_message_id(
-                    ctx.turn_id(),
-                    ctx.protocol_iteration(),
-                    "completion_superseded",
-                ),
-                ctx.turn_id(),
-                &candidate,
-            );
-            actions.push(DriverAction::Start(PendingWork::Checkpoint {
-                checkpoint: CheckpointKind::BeforeCompletion,
-                on_empty: CheckpointResumeAction::Complete {
-                    candidate: Box::new(candidate),
-                    superseded: vec![superseded],
-                },
-            }));
-            return actions;
-        }
-
-        actions.push(DriverAction::AdvanceProtocolIteration);
-        let next_protocol_iteration = ctx.protocol_iteration() + 1;
-        if let Some(max_turns) = ctx.turn_budget().max_turns()
-            && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
-        {
-            actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                TurnStop::MaxTurns,
-            )));
-            return actions;
-        }
-
-        actions.push(DriverAction::Start(PendingWork::Checkpoint {
-            checkpoint: CheckpointKind::AfterWork,
-            on_empty: CheckpointResumeAction::PrepareIteration,
-        }));
         actions
     }
 
@@ -1416,79 +1393,26 @@ fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {
     ]
 }
 
-/// A reply that ends no turn its prose cannot end: the model is told to end
-/// it through a control call, and the turn goes on, within its turn budget
-/// and its no-progress budget, which counts the replies repaired since the
-/// turn's last tool results.
+/// Prose cannot finish a turn that requires a declared control call.
 fn finish_required_repair(ctx: &DriverContextView<'_>) -> Vec<DriverAction> {
-    let mut actions = vec![DriverAction::AdvanceProtocolIteration];
-    let next_protocol_iteration = ctx.protocol_iteration() + 1;
-    if let Some(max_turns) = ctx.turn_budget().max_turns()
-        && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
-    {
-        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::MaxTurns,
-        )));
-        return actions;
-    }
-    if ctx
-        .no_progress_budget()
-        .is_exhausted_by(repaired_replies(ctx) + 1)
-    {
-        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::MaxTurns,
-        )));
-        return actions;
-    }
-    let id = standard_message_id(
-        ctx.turn_id(),
-        ctx.protocol_iteration(),
-        FINISH_REQUIRED_PURPOSE,
-    );
-    let tools = ctx
-        .finishing_tools()
-        .map(|operation| format!("`{}`", ctx.standard_name_of(operation)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    actions.push(DriverAction::AppendEvents(vec![conversation_event(
-        Message {
-            id: id.clone(),
-            role: MessageRole::System,
-            parts: shared_parts(vec![Part::text(
-                format!("{id}.p0"),
-                format!(
-                    "That reply did not end the turn: this turn ends only through a call that ends it ({tools}). Finish any remaining work, then make that call with the answer."
-                ),
-                None,
-            )]),
-            origin: Some(standard_message_origin(ctx.turn_id())),
-            reply_marker: None,
-        },
-    )]));
-    actions.push(DriverAction::Start(PendingWork::Checkpoint {
-        checkpoint: CheckpointKind::AfterWork,
-        on_empty: CheckpointResumeAction::PrepareIteration,
-    }));
-    actions
+    vec![ctx.finish_iteration(lash_sansio::sansio::IterationProgress::Unproductive, |decision| {
+        if decision != lash_sansio::sansio::ContinueDecision::AfterWork { return Vec::new(); }
+        let id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), FINISH_REQUIRED_PURPOSE);
+        let tools = ctx.finishing_tools()
+            .map(|operation| format!("`{}`", ctx.standard_name_of(operation)))
+            .collect::<Vec<_>>().join(", ");
+        vec![conversation_event(Message {
+            id: id.clone(), role: MessageRole::System,
+            parts: shared_parts(vec![Part::text(format!("{id}.p0"), format!(
+                "That reply did not end the turn: this turn ends only through a call that ends it ({tools}). Finish any remaining work, then make that call with the answer."
+            ), None)]),
+            origin: Some(standard_message_origin(ctx.turn_id())), reply_marker: None,
+        })]
+    })]
 }
 
 /// The purpose of a finish-required repair message's id.
 const FINISH_REQUIRED_PURPOSE: &str = "finish_required";
-
-/// The replies this turn repaired since its last tool results.
-fn repaired_replies(ctx: &DriverContextView<'_>) -> usize {
-    let prefix = format!("m_standard_{}_", ctx.turn_id());
-    ctx.events()
-        .iter()
-        .rev()
-        .filter_map(|record| match record {
-            SessionHistoryRecord::Conversation(record) => record.id.strip_prefix(&prefix),
-            SessionHistoryRecord::Protocol(_) => None,
-        })
-        .take_while(|id| !id.ends_with("_tool_results") && !id.ends_with("_refused_tools"))
-        .filter(|id| id.ends_with(FINISH_REQUIRED_PURPOSE))
-        .count()
-}
 
 /// What the model reads when input arrived at BeforeCompletion and its
 /// control call therefore did not end the turn.

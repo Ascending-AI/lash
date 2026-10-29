@@ -1,10 +1,5 @@
-//! What a stalling turn knows about itself.
-//!
-//! A turn stalls when an attempt commits no error-free execution: the reply
-//! carried no cell, or the cell it carried failed. One bound ends such a turn,
-//! and it is the host's: the no-progress budget, counted here from what the turn
-//! committed. This module also mints the reply fingerprint each attempt records,
-//! which carries no runtime behavior — it is evidence a host can read.
+//! Reply fingerprints and extraction diagnostics for host inspection.
+//! The core turn checkpoint owns the no-progress meter.
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_RLM_STALL_REPLY_DOMAIN_VERSION, reply_fingerprint))
@@ -12,9 +7,6 @@ const LASH_RLM_STALL_REPLY_DOMAIN_VERSION: &str = "lash-rlm-stall-reply/v2";
 
 use crate::rlm_support::RlmCompletion;
 use lash_core::llm::types::ProviderReasoningReplay;
-use lash_core::session_model::SessionHistoryRecord;
-use lash_core::{DriverAction, DriverContextView};
-use lash_rlm_types::RlmProtocolEvent;
 use lash_vocabulary::identity::TurnId;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
@@ -22,103 +14,6 @@ use serde_json::Value;
 /// Diagnostic phase that records a turn stopped by its no-progress budget.
 pub(crate) const NO_PROGRESS_BUDGET_PHASE: lash_rlm_types::RlmDiagnosticPhase =
     lash_rlm_types::RlmDiagnosticPhase::NoProgressBudget;
-/// Consecutive provider attempts *in this turn*, ending at its latest record,
-/// that committed no error-free execution.
-///
-/// Derived from committed records rather than carried in driver state: driver
-/// state is rebuilt per protocol iteration, and a counter that survives park,
-/// replay, and continuation has to be readable from what the turn committed.
-/// Every attempt appends exactly one `llm_extraction` diagnostic, so counting
-/// those since the last error-free trajectory entry counts attempts.
-///
-/// The scan runs backwards and stops at the first record that is not this
-/// turn's, because the driver's history is the whole active session path. A
-/// forward scan over that path leaks earlier turns into the count: only an
-/// error-free execution resets, and a prose-only chat turn, a finish request, a
-/// turn-limit stop, and a no-progress stop all end their turn leaving a
-/// trailing diagnostic with no execution behind it. Counting those would spend
-/// a fresh turn's whole budget on its first attempt.
-///
-/// Pending actions are counted too. Whether this attempt's own diagnostic is
-/// already committed depends on which handler is deciding — the extraction
-/// paths decide in the same action batch that appends it, the execution path
-/// decides an effect later — and a count that reads only committed history
-/// would be one short on exactly one of them.
-///
-pub(crate) fn stalled_attempts_in_phase(
-    ctx: &DriverContextView<'_>,
-    actions: &[DriverAction],
-    extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
-) -> Result<usize, lash_core::StoredDataCorruption> {
-    let turn_id = ctx.turn_id();
-    let trajectory_prefix = trajectory_entry_turn_prefix(turn_id);
-    let mut attempts = 0;
-    for record in ctx.events().iter().rev() {
-        let SessionHistoryRecord::Protocol(event) = record else {
-            continue;
-        };
-        match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
-            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == extraction_phase =>
-            {
-                if diagnostic.payload.get("turn_id").and_then(Value::as_str) != Some(turn_id) {
-                    break;
-                }
-                attempts += 1;
-            }
-            // A closed turn's own stop record. Nothing before it is this turn's.
-            Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                if diagnostic.phase == NO_PROGRESS_BUDGET_PHASE =>
-            {
-                break;
-            }
-            // An earlier turn's execution, or this turn's last progress point.
-            Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                if !entry.id.starts_with(&trajectory_prefix) || !entry.result.is_failed() =>
-            {
-                break;
-            }
-            _ => {}
-        }
-    }
-    count_pending_attempts(actions, &trajectory_prefix, &mut attempts, extraction_phase)?;
-    Ok(attempts)
-}
-
-/// Apply the not-yet-committed action batch to `attempts`, forwards, since the
-/// batch is this turn's and is ordered.
-fn count_pending_attempts(
-    actions: &[DriverAction],
-    trajectory_prefix: &str,
-    attempts: &mut usize,
-    extraction_phase: lash_rlm_types::RlmDiagnosticPhase,
-) -> Result<(), lash_core::StoredDataCorruption> {
-    for action in actions {
-        let DriverAction::AppendEvents(records) = action else {
-            continue;
-        };
-        for record in records {
-            let SessionHistoryRecord::Protocol(event) = record else {
-                continue;
-            };
-            match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
-                    if !entry.result.is_failed() && entry.id.starts_with(trajectory_prefix) =>
-                {
-                    *attempts = 0;
-                }
-                Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
-                    if diagnostic.phase == extraction_phase =>
-                {
-                    *attempts += 1;
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(())
-}
-
 fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {
     format!("lash_vm_step_{turn_id}_")
 }
@@ -162,19 +57,8 @@ pub(crate) fn reply_fingerprint(assistant_text: &str) -> String {
 /// stalled attempts and compares their fingerprints. All producers supply the
 /// same fields.
 ///
-/// `turn_id` is what scopes the no-progress count. The driver's view of history
-/// is the whole active session path, not one turn, so a diagnostic that cannot
-/// name its own turn cannot be told apart from a previous turn's tail — and
-/// several terminal shapes (a prose-only chat turn, a finish request, a
-/// turn-limit stop) leave a trailing diagnostic with no execution after it.
-/// Diagnostics written before this field existed name no turn and are read as
-/// belonging to an earlier one, which under-counts rather than mis-stops.
-///
-/// `reply_fingerprint` is evidence for hosts only; lash attaches no runtime
-/// behavior to a repeat. It is derived state, not new information, and it lives
-/// in the diagnostic for the same reason the count does: the driver's only
-/// durable view of the turn is what the turn committed.
-///
+/// `turn_id` scopes this evidence to one turn. `reply_fingerprint` lets a
+/// host compare replies; neither field controls runtime admission.
 #[derive(serde::Serialize)]
 pub(crate) struct ExtractionDiagnostic<'a> {
     turn_id: &'a TurnId,

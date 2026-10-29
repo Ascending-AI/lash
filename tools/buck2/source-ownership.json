@@ -577,7 +577,8 @@
       ],
       "standard_turn_outcomes": [
         "tests/standard_turn_outcomes.rs",
-        "tests/support/served.rs"
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
       ],
       "steering_crash_laws": [
         "tests/steering_crash_laws.rs",
@@ -993,6 +994,7 @@
       "src/sansio/checkpoint_content.rs",
       "src/sansio/checkpoint_ledger.rs",
       "src/sansio/helpers.rs",
+      "src/sansio/iteration.rs",
       "src/sansio/machine_state.rs",
       "src/sansio/mod.rs",
       "src/sansio/tests.rs",

@@ -37,6 +37,14 @@ pub mod value_shape;
 pub mod worker_limit;
 mod workflow_site;
 
+/// The core transition after a protocol records a settled step.
+#[derive(Clone, Debug)]
+pub enum StepEnd {
+    Continue,
+    Completion(CompletionCandidate),
+    Stop(TurnStop),
+}
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The stock VM engine's stored kind, shared by definitions and registration.

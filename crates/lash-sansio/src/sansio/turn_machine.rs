@@ -108,6 +108,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             events,
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
+            consecutive_unproductive: 0,
             cumulative_usage: LlmUsage::default(),
             last_call_usage: None,
             environment: None,
@@ -535,6 +536,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             progress_boundaries: self.progress_boundaries.clone(),
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
+            consecutive_unproductive: self.consecutive_unproductive,
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
             environment: environment
@@ -639,6 +641,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             progress_boundaries: checkpoint.progress_boundaries,
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
+            consecutive_unproductive: checkpoint.consecutive_unproductive,
             cumulative_usage: checkpoint.cumulative_usage,
             last_call_usage: checkpoint.last_call_usage,
             environment: synced,
@@ -671,6 +674,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     events: self.events.as_slice(),
                     protocol_iteration: self.protocol_iteration,
                     protocol_run_offset: self.protocol_run_offset,
+                    consecutive_unproductive: self.consecutive_unproductive,
+                    successful_tool_execution: false,
                     observed_cancellation: None,
                     environment: &environment.sync,
                 },
@@ -683,6 +688,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// actions it returns.
     fn shift(
         &mut self,
+        step: impl FnOnce(
+            &dyn ProtocolDriverHandle<M>,
+            DriverContextView<'_, M>,
+        ) -> Vec<DriverAction<M>>,
+    ) {
+        self.shift_with_tool_execution(false, step);
+    }
+
+    fn shift_with_tool_execution(
+        &mut self,
+        successful_tool_execution: bool,
         step: impl FnOnce(
             &dyn ProtocolDriverHandle<M>,
             DriverContextView<'_, M>,
@@ -710,6 +726,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 events: self.events.as_slice(),
                 protocol_iteration: self.protocol_iteration,
                 protocol_run_offset: self.protocol_run_offset,
+                consecutive_unproductive: self.consecutive_unproductive,
+                successful_tool_execution,
                 observed_cancellation: self.observed_cancellation.as_ref(),
                 environment: &environment.sync,
             },
@@ -1007,6 +1025,62 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         self.emit(event);
                     }
                 }
+                DriverAction::FinishIteration {
+                    continuation,
+                    feedback,
+                } => {
+                    self.protocol_iteration = continuation.next_iteration;
+                    self.consecutive_unproductive = continuation.consecutive_unproductive;
+                    for event in feedback {
+                        self.append_event(event);
+                    }
+                    progress_dirty = true;
+                    if let Some(abort) = self.run_abort.take() {
+                        self.emit_progress();
+                        progress_dirty = false;
+                        self.finish_run_abort(abort);
+                    } else {
+                        match continuation.decision {
+                            ContinueDecision::AfterWork => self.start(PendingWork::Checkpoint {
+                                checkpoint: CheckpointKind::AfterWork,
+                                on_empty: CheckpointResumeAction::PrepareIteration,
+                            }),
+                            ContinueDecision::TurnLimit
+                            | ContinueDecision::NoProgressLimit { .. } => {
+                                self.emit_progress();
+                                progress_dirty = false;
+                                self.finish(TurnOutcome::Stopped(TurnStop::MaxTurns));
+                            }
+                        }
+                    }
+                    break;
+                }
+                DriverAction::EndStep { end, superseded } => {
+                    if progress_dirty {
+                        self.emit_progress();
+                        progress_dirty = false;
+                    }
+                    if let Some(abort) = self.run_abort.take() {
+                        self.finish_run_abort(abort);
+                    } else {
+                        match end {
+                            lash_protocol_types::StepEnd::Stop(stop) => {
+                                self.finish(TurnOutcome::Stopped(stop))
+                            }
+                            lash_protocol_types::StepEnd::Completion(candidate) => {
+                                self.start(PendingWork::Checkpoint {
+                                    checkpoint: CheckpointKind::BeforeCompletion,
+                                    on_empty: CheckpointResumeAction::Complete {
+                                        candidate: Box::new(candidate),
+                                        superseded,
+                                    },
+                                })
+                            }
+                            lash_protocol_types::StepEnd::Continue => continue,
+                        }
+                    }
+                    break;
+                }
                 DriverAction::AdvanceProtocolIteration => {
                     self.protocol_iteration += 1;
                     progress_dirty = true;
@@ -1127,6 +1201,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         delivery: CheckpointDelivery,
     ) {
         if !delivery.committed_user_messages.is_empty() {
+            let progress = if matches!(&on_empty, CheckpointResumeAction::Complete { .. }) {
+                IterationProgress::Productive
+            } else {
+                IterationProgress::Unproductive
+            };
             if let CheckpointResumeAction::Complete {
                 candidate,
                 superseded,
@@ -1151,17 +1230,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .extend(delivery.committed_user_messages.clone());
             self.messages.extend(delivery.committed_user_messages);
             if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
-                self.protocol_iteration += 1;
-                if self
-                    .config
-                    .turn_budget
-                    .max_turns()
-                    .is_some_and(|max_turns| {
-                        self.protocol_iteration
-                            .saturating_sub(self.protocol_run_offset)
-                            >= max_turns
-                    })
-                {
+                let continuation = IterationContinuation::finish(
+                    self.protocol_iteration,
+                    self.protocol_run_offset,
+                    self.consecutive_unproductive,
+                    progress,
+                    self.config.turn_budget,
+                    self.config.no_progress_budget,
+                );
+                self.protocol_iteration = continuation.next_iteration;
+                self.consecutive_unproductive = continuation.consecutive_unproductive;
+                if continuation.decision != ContinueDecision::AfterWork {
                     self.emit_progress();
                     self.finish(TurnOutcome::Stopped(TurnStop::MaxTurns));
                     return;
@@ -1492,6 +1571,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 before
             }
         };
+        let successful_tool_execution = completed.iter().any(|call| call.output.is_success());
+        let run_abort = RunAbort::first_in(completed.iter().map(|outcome| &outcome.output));
         let completed = if expansion.is_empty() {
             completed
         } else {
@@ -1507,8 +1588,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
             });
         }
 
-        self.run_abort = RunAbort::first_in(completed.iter().map(|outcome| &outcome.output));
-        self.shift(|driver, ctx| driver.handle_tool_results(ctx, completed));
+        self.run_abort = run_abort;
+        self.shift_with_tool_execution(successful_tool_execution, |driver, ctx| {
+            driver.handle_tool_results(ctx, completed)
+        });
         self.finish_pending_run_abort();
     }
 

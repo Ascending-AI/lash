@@ -1,23 +1,21 @@
 //! Settlement and continuation policy for RLM execution.
 //! Response admission and committed assistant history belong to the native driver.
 
-use lash_core::sansio::{CheckpointResumeAction, PendingWork};
 use lash_core::session_model::{
     ConversationRecord, Message, MessageRole, Part, SessionHistoryRecord, SessionStreamEvent,
     shared_parts,
 };
 use lash_core::{
-    CellOutcome, CellRecord, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
-    ToolCallRecord, facade_support::TurnOutcome, facade_support::TurnStop,
+    CellOutcome, CellRecord, DriverAction, DriverContextView, ExecResponse, ToolCallRecord,
 };
-use lash_rlm_types::{RlmDiagnosticEvent, RlmDiagnosticPhase, RlmProtocolEvent};
+use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
+use lash_sansio::sansio::{ContinueDecision, IterationProgress};
 use lash_vocabulary::identity::TurnId;
 use serde_json::Value;
 
 use crate::dialect::SessionDialect;
 use crate::projection::rlm_protocol_event;
-use crate::protocol::actions::invalid_turn_options_actions;
-use crate::protocol::stall::{NO_PROGRESS_BUDGET_PHASE, stalled_attempts_in_phase};
+use crate::protocol::stall::NO_PROGRESS_BUDGET_PHASE;
 
 /// Adjudicate the executor's answer before the driver assembles its history.
 /// The commit callback preserves the driver's assistant envelope and trajectory.
@@ -26,7 +24,6 @@ pub(crate) fn settle_execution(
     dialect: &SessionDialect,
     code: String,
     result: Result<ExecResponse, lash_core::ExecCodeFailure>,
-    extraction_phase: RlmDiagnosticPhase,
     commit: impl FnOnce(CellRecord) -> Vec<SessionHistoryRecord>,
 ) -> Vec<DriverAction> {
     let mut actions = Vec::new();
@@ -64,16 +61,31 @@ pub(crate) fn settle_execution(
                     lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
                 )]));
             }
-            let terminal_outcome = response
-                .tool_calls
-                .iter()
-                .find_map(terminal_outcome_from_tool_result);
+            let terminal_end = response.tool_calls.iter().find_map(|call| {
+                if call.output.as_turn_control().is_some() {
+                    return None;
+                }
+                let end = lash_core::step_end_from_tool_output(
+                    ctx.protocol_iteration(),
+                    &call.call_id,
+                    &call.tool,
+                    &call.output,
+                );
+                matches!(end, lash_protocol_types::StepEnd::Stop(_)).then_some(end)
+            });
             if let CellOutcome::Controlled { call_id, .. } = &response.result {
                 settled_control = response
                     .tool_calls
                     .iter()
                     .find(|call| &call.call_id == call_id)
-                    .and_then(|call| call.output.as_turn_control().cloned());
+                    .map(|call| {
+                        lash_core::step_end_from_tool_output(
+                            ctx.protocol_iteration(),
+                            &call.call_id,
+                            &call.tool,
+                            &call.output,
+                        )
+                    });
             }
             // Each call's result summary is projected here, from the
             // committed records, in the record's own commit (FIG-6293).
@@ -96,17 +108,17 @@ pub(crate) fn settle_execution(
             record.prints_retained = response.prints_retained;
             record.result = response.result;
             record.consumption = response.consumption;
-            if let Some(outcome) = terminal_outcome {
+            if let Some(end) = terminal_end {
                 // A tool stopped the turn: the cell's own control never
                 // took effect, so it is not the cell's result.
                 if !record.result.is_failed() {
                     record.result = CellOutcome::Completed;
                 }
                 actions.push(DriverAction::AppendEvents(commit(record)));
-                actions.push(DriverAction::Start(PendingWork::Checkpoint {
-                    checkpoint: CheckpointKind::BeforeCompletion,
-                    on_empty: CheckpointResumeAction::Finish(outcome),
-                }));
+                actions.push(DriverAction::EndStep {
+                    end,
+                    superseded: Vec::new(),
+                });
                 return actions;
             }
         }
@@ -115,19 +127,7 @@ pub(crate) fn settle_execution(
         Err(failure) => record.result = CellOutcome::Failed(failure.into()),
     }
 
-    if let (
-        CellOutcome::Controlled {
-            tool_name, call_id, ..
-        },
-        Some(control),
-    ) = (&record.result, settled_control)
-    {
-        let candidate = lash_core::CompletionCandidate::new(
-            ctx.protocol_iteration(),
-            call_id.clone(),
-            tool_name.clone(),
-            control,
-        );
+    if let Some(lash_protocol_types::StepEnd::Completion(candidate)) = settled_control {
         let superseded = crate::protocol::finish::completion_superseded_message(
             rlm_message_id(
                 ctx.turn_id(),
@@ -137,136 +137,45 @@ pub(crate) fn settle_execution(
             &candidate,
         );
         actions.push(DriverAction::AppendEvents(commit(record)));
-        actions.push(DriverAction::Start(PendingWork::Checkpoint {
-            checkpoint: CheckpointKind::BeforeCompletion,
-            on_empty: CheckpointResumeAction::Complete {
-                candidate: Box::new(candidate),
-                superseded: vec![superseded],
-            },
-        }));
+        actions.push(DriverAction::EndStep {
+            end: lash_protocol_types::StepEnd::Completion(candidate),
+            superseded: vec![superseded],
+        });
         return actions;
     }
 
     let progress = if record.result.is_failed() {
-        AttemptProgress::Stalled
+        IterationProgress::Unproductive
     } else {
-        AttemptProgress::Executed
+        IterationProgress::Productive
     };
-    if let Err(err) = continue_or_stop_after_nonterminal(
-        ctx,
-        &mut actions,
-        commit(record),
-        Vec::new(),
-        progress,
-        extraction_phase,
-    ) {
-        return invalid_turn_options_actions(err);
-    }
+    continue_or_stop_after_nonterminal(ctx, &mut actions, commit(record), Vec::new, progress);
     actions
-}
-
-/// This is the reset condition for the no-progress budget, and it is
-/// deliberately narrower than "appended something": an attempt whose cell only
-/// raised commits a trajectory entry carrying that error, and a model that
-/// raises the same error forever has made exactly as much progress as one
-/// whose cell never parsed.
-///
-/// Two consequences of that law are intended, not oversights. A loop that
-/// raises while genuinely converging is bounded the same as one that is not —
-/// the bound is set far above ordinary repair traffic precisely so that
-/// convergence has room, and a repair that needs more attempts than the bound
-/// is indistinguishable from a stall from outside the model. And an attempt
-/// whose cell executed but only printed observations resets nothing here; that
-/// is real work, and bounding *it* is the turn budget's job, not this one's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AttemptProgress {
-    /// A cell executed and reported no error.
-    Executed,
-    /// No cell executed, or the one that did reported an error.
-    Stalled,
 }
 
 pub(crate) fn continue_or_stop_after_nonterminal(
     ctx: &DriverContextView<'_>,
     actions: &mut Vec<DriverAction>,
     durable_events: Vec<SessionHistoryRecord>,
-    retry_events: Vec<SessionHistoryRecord>,
-    progress: AttemptProgress,
-    extraction_phase: RlmDiagnosticPhase,
-) -> Result<(), String> {
+    retry_events: impl FnOnce() -> Vec<SessionHistoryRecord>,
+    progress: IterationProgress,
+) {
     if !durable_events.is_empty() {
         actions.push(DriverAction::AppendEvents(durable_events));
     }
-    actions.push(DriverAction::AdvanceProtocolIteration);
-
-    let next_protocol_iteration = ctx.protocol_iteration() + 1;
-    let reached_turn_limit = ctx
-        .turn_budget()
-        .max_turns()
-        .is_some_and(|max_turns| next_protocol_iteration >= ctx.protocol_run_offset() + max_turns);
-    if reached_turn_limit {
-        // Final-turn-fresh doctrine: retry events, including no-progress
-        // feedback, are deliberately dropped at the turn limit.
-        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::MaxTurns,
-        )));
-        return Ok(());
-    }
-
-    if progress == AttemptProgress::Stalled {
-        let attempts = stalled_attempts_in_phase(ctx, actions, extraction_phase)
-            .map_err(|error| error.to_string())?;
-        let budget = ctx.no_progress_budget();
-        if budget.is_exhausted_by(attempts) {
-            actions.push(DriverAction::AppendEvents(vec![
-                diagnostic_event(
-                    NO_PROGRESS_BUDGET_PHASE,
-                    serde_json::json!({
-                        "turn_id": ctx.turn_id(),
-                        "decision": "stop_no_progress",
-                        "consecutive_attempts": attempts,
-                        "max_attempts": budget.max_attempts(),
-                    }),
-                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-                ),
-                conversation_event(no_progress_stop_message(
-                    rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "no_progress"),
-                    attempts,
-                )),
-            ]));
-            actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                TurnStop::MaxTurns,
-            )));
-            return Ok(());
-        }
-    }
-
-    if !retry_events.is_empty() {
-        actions.push(DriverAction::AppendEvents(retry_events));
-    }
-
-    actions.push(DriverAction::Start(PendingWork::Checkpoint {
-        checkpoint: CheckpointKind::AfterWork,
-        on_empty: CheckpointResumeAction::PrepareIteration,
-    }));
-    Ok(())
-}
-
-fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutcome> {
-    if record.output.cancels_turn() {
-        // A cancellation outside the cell's Closing is an uncatchable host
-        // terminal: the turn ends with evidence lash mints for itself.
-        return Some(TurnOutcome::Stopped(TurnStop::Cancelled {
-            evidence: lash_core::facade_support::TurnCancellationEvidence::internal(format!(
-                "tool-call-cancelled:{}",
-                record.tool
+    actions.push(ctx.finish_iteration(progress, |decision| match decision {
+        ContinueDecision::AfterWork => retry_events(),
+        ContinueDecision::NoProgressLimit { consecutive } => vec![
+            diagnostic_event(NO_PROGRESS_BUDGET_PHASE, serde_json::json!({
+                "turn_id": ctx.turn_id(), "decision": "stop_no_progress",
+                "consecutive_attempts": consecutive, "max_attempts": ctx.no_progress_budget().max_attempts(),
+            }), lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION)),
+            conversation_event(no_progress_stop_message(
+                rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "no_progress"), consecutive,
             )),
-        }));
-    }
-    if !record.output.is_success() {
-        return None;
-    }
-    lash_core::turn_stop_from_tool_control(&record.tool, record.output.control.as_ref()?)
+        ],
+        ContinueDecision::TurnLimit => Vec::new(),
+    }));
 }
 
 fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {

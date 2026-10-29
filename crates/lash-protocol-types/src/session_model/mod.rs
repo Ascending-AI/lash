@@ -190,10 +190,17 @@ impl std::error::Error for ToolCallLimitExceeded {}
 /// [`TurnBudget`] bounds how much work a turn may do; this bounds how long a
 /// turn may fail to do any. A model that answers with an unreadable cell, or
 /// with a cell that only ever raises, re-enters the protocol loop without
-/// leaving a committed node behind, and a turn budget large enough for real
+/// completing successful execution, and a turn budget large enough for real
 /// work is far too large to stop that cheaply. Any attempt that commits a
 /// successful execution resets the count, so ordinary repair traffic — a model
 /// that mis-writes a cell and then fixes it — never approaches the bound.
+///
+/// Standard mode resets the count when at least one tool execution succeeds;
+/// a step whose tools all failed or were refused spends one attempt. Code mode
+/// resets it when a cell succeeds, including a cell that catches a tool failure.
+/// The meter survives checkpoint restore and input steering within the turn.
+/// A fresh turn starts at zero. If both budgets expire together, the turn limit
+/// wins without repair feedback.
 ///
 /// The host must choose a non-zero bound or explicitly opt out.
 #[derive(

@@ -19,7 +19,8 @@ use serde_json::Value;
 
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
-use crate::settlement::{AttemptProgress, continue_or_stop_after_nonterminal, settle_execution};
+use crate::settlement::{continue_or_stop_after_nonterminal, settle_execution};
+use lash_sansio::sansio::IterationProgress;
 
 use super::stall::{LLM_EXTRACTION_PHASE, native_reply_fingerprint};
 use crate::driver_state::{
@@ -181,70 +182,69 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 .payload(),
                 lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )]));
-            let cap = ctx
-                .generation()
-                .output_token_cap
-                .map(|cap| format!(" (the request cap was {cap} tokens)"))
-                .unwrap_or_default();
-            let copy = format!(
-                "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per program and continue in a later step."
-            );
-            let mut durable = Vec::new();
-            let mut retry = Vec::new();
-            if prose_only {
-                retry.push(conversation_event(
-                    internal_assistant_prose_message_for_turn(
-                        ctx.turn_id(),
-                        rlm_message_id(
-                            ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "truncated_assistant_response",
-                        ),
-                        prose,
-                        &reasoning,
-                    ),
-                ));
-                retry.push(conversation_event(Message {
-                    id: rlm_message_id(
-                        ctx.turn_id(),
-                        ctx.protocol_iteration(),
-                        "output_limit_retry",
-                    ),
-                    role: lash_core::MessageRole::System,
-                    parts: vec![lash_core::Part::text(
-                        rlm_message_id(
-                            ctx.turn_id(),
-                            ctx.protocol_iteration(),
-                            "output_limit_retry.p0",
-                        ),
-                        copy,
-                        None,
-                    )]
-                    .into(),
-                    origin: Some(lash_core::MessageOrigin::Plugin {
-                        plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-                        transient: false,
-                    }),
-                    reply_marker: None,
-                }));
+            let copy = || {
+                let cap = ctx
+                    .generation()
+                    .output_token_cap
+                    .map(|cap| format!(" (the request cap was {cap} tokens)"))
+                    .unwrap_or_default();
+                format!(
+                    "Your answer was cut off by the output limit{cap} — retry with a shorter answer. Do less per program and continue in a later step."
+                )
+            };
+            // A refused provider call still needs its durable paired result,
+            // including on the last iteration. Prose retry feedback is optional.
+            let durable = if prose_only {
+                Vec::new()
             } else {
-                durable.extend(refused_call_events(
-                    ctx.turn_id(),
-                    ctx.protocol_iteration(),
-                    parts,
-                    copy,
-                ));
-            }
-            if let Err(error) = continue_or_stop_after_nonterminal(
+                refused_call_events(ctx.turn_id(), ctx.protocol_iteration(), parts, copy())
+            };
+            continue_or_stop_after_nonterminal(
                 &ctx,
                 &mut actions,
                 durable,
-                retry,
-                AttemptProgress::Stalled,
-                LLM_EXTRACTION_PHASE,
-            ) {
-                return invalid_turn_options_actions(error);
-            }
+                || {
+                    if !prose_only {
+                        return Vec::new();
+                    }
+                    vec![
+                        conversation_event(internal_assistant_prose_message_for_turn(
+                            ctx.turn_id(),
+                            rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "truncated_assistant_response",
+                            ),
+                            prose,
+                            &reasoning,
+                        )),
+                        conversation_event(Message {
+                            id: rlm_message_id(
+                                ctx.turn_id(),
+                                ctx.protocol_iteration(),
+                                "output_limit_retry",
+                            ),
+                            role: lash_core::MessageRole::System,
+                            parts: vec![lash_core::Part::text(
+                                rlm_message_id(
+                                    ctx.turn_id(),
+                                    ctx.protocol_iteration(),
+                                    "output_limit_retry.p0",
+                                ),
+                                copy(),
+                                None,
+                            )]
+                            .into(),
+                            origin: Some(lash_core::MessageOrigin::Plugin {
+                                plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+                                transient: false,
+                            }),
+                            reply_marker: None,
+                        }),
+                    ]
+                },
+                IterationProgress::Unproductive,
+            );
             return actions;
         }
         let decision = match &action {
@@ -273,22 +273,21 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         )]));
         match action {
             super::tool::NativeAction::Malformed { repair_copy, .. } => {
+                // Refusal pairs record what happened to every provider call;
+                // they are durable execution evidence, not optional retry text.
                 let events = refused_call_events(
                     ctx.turn_id(),
                     ctx.protocol_iteration(),
                     parts,
                     repair_copy,
                 );
-                if let Err(error) = continue_or_stop_after_nonterminal(
+                continue_or_stop_after_nonterminal(
                     &ctx,
                     &mut actions,
                     events,
-                    Vec::new(),
-                    AttemptProgress::Stalled,
-                    LLM_EXTRACTION_PHASE,
-                ) {
-                    return invalid_turn_options_actions(error);
-                }
+                    Vec::new,
+                    IterationProgress::Unproductive,
+                );
             }
             super::tool::NativeAction::ProseOnly => {
                 if termination.prose_ends_turn() {
@@ -313,37 +312,36 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         )),
                     }));
                 } else {
-                    let events = vec![
-                        conversation_event(internal_assistant_prose_message_for_turn(
-                            ctx.turn_id(),
-                            rlm_message_id(
+                    let events = || {
+                        vec![
+                            conversation_event(internal_assistant_prose_message_for_turn(
                                 ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "assistant_response",
-                            ),
-                            prose,
-                            &reasoning,
-                        )),
-                        conversation_event(finish_required_reminder_message(
-                            self.dialect.as_ref(),
-                            rlm_message_id(
-                                ctx.turn_id(),
-                                ctx.protocol_iteration(),
-                                "finish_reminder",
-                            ),
-                            &self.dialect.offered_finish_calls(&ctx),
-                        )),
-                    ];
-                    if let Err(error) = continue_or_stop_after_nonterminal(
+                                rlm_message_id(
+                                    ctx.turn_id(),
+                                    ctx.protocol_iteration(),
+                                    "assistant_response",
+                                ),
+                                prose,
+                                &reasoning,
+                            )),
+                            conversation_event(finish_required_reminder_message(
+                                self.dialect.as_ref(),
+                                rlm_message_id(
+                                    ctx.turn_id(),
+                                    ctx.protocol_iteration(),
+                                    "finish_reminder",
+                                ),
+                                &self.dialect.offered_finish_calls(&ctx),
+                            )),
+                        ]
+                    };
+                    continue_or_stop_after_nonterminal(
                         &ctx,
                         &mut actions,
                         Vec::new(),
                         events,
-                        AttemptProgress::Stalled,
-                        LLM_EXTRACTION_PHASE,
-                    ) {
-                        return invalid_turn_options_actions(error);
-                    }
+                        IterationProgress::Unproductive,
+                    );
                 }
             }
             super::tool::NativeAction::Execute { code } => {
@@ -388,21 +386,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Some(driver_state),
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         );
-        settle_execution(
-            &ctx,
-            &self.dialect,
-            state.code,
-            result,
-            LLM_EXTRACTION_PHASE,
-            |record| {
-                cell_events(
-                    ctx.turn_id(),
-                    record,
-                    state.assistant_parts.clone(),
-                    lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
-                )
-            },
-        )
+        settle_execution(&ctx, &self.dialect, state.code, result, |record| {
+            cell_events(
+                ctx.turn_id(),
+                record,
+                state.assistant_parts.clone(),
+                lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
+            )
+        })
     }
 }
 

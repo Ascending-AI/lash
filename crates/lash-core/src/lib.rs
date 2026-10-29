@@ -490,11 +490,11 @@ pub use lash_core_execution::Judgement;
 /// The run spec a frame switch's follow-on runs under (FIG-6021).
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::RouteSource;
-pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_core_execution::{
     DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
     TransformRefusal,
 };
+pub use lash_core_execution::{step_end_from_tool_output, turn_stop_from_tool_control};
 pub use lash_kernel_value::names::EffectName;
 pub use lash_kernel_value::providers::DeferredResolutionPolicy;
 pub use lash_vocabulary::claims::ObligationToken;

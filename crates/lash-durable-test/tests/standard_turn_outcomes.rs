@@ -10,6 +10,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
@@ -396,58 +398,120 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
 /// A tool that fails the turn stops it with the tool's typed failure and
 /// publishes no final or tool value.
 async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(tier: Tier) {
-    let Some(world) = world(
-        tier,
-        vec![
-            answer(vec![tool_call(
+    for code in [false, true] {
+        let hooks = Arc::new(AtomicUsize::new(0));
+        let hook_calls = Arc::clone(&hooks);
+        let refuse_completion = Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("refuse-completion"),
+            lash_core::facade_support::PluginSpec::new().with_checkpoint(
+                lash_core::hook_key!("refuse-completion"),
+                Arc::new(move |ctx: lash_core::plugin::CheckpointHookContext| {
+                    let calls = Arc::clone(&hook_calls);
+                    Box::pin(async move {
+                        if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            return Err(
+                                lash_execution_contracts::plugin_error::PluginError::Session(
+                                    "checkpoint refused".into(),
+                                ),
+                            );
+                        }
+                        Ok(Default::default())
+                    })
+                }),
+            ),
+        ));
+        let response = if code {
+            served::cell("await terminal.tool0({});")
+        } else {
+            served::response(vec![tool_call(
                 "tool-1",
                 "terminal__tool0",
                 serde_json::json!({}),
-            )]),
-            answer(vec![text("unexpected follow-up")]),
-        ],
-        Some(Arc::new(TerminalControlTool {
-            controls: vec![lash_core::ToolControl::Fail {
-                failure: lash_core::ToolFailure::tool(
-                    lash_core::ToolFailureClass::Execution,
-                    "terminal_control_failed",
-                    "failed",
-                ),
-            }],
-        })),
-    )
-    .await
-    else {
-        return;
-    };
-    let session = world.session("terminal-tool-fail", served::spec(8)).await;
-    let output = world.send(&session, "run failing terminal tool").await;
-    let output_tool_calls =
-        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+            )])
+        };
+        let Some(world) = World::with_model(
+            tier,
+            Vec::new(),
+            mock_provider(vec![
+                MockCall {
+                    stream_events: Vec::new(),
+                    response: Ok(response),
+                },
+                answer(vec![text("unexpected follow-up")]),
+            ])
+            .into_handle(),
+            move |backend| {
+                let builder = if code {
+                    lash::LashCore::rlm_builder(
+                        backend.clone(),
+                        served::rlm(backend, sim::untimed_workers()),
+                    )
+                } else {
+                    lash::LashCore::standard_builder(backend.clone())
+                };
+                builder.plugin(refuse_completion).tools(
+                    lash::tool_provider_key!("tools"),
+                    Arc::new(TerminalControlTool {
+                        controls: vec![lash_core::ToolControl::Fail {
+                            failure: lash_core::ToolFailure::tool(
+                                lash_core::ToolFailureClass::Execution,
+                                "terminal_control_failed",
+                                "failed",
+                            ),
+                        }],
+                    }),
+                )
+            },
+        )
+        .await
+        else {
+            return;
+        };
+        let session = world.session("terminal-tool-fail", served::spec(8)).await;
+        let output = world.send(&session, "run failing terminal tool").await;
+        let output_tool_calls =
+            lash::testing::tool_calls_for_activity(&session, &output.activities).await;
 
-    assert!(
-        matches!(
-            &output.outcome,
-            lash_core::facade_support::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ToolError {
-                tool_name,
-                value,
-            }) if tool_name == "terminal.tool0"
-                && value["code"] == "terminal_control_failed"
-                && value["message"] == "failed"
-        ),
-        "outcome={:?} calls={:?}",
-        output.outcome,
-        output_tool_calls
-    );
-    assert!(
-        !output
-            .activities
-            .iter()
-            .any(|activity| matches!(activity.event, TurnEvent::Finished { .. })),
-        "{:?}",
-        output.activities
-    );
-    world.shutdown().await;
+        assert!(
+            matches!(
+                &output.outcome,
+                lash_core::facade_support::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ToolError {
+                    tool_name,
+                    value,
+                }) if tool_name == "terminal.tool0"
+                    && value["code"] == "terminal_control_failed"
+                    && value["message"] == "failed"
+            ),
+            "outcome={:?} calls={:?}",
+            output.outcome,
+            output_tool_calls
+        );
+        assert!(
+            !output
+                .activities
+                .iter()
+                .any(|activity| matches!(activity.event, TurnEvent::Finished { .. })),
+            "{:?}",
+            output.activities
+        );
+        assert_eq!(hooks.load(Ordering::SeqCst), 0, "code={code}");
+        assert!(
+            !output
+                .activities
+                .iter()
+                .any(|activity| matches!(activity.event, TurnEvent::CheckpointRecorded { .. })),
+            "code={code}: {:?}",
+            output.activities
+        );
+        assert_eq!(
+            output_tool_calls.len(),
+            1,
+            "the terminal call's record is committed"
+        );
+        assert_eq!(output_tool_calls[0].tool, "terminal.tool0");
+        world.shutdown().await;
+    }
 }
 
 /// A tool call the model streamed as a part, with an empty final response,
