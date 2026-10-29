@@ -370,6 +370,21 @@ mod tests {
             };
             let read = crate::lower(&printed.source, &environment, mode)
                 .unwrap_or_else(|error| panic!("{}: {error:?}\n{}", case.name, printed.source));
+            let reprinted = print(
+                &read.document,
+                Some(&read.captions),
+                library,
+                PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{}: second print: {error:?}", case.name));
+            assert_eq!(
+                reprinted.source, printed.source,
+                "{}: readable printing must stabilize",
+                case.name
+            );
             if read.document.canonical_bytes() != lowered.document.canonical_bytes() {
                 failures.push(format!(
                     "{}: identity mismatch\n{}",

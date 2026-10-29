@@ -290,7 +290,7 @@ fn bigint_binding(lifter: &Lifter<'_>, value: &k::Expr, name: &Name) -> bool {
 
 /// The body `value` binds `names` around, from the padded `args`.
 fn arguments_around<'v>(
-    lifter: &Lifter<'_>,
+    lifter: &mut Lifter<'_>,
     args: &Name,
     names: &[&Name],
     value: &'v k::Expr,
@@ -313,6 +313,7 @@ fn arguments_around<'v>(
         return None;
     }
     let mut body: &k::Expr = body;
+    let mut bindings = Vec::with_capacity(names.len());
     for (index, name) in names.iter().enumerate() {
         let k::Expr::Let {
             name: bound,
@@ -322,32 +323,27 @@ fn arguments_around<'v>(
         else {
             return None;
         };
-        if bound == *name && argument(lifter, list, index, value) {
-            body = rest;
-            continue;
-        }
         if !argument(lifter, list, index, value) {
             return None;
         }
-        let k::Expr::Let {
-            name: authored,
-            value: normalized,
-            body: after,
-        } = &**rest
-        else {
-            return None;
+        let (bound, rest) = match &**rest {
+            k::Expr::Let {
+                name: authored,
+                value: normalized,
+                body: after,
+            } if bigint_binding(lifter, normalized, bound) => (authored, after),
+            _ => (bound, rest),
         };
-        if authored != *name || !bigint_binding(lifter, normalized, bound) {
-            return None;
-        }
-        body = after;
+        bindings.push((bound.clone(), lifter.binding(name).ok()?));
+        body = rest;
     }
+    lifter.bindings.extend(bindings);
     Some(body)
 }
 
 /// How many statements of `body` bind `names` from the padded `args`.
 fn arguments_before(
-    lifter: &Lifter<'_>,
+    lifter: &mut Lifter<'_>,
     args: &Name,
     names: &[&Name],
     body: &[k::Stmt],
@@ -366,6 +362,7 @@ fn arguments_before(
         return None;
     }
     let mut consumed = 0;
+    let mut bindings = Vec::with_capacity(names.len());
     for (index, name) in names.iter().enumerate() {
         let k::Stmt::Let {
             name: bound,
@@ -378,25 +375,27 @@ fn arguments_before(
             return None;
         }
         consumed += 1;
-        if bound == *name {
-            continue;
-        }
-        let k::Stmt::Let {
+        let mut parameter = bound;
+        if let Some(k::Stmt::Let {
             name: authored,
             value,
-        } = rest.get(consumed)?
-        else {
-            return None;
-        };
-        let normalized = match value {
-            k::Rhs::Expr(value) => value.clone(),
-            k::Rhs::Action(action) => k::Expr::Act(Box::new(super::statements::act_of(action))),
-        };
-        if authored != *name || !bigint_binding(lifter, &normalized, bound) {
-            return None;
+        }) = rest.get(consumed)
+        {
+            let normalized = match value {
+                k::Rhs::Expr(value) => value.clone(),
+                k::Rhs::Action(action) => k::Expr::Act(Box::new(super::statements::act_of(action))),
+            };
+            if bigint_binding(lifter, &normalized, bound) {
+                parameter = authored;
+                consumed += 1;
+            }
         }
-        consumed += 1;
+        bindings.push((parameter.clone(), lifter.binding(name).ok()?));
     }
+    // Lowering renames parameters that shadow an enclosing binding. Their
+    // callable presentation keeps the source name, which also names every
+    // use in the printed body. Publish aliases only after the full prelude fits.
+    lifter.bindings.extend(bindings);
     Some(1 + consumed)
 }
 

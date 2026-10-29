@@ -152,5 +152,29 @@
       "load",
       "to_cols"
     ]
+  },
+  {
+    "name": "FIG-7550 saved factory callable from Figments",
+    "source": "export function run(event: { item_id: string; source: { kind: \"workflow\" | \"integration\"; id: string; slug: string; display_name: string; }; response_id: string; response_label: string; values: {  [key: string]: JsonValue; }; completion: \"immediate\" | \"tracked\"; answered_by: { identity_id: string; kind: \"person\" | \"agent\"; }; answered_at: string; title?: string | null; }): undefined {\n  const saved_factory_0 = () => {\n    const fill_environment_0 = () => null;\n    const echo = async (event: { item_id: string; source: { kind: \"workflow\" | \"integration\"; id: string; slug: string; display_name: string; }; response_id: string; response_label: string; values: {  [key: string]: JsonValue; }; completion: \"immediate\" | \"tracked\"; answered_by: { identity_id: string; kind: \"person\" | \"agent\"; }; answered_at: string; title?: string | null; }): Promise<undefined> => {\n      /** Send an echo of the chosen response */\n      await inbox.sendItem({ title: \"Echo r4020261028090843 \" + event.response_id, body: \"echo\" });\n    };\n    return [echo, fill_environment_0];\n  };\n  const saved_environment_0 = callable.invoke_token(saved_factory_0);\n  const saved_callable_0 = tuple.at(saved_environment_0, 0);\n  const saved_fill_0 = tuple.at(saved_environment_0, 1);\n  saved_fill_0();\n  return saved_callable_0(event);\n}\n"
+  },
+  {
+    "name": "FIG-7550 saved factory with captured environment",
+    "source": "export function run(count: number): { marker: string; captured: string; count: number; [key: string]: never; } {\n  const saved_factory_0 = () => {\n    let captured = null;\n    const fill_environment_0 = (saved_input_0_0) => {\n      captured = saved_input_0_0;\n      return null;\n    };\n    const echo = async (count: number): Promise<{ marker: string; captured: string; count: number; [key: string]: never; }> => {\n      return { marker: \"v1-r4020261028085553\", captured, count };\n    };\n    return [echo, fill_environment_0];\n  };\n  const saved_environment_0 = callable.invoke_token(saved_factory_0);\n  const saved_callable_0 = tuple.at(saved_environment_0, 0);\n  const saved_fill_0 = tuple.at(saved_environment_0, 1);\n  const captured_1 = \"capture-r4020261028085553\";\n  saved_fill_0(captured_1);\n  return saved_callable_0(count);\n}\n"
+  },
+  {
+    "name": "FIG-7550 saved factory with record parameter",
+    "source": "export function run(tick: { fired_at: string; }): { probe: string; tick: { fired_at: string; [key: string]: never; }; [key: string]: never; } {\n  const saved_factory_0 = () => {\n    const fill_environment_0 = () => null;\n    const task = async (tick: { fired_at: string; }): Promise<{ probe: string; tick: { fired_at: string; [key: string]: never; }; [key: string]: never; }> => {\n      return { probe: \"wf-trigger-probe-r4020261028091459\", tick };\n    };\n    return [task, fill_environment_0];\n  };\n  const saved_environment_0 = callable.invoke_token(saved_factory_0);\n  const saved_callable_0 = tuple.at(saved_environment_0, 0);\n  const saved_fill_0 = tuple.at(saved_environment_0, 1);\n  saved_fill_0();\n  return saved_callable_0(tick);\n}\n"
+  },
+  {
+    "name": "FIG-7550 shadowed expression parameter",
+    "source": "export function run(value: number): number { const echo = (value: number): number => value; return echo(value); }"
+  },
+  {
+    "name": "FIG-7550 shadowed BigInt expression parameter",
+    "source": "export function run(value: bigint): bigint { const echo = (value: bigint): bigint => value; return echo(value); }"
+  },
+  {
+    "name": "FIG-7550 shadowed BigInt block parameter",
+    "source": "export function run(value: bigint): bigint { const echo = (value: bigint): bigint => { return value; }; return echo(value); }"
   }
 ]
