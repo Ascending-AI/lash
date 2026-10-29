@@ -14,15 +14,46 @@ fn slot_parts(slot: Slot) -> (u8, u32) {
         Slot::Capture(n) => (8, n),
     }
 }
-pub(super) fn invocation_key(task: TaskId, invocation: u64) -> Vec<u8> {
-    [
-        vec![0],
-        task.0.to_be_bytes().to_vec(),
-        invocation.to_be_bytes().to_vec(),
-    ]
-    .concat()
+#[derive(Clone)]
+pub(super) struct Key {
+    bytes: [u8; 33],
+    len: usize,
 }
-pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
+impl Key {
+    pub(super) fn tagged(tag: u8, bytes: &[u8]) -> Self {
+        let mut key = Self {
+            bytes: [0; 33],
+            len: 1,
+        };
+        key.bytes[0] = tag;
+        key.append(bytes);
+        key
+    }
+    fn append(&mut self, bytes: &[u8]) {
+        self.bytes[self.len..self.len + bytes.len()].copy_from_slice(bytes);
+        self.len += bytes.len();
+    }
+    pub(super) fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+impl AsRef<[u8]> for Key {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+impl std::ops::Deref for Key {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
+pub(super) fn invocation_key(task: TaskId, invocation: u64) -> Key {
+    let mut key = Key::tagged(0, &task.0.to_be_bytes());
+    key.append(&invocation.to_be_bytes());
+    key
+}
+pub(super) fn owner_key(owner: Owner) -> Key {
     match owner {
         Owner::Frame { task, invocation }
         | Owner::Value {
@@ -32,19 +63,15 @@ pub(super) fn owner_key(owner: Owner) -> Vec<u8> {
                 Owner::Value { slot, .. } => slot_parts(slot),
                 _ => (0, 0),
             };
-            [
-                vec![0],
-                task.0.to_be_bytes().to_vec(),
-                invocation.to_be_bytes().to_vec(),
-                vec![kind],
-                index.to_be_bytes().to_vec(),
-            ]
-            .concat()
+            let mut key = invocation_key(task, invocation);
+            key.append(&[kind]);
+            key.append(&index.to_be_bytes());
+            key
         }
-        Owner::Session(key) => [vec![1], key.to_vec()].concat(),
-        Owner::Incoming(task) => [vec![2], task.0.to_be_bytes().to_vec()].concat(),
-        Owner::Ended(task) => [vec![3], task.0.to_be_bytes().to_vec()].concat(),
-        Owner::Saved(key) => [vec![4], key.to_vec()].concat(),
+        Owner::Session(key) => Key::tagged(1, &key),
+        Owner::Incoming(task) => Key::tagged(2, &task.0.to_be_bytes()),
+        Owner::Ended(task) => Key::tagged(3, &task.0.to_be_bytes()),
+        Owner::Saved(key) => Key::tagged(4, &key),
     }
 }
 impl TokenCodec for Slot {
@@ -181,11 +208,14 @@ impl TokenCodec for Holding {
         input.expect_struct(2)?;
         Ok(Self {
             bytes: input.unsigned()?,
-            links: Tree::decode(input)?,
+            links: Links::decode(input)?,
         })
     }
 }
 impl Cell for Holding {
+    fn same_version(&self, other: &Self) -> bool {
+        self.bytes == other.bytes && self.links.same_version(&other.links)
+    }
     fn cost(&self) -> u64 {
         self.bytes
     }
@@ -256,6 +286,9 @@ pub(super) fn validate_root(record: &RootHolding) -> Result<(), HeapFault> {
     }
 }
 impl Cell for RootHolding {
+    fn same_version(&self, other: &Self) -> bool {
+        self.owner == other.owner && self.value.same_version(&other.value)
+    }
     fn cost(&self) -> u64 {
         self.value.bytes
     }
@@ -294,6 +327,9 @@ impl TokenCodec for EntityHolding {
     }
 }
 impl Cell for EntityHolding {
+    fn same_version(&self, other: &Self) -> bool {
+        self.incoming == other.incoming && self.body.same_version(&other.body)
+    }
     fn cost(&self) -> u64 {
         self.body.bytes
     }

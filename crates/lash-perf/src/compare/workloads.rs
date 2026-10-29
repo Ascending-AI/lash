@@ -126,4 +126,11 @@ pub(super) const ALL: &[Workload] = &[
         js: include_str!("workloads/object_sort.js"),
         py: include_str!("workloads/object_sort.py"),
     },
+    Workload {
+        name: "object_sort_200k",
+        low: 20000,
+        ops: 1,
+        js: include_str!("workloads/object_sort.js"),
+        py: include_str!("workloads/object_sort.py"),
+    },
 ];

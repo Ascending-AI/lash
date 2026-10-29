@@ -74,20 +74,23 @@ impl Holding {
             return Ok(holding.clone());
         }
         let mut holding = Self::scalar(arena.logical_local(value)?);
-        if !matches!(
-            value,
-            Value::List(_)
-                | Value::Map(_)
-                | Value::Set(_)
-                | Value::Record(_)
-                | Value::Closure(_)
-                | Value::ObjectRef(_)
-                | Value::Task(_)
-                | Value::TaskRef(_)
-                | Value::Tuple(_)
-                | Value::Error(_)
-        ) {
-            return Ok(holding);
+        match value {
+            Value::List(handle)
+            | Value::Map(handle)
+            | Value::Set(handle)
+            | Value::Record(handle)
+            | Value::Closure(handle)
+            | Value::ObjectRef(handle) => {
+                let entity = arena.identify(*handle).map_err(arena_fault)?;
+                holding.add_edge(Identity::Object(entity), 1, access)?;
+                return Ok(holding);
+            }
+            Value::Task(task) | Value::TaskRef(task) => {
+                holding.add_edge(Identity::Task(*task), 1, access)?;
+                return Ok(holding);
+            }
+            Value::Tuple(_) | Value::Error(_) => (),
+            _ => return Ok(holding),
         }
         let mut pending = vec![*value];
         while let Some(value) = pending.pop() {

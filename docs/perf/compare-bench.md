@@ -37,6 +37,10 @@ destruction and host result validation are excluded. The two-point secant descri
 For nonlinear `object_sort`, the table omits the intercept because two points
 do not identify fixed setup cost. Retain the actual high-count durations.
 
+The maintained instruction gate also runs `object_sort_200k` at 20,000 and
+200,000 records with the same comparator source. It uses one warmup and one
+measured pair for this large row; the other maintained rows retain five pairs.
+
 Build the pinned external references into a cache without vendoring them:
 
 ```sh

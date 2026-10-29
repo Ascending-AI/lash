@@ -37,7 +37,7 @@ def kernel_geometry(root: Path) -> dict:
             geometry[f"kernel/{dialect}/{name}"] = {
                 "source_hash": hashlib.sha256(path.read_bytes()).hexdigest(),
                 "trips": trips, "operations": [n * ops for n in trips],
-                "runs": 5, "warmups": 1,
+                "runs": 1 if low >= 20000 else 5, "warmups": 1,
             }
     return geometry
 

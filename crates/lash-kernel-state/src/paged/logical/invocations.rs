@@ -140,13 +140,13 @@ impl Ledger {
         }
         self.invocation(invocation.task, invocation.id, access)?;
         let prefix = codec::invocation_key(invocation.task, invocation.id);
-        let mut cursor = prefix.clone();
+        let mut cursor = prefix.as_slice().to_vec();
         let mut owners = Vec::new();
         while let Some((key, record)) = self.state.owners.after(Some(&cursor), access)? {
             if !key.starts_with(&prefix) {
                 break;
             }
-            if key != owner_key(record.owner) {
+            if key != owner_key(record.owner).as_slice() {
                 return Err(invalid("logical owner key mismatch"));
             }
             owners.push(record.owner);

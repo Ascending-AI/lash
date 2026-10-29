@@ -35,13 +35,18 @@ def read(path: Path) -> dict:
 def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
     workloads_by_name = kernel_workloads(ROOT)
     captures = []
-    for group, large, factor in (("ordinary", False, "100"), ("large-objects", True, "10")):
-        workloads = ",".join(name for name, (low, _, _) in workloads_by_name.items() if (low >= 10000) == large)
+    for group, minimum, maximum, factor, runs in (
+        ("ordinary", 0, 10000, "100", "5"),
+        ("large-objects", 10000, 20000, "10", "5"),
+        ("large-sort", 20000, math.inf, "10", "1"),
+    ):
+        workloads = ",".join(name for name, (low, _, _) in workloads_by_name.items()
+                             if minimum <= low < maximum)
         if not workloads:
             continue
         compare = directory / f"compare-{group}.json"
         execute([binary, "compare", "--out", str(compare), "--instructions", "--workload", workloads,
-                 "--runs", "5", "--warmups", "1", "--factor", factor], directory / f"compare-{group}.log", env)
+                 "--runs", runs, "--warmups", "1", "--factor", factor], directory / f"compare-{group}.log", env)
         capture = read(compare)
         if capture.get("errors") or not capture.get("rows"):
             raise ValueError(f"incomplete kernel comparison: {group}")
@@ -71,7 +76,7 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
             raise ValueError(f"{name}: missing positive instruction slope")
         rows[name] = value
         geometry[name] = {k: row[k] for k in ("source_hash", "trips", "operations")}
-        geometry[name].update({k: kernel["geometry"][k] for k in ("runs", "warmups")})
+        geometry[name].update(runs=len(row["samples"]), warmups=kernel["geometry"]["warmups"])
         artifacts["kernel"] = row["engine_identity"]
     expected_kernel = {f"kernel/{dialect}/{name}" for dialect in ("typescript", "python")
                        for name in workloads_by_name}

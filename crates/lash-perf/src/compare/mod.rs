@@ -617,7 +617,7 @@ fn table(receipt: &Receipt) -> String {
             row.engine,
             row.minimum.slope_ns,
             row.median.slope_ns,
-            if row.workload == "object_sort" {
+            if row.workload.starts_with("object_sort") {
                 "n/a (nonlinear)".into()
             } else {
                 format!("{:.0}", row.median.intercept_ns)

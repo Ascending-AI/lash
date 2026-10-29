@@ -2,6 +2,35 @@
 use super::*;
 
 impl<T: Cell> Tree<T> {
+    pub(crate) fn encode_pending(
+        &self,
+        len: u64,
+        cost: u64,
+        tasks: u64,
+        members: u64,
+        out: &mut TokenWriter,
+    ) {
+        out.seq(7);
+        self.sequence.encode(out);
+        None::<FamilyId>.encode(out);
+        if len == 0 {
+            out.sum(0, 0);
+        } else {
+            out.sum(2, 3);
+            PageRef {
+                id: PageId([0; 32]),
+                grant: lash_kernel_doc::heap::PageGrant::NONE,
+            }
+            .encode(out);
+            u64::MAX.encode(out);
+            true.encode(out);
+        }
+        len.encode(out);
+        cost.encode(out);
+        tasks.encode(out);
+        members.encode(out);
+    }
+
     pub fn children(&self, out: &mut Vec<PageRef>) {
         if let Some(root) = &self.root {
             match &root.link {

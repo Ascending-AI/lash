@@ -2,12 +2,15 @@
 //! Physical residency never changes these trees. An operation edits cloned
 //! roots and publishes only after its complete source peak has been admitted.
 
-use super::census_graph::visit_tree;
-use super::tree::{Access, Cell, SealWork, Tree};
+use super::tree::{Access, Cell, SealWork};
+mod index;
 use super::{KeyedRoot, SealBudget};
+use index::{Index as Tree, visit_tree};
+mod links;
 use lash_kernel_doc::LogicalHeldV1 as Cost;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity};
+use links::Links;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
@@ -104,7 +107,7 @@ struct Edge {
 #[derive(Clone)]
 pub struct Holding {
     bytes: u64,
-    links: Tree<Edge>,
+    links: Links,
 }
 impl std::fmt::Debug for Holding {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -118,7 +121,7 @@ impl Holding {
     pub fn scalar(bytes: u64) -> Self {
         Self {
             bytes,
-            links: Tree::new(false),
+            links: Links::Empty,
         }
     }
     pub fn frame() -> Self {
@@ -145,22 +148,23 @@ impl Holding {
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
         let key = identity_key(target);
-        let count = self
-            .links
-            .get(&key, access)?
-            .map_or(0, |edge| edge.count)
-            .checked_add(amount)
-            .ok_or_else(|| invalid("edge count overflow"))?;
-        self.links.write(key, Edge { target, count }, access)
+        self.links
+            .write_with(&key, access, |old| {
+                let count = old
+                    .map_or(0, |edge| edge.count)
+                    .checked_add(amount)
+                    .ok_or_else(|| invalid("edge count overflow"))?;
+                Ok::<_, HeapFault>(Some(Edge { target, count }))
+            })
+            .map(|_| ())
     }
     fn replace_members(
-        &self,
+        &mut self,
         remove: &Self,
         add: &Self,
         access: &Access<'_>,
-    ) -> Result<Self, HeapFault> {
-        let mut next = self.clone();
-        next.bytes = self
+    ) -> Result<(), HeapFault> {
+        self.bytes = self
             .bytes
             .checked_sub(remove.bytes)
             .and_then(|bytes| bytes.checked_add(add.bytes))
@@ -168,7 +172,7 @@ impl Holding {
             .ok_or_else(|| invalid("member cost overflow or missing header"))?;
         remove.each_edge(access, &mut |edge| {
             let key = identity_key(edge.target);
-            let old = next
+            let old = self
                 .links
                 .get(&key, access)?
                 .ok_or_else(|| invalid("removed member edge is absent"))?;
@@ -177,9 +181,9 @@ impl Holding {
                 .checked_sub(edge.count)
                 .ok_or_else(|| invalid("member edge underflow"))?;
             if count == 0 {
-                next.links.remove(&key, access)?;
+                self.links.remove(&key, access)?;
             } else {
-                next.links.write(
+                self.links.write(
                     key,
                     Edge {
                         target: edge.target,
@@ -191,9 +195,9 @@ impl Holding {
             Ok(())
         })?;
         add.each_edge(access, &mut |edge| {
-            next.add_edge(edge.target, edge.count, access)
+            self.add_edge(edge.target, edge.count, access)
         })?;
-        Ok(next)
+        Ok(())
     }
     pub fn visit_edges(
         &self,
@@ -207,7 +211,7 @@ impl Holding {
         access: &Access<'_>,
         visit: &mut dyn FnMut(&Edge) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        visit_tree(&self.links, access, visit)
+        self.links.each(access, visit)
     }
 }
 
@@ -555,13 +559,19 @@ impl Ledger {
                     add,
                 } => {
                     let key = entity_key(entity);
-                    let mut record = edit
-                        .state
-                        .entities
-                        .get(&key, access)?
-                        .ok_or_else(|| invalid("mutated entity is absent"))?;
-                    record.body = record.body.replace_members(&remove, &add, access)?;
-                    edit.state.entities.write(key, record, access)?;
+                    if remove.bytes == add.bytes
+                        && remove.links.is_empty()
+                        && add.links.is_empty()
+                        && edit.state.entities.get_with(&key, access, |record| {
+                            record.is_some_and(|record| record.body.bytes >= remove.bytes)
+                        })?
+                    {
+                        continue;
+                    }
+                    edit.state.entities.update(&key, access, |record| {
+                        record.body.replace_members(&remove, &add, access)?;
+                        Ok(true)
+                    })?;
                     edit.retain(&add)?;
                     edit.release(&remove, false)?;
                 }
@@ -660,6 +670,7 @@ impl Ledger {
             || !state.ended.seal(access, work)?
             || !state.entities.seal(access, work)?
         {
+            self.state = state;
             return Ok(None);
         }
         let root = LedgerRoot {
@@ -690,16 +701,13 @@ impl Edit<'_, '_> {
         for edge in edges {
             if let Identity::Object(entity) = edge.target {
                 let key = entity_key(entity);
-                let mut record = self
-                    .state
-                    .entities
-                    .get(&key, self.access)?
-                    .ok_or_else(|| invalid("holding reaches absent entity"))?;
-                record.incoming = record
-                    .incoming
-                    .checked_add(edge.count)
-                    .ok_or_else(|| invalid("incoming ownership overflow"))?;
-                self.state.entities.write(key, record, self.access)?;
+                self.state.entities.update(&key, self.access, |record| {
+                    record.incoming = record
+                        .incoming
+                        .checked_add(edge.count)
+                        .ok_or_else(|| invalid("incoming ownership overflow"))?;
+                    Ok(true)
+                })?;
             }
         }
         Ok(())
@@ -713,20 +721,21 @@ impl Edit<'_, '_> {
         for edge in edges {
             if let Identity::Object(entity) = edge.target {
                 let key = entity_key(entity);
-                let Some(mut record) = self.state.entities.get(&key, self.access)? else {
-                    if allow_swept {
-                        continue;
-                    }
-                    return Err(invalid("released entity is absent"));
-                };
-                record.incoming = record
-                    .incoming
-                    .checked_sub(edge.count)
-                    .ok_or_else(|| invalid("incoming ownership underflow"))?;
-                if record.incoming == 0 {
+                if allow_swept && self.state.entities.get(&key, self.access)?.is_none() {
+                    continue;
+                }
+                let mut last = false;
+                self.state.entities.update(&key, self.access, |record| {
+                    record.incoming = record
+                        .incoming
+                        .checked_sub(edge.count)
+                        .ok_or_else(|| invalid("incoming ownership underflow"))?;
+                    last = record.incoming == 0;
+                    Ok(true)
+                })?;
+                if last {
                     self.zero.push_back(entity);
                 }
-                self.state.entities.write(key, record, self.access)?;
             }
         }
         Ok(())
@@ -766,7 +775,6 @@ impl Edit<'_, '_> {
         self.roots(changes)
     }
     fn roots(&mut self, changes: Vec<(Owner, Option<Holding>)>) -> Result<(), HeapFault> {
-        let mut old = Vec::new();
         let mut unique = BTreeMap::new();
         for (owner, value) in changes {
             if value.is_none()
@@ -782,6 +790,19 @@ impl Edit<'_, '_> {
                 return Err(invalid("owner replaced twice in one transfer"));
             }
         }
+        let mut edges = BTreeMap::<EntityId, (u64, u64)>::new();
+        let mut collect = |value: &Holding, adding: bool| {
+            value.each_edge(self.access, &mut |edge| {
+                if let Identity::Object(entity) = edge.target {
+                    let counts = edges.entry(entity).or_default();
+                    let count = if adding { &mut counts.1 } else { &mut counts.0 };
+                    *count = count
+                        .checked_add(edge.count)
+                        .ok_or_else(|| invalid("incoming ownership overflow"))?;
+                }
+                Ok(())
+            })
+        };
         for (owner, value) in &unique {
             if let Some(value) = value {
                 codec::validate_root(&RootHolding {
@@ -802,13 +823,23 @@ impl Edit<'_, '_> {
                         Ok(())
                     })?;
                 }
-                self.retain(value)?;
+                collect(value, true)?;
             }
+            self.state
+                .roots(*owner)
+                .get_with(&owner_key(*owner), self.access, |old| {
+                    old.map_or(Ok(()), |old| collect(&old.value, false))
+                })??;
         }
         for (owner, value) in unique {
             let key = owner_key(owner);
-            if let Some(previous) = self.state.roots(owner).get(&key, self.access)? {
-                old.push(previous.value);
+            if let Some(previous) = self.state.roots(owner).get(&key, self.access)?
+                && let Some(value) = &value
+                && value.bytes == previous.value.bytes
+                && value.links.is_empty()
+                && previous.value.links.is_empty()
+            {
+                continue;
             }
             match value {
                 Some(value) => {
@@ -823,8 +854,35 @@ impl Edit<'_, '_> {
                 }
             }
         }
-        for value in old {
-            self.release(&value, false)?;
+        for (entity, (removed, added)) in edges {
+            let key = entity_key(entity);
+            let next = |incoming: u64| {
+                incoming
+                    .checked_add(added)
+                    .ok_or_else(|| invalid("incoming ownership overflow"))?
+                    .checked_sub(removed)
+                    .ok_or_else(|| invalid("incoming ownership underflow"))
+            };
+            let incoming = if removed == added {
+                self.state.entities.get_with(&key, self.access, |record| {
+                    next(
+                        record
+                            .ok_or_else(|| invalid("holding reaches absent entity"))?
+                            .incoming,
+                    )
+                })??
+            } else {
+                let mut incoming = 0;
+                self.state.entities.update(&key, self.access, |record| {
+                    incoming = next(record.incoming)?;
+                    record.incoming = incoming;
+                    Ok(true)
+                })?;
+                incoming
+            };
+            if incoming == 0 {
+                self.zero.push_back(entity);
+            }
         }
         self.release_zero(false)
     }
@@ -833,18 +891,21 @@ impl Edit<'_, '_> {
 fn invalid(reason: &str) -> HeapFault {
     HeapFault::Malformed(reason.into())
 }
-fn entity_key(entity: EntityId) -> Vec<u8> {
-    [entity.family.0.to_be_bytes(), entity.ordinal.to_be_bytes()].concat()
+fn entity_key(entity: EntityId) -> [u8; 16] {
+    let mut key = [0; 16];
+    key[..8].copy_from_slice(&entity.family.0.to_be_bytes());
+    key[8..].copy_from_slice(&entity.ordinal.to_be_bytes());
+    key
 }
-fn identity_key(identity: Identity) -> Vec<u8> {
+fn identity_key(identity: Identity) -> codec::Key {
     match identity {
-        Identity::Object(entity) => [vec![0], entity_key(entity)].concat(),
-        Identity::Task(task) => [vec![1], task.0.to_be_bytes().to_vec()].concat(),
+        Identity::Object(entity) => codec::Key::tagged(0, &entity_key(entity)),
+        Identity::Task(task) => codec::Key::tagged(1, &task.0.to_be_bytes()),
     }
 }
-fn owner_key(owner: Owner) -> Vec<u8> {
+fn owner_key(owner: Owner) -> codec::Key {
     codec::owner_key(owner)
 }
 fn keyed<T: Cell>(tree: &Tree<T>) -> Result<KeyedRoot, HeapFault> {
-    super::heap_impl::keyed(tree)
+    tree.keyed_root()
 }

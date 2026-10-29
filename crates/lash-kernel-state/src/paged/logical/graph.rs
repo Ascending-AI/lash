@@ -111,7 +111,7 @@ impl CensusGraph for Graph<'_, '_> {
         after: Option<EntityId>,
         limit: usize,
     ) -> Result<Vec<EntityId>, HeapFault> {
-        let mut key = after.map(entity_key);
+        let mut key = after.map(|entity| entity_key(entity).to_vec());
         let mut entities = Vec::new();
         while entities.len() < limit {
             let Some((next, _)) = self
@@ -146,7 +146,7 @@ impl CensusGraph for Graph<'_, '_> {
         after: Option<TaskId>,
         limit: usize,
     ) -> Result<Vec<TaskId>, HeapFault> {
-        let mut key = after.map(|t| owner_key(Owner::Ended(t)));
+        let mut key = after.map(|t| owner_key(Owner::Ended(t)).as_slice().to_vec());
         let mut tasks = Vec::new();
         while tasks.len() < limit {
             let Some((next, r)) = self
