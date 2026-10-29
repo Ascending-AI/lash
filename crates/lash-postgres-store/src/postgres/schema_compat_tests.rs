@@ -176,12 +176,12 @@ async fn release_build_refuses_pre_release_store_before_counters_without_mutatio
     scratch.cleanup().await;
 }
 
-/// FIG-5270: the baseline release opens its own version-1 store.
+/// FIG-5270: a release opens a store stamped for the current schema.
 #[tokio::test]
 async fn release_build_admits_release_store() {
     let url = crate::testing::required_database_url();
     let scratch = Scratch::new(&url).await;
-    assert_release_admission(&scratch, "1.0.0", "1.0.0", 1, false).await;
+    assert_release_admission(&scratch, "1.0.0", "1.0.0", current_schema_counter(), false).await;
     scratch.cleanup().await;
 }
 
@@ -190,8 +190,20 @@ async fn release_build_admits_release_store() {
 async fn pre_release_build_admits_pre_release_store() {
     let url = crate::testing::required_database_url();
     let scratch = Scratch::new(&url).await;
-    assert_release_admission(&scratch, "0.0.0-dev", "0.0.0-dev", 1, false).await;
+    assert_release_admission(
+        &scratch,
+        "0.0.0-dev",
+        "0.0.0-dev",
+        current_schema_counter(),
+        false,
+    )
+    .await;
     scratch.cleanup().await;
+}
+
+fn current_schema_counter() -> i32 {
+    i32::try_from(postgres_descriptor().reads.min())
+        .expect("schema counter fits PostgreSQL integer")
 }
 
 async fn assert_release_admission(
@@ -201,12 +213,14 @@ async fn assert_release_admission(
     counter: i32,
     refuses: bool,
 ) {
-    sqlx::query("INSERT INTO lash_release_stamp (singleton, release_version, schema_versions, written_at_epoch_ms) VALUES (TRUE, $1, 'Postgres schema=1', 42) ON CONFLICT (singleton) DO UPDATE SET release_version = excluded.release_version")
-        .bind(writing).execute(&scratch.pool).await.expect("stamp writing release");
+    sqlx::query("INSERT INTO lash_release_stamp (singleton, release_version, schema_versions, written_at_epoch_ms) VALUES (TRUE, $1, $2, 42) ON CONFLICT (singleton) DO UPDATE SET release_version = excluded.release_version, schema_versions = excluded.schema_versions")
+        .bind(writing).bind(format!("Postgres schema={counter}")).execute(&scratch.pool).await.expect("stamp writing release");
     sqlx::query("UPDATE lash_schema_versions SET version = $1, min_reader = $1 WHERE component = 'lash-postgres-store'")
         .bind(counter).execute(&scratch.pool).await.expect("stamp component counters");
+    let fleet =
+        lash_core_store::store::FleetFormat::seed(lash_core_store::store::FleetFormat::writable());
     sqlx::query("UPDATE lash_fleet_format SET format_version = $1")
-        .bind(counter)
+        .bind(i32::try_from(fleet.version()).expect("fleet epoch fits PostgreSQL integer"))
         .execute(&scratch.pool)
         .await
         .expect("stamp fleet counter");

@@ -182,6 +182,17 @@ def functions(src: Source) -> list[Function]:
     return found
 
 
+def constants(src: Source) -> list[Function]:
+    found = []
+    # Transaction SQL can be a named constant used by the guarded writer.
+    # Keep its identity distinct from unrelated module-level SQL.
+    for match in re.finditer(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+(\w+)\s*:[^=;]+?=", src.code):
+        end = src.code.find(";", match.end())
+        if end >= 0:
+            found.append(Function(match.group(1), match.end(), end))
+    return found
+
+
 def enclosing(fns: list[Function], offset: int) -> str:
     inner = [fn for fn in fns if fn.body_start <= offset < fn.body_end]
     if not inner:
@@ -195,8 +206,8 @@ def line_of(text: str, offset: int) -> int:
 
 # --- SQLite (lane L3) ---------------------------------------------------------
 #
-# The guarded entry is `SqliteConnection::write` / `write_flow`
-# (crates/lash-sqlite-store/src/conn.rs): `BEGIN IMMEDIATE`, then the fence
+# The guarded entry is `conn/batch.rs::transact`, reached by
+# `SqliteConnection::write` / `write_flow`: `BEGIN IMMEDIATE`, then the fence
 # (`compat::fence`) as the first statement. Two other entries open write
 # transactions by design and are named here rather than allowlisted, because
 # they are not read-only:
@@ -215,7 +226,9 @@ def line_of(text: str, offset: int) -> int:
 SQLITE_SOURCE = ROOT / "crates/lash-sqlite-store/src"
 SQLITE_TEST_FILES = re.compile(r"(^|/)(tests?|test_support|testing|\w+_tests)\.rs$|(^|/)tests/")
 SQLITE_GUARDS = {
-    "crates/lash-sqlite-store/src/conn.rs::write_flow",
+    "crates/lash-sqlite-store/src/conn/batch.rs::transact",
+    # The batch uses this nested savepoint only after its writer fence.
+    "crates/lash-sqlite-store/src/connection_sql.rs::BATCH_MEMBER_SAVEPOINT",
     "crates/lash-sqlite-store/src/conn.rs::install",
     "crates/lash-sqlite-store/src/compat.rs::advance_observed",
 }
@@ -326,7 +339,7 @@ def check_sqlite() -> list[Site]:
     writing = sqlite_writing_functions(sources)
     flagged = []
     for src in sources:
-        fns = functions(src)
+        fns = functions(src) + constants(src)
 
         def site(offset: int, what: str) -> Site:
             return Site(src.path, enclosing(fns, offset), line_of(src.text, offset), what)
@@ -513,15 +526,25 @@ def matching_brace(text: str, open_index: int) -> int:
     return length - 1
 
 
-def blank_test_modules(text: str) -> str:
-    """`text` with every test-gated inline `mod name { ... }` blanked."""
+def blank_test_items(text: str) -> str:
+    """Blank test-gated inline modules and standalone functions, keeping SQL."""
 
-    for match in reversed(list(re.finditer(r"\bmod\s+\w+\s*\{", text))):
+    code = masked(text)
+    pairs = bracket_pairs(code)
+    items = re.finditer(r"\b(?:mod\s+\w+\s*\{|fn\s+\w+\s*\()", code)
+    for match in reversed(list(items)):
         if not _TEST_CFG.search(_attribute_run_before(text, _line_start(text, match.start()))):
             continue
-        close = matching_brace(text, match.end() - 1)
-        segment = text[match.start() : close + 1]
-        text = text[: match.start()] + re.sub(r"[^\n]", " ", segment) + text[close + 1 :]
+        opening = match.end() - 1
+        if code[opening] == "(":
+            arguments = pairs[opening]
+            brace = code.find("{", arguments)
+            semicolon = code.find(";", arguments)
+            end = semicolon + 1 if brace < 0 or 0 <= semicolon < brace else pairs[brace]
+        else:
+            end = pairs[opening]
+        segment = text[match.start() : end]
+        text = text[: match.start()] + re.sub(r"[^\n]", " ", segment) + text[end:]
     return text
 
 
@@ -738,7 +761,7 @@ def check_postgres(root: Path = ROOT) -> list[Site]:
         relative = path.relative_to(root).as_posix()
         if path.resolve() in excluded or relative == POSTGRES_GUARD:
             continue
-        text = blank_test_modules(strip_comments(path.read_text()))
+        text = blank_test_items(strip_comments(path.read_text()))
         functions = enclosing_functions(text)
         for match in _BEGIN.finditer(text):
             line = line_of(text, match.start())

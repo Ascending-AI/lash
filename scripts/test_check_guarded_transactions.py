@@ -184,6 +184,16 @@ class CheckTests(unittest.TestCase):
             fn nothing() {}
 
             #[cfg(test)]
+            #[tokio::test]
+            async fn standalone_seed(pool: &PgPool) {
+                sqlx::query("DELETE FROM widgets").execute(pool).await;
+            }
+            #[cfg(feature = "testing")]
+            async fn inject_fault(pool: &PgPool) {
+                sqlx::query(sql).execute(pool).await;
+            }
+
+            #[cfg(test)]
             mod tests {
                 async fn seeds(pool: &PgPool) {
                     let tx = pool.begin().await;
@@ -192,6 +202,12 @@ class CheckTests(unittest.TestCase):
             """
         )
         self.assertEqual(self.check(), [])
+        path = self.repo / f"{SRC}/postgres/widgets.rs"
+        path.write_text(path.read_text() + "\nasync fn production(pool: &PgPool) {\n    sqlx::query(SQL.insert.sql()).execute(pool).await;\n}\n")
+        problems = self.check()
+        self.assertEqual(len(problems), 1)
+        self.assertIn("production", problems[0])
+        self.assertIn("mutating statement", problems[0])
 
     def test_pooled_begin_forms_cannot_use_readonly_exemptions(self) -> None:
         # FIG-7551: spelling changes and an exemption cannot bypass the owner.
