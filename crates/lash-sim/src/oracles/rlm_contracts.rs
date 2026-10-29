@@ -174,7 +174,7 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "rlm.exec_tool_control_fail_terminal",
         ),
         fact: "rlm_exec_tool_control_fail_terminal",
-        assertion: "exec result tool control failure terminalizes as a concrete ToolError outcome",
+        assertion: "exec result tool control failure immediately terminalizes as a concrete ToolError without a checkpoint or another model call",
         check: check_rlm_exec_tool_control_fail_terminal,
         extras_before: &[],
         extras_after: &[
@@ -524,14 +524,29 @@ fn check_rlm_exec_tool_control_fail_terminal(
 ) -> Result<Value, String> {
     require_bool(result, "/done", true, contract)?;
     require_rlm_exec_code(result, "const x = await tools.customFail({});", contract)?;
-    require_checkpoint(result, "before_completion", contract)?;
+    require_u64(result, "/llm_call_count", 1, contract)?;
+    if result.get("checkpoints") != Some(&json!([])) {
+        return Err(format!(
+            "{contract} hard stop must not request a checkpoint"
+        ));
+    }
+    if result
+        .get("turn_outcomes")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        != Some(1)
+    {
+        return Err(format!(
+            "{contract} hard stop must emit exactly one terminal outcome"
+        ));
+    }
     require_rlm_tool_call_event(result, contract)?;
     require_rlm_tool_error(result, "custom_fail", "no valid result", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "done": true,
         "exec_code": "const x = await tools.customFail({});",
-        "checkpoint": "before_completion",
+        "checkpoint": null,
         "tool_error": { "tool_name": "custom_fail", "message": "no valid result" },
         "tool_call_event": true,
     }))

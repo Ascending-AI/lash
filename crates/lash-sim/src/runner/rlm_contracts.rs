@@ -415,7 +415,6 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
                     ),
                 )],
             ))),
-            RlmContractStep::Checkpoint,
         ],
     )
 }

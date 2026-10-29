@@ -621,6 +621,30 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected RLM tool-control-fail replay failure: {err}"
     );
 
+    for (contract, checkpoints, message) in [
+        (
+            "rlm.exec_tool_control_fail_terminal",
+            json!(["before_completion"]),
+            "a hard stop must not checkpoint",
+        ),
+        (
+            "rlm.exec_tool_control_frame_switch_terminal",
+            json!([]),
+            "a declared completion must checkpoint",
+        ),
+    ] {
+        let mut wrong_checkpoints = events.clone();
+        mutate_contract_execution(&mut wrong_checkpoints, contract, |execution| {
+            execution["result"]["checkpoints"] = checkpoints.clone();
+        });
+        let err = scenario_contract_generated_facts_for_semantic(contract, &wrong_checkpoints)
+            .expect_err(message);
+        assert!(
+            err.contains("fixed-source replay validation"),
+            "unexpected checkpoint contract failure: {err}"
+        );
+    }
+
     let mut foreground_tool_missing = events.clone();
     mutate_contract_execution(
         &mut foreground_tool_missing,

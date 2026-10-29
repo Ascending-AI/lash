@@ -699,8 +699,19 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             .iter()
             .any(|effect| matches!(effect, Effect::Emit(SessionStreamEvent::ToolCall { .. })))
     );
-    let trajectory = machine_trajectory(&restored);
-    let entry = trajectory.last().expect("rlm trajectory entry");
+    // Completion transfers history to the consumer, so its records must be
+    // inspected in the delivered delta rather than the finished machine.
+    let trajectory = delivered_events(&exec_effects)
+        .filter_map(|record| match record {
+            lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(entry),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(trajectory.len(), 1);
+    let entry = &trajectory[0];
     assert!(
         serde_json::to_value(entry)
             .unwrap()
@@ -762,22 +773,21 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             },
         ]
     );
-    let (checkpoint_id, checkpoint) = find_checkpoint(&effects).expect("terminal checkpoint");
-    // A cancelled call record is an uncatchable host terminal: the run it was
-    // dispatched for is over, so the turn checkpoints BeforeCompletion and
-    // settles cancelled instead of re-prompting the model.
-    assert_eq!(checkpoint, CheckpointKind::BeforeCompletion);
-    restored.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: lash_sansio::CheckpointDelivery::default(),
-    });
-    let settled = drain_effects(&mut restored);
+    // A cancelled call is a hard stop, with no completion-policy checkpoint.
+    assert!(find_checkpoint(&exec_effects).is_none());
+    assert!(find_llm_call(&exec_effects).is_none());
+    assert!(find_done(&exec_effects).is_some());
+    assert!(machine.is_done());
     assert!(matches!(
-        find_turn_outcome(&settled),
+        find_turn_outcome(&exec_effects),
         Some(lash_protocol_types::TurnOutcome::Stopped(
             lash_protocol_types::TurnStop::Cancelled { .. }
         ))
     ));
+    assert!(restored.is_done());
+    assert!(find_checkpoint(&effects).is_none());
+    assert!(find_llm_call(&effects).is_none());
+    assert!(find_turn_outcome(&effects).is_none());
 }
 
 // === FIG-1407: the no-progress budget ===
