@@ -54,6 +54,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
             lash_core::CellRecord {
+                read_facts: Vec::new(),
                 consumption: Vec::new(),
                 language: "typescript".to_string(),
                 prints_retained: None,
@@ -130,6 +131,7 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
         omitted: 0,
     };
     let entry = |bindings| lash_core::CellRecord {
+        read_facts: Vec::new(),
         prints: vec!["done".to_string().into()],
         bindings,
         ..lash_core::CellRecord::default()
@@ -169,6 +171,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
     let dialect =
         crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript());
     let entry = lash_core::CellRecord {
+        read_facts: Vec::new(),
         consumption: Vec::new(),
         language: "typescript".to_string(),
         prints_retained: None,
@@ -239,6 +242,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
             lash_core::CellRecord {
+                read_facts: Vec::new(),
                 consumption: Vec::new(),
                 language: "typescript".to_string(),
                 prints_retained: None,
@@ -317,6 +321,7 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
     SessionHistoryRecord::Protocol(rlm_protocol_event(
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
             lash_core::CellRecord {
+                read_facts: Vec::new(),
                 consumption: Vec::new(),
                 language: "typescript".to_string(),
                 prints_retained: None,

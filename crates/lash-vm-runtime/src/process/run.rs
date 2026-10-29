@@ -126,10 +126,11 @@ struct StepHost {
     observe: lash_kernel_value::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
     read_ordinal: std::sync::atomic::AtomicU64,
+    facts: std::sync::Mutex<Vec<lash_protocol_types::ReadFact>>,
+    read_panic: std::sync::Mutex<Option<lash_protocol_types::ReadPanic>>,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     environment: Arc<lash_core_store::tool_surface::ExecutionEnvironment>,
     cancel: CancellationToken,
-    parent_wait: std::time::Duration,
     /// The live deltas this segment reported, which name their trace facts.
     deltas: std::sync::atomic::AtomicU64,
     /// What names this segment's live facts: its start.
@@ -188,6 +189,7 @@ impl RunHost for StepHost {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let requirement = self
             .environment
@@ -209,27 +211,41 @@ impl RunHost for StepHost {
                 )
             },
         );
-        let deadline = std::time::Instant::now() + self.parent_wait;
-        let answer = super::reads::answer(
+        let result = self
+            .effect_reads
+            .read(
+                effect,
+                input,
+                lash_execution_contracts::process::EngineReadSite {
+                    ordinal: self
+                        .read_ordinal
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1,
+                    site,
+                    origin,
+                },
+                &self.cancel,
+                parent_remaining,
+            )
+            .await
+            .map_err(|error| ParentFault(error.to_string()))?;
+        self.facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(result.fact);
+        let answer = match lash_vm_broker::kernel::value::read_answer(
             &requirement.signature.result,
-            self.effect_reads
-                .read(
-                    effect,
-                    input,
-                    lash_execution_contracts::process::EngineReadSite {
-                        ordinal: self
-                            .read_ordinal
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                            + 1,
-                        site,
-                        origin,
-                    },
-                    &self.cancel,
-                    deadline,
-                )
-                .await
-                .map_err(|error| ParentFault(error.to_string()))?,
-        );
+            result.answer,
+        ) {
+            Ok(answer) => answer,
+            Err(panic) => {
+                *self
+                    .read_panic
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(panic.clone());
+                return Err(ParentFault(panic.message));
+            }
+        };
         if self.observe == lash_kernel_value::observation::RunObservation::Counts {
             self.taped().effects.push(super::state::EffectRead {
                 use_: *effect,
@@ -256,6 +272,7 @@ fn ended(
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
+            read_facts: Vec::new(),
             ran: lash_kernel_value::observation::SiteCounts::new(),
             caught: Vec::new(),
             reads: None,
@@ -482,13 +499,14 @@ async fn kernel_run(
                 .collect(),
             ..HostReads::default()
         }),
+        facts: std::sync::Mutex::new(Vec::new()),
+        read_panic: std::sync::Mutex::new(None),
         read_ordinal: std::sync::atomic::AtomicU64::new(
             input.parked.as_ref().map_or(0, |parked| parked.read_count),
         ),
         effect_reads: Arc::clone(&run.reads),
         environment: Arc::clone(&run.environment),
         cancel: stop.clone(),
-        parent_wait: engine.workers.config().tuning.parent_wait,
         deltas: std::sync::atomic::AtomicU64::new(0),
         segment: input
             .parked
@@ -546,8 +564,36 @@ async fn kernel_run(
         &stop,
     )
     .await;
+    let read_facts = std::mem::take(
+        &mut *host
+            .facts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    let read_panic = host
+        .read_panic
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let Some(panic) = read_panic {
+        let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::failure(panic.failure()),
+        );
+        return Ok((
+            KernelRunOutput::Ended {
+                outcome: Box::new(outcome),
+                read_facts,
+                ran: Default::default(),
+                caught: Vec::new(),
+                reads: host.tape(),
+                start: start.map(Box::new),
+            },
+            None,
+        ));
+    }
     let Driven {
         step,
+        meters,
         parked: state,
         ran,
         caught,
@@ -573,12 +619,13 @@ async fn kernel_run(
     let start = start.map(Box::new);
     match step {
         MachineStep::Ended(end) => {
-            let outcome = outcome_of_end(end);
+            let outcome = outcome_of_end(end, meters);
             if let Some(trace) = &trace {
                 trace.finished(&outcome);
             }
             Ok((
                 KernelRunOutput::Ended {
+                    read_facts,
                     outcome: Box::new(outcome),
                     ran,
                     caught,
@@ -616,6 +663,7 @@ async fn kernel_run(
             }
             Ok((
                 KernelRunOutput::Parked {
+                    read_facts,
                     read_count: host.read_ordinal.load(std::sync::atomic::Ordering::Relaxed),
                     state,
                     issued,
@@ -676,6 +724,7 @@ fn recorded_start(
 /// park with the candidate that publishes it, and what it observed.
 pub(super) struct Driven {
     pub(super) step: MachineStep,
+    pub(super) meters: Option<lash_kernel_vm::Meters>,
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
     pub(super) ran: lash_kernel_value::observation::SiteCounts,
     pub(super) path: lash_kernel_value::observation::ExecutionPath,
@@ -752,66 +801,139 @@ pub(super) async fn run_machine(
     slice: u64,
     stop: &CancellationToken,
 ) -> Result<Driven, KernelFailure> {
-    // Keep the lease schedule alive across every part of the drive, including
-    // resume, delivery and inline host reads. This future belongs to the
-    // activation: finishing or dropping the drive also drops its renewal.
-    let pages = std::sync::Arc::clone(&activation.pages);
-    let drive = async {
-        let pages = std::sync::Arc::clone(&activation.pages);
-        let mut machine = match &activation.parked {
-            Some(parked) => machines.resume(parked, binding, pages).await?,
-            None => machines.start(binding, pages).await?,
-        };
-        for (wait, outcome) in deliver {
-            machine.deliver(wait, outcome.into()).await?;
-        }
-        loop {
-            let step = machine.run(slice, false).await?;
-            let parked = match &step {
-                // A stopped step is asked again from the same input.
-                MachineStep::Slice if stop.is_cancelled() => None,
-                MachineStep::Slice => continue,
-                MachineStep::Parked(_) => {
-                    let sealed = lash_vm_broker::kernel::run::sealed(
-                        &mut machine,
-                        &activation.pages,
-                        binding,
-                        &machines.document(),
-                        machines.closure()?.reference(),
-                    )
-                    .await?;
-                    let page = ParkedPage {
-                        root: sealed.root,
-                        kernel: sealed.header.kernel,
-                    };
-                    let candidate = activation.candidate(sealed.root, machines.closure()?.clone());
-                    Some((page, candidate))
-                }
-                MachineStep::Ended(_) => None,
-            };
-            let (ran, path, caught) = (
-                machine.take_ran(),
-                machine.take_path(),
-                machine.take_caught(),
-            );
-            if !matches!(step, MachineStep::Slice) {
-                machine.release().await?;
-            }
-            return Ok(Driven {
-                step,
-                parked,
-                ran,
-                path,
-                caught,
-            });
-        }
+    let mut owner = ProcessKernelOwner {
+        machines,
+        activation,
+        binding,
+        slice,
+        stop,
+        machine: None,
+        deliver: Some(deliver),
     };
-    tokio::pin!(drive);
-    loop {
-        tokio::select! {
-            driven = &mut drive => return driven,
-            () = lash_vm_broker::kernel::pages::renew_when_due(&pages) => {}
+    lash_core_execution::kernel_runner::run(&mut owner).await
+}
+
+struct ProcessKernelOwner<'a> {
+    machines: &'a lash_vm_client::RemoteMachines,
+    activation: &'a mut StepActivation,
+    binding: lash_core_store::checkpoint_graph::NodeId,
+    slice: u64,
+    stop: &'a CancellationToken,
+    machine: Option<lash_vm_client::RemoteMachine>,
+    deliver: Option<
+        Vec<(
+            lash_kernel_value::sites::WaitId,
+            lash_vm_client::wire::OutcomeWire,
+        )>,
+    >,
+}
+
+impl ProcessKernelOwner<'_> {
+    async fn finish(&mut self, step: MachineStep) -> Result<Driven, KernelFailure> {
+        let machine = self
+            .machine
+            .as_mut()
+            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        let parked = if matches!(step, MachineStep::Parked(_)) {
+            let sealed = lash_vm_broker::kernel::run::sealed(
+                machine,
+                &self.activation.pages,
+                self.binding,
+                &self.machines.document(),
+                self.machines.closure()?.reference(),
+            )
+            .await?;
+            let page = ParkedPage {
+                root: sealed.root,
+                kernel: sealed.header.kernel,
+            };
+            Some((
+                page,
+                self.activation
+                    .candidate(sealed.root, self.machines.closure()?.clone()),
+            ))
+        } else {
+            None
+        };
+        let machine_meters = machine.meters();
+        let (ran, path, caught) = (
+            machine.take_ran(),
+            machine.take_path(),
+            machine.take_caught(),
+        );
+        if !matches!(step, MachineStep::Slice)
+            && let Some(machine) = self.machine.take()
+        {
+            machine.release().await?;
         }
+        Ok(Driven {
+            step,
+            parked,
+            ran,
+            path,
+            caught,
+            meters: machine_meters,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::kernel_runner::KernelOwner for ProcessKernelOwner<'_> {
+    type Error = KernelFailure;
+    type Output = Driven;
+
+    fn bounds(&self) -> Bounds {
+        self.machines.bounds()
+    }
+
+    async fn next(&mut self) -> Result<MachineStep, KernelFailure> {
+        let pages = Arc::clone(&self.activation.pages);
+        let work = async {
+            if self.machine.is_none() {
+                self.machine = Some(match &self.activation.parked {
+                    Some(parked) => {
+                        self.machines
+                            .resume(parked, self.binding, Arc::clone(&pages))
+                            .await?
+                    }
+                    None => {
+                        self.machines
+                            .start(self.binding, Arc::clone(&pages))
+                            .await?
+                    }
+                });
+            }
+            let machine = self
+                .machine
+                .as_mut()
+                .ok_or(KernelFailure::EmptyCheckpoint)?;
+            if let Some(deliver) = self.deliver.take() {
+                for (wait, outcome) in deliver {
+                    machine.deliver(wait, outcome.into()).await?;
+                }
+            }
+            machine.run(self.slice, false).await
+        };
+        lash_vm_broker::kernel::pages::shared::while_held(&self.activation.pages, work).await
+    }
+
+    async fn sliced(&mut self) -> Result<Option<Driven>, KernelFailure> {
+        if self.stop.is_cancelled() {
+            self.finish(MachineStep::Slice).await.map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn park(
+        &mut self,
+        park: lash_core_execution::kernel_runner::MachinePark,
+    ) -> Result<Option<Driven>, KernelFailure> {
+        self.finish(MachineStep::Parked(park)).await.map(Some)
+    }
+
+    async fn end(&mut self, end: End) -> Result<Driven, KernelFailure> {
+        self.finish(MachineStep::Ended(end)).await
     }
 }
 
@@ -1092,7 +1214,10 @@ fn issue(
 }
 
 /// How a run's end becomes the output its awaiter reads.
-pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::ProcessOutcome {
+pub(super) fn outcome_of_end(
+    end: End,
+    meters: Option<lash_kernel_vm::Meters>,
+) -> lash_execution_contracts::process::ProcessOutcome {
     let json = |value: &Datum| -> Option<serde_json::Value> {
         datum_to_json(value)
             .ok()
@@ -1114,10 +1239,13 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
             "the process failed",
             json(&value),
         ),
-        End::Error(RunError::Bound(exceeded)) => failure(
+        End::Error(RunError::Bound(exceeded)) => caused_failure(
             KernelProcessFailureCode::BoundExceeded,
             exceeded.to_string(),
             None,
+            Some(lash_core::ToolFailureCause::ExecutionBound {
+                fact: lash_core_execution::kernel_runner::bound_fact(&exceeded, meters),
+            }),
         ),
         End::Error(RunError::TasksOutstanding {
             unfinished,

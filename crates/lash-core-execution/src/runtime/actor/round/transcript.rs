@@ -36,6 +36,7 @@ pub enum TranscriptEntry {
     Report(NodeId),
     /// A recorded model round retains its immutable environment lifetime.
     Environment(NodeId),
+    Read(NodeId),
 }
 
 /// Kind 45: a turn's answered calls, in order.
@@ -51,6 +52,7 @@ impl TokenCodec for TranscriptEntry {
             Self::Payload(node) => (1, node),
             Self::Report(node) => (2, node),
             Self::Environment(node) => (3, node),
+            Self::Read(node) => (4, node),
         };
         out.sum(variant, 1);
         node.encode(out);
@@ -65,6 +67,7 @@ impl TokenCodec for TranscriptEntry {
             1 => Ok(Self::Payload(node)),
             2 => Ok(Self::Report(node)),
             3 => Ok(Self::Environment(node)),
+            4 => Ok(Self::Read(node)),
             other => Err(TokenError::UnsupportedVariant { variant: other }),
         }
     }
@@ -112,12 +115,12 @@ impl TurnTranscript {
         for (run, mut rows) in runs {
             rows.sort_by_key(|row| row.ordinal);
             let first: RoundFact = decoder.decode(rows[0].record, NodeKind::ROUND_FACT)?;
-            let members = match first {
+            let (members, plans) = match first {
                 RoundFact::CellReport { report } => {
                     entries.push(TranscriptEntry::Report(report));
                     continue;
                 }
-                RoundFact::Admit { members } => members,
+                RoundFact::Admit { members, reads } => (members, reads),
                 _ => {
                     return Err(corrupt(format!(
                         "run {} opens without its admission",
@@ -136,7 +139,44 @@ impl TurnTranscript {
                     finals.insert(call.clone(), output.material);
                 }
             }
+            let mut read_facts = rows
+                .iter()
+                .filter(|row| row.kind == RunFactKind::Present)
+                .map(|row| {
+                    let RoundFact::Present { reads } = RoundFact::load(&mut decoder, row.record)?
+                    else {
+                        return Err(corrupt("a present row holds another fact"));
+                    };
+                    reads
+                        .into_iter()
+                        .map(|node| {
+                            let fact = graph::load_model_read(&mut decoder, node)?.fact;
+                            let plan = plans
+                                .iter()
+                                .find(|plan| plan.call_id == fact.call_id)
+                                .ok_or_else(|| {
+                                    corrupt("a saved read has no slot in its model plan")
+                                })?;
+                            Ok((plan.slot + 1, node))
+                        })
+                        .collect::<Result<Vec<_>, GraphRefusal>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .peekable();
+            let mut slot = 1;
             for member in members {
+                while read_facts
+                    .peek()
+                    .is_some_and(|(ordinal, _)| *ordinal == slot)
+                {
+                    if let Some((_, node)) = read_facts.next() {
+                        entries.push(TranscriptEntry::Read(node));
+                        slot += 1;
+                    }
+                }
+                slot += 1;
                 let call = match member {
                     AdmitMember::Pinned(pin) => pin.call,
                     AdmitMember::Admission(node) => {
@@ -153,6 +193,7 @@ impl TurnTranscript {
                     MaterialNode::Value(node) => TranscriptEntry::Payload(node),
                 });
             }
+            entries.extend(read_facts.map(|(_, node)| TranscriptEntry::Read(node)));
         }
         Ok((!entries.is_empty()).then_some(Self { entries }))
     }
@@ -176,7 +217,9 @@ impl TurnTranscript {
         for entry in &transcript.entries {
             let (node, kind) = match entry {
                 TranscriptEntry::Call(node) => (node, NodeKind::CALL_BODY),
-                TranscriptEntry::Payload(node) => (node, NodeKind::FROZEN_VALUE),
+                TranscriptEntry::Payload(node) | TranscriptEntry::Read(node) => {
+                    (node, NodeKind::FROZEN_VALUE)
+                }
                 TranscriptEntry::Report(node) => (node, NodeKind::REPORT_VIEW),
                 TranscriptEntry::Environment(node) => (node, NodeKind::ROUND_ENVIRONMENT),
             };
@@ -202,6 +245,9 @@ impl TurnTranscript {
         for entry in &self.entries {
             match *entry {
                 TranscriptEntry::Environment(_) => {}
+                TranscriptEntry::Read(node) => {
+                    records.push(graph::load_model_read(decoder, node)?.fact.record())
+                }
                 TranscriptEntry::Call(body) => records.push(CallBody::load(decoder, body)?.record),
                 TranscriptEntry::Payload(node) => {
                     let serde_json::Value::String(payload) = graph::load_value(decoder, node)?

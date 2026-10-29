@@ -149,6 +149,10 @@ pub struct CellFailure {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec_failure: Option<ExecCodeFailureReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_panic: Option<Box<crate::ReadPanic>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound: Option<Box<ExecutionBoundFact>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_admission: Option<Box<lash_kernel_value::json_schema::SchemaAdmissionError>>,
     /// The rule of a session's cells the program broke, when that is why
     /// the cell failed, kept typed through the plugin and host result.
@@ -210,6 +214,8 @@ impl CellFailure {
             worker_limit: None,
             tool_call_limit: None,
             exec_failure: None,
+            read_panic: None,
+            bound: None,
             schema_admission: None,
             defect: None,
             feedback: Vec::new(),
@@ -545,6 +551,19 @@ pub struct CellConsumption {
     pub observed: Option<u64>,
 }
 
+/// The bound that ended a kernel execution, with only the receipts received.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ExecutionBoundFact {
+    pub resource: CellResource,
+    pub limit: u64,
+    pub observed: Option<u64>,
+    pub consumed: Option<u64>,
+    pub function: Option<lash_kernel_value::names::FunctionName>,
+    pub site: Option<Box<lash_kernel_value::sites::Site>>,
+}
+
 /// One executed code cell, as committed history records it and a transcript
 /// returns it: the protocol that ran the cell appends this record, and a
 /// reader decodes the same record back. Its prints and result are the
@@ -574,6 +593,8 @@ pub struct CellRecord {
     /// lash handled with no host tool call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<ExecutedCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_facts: Vec<crate::ReadFact>,
     /// What the cell's committed transition did to the session's bindings.
     #[serde(default, skip_serializing_if = "BindingChanges::is_empty")]
     pub bindings: BindingChanges,
@@ -596,6 +617,8 @@ pub struct ExecResponse {
     pub prints_retained: Option<crate::RetainedValue>,
     /// Every source-level dispatch the cell executed, in execution order.
     pub calls: Vec<ExecutedCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_facts: std::sync::Arc<Vec<crate::ReadFact>>,
     /// The record of each host tool call the cell made, in execution order.
     /// A `calls` entry references its record by `call_id`.
     #[serde(serialize_with = "crate::durable_serde::serialize")]

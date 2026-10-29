@@ -752,6 +752,9 @@ pub enum TurnStop {
         call_id: crate::ToolCallId,
         message: String,
     },
+    ReadPanicked {
+        panic: crate::ReadPanic,
+    },
     ProviderError {
         cause: TurnErrorCause,
     },

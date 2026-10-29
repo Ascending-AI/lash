@@ -2,7 +2,7 @@
 //! answered inside the statement that makes them.
 //!
 //! A read is no admitted execution. Its call identity is observational; it mints no wait,
-//! commits nothing, and runs no hook: the machine asks its host, the host
+//! Its caller saves its fact. It runs no hook: the machine asks its host, the host
 //! asks the reader the plan's provider registered, and the answer goes
 //! straight back into the statement. What survives of it is what the
 //! cell's next save holds; a crash before that save makes the read again,
@@ -20,17 +20,15 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use lash_kernel_doc::{Datum, ErrorDatum};
 
 use lash_kernel_value::names::OperationUse;
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
-use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_TIMED_OUT, datum_from_json};
 use lash_vm_runtime::EffectReads;
 
-use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refused, tool_failed};
+use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, refused};
 
 /// The reads one activation of a cell answers.
 pub(super) struct CellReads {
@@ -41,8 +39,6 @@ pub(super) struct CellReads {
     pub clock: Arc<dyn lash_core::Clock>,
     /// Cancelled when the cell's run is stopped.
     pub cancel: lash_core::CancellationToken,
-    /// How long the worker waits on its parent's answer.
-    pub parent_wait: Duration,
     pub ledgers: Arc<Mutex<CellHostLedgers>>,
     pub limit: lash_core::MaxToolCalls,
     /// The cell, as its observations name it.
@@ -72,56 +68,6 @@ impl CellReads {
         }
         (ledgers.reads, Ok(()))
     }
-
-    async fn answer(
-        &self,
-        effect: &OperationUse,
-        route: &lash_core::ReadRoute,
-        args: &serde_json::Value,
-    ) -> Result<(Datum, serde_json::Value), ErrorDatum> {
-        let bound = route.definition.manifest.execution().min(self.parent_wait);
-        let deadline = self.clock.now() + bound;
-        let read = route.read(
-            Some(&self.history),
-            args,
-            &self.config,
-            self.clock.as_ref(),
-            &self.cancel,
-            deadline,
-        );
-        let value = tokio::select! {
-            biased;
-            () = self.cancel.cancelled() => {
-                return Err(refused(
-                    EFFECT_CANCELLED,
-                    format!("the read of `{effect}` was stopped with the cell"),
-                ));
-            }
-            () = self.clock.sleep_until(deadline) => {
-                return Err(refused(
-                    EFFECT_TIMED_OUT,
-                    format!("the read of `{effect}` took longer than {bound:?}"),
-                ));
-            }
-            answered = read => answered,
-        };
-        let value = value.map_err(|error| ErrorDatum {
-            kind: TOOL_FAILED.to_owned(),
-            message: error.message,
-            data: datum_from_json(&error.data.to_string()).unwrap_or(Datum::Null),
-        })?;
-        let signature = lash_kernel_value::json_schema::tool_signature(
-            &route.definition.contract.input_schema.canonical,
-            &route.definition.contract.output_schema.canonical,
-        );
-        let datum = lash_vm_broker::kernel::value::datum_from_tool_json(&value, &signature.result)
-            .map_err(|refusal| {
-                refusal
-                    .error_datum()
-                    .unwrap_or_else(|error| refused("diagnostic_encoding", error.to_string()))
-            })?;
-        Ok((datum, value))
-    }
 }
 
 #[async_trait::async_trait]
@@ -132,6 +78,7 @@ impl EffectReads for CellReads {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         // The plan names every effect the machine binds as a read, and the
         // activation routed each before the run started.
@@ -140,71 +87,57 @@ impl EffectReads for CellReads {
                 "the cell performs `{effect}` as a read it did not plan"
             ))
         })?;
+        use lash_core::facade_support::{ReadContext, ReadTarget, run_read};
+        use lash_protocol_types::ReadFailure;
         let (ordinal, count) = self.count();
-        let projected = CellArgs::Direct
+        let input = CellArgs::Direct
             .args(args)
-            .map_err(|refusal| refusal.error(effect));
-        let args = projected
-            .as_ref()
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        let args_bytes = projected.as_ref().map_or(0, |args| args.to_string().len());
-        let read = lash_core::ToolReadMetadata {
+            .map_err(|refusal| ReadFailure::Arguments(refusal.error(effect).message));
+        let metadata = lash_core::ToolReadMetadata {
             caller: self.caller.clone(),
             provider: route.provider.clone(),
             ordinal,
             site: site.to_string(),
             origin: origin.to_string(),
             elapsed_us: 0,
-            args_bytes,
+            args_bytes: input.as_ref().map_or(0, |args| args.to_string().len()),
             answer_bytes: 0,
         };
-        let answer = lash_core::observe_tool_read(
-            Some(self.observe.as_ref()),
-            read,
-            route.definition.manifest.id.to_string(),
-            args,
-            async {
-                count?;
-                if let Some(failure) = route.contract_changed() {
-                    return Err(tool_failed(failure));
-                }
-                let args = projected?;
-                lash_vocabulary::tool_contract::validate_tool_input(
-                    &route.definition.contract,
-                    &args,
-                )
-                .map_err(|error| {
-                    tool_failed(
-                        &lash_core::ToolFailure::runtime(
-                            lash_core::ToolFailureClass::InvalidRequest,
-                            "invalid_tool_args",
-                            error.to_string(),
-                        )
-                        .with_cause(lash_core::ToolFailureCause::ValueMismatch { source: error }),
-                    )
-                })?;
-                self.answer(effect, route, &args).await
+        let target = match count {
+            Ok(()) => ReadTarget::Ready(route),
+            Err(error) => ReadTarget::Refused {
+                tool: route.definition.manifest.id.to_string(),
+                failure: ReadFailure::Tool(Box::new(lash_core::ToolFailure::new(
+                    error.kind,
+                    error.message,
+                ))),
             },
-            |answer| match answer {
-                Ok((_, value)) => (
-                    lash_core::ToolCallOutput::success(value.clone()),
-                    value.to_string().len(),
-                ),
-                Err(error) => {
-                    let mut failure =
-                        lash_core::ToolFailure::new(&error.kind, error.message.clone());
-                    if let Ok(text) = lash_vm_broker::kernel::datum_to_json(&error.data)
-                        && let Ok(data) = serde_json::from_str::<serde_json::Value>(&text)
-                        && !data.is_null()
-                    {
-                        failure = failure.with_raw(lash_core::ToolValue::untrusted_json(data));
-                    }
-                    (lash_core::ToolCallOutput::failure(failure), 0)
-                }
+        };
+        let result = run_read(
+            target,
+            input,
+            ReadContext {
+                history: Some(&self.history),
+                config: &self.config,
+                clock: self.clock.as_ref(),
+                cancel: &self.cancel,
+                parent_remaining,
+                metadata,
+                observe: Some(self.observe.as_ref()),
             },
         )
         .await;
-        Ok(answer.map(|(value, _)| value))
+        self.ledgers.lock_recover().read_facts.push(result.fact);
+        let signature = lash_kernel_value::json_schema::tool_signature(
+            &route.definition.contract.input_schema.canonical,
+            &route.definition.contract.output_schema.canonical,
+        );
+        match lash_vm_broker::kernel::value::read_answer(&signature.result, result.answer) {
+            Ok(answer) => Ok(answer),
+            Err(panic) => {
+                self.ledgers.lock_recover().read_panic = Some(panic.clone());
+                Err(ParentFault(panic.message))
+            }
+        }
     }
 }

@@ -85,6 +85,37 @@ pub struct PinnedWaits {
 }
 
 impl PinnedWaits {
+    /// Read the waits pinned by an admission the owner just committed.
+    /// The fold still checks its saved records against these wait rows.
+    ///
+    /// # Errors
+    /// A failed store read.
+    pub fn read_admitted<'a>(
+        reads: &'a dyn DurableReads,
+        admitted: &'a super::AdmittedRound,
+    ) -> impl std::future::Future<Output = Result<Self, DurableError>> + Send + 'a {
+        Self::read_ids(
+            reads,
+            admitted
+                .members()
+                .iter()
+                .filter_map(|member| member.draft().pinned_wait().map(|wait| wait.id)),
+        )
+    }
+
+    async fn read_ids(
+        reads: &dyn DurableReads,
+        ids: impl Iterator<Item = WaitId>,
+    ) -> Result<Self, DurableError> {
+        let mut waits = Self::default();
+        for id in ids {
+            if let Some(wait) = reads.wait(&id).await? {
+                waits.rows.insert(id, wait);
+            }
+        }
+        Ok(waits)
+    }
+
     /// The view of a fold that reads a turn's ledger alone: its tool-call
     /// report, before or after its end. It reads no wait, since a turn's
     /// waits are compacted at its end: every outcome it reports is a run
@@ -105,7 +136,7 @@ impl PinnedWaits {
     /// # Errors
     /// A failed store read.
     pub async fn read(reads: &dyn DurableReads, facts: &RunFacts) -> Result<Self, DurableError> {
-        let mut waits = Self::default();
+        let mut ids = Vec::new();
         for row in facts
             .rows
             .iter()
@@ -114,17 +145,13 @@ impl PinnedWaits {
             let Ok(Record::Admit(body)) = records::read(facts, row) else {
                 continue;
             };
-            for id in body
-                .members
-                .iter()
-                .filter_map(|member| member.pinned_wait())
-            {
-                if let Some(wait) = reads.wait(&id).await? {
-                    waits.rows.insert(id, wait);
-                }
-            }
+            ids.extend(
+                body.members
+                    .iter()
+                    .filter_map(|member| member.pinned_wait()),
+            );
         }
-        Ok(waits)
+        Self::read_ids(reads, ids.into_iter()).await
     }
 
     /// These waits and `rows`, each under its id.

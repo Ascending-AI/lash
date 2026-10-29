@@ -30,11 +30,13 @@ Host data reads use this same Read-tool mechanism (ADR 0132 §9). There is no se
 
 ### 1. A read is owned by the saved state
 
-A tool declares `ExecutionPolicy::Read`: its answer is not recorded; after a
-crash before the next save it is fetched again and may differ. Nothing about
-an individual read is durable. What survives of it is what the cell's next
-saved state holds, and a crash before that save reads it again. There is no
-per-read audit.
+A tool declares `ExecutionPolicy::Read`. Its caller retains a `ReadFact` with
+its identity, ordinal, provider, tool, projected arguments, typed outcome and
+site in the caller's next save. A cell saves it with its host state and cell
+record; a process saves it with its next park or end; a model round saves it
+with the tool results. There is no separate read admission, start or outcome
+transaction. A crash before that save may recompute the read and receive a
+different answer. After the save, history returns the saved fact exactly once.
 
 `Read` is not `Repeatable`. A `Repeatable` call is recorded and retried by
 policy; a read is neither. A provider whose call must be recorded, retried,
@@ -42,7 +44,7 @@ deferred, isolated or must declare intents or end a turn declares `Once` or
 `Repeatable`: a manifest that declares `Read` with any of those is refused.
 A serialized policy this build does not know refuses to decode.
 
-### 2. Code cells and workflow processes read
+### 2. Cells, workflow processes and model rounds read
 
 A `Read` tool's provider registers a reader beside itself
 (`ToolProviderRegistration::with_reads`). The reader gets the manifest the
@@ -51,16 +53,26 @@ cancellation and a deadline, plus the immutable run-history view for a cell; it 
 intents or call identity. A provider that advertises a `Read` tool without a
 reader is refused at registration, and a read never falls back to `execute`.
 
-A model round's call of a `Read` tool stays recorded, and so does a cell's
-call that is not planned as a read (§3). On the recorded route a `Read` call
-that was interrupted runs again at its ordinal, and a reported failure is
-never retried.
+A model round saves its ordered plan before any body runs, including each
+slot's chosen mode, stable identity and presentation binding. Reads use the
+same core read runner as cells and processes. Model read outputs pass through
+the recorded presenter, ordered presentation steps and oversized-return
+retention boundary. The results save owns the final model return, retained
+artifact references and retention decision beside the semantic read fact;
+recovery restores that presentation without deriving it again. Recorded siblings retain their existing admission,
+Once/Repeatable recovery and committed outcomes. A crash before the results
+save may recompute reads while reusing committed recorded outcomes. After the
+results save, recovery consumes those results without reading again.
+
+A call that any argument or result transform or check would observe is bound
+Recorded when its plan is saved. Every owner restores that saved mode and its
+callback requirements, even if today's hook registrations differ.
 
 A workflow process derives its read modes from its recorded environment's
 operation routes (FIG-7099). A read-mode `perform` calls the reader registered
 by that route's process component, without a session or a durable tool step.
 An uncommitted stretch runs again from its last park and redraws its reads;
-its next committed park keeps the resulting heap. Counted process segments
+its next committed park keeps the resulting heap and read facts. Counted process segments
 retain read answers and modes only as diagnostic tapes for explicit replay.
 Live execution never consumes those tapes. Recorded operations still run as
 durable process steps.
@@ -88,8 +100,8 @@ are retired with the root at the commit that consumes the cell's answer.
 The machine binds each effect `Recorded` or `Read` at start, from the plan,
 and the binding is part of the run's saved state: a restore cannot change
 it. A read-bound `perform` does not yield and mints no wait. It is answered
-inside its statement through the host, decoded against the effect's declared
-result type, and charged exactly as a recorded `perform` is. A read the host
+inside its statement through the host, admitted against the tool's output schema and declaration,
+then decoded against the effect's declared result type, and charged exactly as a recorded `perform` is. A read the host
 cannot answer at all (the parent's own failure) stops the run unanswered,
 and its last save stands; the read's own failure is raised in the guest,
 which may catch it. Both dialects lower to the same `perform`, and ordinary package operations are the only data-read interface.
@@ -103,13 +115,14 @@ execution bound and how long the worker waits on its parent's answer, and is
 cancelled with the cell's run. It is never retried. Each read emits
 the ordinary `ToolCallStarted` followed by `ToolCallReturned`, marked
 `execution: read`. No new semantic event type is introduced. Both readers call
-`lash_core_execution::observe_tool_read`, the sole emitter of this pair; cell
-and process execution remain separate. Model-round reads keep their existing
-recorded execution path.
+`lash_core_execution::observe_tool_read`, the sole emitter of this pair.
+The shared core kernel runner drives cell and process quiet points; their
+owners retain their distinct save and lifetime policies. Model-round reads
+use the same read invocation and admission boundary.
 
 Each pair carries a `ToolCallId`, derived with one BLAKE3 hash from its caller
 and one-based read ordinal, with a separate identity form from admitted calls.
-Cell reads carry the enclosing code block's `graph_key`, exactly as recorded
+Model-round identities use the saved round and one-based read ordinal. Cell reads carry the enclosing code block's `graph_key`, exactly as recorded
 cell calls do. Process reads travel on their existing process observation feed
 in an `Activity` envelope. Read metadata names the caller, provider, ordinal,
 site and origin; the events carry the tool id and projected arguments. The
@@ -119,9 +132,9 @@ It also carries elapsed microseconds and JSON argument/answer byte sizes.
 Unavailable arguments are null with size zero; an unavailable answer has size
 zero. Hosts render these with their ordinary tool-call rows.
 
-A read never emits `ToolCallCompleted`: nothing commits that call. Its events
-are live and provisional (ADR 0122), never a durable record, transcript entry,
-admission or commit. Existing bounded replay windows may retain them for
+A read never emits `ToolCallCompleted`. Its events are live and provisional
+(ADR 0122). Its fact becomes durable only with its caller's next save; history
+and tool-call lookup use that saved fact. Existing bounded replay windows may retain them for
 reconnect. After a crash between saves, an unsaved stretch runs again and its
 read events can repeat under the same caller, ordinal and call id with a new
 answer. A host can see events from a stretch that never commits. Correlate by

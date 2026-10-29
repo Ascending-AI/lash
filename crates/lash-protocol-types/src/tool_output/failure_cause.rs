@@ -16,6 +16,13 @@ pub enum ToolFailureCause {
         expiry: Box<crate::ControlPhaseExpired>,
     },
     Interrupted,
+    /// A declared reader panicked; its owner stops without a guest continuation.
+    ReadPanicked {
+        panic: crate::ReadPanic,
+    },
+    ExecutionBound {
+        fact: crate::ExecutionBoundFact,
+    },
     /// The host body panicked. It may already have performed outside work;
     /// this terminal is never retried or sent back to the model for repair.
     Panicked {

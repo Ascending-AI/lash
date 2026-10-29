@@ -539,6 +539,8 @@ pub struct RoutedOperation {
     pub requirement: OperationRequirement,
     pub offer: OperationOffer,
     pub route: OperationRoute,
+    /// Invocation mode chosen when this plan was saved, independent of the offer.
+    pub mode: OperationMode,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -593,7 +595,7 @@ impl ExecutionEnvironment {
     /// The mode is recorded per use. Deferred targets remain waited throughout execution.
     pub fn mode(&self, use_: &OperationUse) -> Option<OperationMode> {
         self.uses.get(use_).map(|binding| match binding {
-            UseBinding::Fixed(operation) => operation.offer.mode,
+            UseBinding::Fixed(operation) => operation.mode,
             UseBinding::Deferred(_) => OperationMode::Waited,
         })
     }
@@ -607,6 +609,25 @@ impl ExecutionEnvironment {
 }
 
 impl RoutedOperation {
+    /// Claim debt follows the saved invocation mode, never current hooks.
+    pub fn require(&self, requirements: &mut ClaimRequirements) {
+        let mut route = ClaimRequirements::default();
+        self.route.require(&mut route);
+        if self.mode == OperationMode::Waited
+            && self.route.policy == lash_kernel_value::ExecutionPolicy::Read
+        {
+            route.callbacks.remove(&CallbackRequirement {
+                registry: self.route.provider.registry(),
+                callback: self.route.provider.reads_identity(),
+            });
+            route.callbacks.insert(CallbackRequirement {
+                registry: self.route.provider.registry(),
+                callback: self.route.provider.callback_identity(),
+            });
+        }
+        requirements.extend(&route);
+    }
+
     /// Check the fixed pin and accepted metadata without consulting a live advertisement.
     pub fn validate(&self) -> Result<(), String> {
         if self.requirement.contract != self.offer.requirement.contract {
@@ -616,6 +637,9 @@ impl RoutedOperation {
             != (self.route.policy == lash_kernel_value::ExecutionPolicy::Read)
         {
             return Err("fixed offer mode and route policy disagree".into());
+        }
+        if self.mode == OperationMode::Read && self.offer.mode != OperationMode::Read {
+            return Err("a waited offer cannot be bound as a read".into());
         }
         match lash_kernel_value::type_relations::serves(
             &self.offer.requirement.signature,

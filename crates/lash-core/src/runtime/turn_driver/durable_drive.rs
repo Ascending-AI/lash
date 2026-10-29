@@ -517,7 +517,9 @@ async fn cell_calls(
     let run = driver.turn_id.clone();
     let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
     let (records, ledger) = match acknowledged {
-        Some(CellToolCalls { records, ledger }) => (records, ledger),
+        Some(CellToolCalls {
+            records, ledger, ..
+        }) => (records, ledger),
         None => match stored_cell(cx, exec).await? {
             Some(stored) => executor.snapshot_tool_calls(&stored).map_err(|error| {
                 TurnError::Exec(format!("the cell call ledger does not read: {error}"))
@@ -530,7 +532,15 @@ async fn cell_calls(
     let waits = round::PinnedWaits::read(reads, &facts).await?;
     let fold = round::fold(&facts, &PolicyView::new([]), &waits)
         .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
-    cell_calls_from_ledger(&facts, &fold, CellToolCalls { records, ledger })
+    cell_calls_from_ledger(
+        &facts,
+        &fold,
+        CellToolCalls {
+            records,
+            ledger,
+            ..Default::default()
+        },
+    )
 }
 
 /// Merge the cell's final call outcomes into its saved report by call identity.
@@ -546,6 +556,7 @@ fn cell_calls_from_ledger(
     let CellToolCalls {
         mut records,
         mut ledger,
+        read_facts,
     } = calls;
     let mut decoder = GraphDecoder::new(facts, facts.read_limits);
     for (run, member) in fold.rounds().flat_map(|round| {
@@ -609,7 +620,11 @@ fn cell_calls_from_ledger(
             output: completed.output,
         });
     }
-    Ok(CellToolCalls { records, ledger })
+    Ok(CellToolCalls {
+        records,
+        ledger,
+        read_facts,
+    })
 }
 
 impl RuntimeTurnDriver<'_> {
@@ -621,7 +636,11 @@ impl RuntimeTurnDriver<'_> {
         let acknowledged = self
             .cell_end
             .take_calls()
-            .map(|(records, ledger)| CellToolCalls { records, ledger });
+            .map(|(records, ledger)| CellToolCalls {
+                records,
+                ledger,
+                ..Default::default()
+            });
         cell_calls(
             self,
             machine,
@@ -1376,6 +1395,9 @@ impl TurnDrive for RuntimeDrive {
         let panic = match &outcome {
             TurnOutcome::Stopped(TurnStop::ToolPanicked { message, .. }) => {
                 Some(("tool_panicked", message.clone()))
+            }
+            TurnOutcome::Stopped(TurnStop::ReadPanicked { panic }) => {
+                Some(("tool_read_panicked", panic.message.clone()))
             }
             TurnOutcome::Stopped(TurnStop::ProviderError { .. }) => driver
                 .provider_panic

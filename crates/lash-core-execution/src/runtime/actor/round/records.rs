@@ -29,6 +29,7 @@ pub(super) fn first_start(member: u64) -> Ordinal {
 /// The admission record's body: each member's pin, in declared order.
 pub(super) struct AdmitBody {
     pub(super) members: Vec<PinnedMember>,
+    pub(super) reads: Vec<super::ModelReadPlan>,
     /// Each member's Admission, when a park admitted them by admission:
     /// the fact names those and no pin of its own.
     pub(super) admissions: Vec<NodeId>,
@@ -71,7 +72,7 @@ pub(super) enum Record {
     Wait(OutcomeBody),
     Outcome(OutcomeBody),
     Retry(RetryBody),
-    Present,
+    Present(Vec<NodeId>),
     CellReport(NodeId),
 }
 
@@ -83,7 +84,7 @@ impl Record {
             Self::Wait(_) => RunFactKind::XWait,
             Self::Outcome(_) => RunFactKind::XOutcome,
             Self::Retry(_) => RunFactKind::Retry,
-            Self::Present => RunFactKind::Present,
+            Self::Present(_) => RunFactKind::Present,
             Self::CellReport(_) => RunFactKind::CellReport,
         }
     }
@@ -140,6 +141,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
     let (fact, held) = match record {
         Record::Admit(body) if body.admissions.is_empty() => (
             RoundFact::Admit {
+                reads: body.reads.clone(),
                 members: body
                     .members
                     .iter()
@@ -151,6 +153,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
         ),
         Record::Admit(body) => (
             RoundFact::Admit {
+                reads: body.reads.clone(),
                 members: body
                     .admissions
                     .iter()
@@ -203,7 +206,12 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
                 held,
             )
         }
-        Record::Present => (RoundFact::Present, true),
+        Record::Present(reads) => (
+            RoundFact::Present {
+                reads: reads.clone(),
+            },
+            true,
+        ),
         Record::CellReport(report) => (RoundFact::CellReport { report: *report }, true),
     };
     let node = fact.stage_settled(staging)?;
@@ -237,7 +245,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
         ));
     }
     Ok(match fact {
-        RoundFact::Admit { members } => {
+        RoundFact::Admit { members, reads } => {
             let mut pins = Vec::with_capacity(members.len());
             let mut admissions = Vec::new();
             for (index, member) in (0_u64..).zip(members) {
@@ -265,6 +273,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             }
             Record::Admit(AdmitBody {
                 members: pins,
+                reads,
                 admissions,
             })
         }
@@ -296,7 +305,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             output: output?,
             due_at_ms,
         }),
-        RoundFact::Present => Record::Present,
+        RoundFact::Present { reads } => Record::Present(reads),
         RoundFact::CellReport { report } => Record::CellReport(report),
     })
 }
@@ -396,13 +405,14 @@ pub(super) fn admit_record(
     run: RunSeq,
     drafts: &[ExecutionDraft],
     admissions: Vec<NodeId>,
+    reads: Vec<super::ModelReadPlan>,
 ) {
     if let OwnerKey::Turn(session, turn) | OwnerKey::Cell(session, turn, _) = owner {
         tx.write(DomainWrite::Turn(
             lash_durable::domain::TurnWrite::AddToolCalls {
                 session: session.clone(),
                 run: turn.clone(),
-                calls: drafts.len() as u64,
+                calls: (drafts.len() + reads.len()) as u64,
             },
         ));
     }
@@ -414,6 +424,7 @@ pub(super) fn admit_record(
         None,
         &Record::Admit(AdmitBody {
             members: drafts.iter().map(PinnedMember::of).collect(),
+            reads,
             admissions,
         }),
     );

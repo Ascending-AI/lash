@@ -292,19 +292,21 @@ impl ToolCallOutput {
         let ToolCallOutcome::Failure(failure) = &self.outcome else {
             return None;
         };
-        let ToolFailureCause::Panicked {
-            tool_name,
-            call_id,
-            message,
-        } = failure.cause.as_deref()?
-        else {
-            return None;
-        };
-        Some(crate::TurnStop::ToolPanicked {
-            tool_name: tool_name.clone(),
-            call_id: call_id.clone(),
-            message: message.clone(),
-        })
+        match failure.cause.as_deref()? {
+            ToolFailureCause::Panicked {
+                tool_name,
+                call_id,
+                message,
+            } => Some(crate::TurnStop::ToolPanicked {
+                tool_name: tool_name.clone(),
+                call_id: call_id.clone(),
+                message: message.clone(),
+            }),
+            ToolFailureCause::ReadPanicked { panic } => Some(crate::TurnStop::ReadPanicked {
+                panic: panic.clone(),
+            }),
+            _ => None,
+        }
     }
 
     pub fn is_success(&self) -> bool {
@@ -398,7 +400,7 @@ impl ToolCallStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum ToolCallOutcome {
@@ -450,7 +452,7 @@ pub enum ToolCallOutcome {
 /// [`Attachment`](Self::Attachment). A provider that does not trust its host
 /// to name attachments reads the answer as plain JSON and wraps it with
 /// [`untrusted_json`](Self::untrusted_json).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolValue {
     Null,
     Bool(bool),
@@ -727,7 +729,7 @@ fn decode_object(mut map: Map<String, Value>) -> serde_json::Result<ToolValue> {
 mod failure_cause;
 pub use failure_cause::ToolFailureCause;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 pub struct ToolFailure {
     pub class: ToolFailureClass,
@@ -898,7 +900,7 @@ impl CancelRequest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(remote = "Self")]
 pub struct ToolCancellation {
     pub message: String,

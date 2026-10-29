@@ -64,6 +64,7 @@ pub mod direct_completion_client;
 pub mod effect_attempt;
 pub use effect_attempt::{EffectAttempt, RecordedEffectExecution};
 pub mod engine;
+pub mod kernel_runner;
 
 pub(crate) use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;

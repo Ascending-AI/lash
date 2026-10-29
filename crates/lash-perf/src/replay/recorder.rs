@@ -604,6 +604,7 @@ mod tests {
 
     fn cell(id: &str, code: &str, result: CellOutcome) -> TranscriptItem {
         TranscriptItem::Cell(std::sync::Arc::new(CellRecord {
+            read_facts: Vec::new(),
             consumption: Vec::new(),
             id: id.to_owned(),
             protocol_iteration: 0,

@@ -42,6 +42,18 @@ Standard-library `Mutex` and `RwLock` acquisitions recover poisoned guards with
 Poison is not a typed error tier. The operation that owns a domain invariant
 also owns its repair.
 
+## Read provider panics
+
+`ToolReads::read` uses the same containment rule. A panic produces terminal
+`ReadPanic` evidence with the tool and panic message, and stops its owning
+cell, process or model round. Guest catch and protocol repair cannot resume
+it. A read has a correlation `ToolCallId` for observation and history, but no
+admitted execution or attempt. Its typed panic evidence therefore contains
+no admitted call id or attempt ordinal. The caller saves the read fact and
+terminal evidence at its existing save boundary. Typed outcome construction
+precedes loudness, and a turn raises a loud panic only after its terminal
+commit is acknowledged.
+
 ## Why
 
 Selecting containment through features would let feature unification change

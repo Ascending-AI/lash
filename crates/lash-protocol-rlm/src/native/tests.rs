@@ -305,6 +305,7 @@ fn run(
 pub(super) fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
     let call_id = lash_core::ToolCallId::fixture("finish-call");
     lash_core::ExecResponse {
+        read_facts: Default::default(),
         consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),

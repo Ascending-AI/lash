@@ -173,6 +173,7 @@ impl RunHost for ReplayHost {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        _parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let read = self
             .effects
@@ -698,7 +699,7 @@ impl KernelProcessEngine {
                 let durable = |outcome: &lash_execution_contracts::process::ProcessOutcome| {
                     serde_json::to_value(lash_protocol_types::Durable(outcome)).ok()
                 };
-                durable(&outcome_of_end(end.clone())) == durable(outcome)
+                durable(&outcome_of_end(end.clone(), driven.meters)) == durable(outcome)
             }
             _ => false,
         };

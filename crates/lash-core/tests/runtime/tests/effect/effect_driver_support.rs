@@ -181,6 +181,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
         _request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, lash_core::SessionError> {
         Ok(lash_core::ExecResponse {
+            read_facts: Default::default(),
             consumption: Vec::new(),
             prints_retained: None,
             prints: vec![lash_core::CellPrint {

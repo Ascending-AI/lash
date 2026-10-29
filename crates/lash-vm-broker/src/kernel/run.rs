@@ -143,33 +143,18 @@ pub trait KernelEffects: Projections + Send + Sync {
     }
 }
 
-/// A machine's park as the broker reads it: [`lash_kernel_vm::Park`]
-/// less its task table, which stays in the machine's heap.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MachinePark {
-    pub requests: Vec<Request>,
-    pub withdrawn: Vec<WaitId>,
-    /// How many tasks would make the run's end an error at this park
-    /// ([`Park::outstanding`](lash_kernel_vm::Park)).
-    pub outstanding: u64,
-    /// How many tasks other than `main` have not ended
-    /// ([`Park::live`](lash_kernel_vm::Park)).
-    pub live: u64,
-}
-
-/// Where one `run` of a driven machine stopped.
-#[derive(Clone, Debug, PartialEq)]
-pub enum MachineStep {
-    Parked(MachinePark),
-    Slice,
-    Ended(End),
-}
+pub use lash_core_execution::kernel_runner::{MachinePark, MachineStep, park_bound};
 
 /// One run's machine, wherever it executes. Between calls the run is at a
 /// safe point. Its heap reads and seals pages through the activation's
 /// page service ([`SharedPages`]), which the broker publishes from.
 #[async_trait::async_trait]
 pub trait DrivenMachine: Send {
+    /// Latest received kernel receipt; missing means unknown, never zero.
+    fn meters(&self) -> Option<lash_kernel_vm::Meters> {
+        None
+    }
+
     /// Runs ready tasks until none is ready, the run ends or `slice` charge
     /// units are spent. With `cancel`, the run observes its cancel at its
     /// next safe point and ends [`End::Cancelled`].
@@ -377,17 +362,6 @@ impl KernelCeilings {
     }
 }
 
-/// The bound a park of `requests` waits passes, if it passes one: the
-/// broker admits none of them, and the run ends there (`K-BND-001`).
-pub fn park_bound(bounds: &Bounds, requests: usize) -> Option<BoundExceeded> {
-    (requests > bounds.requests_per_park as usize).then(|| BoundExceeded {
-        bound: Bound::RequestsPerPark,
-        limit: u64::from(bounds.requests_per_park),
-        function: None,
-        site: None,
-    })
-}
-
 /// How a driven run stopped.
 pub enum KernelEnd {
     /// The run ended. `owed` is the ledger its end commits over when the
@@ -558,7 +532,7 @@ impl KernelBroker<'_> {
         if checkpoint.is_some() {
             self.commit_response_alone(&mut held).await?;
         }
-        let (mut activation, machine, mut ledger) = match checkpoint {
+        let (activation, machine, mut ledger) = match checkpoint {
             Some(Checkpoint::Ended { end, .. }) => {
                 return Ok(KernelEnd::Ended {
                     end,
@@ -634,172 +608,26 @@ impl KernelBroker<'_> {
             ledger = committed.ledger;
             resting = Some(self.resting(committed.root, state, &ledger)?);
         }
-        loop {
-            let running = match &mut machine {
-                Some(running) => running,
-                None => {
-                    let state = resting.take().ok_or(KernelFailure::EmptyCheckpoint)?;
-                    let previous = std::mem::replace(
-                        &mut activation,
-                        self.activation(Some(&state), binding, machines).await?,
-                    );
-                    self.end_activation(previous).await;
-                    let reopened = machines
-                        .resume(&state, binding, activation.pages.clone())
-                        .await?;
-                    resting = Some(state);
-                    machine.insert(reopened)
-                }
-            };
-            let park = match super::pages::shared::while_held(
-                &activation.pages,
-                running.run(self.slice, cancel.is_cancelled()),
-            )
-            .await?
-            {
-                // The first stretch outlasts its slice: the response the
-                // turn held commits now, and the run goes on.
-                MachineStep::Slice => {
-                    self.commit_response_alone(&mut held).await?;
-                    continue;
-                }
-                MachineStep::Ended(end) => {
-                    if let Some(ended) = machine.take() {
-                        ended.release().await?;
-                    }
-                    return Ok(self.ended(ledger, end, saved, activation).await);
-                }
-                MachineStep::Parked(park) => park,
-            };
-            let requests: Vec<Request> = park
-                .requests
-                .into_iter()
-                .filter(|request| !park.withdrawn.contains(&wait_of(request)))
-                .collect();
-            let outstanding = park.outstanding;
-            let live = park.live;
-            for wait in park.withdrawn {
-                ledger.withdraw(wait);
-            }
-            if let Some(exceeded) = park_bound(&bounds, requests.len()) {
-                if let Some(refused) = machine.take() {
-                    refused.release().await?;
-                }
-                let end = End::Error(RunError::Bound(exceeded));
-                return Ok(self.ended(ledger, end, saved, activation).await);
-            }
-            if !requests.is_empty() {
-                // The save appends the park's requests and the pages the
-                // run sealed since the last one: past a lifetime bound it
-                // admits nothing, and the run ends there.
-                let state = self
-                    .sealed(
-                        running,
-                        &activation,
-                        binding,
-                        &document,
-                        machines.closure()?.reference(),
-                    )
-                    .await?;
-                match self
-                    .grown(&ledger, &activation, requests.len() as u64)
-                    .await
-                {
-                    Ok(growth) => ledger.grown(growth),
-                    Err(exceeded) => {
-                        if let Some(refused) = machine.take() {
-                            refused.release().await?;
-                        }
-                        let end = End::Error(RunError::Bound(exceeded));
-                        return Ok(self.ended(ledger, end, saved, activation).await);
-                    }
-                }
-                let admit = self
-                    .admissions(&ledger, requests, outstanding, live)
-                    .await?;
-                let save = ParkSave {
-                    document,
-                    state: state.clone(),
-                    pages: &activation.pages,
-                    closure: machines.closure()?,
-                    carried: machines.carried(),
-                    ledger,
-                    admit,
-                    with: Vec::new(),
-                };
-                let committed = match self.commit_save(save, &mut held).await? {
-                    Ok(committed) => committed,
-                    // The turn's cancel stopped the cell at its first save:
-                    // nothing it admitted starts, and the turn, which drops
-                    // this run, stops where it would have before the cell
-                    // started.
-                    Err(response) => {
-                        if let Some(stopped) = machine.take() {
-                            stopped.release().await?;
-                        }
-                        self.end_activation(activation).await;
-                        response.stop();
-                        return std::future::pending().await;
-                    }
-                };
-                saved = true;
-                ledger = committed.ledger;
-                resting = Some(self.resting(committed.root, state, &ledger)?);
-            }
-            if ledger.pending().next().is_none() {
-                return Err(KernelFailure::Stalled);
-            }
-            // The run waits on its effects: nothing is held across a wait.
-            self.commit_response_alone(&mut held).await?;
-            // Once the run waits only on parked rows, with its state saved
-            // as it stands, its worker is another run's to use: a process
-            // this run awaits may need it (FIG-4275).
-            let quiet = tokio::sync::Notify::new();
-            let driven = {
-                let outcome = |effect: &AdmittedEffect, output: &SettledOutput| {
-                    self.effects.outcome(effect, output)
-                };
-                let drive = self
-                    .store
-                    .drive_effects_as(&ledger, cancel, &outcome, Some(&quiet));
-                tokio::pin!(drive);
-                loop {
-                    tokio::select! {
-                        driven = &mut drive => break driven?,
-                        () = quiet.notified(), if machine.is_some() && resting.is_some() => {
-                            if let Some(waiting) = machine.take() {
-                                waiting.release().await?;
-                            }
-                        }
-                        () = renew_when_due(&activation.pages), if machine.is_some() => {}
-                    }
-                }
-            };
-            let settled = match driven {
-                Driven::Answered(settled) => settled,
-                Driven::Suspended => {
-                    if let Some(parked) = machine.take() {
-                        parked.release().await?;
-                    }
-                    self.end_activation(activation).await;
-                    return Ok(KernelEnd::Suspended);
-                }
-            };
-            if self.effects.stop_requested() {
-                if let Some(stopped) = machine.take() {
-                    stopped.release().await?;
-                }
-                return Ok(self.ended(ledger, End::Cancelled, saved, activation).await);
-            }
-            // A machine that gave its worker back is reopened from its
-            // saved root, and reads these outcomes again once it has parked.
-            let Some(running) = machine.as_mut() else {
-                continue;
-            };
-            resting = None;
-            for outcome in settled {
-                running.deliver(outcome.wait, outcome.outcome).await?;
-                ledger.consume(&outcome.identity);
+        let mut owner = CellKernelOwner {
+            broker: self,
+            machines,
+            cancel,
+            activation,
+            machine,
+            ledger,
+            resting,
+            binding,
+            document,
+            saved,
+            held,
+        };
+        match lash_core_execution::kernel_runner::run(&mut owner).await? {
+            CellStop::Ended(end) => Ok(self
+                .ended(owner.ledger, end, owner.saved, owner.activation)
+                .await),
+            CellStop::Suspended => {
+                self.end_activation(owner.activation).await;
+                Ok(KernelEnd::Suspended)
             }
         }
     }
@@ -1033,9 +861,209 @@ impl KernelBroker<'_> {
     }
 }
 
-fn wait_of(request: &Request) -> WaitId {
-    match request {
-        Request::Effect(request) => request.wait,
+enum CellStop {
+    Ended(End),
+    Suspended,
+}
+
+struct CellKernelOwner<'a, 'b, S: Machines> {
+    broker: &'a KernelBroker<'b>,
+    machines: &'a S,
+    cancel: &'a CancellationToken,
+    activation: PageActivation,
+    machine: Option<S::Machine>,
+    ledger: EffectLedger,
+    resting: Option<ParkedState>,
+    binding: NodeId,
+    document: DocumentId,
+    saved: bool,
+    held: Option<&'a lash_core_execution::HeldResponse>,
+}
+
+#[async_trait::async_trait]
+impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernelOwner<'_, '_, S> {
+    type Error = KernelFailure;
+    type Output = CellStop;
+
+    fn bounds(&self) -> Bounds {
+        self.machines.bounds()
+    }
+
+    fn withdrawn(&mut self, waits: &[WaitId]) {
+        for wait in waits {
+            self.ledger.withdraw(*wait);
+        }
+    }
+
+    async fn next(&mut self) -> Result<MachineStep, KernelFailure> {
+        if self.machine.is_none() {
+            let state = self.resting.take().ok_or(KernelFailure::EmptyCheckpoint)?;
+            let previous = std::mem::replace(
+                &mut self.activation,
+                self.broker
+                    .activation(Some(&state), self.binding, self.machines)
+                    .await?,
+            );
+            self.broker.end_activation(previous).await;
+            self.machine = Some(
+                self.machines
+                    .resume(&state, self.binding, self.activation.pages.clone())
+                    .await?,
+            );
+            self.resting = Some(state);
+        }
+        let running = self
+            .machine
+            .as_mut()
+            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        super::pages::shared::while_held(
+            &self.activation.pages,
+            running.run(self.broker.slice, self.cancel.is_cancelled()),
+        )
+        .await
+    }
+
+    async fn sliced(&mut self) -> Result<Option<CellStop>, KernelFailure> {
+        self.broker.commit_response_alone(&mut self.held).await?;
+        Ok(None)
+    }
+
+    async fn end(&mut self, end: End) -> Result<CellStop, KernelFailure> {
+        if let Some(machine) = self.machine.take() {
+            machine.release().await?;
+        }
+        Ok(CellStop::Ended(end))
+    }
+
+    async fn park(&mut self, park: MachinePark) -> Result<Option<CellStop>, KernelFailure> {
+        let machines = self.machines;
+        let cancel = self.cancel;
+        let requests = park.requests;
+        let outstanding = park.outstanding;
+        let live = park.live;
+        if !requests.is_empty() {
+            let running = self
+                .machine
+                .as_mut()
+                .ok_or(KernelFailure::EmptyCheckpoint)?;
+            // The save appends the park's requests and the pages the
+            // run sealed since the last one: past a lifetime bound it
+            // admits nothing, and the run ends there.
+            let state = self
+                .broker
+                .sealed(
+                    running,
+                    &self.activation,
+                    self.binding,
+                    &self.document,
+                    machines.closure()?.reference(),
+                )
+                .await?;
+            match self
+                .broker
+                .grown(&self.ledger, &self.activation, requests.len() as u64)
+                .await
+            {
+                Ok(growth) => self.ledger.grown(growth),
+                Err(exceeded) => {
+                    if let Some(refused) = self.machine.take() {
+                        refused.release().await?;
+                    }
+                    let end = End::Error(RunError::Bound(exceeded));
+                    return self.end(end).await.map(Some);
+                }
+            }
+            let admit = self
+                .broker
+                .admissions(&self.ledger, requests, outstanding, live)
+                .await?;
+            let save = ParkSave {
+                document: self.document,
+                state: state.clone(),
+                pages: &self.activation.pages,
+                closure: machines.closure()?,
+                carried: machines.carried(),
+                ledger: std::mem::replace(&mut self.ledger, EffectLedger::new()),
+                admit,
+                with: Vec::new(),
+            };
+            let committed = match self.broker.commit_save(save, &mut self.held).await? {
+                Ok(committed) => committed,
+                // The turn's cancel stopped the cell at its first save:
+                // nothing it admitted starts, and the turn, which drops
+                // this run, stops where it would have before the cell
+                // started.
+                Err(response) => {
+                    if let Some(stopped) = self.machine.take() {
+                        stopped.release().await?;
+                    }
+                    if let Ok(store) = self.broker.store.context().pages() {
+                        end_activation(store.as_ref(), &self.activation.pages).await;
+                    }
+                    response.stop();
+                    return std::future::pending().await;
+                }
+            };
+            self.saved = true;
+            self.ledger = committed.ledger;
+            self.resting = Some(self.broker.resting(committed.root, state, &self.ledger)?);
+        }
+        if self.ledger.pending().next().is_none() {
+            return Err(KernelFailure::Stalled);
+        }
+        // The run waits on its effects: nothing is held across a wait.
+        self.broker.commit_response_alone(&mut self.held).await?;
+        // Once the run waits only on parked rows, with its state saved
+        // as it stands, its worker is another run's to use: a process
+        // this run awaits may need it (FIG-4275).
+        let quiet = tokio::sync::Notify::new();
+        let driven = {
+            let outcome = |effect: &AdmittedEffect, output: &SettledOutput| {
+                self.broker.effects.outcome(effect, output)
+            };
+            let drive =
+                self.broker
+                    .store
+                    .drive_effects_as(&self.ledger, cancel, &outcome, Some(&quiet));
+            tokio::pin!(drive);
+            loop {
+                tokio::select! {
+                    driven = &mut drive => break driven?,
+                    () = quiet.notified(), if self.machine.is_some() && self.resting.is_some() => {
+                        if let Some(waiting) = self.machine.take() {
+                            waiting.release().await?;
+                        }
+                    }
+                    () = renew_when_due(&self.activation.pages), if self.machine.is_some() => {}
+                }
+            }
+        };
+        let settled = match driven {
+            Driven::Answered(settled) => settled,
+            Driven::Suspended => {
+                if let Some(parked) = self.machine.take() {
+                    parked.release().await?;
+                }
+                return Ok(Some(CellStop::Suspended));
+            }
+        };
+        if self.broker.effects.stop_requested() {
+            if let Some(stopped) = self.machine.take() {
+                stopped.release().await?;
+            }
+            return self.end(End::Cancelled).await.map(Some);
+        }
+        // A machine that gave its worker back is reopened from its
+        // saved root, and reads these outcomes again once it has parked.
+        let Some(running) = self.machine.as_mut() else {
+            return Ok(None);
+        };
+        self.resting = None;
+        for outcome in settled {
+            running.deliver(outcome.wait, outcome.outcome).await?;
+            self.ledger.consume(&outcome.identity);
+        }
+        Ok(None)
     }
 }
 

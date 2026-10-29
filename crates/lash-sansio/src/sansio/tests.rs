@@ -261,6 +261,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
 
 fn empty_exec_response() -> lash_protocol_types::ExecResponse {
     lash_protocol_types::ExecResponse {
+        read_facts: Default::default(),
         consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),
@@ -1604,6 +1605,7 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     restored.handle_response(Response::ExecResult {
         id: *exec_id,
         result: Ok(lash_protocol_types::ExecResponse {
+            read_facts: Default::default(),
             ..empty_exec_response()
         }),
     });

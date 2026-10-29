@@ -20,7 +20,9 @@ pub mod module_artifact_refusal;
 pub mod persistent_sequence;
 pub mod plugin;
 pub mod profile;
+mod read_fact;
 mod redacted;
+pub use read_fact::{ReadFact, ReadFailure, ReadPanic, ReadResult, ToolReadCaller};
 mod result_fit;
 mod retained_output;
 mod run_aggregate;
@@ -89,7 +91,7 @@ pub use session::{
     BindingChanges, CallResultSummary, CellConsumption, CellControl, CellDefect, CellFailure,
     CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord, CellResource,
     DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall,
-    ExecutedCallOutcome, TextProjectionMetadata,
+    ExecutedCallOutcome, ExecutionBoundFact, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

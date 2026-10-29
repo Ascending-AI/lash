@@ -249,11 +249,9 @@ pub(super) async fn link_cell(
         &fulfilled.inspection,
         lash_vocabulary::claims::RegistryKind::Session,
         &packages.routes,
+        &Default::default(),
         packages.publications(),
-        |grant, registry| {
-            ctx.package_composition()
-                .validate_deferred_grant(grant, registry)
-        },
+        ctx.package_composition().as_ref(),
     )
     .map_err(package_error)?;
     environment.retained_code.extend(

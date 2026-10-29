@@ -20,6 +20,7 @@ pub trait EffectReads: Send + Sync {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 }
 
@@ -54,8 +55,11 @@ impl RunHost for ParentHost {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        self.reads.perform(use_, args, site, origin).await
+        self.reads
+            .perform(use_, args, site, origin, parent_remaining)
+            .await
     }
 
     fn print(&self, value: Datum) -> Result<(), ParentFault> {

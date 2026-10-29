@@ -866,157 +866,14 @@ impl super::ExecutionComposition {
             ),
         >,
     ) -> Result<lash_core_store::tool_surface::ExecutionEnvironment, EnginePortError> {
-        use lash_core_store::tool_surface::{ExecutionEnvironment, RoutedOperation, UseBinding};
-        use lash_vocabulary::claims::{CallbackRequirement, ClaimRequirements};
-        let mut requirements = ClaimRequirements {
-            machine: inspection.machine.clone(),
-            ..Default::default()
-        };
-        let mut uses = std::collections::BTreeMap::new();
-        for (use_, need) in &inspection.operations {
-            let binding = match need {
-                OperationNeed::Deferred { grant, .. } => {
-                    self.validate_deferred_grant(grant, registry)?;
-                    UseBinding::Deferred((**grant).clone())
-                }
-                OperationNeed::Fixed { name, requirement } => {
-                    let mut candidates = packages.routes.iter().filter(|candidate| {
-                        candidate.operation.package == name.package
-                            && candidate.operation.name == name.member
-                            && candidate.definition.contract_id() == requirement.contract
-                            && candidate.route.provider.registry() == registry
-                            && selected.get(use_).is_none_or(|(provider, tool)| {
-                                *provider == candidate.route.provider
-                                    && *tool == candidate.route.tool
-                            })
-                    });
-                    let candidate = candidates.next().ok_or({
-                        EnginePortError::Refused(AdmissionRefusal::MissingRoute { use_: *use_ })
-                    })?;
-                    if candidates.next().is_some() {
-                        return Err(EnginePortError::Refused(
-                            AdmissionRefusal::InvalidDocument {
-                                message: format!(
-                                    "operation use {use_:?} has ambiguous serving routes; select a provider and tool explicitly"
-                                ),
-                            },
-                        ));
-                    }
-                    let route = &candidate.route;
-                    if !self.tool_registry().serves(&route.provider) {
-                        return Err(EnginePortError::Refused(
-                            AdmissionRefusal::ProviderNotHostable {
-                                provider: ProviderName {
-                                    owner: route.provider.owner().into(),
-                                    key: route.provider.key().into(),
-                                },
-                                registry,
-                            },
-                        ));
-                    }
-                    let mode = if route.policy == lash_kernel_value::ExecutionPolicy::Read {
-                        OperationMode::Read
-                    } else {
-                        OperationMode::Waited
-                    };
-                    let offer = packages
-                        .snapshot
-                        .advertisements
-                        .iter()
-                        .find_map(|accepted| match &accepted.advertisement {
-                            PackageAdvertisement::Enumerated(package)
-                                if package.path == name.package =>
-                            {
-                                match &package.members.get(&name.member)?.kind {
-                                    MemberKind::Operation(offer)
-                                        if offer.requirement.contract == requirement.contract =>
-                                    {
-                                        Some(offer.clone())
-                                    }
-                                    _ => None,
-                                }
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| OperationOffer {
-                            requirement: lash_kernel_value::OperationRequirement {
-                                signature: lash_kernel_value::json_schema::tool_signature(
-                                    &candidate.definition.contract.input_schema.canonical,
-                                    &candidate.definition.contract.output_schema.canonical,
-                                ),
-                                contract: candidate.definition.contract_id(),
-                            },
-                            mode,
-                            intents: candidate
-                                .definition
-                                .manifest
-                                .declaration()
-                                .intents
-                                .iter()
-                                .map(|intent| Intent(intent.as_str().to_owned()))
-                                .collect(),
-                            controls: candidate.definition.manifest.declaration().controls.clone(),
-                        });
-                    if offer.mode != mode
-                        || !lash_kernel_value::schema::signature_serves(
-                            &offer.requirement.signature,
-                            &requirement.signature,
-                        )
-                    {
-                        return Err(EnginePortError::Refused(
-                            AdmissionRefusal::InvalidDocument {
-                                message: format!("route does not serve operation use {use_:?}"),
-                            },
-                        ));
-                    }
-                    requirements.providers.insert(route.provider.clone());
-                    let callback = if mode == OperationMode::Read {
-                        if self.tool_registry().reads(&route.provider).is_none() {
-                            return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute {
-                                use_: *use_,
-                            }));
-                        }
-                        route.provider.reads_identity()
-                    } else {
-                        route.provider.callback_identity()
-                    };
-                    requirements
-                        .callbacks
-                        .insert(CallbackRequirement { registry, callback });
-                    if let Some(payload) = &route.payload {
-                        if payload.codec.registry() != registry
-                            || !self.tool_registry().serves(&payload.codec)
-                        {
-                            return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute {
-                                use_: *use_,
-                            }));
-                        }
-                        requirements
-                            .codecs
-                            .insert((payload.codec.clone(), payload.format));
-                        requirements.callbacks.insert(CallbackRequirement {
-                            registry,
-                            callback: payload.codec.callback_identity(),
-                        });
-                    }
-                    UseBinding::Fixed(RoutedOperation {
-                        requirement: requirement.clone(),
-                        offer,
-                        route: route.clone(),
-                    })
-                }
-            };
-            uses.insert(*use_, binding);
-        }
-        Ok(ExecutionEnvironment {
-            retained_code: Default::default(),
-            authored: BTreeSet::new(),
-            publications,
-            roots: [inspection.link].into(),
-            uses,
+        crate::runtime::actor::route_selection::select_routes(
+            inspection,
             registry,
-            requirements,
-        })
+            &packages.routes,
+            selected,
+            publications,
+            self,
+        )
     }
 }
 
@@ -1118,4 +975,145 @@ pub fn operation_environment_fragment(
         fragment.namespace_claims.push(context);
     }
     Ok(fragment)
+}
+
+#[cfg(test)]
+mod route_laws {
+    use super::*;
+    use lash_core_store::tool_surface::RecordedPackages;
+    use lash_kernel_value::claims::NodeRequirements;
+    use lash_vocabulary::claims::RegistryKind;
+
+    /// ROUTE-EQUAL-DUPLICATES: equal advertisements denote one choice for both owners.
+    #[test]
+    fn cells_and_processes_accept_equal_routes_and_require_a_choice_for_distinct_providers() {
+        for registry in [RegistryKind::Session, RegistryKind::Process] {
+            let provider = |key: &str| {
+                super::super::ToolProviderHandle::from_name(
+                    registry,
+                    &ProviderName {
+                        owner: "route-law".into(),
+                        key: key.into(),
+                    },
+                )
+                .unwrap()
+            };
+            let definition = ToolDefinition::raw(
+                "lookup",
+                "inventory.available",
+                "",
+                serde_json::json!({"type":"object"}),
+                serde_json::json!({"type":"integer"}),
+            )
+            .unwrap()
+            .with_execution(std::time::Duration::from_secs(30));
+            let candidate = |key: &str| AdvertisedRoute {
+                operation: definition.manifest.operation.clone(),
+                definition: definition.clone(),
+                route: OperationRoute::advertised(provider(key), &definition, None),
+            };
+            let one = candidate("one");
+            let other = candidate("other");
+            let use_ = OperationUse {
+                link: LinkId::from_bytes([1; 32]),
+                slot: ImportSlot(0).into(),
+            };
+            let inspection = LinkInspection {
+                link: use_.link,
+                document: DocumentId::from_bytes([2; 32]),
+                selector: ReachSelector::Start(StartSelector::Main),
+                operations: [(
+                    use_,
+                    OperationNeed::Fixed {
+                        name: QualifiedName {
+                            package: one.operation.package.clone(),
+                            member: one.operation.name.clone(),
+                            type_member: None,
+                        },
+                        requirement: lash_kernel_value::OperationRequirement {
+                            signature: lash_kernel_value::json_schema::tool_signature(
+                                &definition.contract.input_schema.canonical,
+                                &definition.contract.output_schema.canonical,
+                            ),
+                            contract: definition.contract_id(),
+                        },
+                    },
+                )]
+                .into(),
+                machine: NodeRequirements::default(),
+                artifacts: Vec::new(),
+                signature: None,
+            };
+            let tools = crate::ToolRegistry::from_tool_registrations(
+                vec![
+                    (provider("one"), Arc::new(crate::testing::EmptyToolProvider)),
+                    (
+                        provider("other"),
+                        Arc::new(crate::testing::EmptyToolProvider),
+                    ),
+                ],
+                None,
+                Default::default(),
+                Vec::new(),
+            )
+            .unwrap();
+            let composition =
+                super::super::ExecutionComposition::new(&mut Default::default(), Arc::new(tools));
+            for routes in [
+                vec![one.clone(), one.clone()],
+                vec![one.clone(), other.clone()],
+            ] {
+                let packages = RecordedPackages {
+                    routes,
+                    ..Default::default()
+                };
+                let cells = crate::runtime::actor::route_selection::select_routes(
+                    &inspection,
+                    registry,
+                    &packages.routes,
+                    &Default::default(),
+                    Vec::new(),
+                    &composition,
+                );
+                let processes = composition.execution_environment(
+                    &inspection,
+                    &packages,
+                    Vec::new(),
+                    registry,
+                    &Default::default(),
+                );
+                if packages.routes[0] == packages.routes[1] {
+                    assert_eq!(cells.unwrap(), processes.unwrap());
+                } else {
+                    assert!(cells.is_err());
+                    assert!(processes.is_err());
+                    let selection =
+                        [(use_, (provider("other"), definition.manifest.id.clone()))].into();
+                    let cells = crate::runtime::actor::route_selection::select_routes(
+                        &inspection,
+                        registry,
+                        &packages.routes,
+                        &selection,
+                        Vec::new(),
+                        &composition,
+                    )
+                    .unwrap();
+                    let processes = composition
+                        .execution_environment(
+                            &inspection,
+                            &packages,
+                            Vec::new(),
+                            registry,
+                            &selection,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        cells.fixed(&use_).unwrap().route.provider,
+                        provider("other")
+                    );
+                    assert_eq!(cells, processes);
+                }
+            }
+        }
+    }
 }

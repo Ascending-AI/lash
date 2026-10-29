@@ -112,6 +112,66 @@ impl MemberPin {
 /// Nothing here drives the turn or commits: the phase runner admits, runs
 /// and presents the round, and asks this for what only the catalog knows.
 pub trait RoundTools: Send + Sync {
+    /// Choose read mode once, before saving a model round's plan.
+    fn plan_read(
+        &self,
+        _call: &PendingToolCall,
+        _caller: crate::ToolReadCaller,
+        _ordinal: u64,
+    ) -> Option<super::ModelReadPlan> {
+        None
+    }
+
+    /// Run a saved read slot without admission or an outcome transaction.
+    fn read<'a>(
+        &'a self,
+        _call: &'a PendingToolCall,
+        _plan: &'a super::ModelReadPlan,
+        _cancel: &'a tokio_util::sync::CancellationToken,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        lash_protocol_types::ReadResult,
+                        crate::RuntimeEffectControllerError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeToolRunShape,
+                "these tools do not serve reads",
+            ))
+        })
+    }
+
+    /// Present a fresh read under its saved plan; the caller saves the result.
+    fn present_read<'a>(
+        &'a self,
+        _call: &'a PendingToolCall,
+        _plan: &'a super::ModelReadPlan,
+        _fact: &'a lash_protocol_types::ReadFact,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::runtime::effect::ToolPresentation,
+                        crate::RuntimeEffectControllerError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeToolRunShape,
+                "these tools do not present reads",
+            ))
+        })
+    }
+
     /// Observe `call` as its committed member records leave it, before any
     /// body runs, under the trace scope its admission retained. Called
     /// after every fold; a live observer deduplicates it. `admitted_here`
@@ -127,6 +187,18 @@ pub trait RoundTools: Send + Sync {
         _admitted_here: bool,
         _settled_here: bool,
     ) {
+    }
+
+    /// The same observation state with the owner's authored node attribution.
+    fn observe_from(
+        &self,
+        call: &PendingToolCall,
+        member: &super::RoundMember,
+        admitted_here: bool,
+        settled_here: bool,
+        _node: Option<&str>,
+    ) {
+        self.observe(call, member, admitted_here, settled_here);
     }
 
     /// The trace scope `call`'s round admission retains, admitted under

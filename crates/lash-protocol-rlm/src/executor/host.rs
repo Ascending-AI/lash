@@ -114,6 +114,8 @@ pub(super) struct CellHostLedgers {
     pub tool_call_limit: Option<lash_core::ToolCallLimitExceeded>,
     /// How many reads the cell made (ADR 0144), from its saved count on.
     pub reads: u64,
+    pub read_facts: Vec<lash_protocol_types::ReadFact>,
+    pub read_panic: Option<lash_protocol_types::ReadPanic>,
 }
 
 impl CellHostLedgers {
@@ -893,6 +895,18 @@ impl KernelEffects for CellHost<'_> {
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;
         graph.state.reads = ledgers.reads;
+        for fact in ledgers
+            .read_facts
+            .iter()
+            .skip(graph.state.read_facts.items().len())
+        {
+            let node =
+                lash_vm_broker::round_graph::stage_read_fact(staging, fact).map_err(fault)?;
+            graph
+                .state
+                .read_facts
+                .push(super::host_graph::ReadEvent(node));
+        }
         graph.state.held_ms = u64::try_from(self.budget.held().as_millis()).unwrap_or(u64::MAX);
         drop(ledgers);
         for value in prints

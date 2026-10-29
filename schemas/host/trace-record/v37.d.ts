@@ -537,6 +537,7 @@ export type CellDefect = ({
  * Structured failure returned by a code executor.
  */
 export type CellFailure = {
+  "bound"?: (ExecutionBoundFact | null);
   /**
    * The rule of a session's cells the program broke, when that is why
    * the cell failed, kept typed through the plugin and host result.
@@ -555,6 +556,7 @@ export type CellFailure = {
   "feedback"?: Array<CellFailureRepair>;
   "kind": CellFailureKind;
   "message": string;
+  "read_panic"?: (ReadPanic | null);
   "schema_admission"?: (SchemaAdmissionError | null);
   /**
    * The session's `max_tool_calls` refusal, when that is why the cell
@@ -698,6 +700,19 @@ export type EffectRefusal = {
  * durable journal and trace surfaces.
  */
 export type ExecCodeFailureReason = ("executor_unavailable" | "runtime_stopped" | "session");
+
+/**
+ * The bound that ended a kernel execution, with only the receipts received.
+ */
+export type ExecutionBoundFact = {
+  "consumed"?: (number | null);
+  "function"?: (FunctionName | null);
+  "limit": number;
+  "observed"?: (number | null);
+  "resource": CellResource;
+  "site"?: (Site | null);
+  [key: string]: unknown;
+};
 
 /**
  * Facts reported by the provider about the execution that produced a response.
@@ -1157,6 +1172,15 @@ export type ProviderRouteIdentity = {
   "endpoint": string;
   "model": string;
   "provider": string;
+  [key: string]: unknown;
+};
+
+/**
+ * A provider panic has no admitted call id or attempt ordinal.
+ */
+export type ReadPanic = {
+  "message": string;
+  "tool_name": string;
   [key: string]: unknown;
 };
 

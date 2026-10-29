@@ -128,6 +128,8 @@ pub(super) fn load_cell(
         calls: Vec::with_capacity(state.calls.items().len()),
         tool_call_limit: state.tool_call_limit,
         reads: state.reads,
+        read_facts: state.read_facts(&mut decoder).map_err(text)?,
+        read_panic: None,
     };
     let mut graph = HostGraph {
         envelope: Some(envelope),
@@ -272,7 +274,20 @@ pub(crate) fn snapshot_tool_calls(
                 .map_err(|error| error.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok((calls, lash_vm_broker::round_graph::ReportView { entries }))
+    Ok((
+        calls,
+        lash_vm_broker::round_graph::ReportView {
+            entries,
+            reads: loaded
+                .graph
+                .state
+                .read_facts
+                .items()
+                .iter()
+                .map(|read| read.0)
+                .collect(),
+        },
+    ))
 }
 
 /// Read the original archival component. Its arguments are the exact
@@ -310,6 +325,12 @@ pub(crate) fn recorded_cell_ledger(
             }
         }
     }
+    records.extend(
+        state
+            .read_facts(decoder)?
+            .iter()
+            .map(lash_protocol_types::ReadFact::record),
+    );
     Ok((records, pending))
 }
 

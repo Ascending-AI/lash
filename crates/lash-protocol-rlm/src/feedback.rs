@@ -548,6 +548,7 @@ impl CellObservation {
                     format!("{CELL_BOUND_EXCEEDED}: {what}{function} (limit {}){location}\n{repair}", exceeded.limit),
                 );
                 failure.worker_limit = limit;
+                failure.bound = Some(Box::new(lash_core::facade_support::bound_fact(exceeded, None)));
                 failure
             }
         }

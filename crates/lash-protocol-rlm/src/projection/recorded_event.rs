@@ -54,6 +54,8 @@ mod cell {
         images: Vec<AttachmentRef>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         calls: Vec<ExecutedCall>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        read_facts: Vec<lash_protocol_types::ReadFact>,
         #[serde(default, skip_serializing_if = "BindingChanges::is_empty")]
         bindings: BindingChanges,
         result: CellOutcome,

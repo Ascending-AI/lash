@@ -507,6 +507,7 @@ fn attachment_provider_kinds_are_nameable() {
 
 fn cell_call_references_are_public() -> lash::plugins::CellCallReferences {
     lash::plugins::CellCallReferences {
+        reads: Vec::new(),
         entries: Vec::new(),
     }
 }

@@ -840,6 +840,162 @@ struct ProductionRoundTools {
 }
 
 impl RoundTools for ProductionRoundTools {
+    fn plan_read(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        caller: crate::ToolReadCaller,
+        ordinal: u64,
+    ) -> Option<crate::runtime::actor::round::ModelReadPlan> {
+        if !self.context.tool_call_hooks().is_empty() {
+            return None;
+        }
+        let dispatch = self.context.dispatch();
+        let catalog = self.context.tool_catalog();
+        let definition = catalog
+            .entries()
+            .iter()
+            .find(|entry| entry.manifest.tool() == call.tool_name)?;
+        if definition.manifest.execution_policy != lash_kernel_value::ExecutionPolicy::Read {
+            return None;
+        }
+        let provider = dispatch
+            .routes
+            .entry(&definition.manifest.id)?
+            .provider()
+            .clone();
+        let mut plan = crate::runtime::actor::round::ModelReadPlan {
+            refusal: None,
+            slot: 0,
+            ordinal,
+            caller,
+            provider,
+            definition: dispatch
+                .routes
+                .entry(&definition.manifest.id)?
+                .definition
+                .clone(),
+            call_id: call.call_id.clone(),
+            request: crate::runtime::actor::round::request_material(&self.owner, call).ok()?,
+            presentation: dispatch.composition.tool_presentation_plan(),
+        };
+        plan.call_id = plan.metadata().call_id();
+        let mut rebound = call.clone();
+        rebound.call_id = plan.call_id.clone();
+        plan.request =
+            crate::runtime::actor::round::request_material(&self.owner, &rebound).ok()?;
+        Some(plan)
+    }
+
+    fn present_read<'a>(
+        &'a self,
+        call: &'a crate::sansio::PendingToolCall,
+        plan: &'a crate::runtime::actor::round::ModelReadPlan,
+        fact: &'a lash_protocol_types::ReadFact,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        crate::runtime::effect::ToolPresentation,
+                        crate::RuntimeEffectControllerError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let dispatch = self.context.dispatch();
+            dispatch
+                .composition
+                .present_tool_result(
+                    crate::plugin::ToolResultProjectionContext {
+                        owner: dispatch.owner.runtime_owner(),
+                        call_id: call.call_id.clone(),
+                        tool_id: plan.definition.manifest.id.clone(),
+                        tool_name: call.tool_name.clone(),
+                        render: dispatch.facts.render.clone(),
+                        args: call.args.clone(),
+                        output: fact.record().output,
+                        artifacts: Arc::new(
+                            crate::runtime::effect::SessionPresentationArtifacts::new(
+                                self.context.attachment_store(),
+                            ),
+                        ),
+                    },
+                    Arc::new(crate::plugin::ToolPresentationFacts {
+                        intent_outcomes: Vec::new(),
+                    }),
+                    &plan.presentation,
+                )
+                .await
+        })
+    }
+
+    fn read<'a>(
+        &'a self,
+        call: &'a crate::sansio::PendingToolCall,
+        plan: &'a crate::runtime::actor::round::ModelReadPlan,
+        cancel: &'a tokio_util::sync::CancellationToken,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        lash_protocol_types::ReadResult,
+                        crate::RuntimeEffectControllerError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let dispatch = self.context.dispatch();
+            let registry = dispatch.routes.registry();
+            let reader = registry.reads(&plan.provider).ok_or_else(|| {
+                crate::RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::LashVmCellBindingDrift,
+                    "the saved model read provider has no reader",
+                )
+            })?;
+            let drift = dispatch
+                .routes
+                .drift(
+                    &plan.definition.manifest.id,
+                    Some(&plan.definition.contract_id()),
+                    &dispatch.config,
+                )
+                .and_then(|drift| drift.failure(&call.tool_name));
+            let route = crate::ReadRoute::new(
+                plan.provider.clone(),
+                plan.definition.clone(),
+                Arc::clone(reader),
+            )
+            .with_drift(drift);
+            let history = self.context.read_history();
+            let observe = self.context.tool_read_observer();
+            let mut metadata = plan.metadata();
+            metadata.args_bytes = call.args.to_string().len();
+            Ok(crate::tool_reads::run_read(
+                match &plan.refusal {
+                    Some(failure) => crate::tool_reads::ReadTarget::Refused {
+                        tool: plan.definition.manifest.id.to_string(),
+                        failure: crate::tool_reads::ReadFailure::Tool(Box::new(failure.clone())),
+                    },
+                    None => crate::tool_reads::ReadTarget::Ready(&route),
+                },
+                Ok(call.args.clone()),
+                crate::tool_reads::ReadContext {
+                    history: Some(&history),
+                    config: self.context.owner_config(),
+                    clock: dispatch.clock.as_ref(),
+                    cancel,
+                    parent_remaining: plan.definition.manifest.execution(),
+                    metadata,
+                    observe: Some(observe.as_ref()),
+                },
+            )
+            .await)
+        })
+    }
+
     fn observe(
         &self,
         call: &crate::sansio::PendingToolCall,
@@ -847,48 +1003,22 @@ impl RoundTools for ProductionRoundTools {
         admitted_here: bool,
         settled_here: bool,
     ) {
-        let (start, close) = {
-            let mut traced = self.traced.lock_recover();
-            let start = !traced.contains_key(&call.call_id);
-            let closed = traced.entry(call.call_id.clone()).or_insert(false);
-            let close = !*closed && settled_here && member.outcome().is_some();
-            *closed |= close;
-            (start, close)
-        };
-        // The call was admitted with its round, under the scope its member
-        // carries: a successor re-folding the round traces it under that
-        // scope and admits nothing (FIG-5382). Its start is the admitting
-        // owner's record; a successor traces only what it observes after.
-        if start && let Some(scope) = member.draft().trace() {
-            if admitted_here {
-                let start = crate::session::ToolCallStart {
-                    call_id: &call.call_id,
-                    provider_call_id: call.provider_call_id.as_deref(),
-                    tool: &call.tool_name,
-                    args: &call.args,
-                };
-                self.context.trace_tool_call_admitted(start, scope.clone());
-            } else {
-                self.context
-                    .adopt_tool_call_trace(&call.call_id, scope.clone());
-            }
-        }
-        // Only the owner whose acknowledged commit wrote the outcome closes
-        // the call's span, at the end that commit retained (P1): a successor
-        // that folds an outcome another owner committed closes nothing.
-        if close && let Some(output) = member.outcome() {
-            let record = member_record(call, output);
-            let attempts = member
-                .attempts()
-                .map(|(ordinal, output, delay)| {
-                    crate::trace::trace_tool_attempt(ordinal, &member_record(call, output), delay)
-                })
-                .collect::<Vec<_>>();
-            self.context
-                .trace_tool_call_completed(&record, &attempts, member.ended_at_ms());
-            self.context
-                .emit_tool_call_completed_activity(call.call_id.as_str(), &record, None);
-        }
+        self.observe_context(&self.context, call, member, admitted_here, settled_here);
+    }
+
+    fn observe_from(
+        &self,
+        call: &crate::sansio::PendingToolCall,
+        member: &crate::runtime::actor::round::RoundMember,
+        admitted_here: bool,
+        settled_here: bool,
+        node: Option<&str>,
+    ) {
+        let context = node.map_or_else(
+            || self.context.clone(),
+            |node| self.context.clone().with_issuing_language_node_id(node),
+        );
+        self.observe_context(&context, call, member, admitted_here, settled_here);
     }
 
     fn trace_scope(
@@ -904,18 +1034,17 @@ impl RoundTools for ProductionRoundTools {
     }
 
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {
-        let manifest = self
-            .context
-            .tool_catalog()
+        let catalog = self.context.tool_catalog();
+        let manifest = catalog
             .entries()
             .iter()
             .find(|tool| tool.manifest.tool() == call.tool_name)
-            .map(|tool| tool.manifest.clone());
-        let tool = manifest.as_ref().map_or_else(
+            .map(|tool| &tool.manifest);
+        let tool = manifest.map_or_else(
             || lash_vocabulary::tool_contract::ToolId::new(call.tool_name.clone()),
             |manifest| manifest.id.clone(),
         );
-        member_pin(&self.context, manifest.as_ref(), tool, None, now_ms)
+        member_pin(&self.context, manifest, tool, None, now_ms)
     }
 
     fn policies(&self) -> PolicyView {
@@ -1061,6 +1190,57 @@ impl RoundTools for ProductionRoundTools {
         state: &[crate::plugin::StateResolution],
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.context.dispatch().state.publish_committed_state(state)
+    }
+}
+
+impl ProductionRoundTools {
+    fn observe_context(
+        &self,
+        context: &RuntimeExecutionContext<'_>,
+        call: &crate::sansio::PendingToolCall,
+        member: &crate::runtime::actor::round::RoundMember,
+        admitted_here: bool,
+        settled_here: bool,
+    ) {
+        let (start, close) = {
+            let mut traced = self.traced.lock_recover();
+            let start = !traced.contains_key(&call.call_id);
+            let closed = traced.entry(call.call_id.clone()).or_insert(false);
+            let close = !*closed && settled_here && member.outcome().is_some();
+            *closed |= close;
+            (start, close)
+        };
+        // The call was admitted with its round, under the scope its member
+        // carries: a successor re-folding the round traces it under that
+        // scope and admits nothing (FIG-5382). Its start is the admitting
+        // owner's record; a successor traces only what it observes after.
+        if start && let Some(scope) = member.draft().trace() {
+            if admitted_here {
+                let start = crate::session::ToolCallStart {
+                    call_id: &call.call_id,
+                    provider_call_id: call.provider_call_id.as_deref(),
+                    tool: &call.tool_name,
+                    args: &call.args,
+                };
+                context.trace_tool_call_admitted(start, scope.clone());
+            } else {
+                context.adopt_tool_call_trace(&call.call_id, scope.clone());
+            }
+        }
+        // Only the owner whose acknowledged commit wrote the outcome closes
+        // the call's span, at the end that commit retained (P1): a successor
+        // that folds an outcome another owner committed closes nothing.
+        if close && let Some(output) = member.outcome() {
+            let record = member_record(call, output);
+            let attempts = member
+                .attempts()
+                .map(|(ordinal, output, delay)| {
+                    crate::trace::trace_tool_attempt(ordinal, &member_record(call, output), delay)
+                })
+                .collect::<Vec<_>>();
+            context.trace_tool_call_completed(&record, &attempts, member.ended_at_ms());
+            context.emit_tool_call_completed_activity(call.call_id.as_str(), &record, None);
+        }
     }
 }
 

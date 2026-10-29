@@ -144,18 +144,35 @@ pub struct PresentRecord {
     owner: lash_durable::domain::OwnerKey,
     run: lash_durable::domain::RunSeq,
     ordinal: lash_durable::domain::Ordinal,
+    reads: Vec<lash_core_store::checkpoint_graph::NodeId>,
+    nodes: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
 }
 
 impl PresentRecord {
+    /// Attach read facts to the same save as the tool results.
+    pub fn with_reads(mut self, reads: Vec<lash_core_store::checkpoint_graph::NodeId>) -> Self {
+        self.reads = reads;
+        self
+    }
+
+    pub fn with_staging(
+        mut self,
+        staging: lash_core_store::checkpoint_graph::GraphStaging,
+    ) -> Self {
+        self.nodes = staging.into_nodes().into_values().collect();
+        self
+    }
+
     /// Writes the record into `tx`.
     pub fn write(&self, tx: &mut ActorTx) {
+        tx.stage(self.nodes.clone());
         append(
             tx,
             &self.owner,
             self.run,
             self.ordinal,
             None,
-            &Record::Present,
+            &Record::Present(self.reads.clone()),
         );
     }
 }
@@ -191,6 +208,8 @@ pub fn presentation(
         owner: view.owner().clone(),
         run: view.run(),
         ordinal: view.cursor().take(),
+        reads: Vec::new(),
+        nodes: Vec::new(),
     });
     (Presentation::of(entries), record)
 }
@@ -260,4 +279,31 @@ pub fn start_retry(tx: &mut ActorTx, failed: &AdmittedExecution) -> AdmittedExec
         attempt,
         Arc::clone(failed.cursor()),
     )
+}
+
+/// Save the ordered read slots beside the existing recorded admission.
+pub fn admit_model_round(
+    tx: &mut ActorTx,
+    scope: &lash_durable::domain::ScopeKey,
+    round: RoundDraft,
+    reads: Vec<super::ModelReadPlan>,
+) -> Result<AdmittedRound, AdmissionRefusal> {
+    let pinned = if round.members.is_empty() && !reads.is_empty() {
+        PinnedRound {
+            owner: round.owner,
+            run: round.run,
+            members: Vec::new(),
+        }
+    } else {
+        pin_round(tx, scope, round)?
+    };
+    let members = super::admit_model_by(
+        tx,
+        &pinned.owner,
+        pinned.run,
+        pinned.members,
+        Vec::new(),
+        reads,
+    )?;
+    Ok(AdmittedRound::admitted(pinned.run, members))
 }

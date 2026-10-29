@@ -135,11 +135,19 @@ async fn unread(_: SessionId, _: ReadScope) -> Result<RecordedWork, lash_durable
 
 /// OWED-IS-NOT-INSTALLED: two calls owe one provider; settling one keeps
 /// it required, settling both drops it.
-#[test]
-fn a_token_stays_required_until_its_last_use_settles() {
+/// CLAIM-ADMISSION-ONE-DECODE: read plans and recorded bindings share a decode.
+/// EMPTY-READ-PRESENTATION-HAS-NO-CLAIM-WORK: no reader debt closes in an empty presentation.
+#[tokio::test]
+async fn a_token_stays_required_until_its_last_use_settles() {
     let mut work = RecordedWork::session();
     let (tx, members) = admitting(1, vec![draft("a", "k"), draft("b", "k")]);
-    work.apply(&tx, Epoch(1), None, limits(), limits()).unwrap();
+    let decodes = crate::testing::fact_decodes::FactDecodes::default();
+    decodes
+        .within(async {
+            work.apply(&tx, Epoch(1), None, limits(), limits()).unwrap();
+        })
+        .await;
+    assert_eq!(decodes.count(), 1, "one admission is decoded once");
     assert_eq!(work.requires(), [token("k")]);
     assert_eq!(work.outstanding_obligations().len(), 2);
     work.apply(&settling(&members[0]), Epoch(1), None, limits(), limits())
@@ -148,6 +156,36 @@ fn a_token_stays_required_until_its_last_use_settles() {
     work.apply(&settling(&members[1]), Epoch(1), None, limits(), limits())
         .unwrap();
     assert!(work.requires().is_empty());
+    let mut tx = opened();
+    let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(1 << 24),
+        ),
+    );
+    let record = round::graph::RoundFact::Present { reads: Vec::new() }
+        .stage(&mut staging)
+        .unwrap();
+    tx.stage_all(staging);
+    tx.write(lash_durable::domain::DomainWrite::RunFact(
+        lash_durable::domain::RunFactWrite::Append {
+            owner: owner(),
+            run: RunSeq(1),
+            ordinal: lash_durable::domain::Ordinal(4),
+            kind: lash_durable::domain::RunFactKind::Present,
+            call: None,
+            record,
+        },
+    ));
+    assert!(
+        !RecordedWork::touches(&tx),
+        "a presentation without reads changes no claim obligations"
+    );
+    let mut missing = opened();
+    missing.write(tx.domain()[0].clone());
+    assert!(
+        RecordedWork::touches(&missing),
+        "a missing presentation must reach the checked reducer"
+    );
 }
 
 /// FIG-6075 R-11: a commit that settles K's call is in flight when another

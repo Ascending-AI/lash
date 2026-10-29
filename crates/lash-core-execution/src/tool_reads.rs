@@ -7,8 +7,8 @@
 //! those tools runs inside the statement that performs it: the cell's host
 //! hands the reader the tool, its arguments, the run's configuration, a
 //! cancellation and a deadline, and the answer goes straight back into the
-//! cell. Nothing about the call is recorded. The answer survives only as
-//! part of the cell's next saved state; a crash before that save reads it
+//! cell. The caller retains the read fact with its next saved state; a
+//! crash before that save reads it
 //! again, and the answer may differ.
 //!
 //! The reader is a narrow interface on purpose: it gets no attempt context,
@@ -183,8 +183,8 @@ impl ReadRoute {
 }
 
 /// Observe an unrecorded read on the ordinary tool-call activity lane.
-/// Cells and processes keep their own execution and error mapping; this
-/// function alone emits their read start/return pair, never a completion.
+/// This function alone emits the read start/return pair, never a completion.
+/// The shared read runner supplies the admitted answer and caller-saved fact.
 /// `project` borrows the answer only for observation and does not change it.
 pub async fn observe_tool_read<T>(
     observe: Option<&(dyn Fn(crate::TurnEvent) + Send + Sync)>,
@@ -225,4 +225,113 @@ pub async fn observe_tool_read<T>(
         });
     }
     result
+}
+
+pub use lash_protocol_types::{ReadFailure, ReadResult};
+
+/// Per-invocation inputs supplied by the saving owner.
+pub struct ReadContext<'a> {
+    pub history: Option<&'a crate::ReadHistory>,
+    pub config: &'a OwnerConfigView,
+    pub clock: &'a dyn crate::Clock,
+    pub cancel: &'a CancellationToken,
+    pub parent_remaining: std::time::Duration,
+    pub metadata: crate::ToolReadMetadata,
+    pub observe: Option<&'a (dyn Fn(crate::TurnEvent) + Send + Sync)>,
+}
+
+/// A resolved reader, or the refusal of the pinned route before provider entry.
+pub enum ReadTarget<'a> {
+    Ready(&'a ReadRoute),
+    Refused { tool: String, failure: ReadFailure },
+}
+
+/// Execute a read once. Only its owner saves the returned fact.
+/// The observation function is FIG-7547's sole read-event producer.
+pub async fn run_read(
+    target: ReadTarget<'_>,
+    input: Result<serde_json::Value, ReadFailure>,
+    context: ReadContext<'_>,
+) -> ReadResult {
+    let args = input.as_ref().cloned().unwrap_or(serde_json::Value::Null);
+    let name = match &target {
+        ReadTarget::Ready(route) => route.definition.manifest.id.to_string(),
+        ReadTarget::Refused { tool, .. } => tool.clone(),
+    };
+    let read = context.metadata.clone();
+    let answer = observe_tool_read(context.observe, read.clone(), name.clone(), args.clone(), async {
+        let args = input?;
+        let route = match target {
+            ReadTarget::Ready(route) => route,
+            ReadTarget::Refused { failure, .. } => return Err(failure),
+        };
+        if let Some(failure) = route.contract_changed() { return Err(ReadFailure::Tool(Box::new(failure.clone()))); }
+        lash_vocabulary::validate_tool_input(&route.definition.contract, &args).map_err(|source| {
+            ReadFailure::Tool(Box::new(crate::ToolFailure::runtime(crate::ToolFailureClass::InvalidRequest, "invalid_tool_args", source.to_string())
+                .with_cause(crate::ToolFailureCause::ValueMismatch { source })))
+        })?;
+        let deadline = context.clock.now() + route.definition.manifest.execution().min(context.parent_remaining);
+        use futures_util::FutureExt as _;
+        let provider = std::panic::AssertUnwindSafe(async {
+            route.read(context.history, &args, context.config, context.clock, context.cancel, deadline).await
+        }).catch_unwind();
+        let value = tokio::select! {
+            biased;
+            () = context.cancel.cancelled() => return Err(ReadFailure::Cancelled),
+            () = context.clock.sleep_until(deadline) => return Err(ReadFailure::TimedOut),
+            answer = provider => match answer {
+                Ok(answer) => answer.map_err(|error| ReadFailure::Reader { message: error.message, data: error.data })?,
+                Err(payload) => return Err(ReadFailure::Panicked(lash_protocol_types::ReadPanic {
+                    tool_name: name.clone(), message: crate::panic_containment::payload_message(payload.as_ref()),
+                })),
+            },
+        };
+        admit_read_output(&route.definition, value)
+    }, |answer| match answer {
+        Ok(value) => (crate::ToolCallOutput::success(value.clone()), value.to_string().len()),
+        Err(failure) => (failure.output(), 0),
+    }).await;
+    let output = match &answer {
+        Ok(value) => crate::ToolCallOutput::success(value.clone()),
+        Err(failure) => failure.output(),
+    };
+    ReadResult {
+        fact: lash_protocol_types::ReadFact {
+            call_id: read.call_id(),
+            caller: read.caller,
+            ordinal: read.ordinal,
+            provider: read.provider,
+            tool: name,
+            args,
+            outcome: output.outcome,
+            site: read.site,
+            origin: read.origin,
+        },
+        answer,
+    }
+}
+
+fn admit_read_output(
+    definition: &ToolDefinition,
+    value: serde_json::Value,
+) -> Result<serde_json::Value, ReadFailure> {
+    crate::ToolCallOutput::success(value.clone())
+        .settled(
+            definition.manifest.declaration(),
+            &definition.contract.output_schema.canonical,
+        )
+        .map_err(|refusal| {
+            ReadFailure::Tool(Box::new(
+                crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "tool_outcome_not_declared",
+                    format!(
+                        "tool `{}` returned an outcome its declaration does not admit: {refusal}",
+                        definition.manifest.id
+                    ),
+                )
+                .with_cause(crate::ToolFailureCause::Declaration { refusal }),
+            ))
+        })?;
+    Ok(value)
 }

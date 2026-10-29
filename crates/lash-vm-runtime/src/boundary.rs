@@ -44,27 +44,7 @@ pub use {
     lash_kernel_value::schema::SchemaProjectionRefusal, lash_kernel_value::schema::type_of_schema,
 };
 
-/// A tool call's input as the tool reads it, from the operands the call
-/// performs the tool with: a tool takes its input as one record
-/// ([`offered_tool`]), and a call that omits it gives exactly
-/// the empty object, never null or the schema's defaults. Cells and
-/// processes both read a tool call's operands through this one rule.
-///
-/// # Errors
-///
-/// What `project` refuses for the one operand, or what `excess` makes of the
-/// count of more than one.
-pub fn tool_input<T, E>(
-    args: &[T],
-    project: impl FnOnce(&T) -> Result<serde_json::Value, E>,
-    excess: impl FnOnce(usize) -> E,
-) -> Result<serde_json::Value, E> {
-    match args {
-        [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
-        [input] => project(input),
-        more => Err(excess(more.len())),
-    }
-}
+pub use lash_core_execution::kernel_runner::tool_input;
 
 /// Deferred Imports carry the source call's positional operands as one Json
 /// list until discovery pins the target. Unpack that list only at the tool

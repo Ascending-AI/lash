@@ -2,7 +2,6 @@
 
 use super::activation::corrupt;
 use super::driver::Driver;
-use super::node_trace::{StepCall, StepToolSpans};
 use crate::ToolCallId;
 use crate::runtime::actor::claim_obligations::RecordedWork;
 use crate::runtime::actor::round::{self, AdmittedExecution, MemberBodies, MemberBody};
@@ -25,10 +24,6 @@ pub(super) struct StepBodies {
     /// outcomes publish into.
     pub(super) runtime: Arc<StepRuntime>,
     pub(super) seen: Mutex<SeenSteps>,
-    /// What the steps' tool spans are reported through; none on a node
-    /// given no tracing.
-    pub(super) tracing: Option<crate::trace::TraceRuntime>,
-    pub(super) spans: StepToolSpans,
 }
 
 /// The process and its in-flight steps' requests, by call, as a pass read
@@ -123,32 +118,40 @@ impl MemberBodies for StepBodies {
         admitted_here: &BTreeSet<lash_durable::domain::AdmittedId>,
         settled_here: &BTreeSet<lash_durable::domain::AdmittedId>,
     ) {
-        self.spans.observe(
-            self.tracing.as_ref(),
-            round,
-            admitted_here,
-            settled_here,
-            |call, tool| {
-                let (record, request) = self.step(call)?;
-                let name = self
-                    .runtime
-                    .built_tools()
-                    .and_then(|built| {
-                        built
-                            .catalog
-                            .entries()
-                            .iter()
-                            .find(|entry| entry.manifest.id == *tool)
-                            .map(|entry| entry.manifest.tool())
-                    })
-                    .unwrap_or_else(|| tool.to_string());
-                Some(StepCall {
-                    process: record.id.clone(),
-                    request,
-                    tool: name,
-                })
-            },
-        );
+        let Some(built) = self.runtime.built_tools() else {
+            return;
+        };
+        for member in round.members() {
+            let Some((_, StepRequest::Tool { input, site, .. })) = self.step(member.call()) else {
+                continue;
+            };
+            let name = built
+                .catalog
+                .entries()
+                .iter()
+                .find(|entry| entry.manifest.id == *member.draft().tool())
+                .map_or_else(
+                    || member.draft().tool().to_string(),
+                    |entry| entry.manifest.tool(),
+                );
+            let call = crate::sansio::PendingToolCall {
+                call_id: member.call().clone(),
+                provider_call_id: None,
+                tool_name: name,
+                args: input,
+                replay: None,
+            };
+            let id = round.id_of(member);
+            built.tools.observe_from(
+                &call,
+                member,
+                admitted_here.contains(&id),
+                settled_here.contains(&id),
+                site.as_ref()
+                    .map(|site| site.origin.position().to_string())
+                    .as_deref(),
+            );
+        }
     }
 
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {

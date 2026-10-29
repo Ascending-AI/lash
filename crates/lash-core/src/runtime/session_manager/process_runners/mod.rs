@@ -84,6 +84,11 @@ impl RuntimeSessionServices {
             environment: Arc::clone(&environment),
             resolutions: Arc::clone(&engine.resolutions),
         })
+        .with_tracing(Some(crate::session::RuntimeExecutionTracing::new(
+            core.tracing.clone(),
+            process.trace.clone(),
+            lash_trace::TraceContext::default().for_process(process.id.clone()),
+        )))
         .with_process_execution(process, Some(env))?;
         let tools = context
             .round_tools(crate::EffectOpener::Process {

@@ -154,15 +154,7 @@ impl TurnActivity {
     }
 }
 
-/// The caller of an unrecorded tool read. This is observation identity only.
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ToolReadCaller {
-    CodeBlock { graph_key: String },
-    Process { process_id: crate::ProcessId },
-}
+pub use lash_protocol_types::ToolReadCaller;
 
 /// Whether tool-call activity describes a recorded call or an unrecorded read.
 #[derive(
@@ -189,8 +181,8 @@ impl ToolCallExecution {
     }
 }
 
-/// Read-specific observation metadata, reusable if a save later retains reads.
-/// This build keeps it only on live tool-call activity (ADR 0144 §5).
+/// Read observation identity and live measurements. The caller saves the read
+/// fact, while elapsed time and byte counts remain provisional activity.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ToolReadMetadata {
     pub caller: ToolReadCaller,
@@ -211,6 +203,7 @@ impl ToolReadMetadata {
         let caller = match &self.caller {
             ToolReadCaller::CodeBlock { graph_key } => format!("cell:{graph_key}"),
             ToolReadCaller::Process { process_id } => format!("process:{process_id}"),
+            ToolReadCaller::ModelRound { round_key } => format!("model:{round_key}"),
         };
         crate::ToolCallId::unrecorded_read(&caller, self.ordinal)
     }
@@ -218,7 +211,7 @@ impl ToolReadMetadata {
     pub(crate) fn graph_key(&self) -> Option<String> {
         match &self.caller {
             ToolReadCaller::CodeBlock { graph_key } => Some(graph_key.clone()),
-            ToolReadCaller::Process { .. } => None,
+            ToolReadCaller::Process { .. } | ToolReadCaller::ModelRound { .. } => None,
         }
     }
 }

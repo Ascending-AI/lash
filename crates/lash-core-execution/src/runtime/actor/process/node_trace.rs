@@ -10,18 +10,14 @@
 //! process's terminal for an occurrence still open. Whether it exists is
 //! the retained `trace_nodes`, never the closing owner's own policy.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Mutex, PoisonError};
-
-use lash_durable::domain::{AdmittedId, RunSeq};
+use lash_durable::domain::RunSeq;
 use lash_trace::{
     DurableTraceScope, SpanKey, TraceContext, TraceDomainCompletion, TraceDomainStatus,
     TraceDomainSubject, TraceEvent, TraceSpanKind,
 };
 
 use super::driver::{Driver, InFlight};
-use crate::ToolCallId;
-use crate::runtime::actor::round::{RoundView, RunFold};
+use crate::runtime::actor::round::RunFold;
 use crate::trace::TraceRuntime;
 use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::ProcessRecord;
@@ -194,154 +190,5 @@ fn status_of(outcome: &SettledOutput) -> TraceDomainStatus {
         SettledOutput::Completed(_) => TraceDomainStatus::Completed,
         SettledOutput::Cancelled { .. } => TraceDomainStatus::Cancelled,
         _ => TraceDomainStatus::Failed,
-    }
-}
-
-/// The tool spans of a process's step calls, as one activation observes its
-/// folds: the admitting owner opens a call's span, and the owner whose
-/// acknowledged commit wrote its final outcome closes it (P1).
-#[derive(Default)]
-pub(super) struct StepToolSpans {
-    /// Calls this activation observed, and whether it closed their span.
-    traced: Mutex<BTreeMap<ToolCallId, bool>>,
-}
-
-/// What the tool span of one step call names.
-pub(super) struct StepCall {
-    pub(super) process: lash_vocabulary::identity::ProcessId,
-    pub(super) request: StepRequest,
-    /// The tool's name, as the step's catalog lists it.
-    pub(super) tool: String,
-}
-
-impl StepToolSpans {
-    /// Observe `round`'s committed state: open the span of each call
-    /// `admitted_here`, and close the span of each call `settled_here`.
-    pub(super) fn observe(
-        &self,
-        tracing: Option<&TraceRuntime>,
-        round: &RoundView,
-        admitted_here: &BTreeSet<AdmittedId>,
-        settled_here: &BTreeSet<AdmittedId>,
-        step: impl Fn(&ToolCallId, &lash_vocabulary::tool_contract::ToolId) -> Option<StepCall>,
-    ) {
-        let Some(tracing) = tracing.filter(|tracing| tracing.is_observed()) else {
-            return;
-        };
-        for member in round.members() {
-            let Some(scope) = member.draft().trace() else {
-                continue;
-            };
-            let id = round.id_of(member);
-            let call = member.call();
-            let (start, close) = {
-                let mut traced = self.traced.lock().unwrap_or_else(PoisonError::into_inner);
-                let start = !traced.contains_key(call);
-                let closed = traced.entry(call.clone()).or_insert(false);
-                let close = !*closed && settled_here.contains(&id) && member.outcome().is_some();
-                *closed |= close;
-                (start, close)
-            };
-            let open = start && admitted_here.contains(&id);
-            if !open && !close {
-                continue;
-            }
-            let Some(step) = step(call, member.draft().tool()) else {
-                continue;
-            };
-            let StepRequest::Tool { input, site, .. } = &step.request else {
-                continue;
-            };
-            let context = TraceContext::default()
-                .for_process(step.process.clone())
-                .for_call(call.clone());
-            let issuing_node = site.as_ref().map(|site| site.origin.position().to_string());
-            let standing = tracing
-                .unreplayed(Some(scope.clone()))
-                .selected(TraceSpanKind::Tool, &context.ids());
-            let content = standing.content();
-            if open {
-                standing.open_scope(|| {
-                    (
-                        context.clone(),
-                        TraceEvent::ToolCallStarted {
-                            call_id: call.clone(),
-                            provider_call_id: None,
-                            name: step.tool.clone(),
-                            args: content
-                                .capture(lash_trace::ContentCategory::ToolArguments, || {
-                                    input.clone()
-                                }),
-                            issuing_node_id: issuing_node.clone(),
-                        },
-                    )
-                });
-            }
-            let (true, Some(outcome), Some(ended_at_ms)) =
-                (close, member.outcome(), member.ended_at_ms())
-            else {
-                continue;
-            };
-            let record = step_record(call, &step.tool, input, outcome);
-            let attempts = member
-                .attempts()
-                .map(|(ordinal, output, delay)| {
-                    crate::trace::trace_tool_attempt(
-                        ordinal,
-                        &step_record(call, &step.tool, input, output),
-                        delay,
-                    )
-                })
-                .collect::<Vec<_>>();
-            standing.close_scope(ended_at_ms, || {
-                (
-                    context,
-                    TraceEvent::ToolCallCompleted {
-                        call_id: call.clone(),
-                        provider_call_id: None,
-                        name: record.tool.clone().into(),
-                        args: content
-                            .capture(lash_trace::ContentCategory::ToolArguments, || {
-                                record.args.clone()
-                            })
-                            .into(),
-                        output: crate::trace::trace_tool_call_output(&record.output, content),
-                        duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
-                        issuing_node_id: issuing_node,
-                        attempts: (!attempts.is_empty()).then_some(attempts),
-                        span_attributes: lash_trace::ToolSpanAnnotations::default(),
-                    },
-                )
-            });
-        }
-    }
-}
-
-/// The call record a step's settled `output` retains, else the answer its
-/// settlement stands for.
-fn step_record(
-    call: &ToolCallId,
-    tool: &str,
-    input: &serde_json::Value,
-    output: &SettledOutput,
-) -> crate::ToolCallRecord {
-    if let Some(record) = output
-        .payload()
-        .and_then(|payload| serde_json::from_str::<crate::ToolCallRecord>(payload).ok())
-    {
-        return record;
-    }
-    crate::ToolCallRecord {
-        call_id: call.clone(),
-        provider_call_id: None,
-        tool: tool.to_owned(),
-        args: input.clone(),
-        output: output.stopped_answer().unwrap_or_else(|| {
-            crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                crate::ToolFailureClass::Internal,
-                "tool_outcome_unreadable",
-                "the step's committed output is not a tool answer",
-            ))
-        }),
     }
 }

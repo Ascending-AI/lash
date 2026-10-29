@@ -10,9 +10,9 @@
 use lash_core::plugin::PluginExecutionTrace;
 use lash_kernel_value::sites::EffectId;
 use lash_trace::{
-    TraceContext, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject,
+    TraceContext, TraceLanguageExecutionFailure, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeFact, TraceRuntimeScope,
+    TraceRuntimeSubject,
 };
 use lash_vm_client::wire::OutcomeWire;
 
@@ -169,60 +169,12 @@ impl ProcessTrace {
     }
 
     fn emit(&self, payload: TraceLanguageExecutionPayload) {
-        use TraceLanguageExecutionPayload as Payload;
-        let (suffix, node) = match &payload {
-            Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
-            Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
-            Payload::Counts { counts } => {
-                let event_key = counts.event_key(&self.identity);
-                (event_key, None)
-            }
-            Payload::Node { at, fact, .. } => {
-                // The whole identity names an occurrence: every task counts
-                // a site's occurrences from 0.
-                let occurrence = serde_json::to_string(at).unwrap_or_default();
-                let transition = match fact {
-                    TraceNodeFact::BranchSelected { .. } => "branch",
-                    TraceNodeFact::ChildStarted { .. } => "child",
-                    TraceNodeFact::Origin { .. } => "origin",
-                    TraceNodeFact::Started { .. } => "started",
-                    TraceNodeFact::Completed { .. } => "completed",
-                    TraceNodeFact::Failed { .. } => "failed",
-                    TraceNodeFact::Cancelled => "cancelled",
-                    TraceNodeFact::Waiting { .. } => "waiting",
-                    TraceNodeFact::Resumed { .. } => "resumed",
-                };
-                (
-                    format!("node:{occurrence}:{transition}"),
-                    Some(at.position().to_string()),
-                )
-            }
-        };
-        let event_key = if matches!(&payload, Payload::Counts { .. }) {
-            suffix
-        } else {
-            format!(
-                "kernel_execution:{}:{suffix}",
-                self.identity.graph_key(&self.subject())
-            )
-        };
-        let context = TraceContext {
-            graph_node_id: node,
-            ..TraceContext::default()
-        };
-        let event = TraceLanguageExecution {
-            event_key,
-            identity: self.identity.clone(),
+        lash_core::trace::observe_language(
+            &self.tracing,
+            &self.identity,
             payload,
-        };
-        self.tracing.observe_language(&event.event_key, || {
-            (
-                context.clone(),
-                TraceEvent::LanguageExecution {
-                    language: None,
-                    event: event.clone(),
-                },
-            )
-        });
+            TraceContext::default(),
+            None,
+        );
     }
 }

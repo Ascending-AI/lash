@@ -356,6 +356,7 @@ pub(crate) fn exec_response(
     final_output: Option<serde_json::Value>,
 ) -> lash_protocol_types::ExecResponse {
     lash_protocol_types::ExecResponse {
+        read_facts: Default::default(),
         consumption: Vec::new(),
         prints_retained: None,
         prints: output

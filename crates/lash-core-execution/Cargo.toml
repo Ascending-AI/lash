@@ -19,7 +19,7 @@ doctest = false
 [features]
 # Keep the execution kernel portable by default.
 default = []
-synthetic-next = ["lash-execution-contracts/synthetic-next", "lash-core-store/synthetic-next"]
+synthetic-next = ["lash-execution-contracts/synthetic-next", "lash-core-store/synthetic-next", "lash-kernel-vm/synthetic-next"]
 otel-trace = ["lash-execution-contracts/otel-trace", "lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
@@ -32,6 +32,7 @@ workspace = true
 
 [dependencies]
 lash-kernel-value = { workspace = true }
+lash-kernel-vm = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }

@@ -361,6 +361,13 @@ fn trace_cell_failure(
         worker_limit: failure.worker_limit,
         tool_call_limit: failure.tool_call_limit,
         exec_failure: failure.exec_failure,
+        bound: failure.bound.clone(),
+        read_panic: failure.read_panic.as_ref().map(|panic| {
+            Box::new(lash_protocol_types::ReadPanic {
+                tool_name: panic.tool_name.clone(),
+                message: String::new(),
+            })
+        }),
         defect: failure.defect.clone(),
         schema_admission: failure.schema_admission.as_deref().map(|error| {
             Box::new(match error {
@@ -536,6 +543,64 @@ pub(crate) fn trace_tool_attempt(
         delay_ms,
         detail: TraceRetryAttemptDetail::Tool { outcome },
     }
+}
+
+/// Construct a language observation with the same occurrence identity for every owner.
+/// Caller attribution and count accumulation retain their own semantics.
+pub fn observe_language(
+    tracing: &crate::plugin::PluginExecutionTrace,
+    identity: &lash_trace::TraceLanguageExecutionIdentity,
+    payload: lash_trace::TraceLanguageExecutionPayload,
+    mut context: TraceContext,
+    language: Option<String>,
+) {
+    use lash_trace::{TraceLanguageExecutionPayload as Payload, TraceNodeFact};
+    let (suffix, node) = match &payload {
+        Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
+        Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
+        Payload::Counts { counts } => (counts.event_key(identity), None),
+        Payload::Node { at, fact, .. } => {
+            let occurrence = serde_json::to_string(at).unwrap_or_default();
+            let transition = match fact {
+                TraceNodeFact::BranchSelected { .. } => "branch",
+                TraceNodeFact::ChildStarted { .. } => "child",
+                TraceNodeFact::Origin { .. } => "origin",
+                TraceNodeFact::Started { .. } => "started",
+                TraceNodeFact::Completed { .. } => "completed",
+                TraceNodeFact::Failed { .. } => "failed",
+                TraceNodeFact::Cancelled => "cancelled",
+                TraceNodeFact::Waiting { .. } => "waiting",
+                TraceNodeFact::Resumed { .. } => "resumed",
+            };
+            (
+                format!("node:{occurrence}:{transition}"),
+                Some(at.position().to_string()),
+            )
+        }
+    };
+    let event_key = if matches!(&payload, Payload::Counts { .. }) {
+        suffix
+    } else {
+        format!(
+            "kernel_execution:{}:{suffix}",
+            identity.graph_key(&payload.subject())
+        )
+    };
+    context.graph_node_id = node;
+    let event = lash_trace::TraceLanguageExecution {
+        event_key,
+        identity: identity.clone(),
+        payload,
+    };
+    tracing.observe_language(&event.event_key, || {
+        (
+            context.clone(),
+            TraceEvent::LanguageExecution {
+                language: language.clone(),
+                event: event.clone(),
+            },
+        )
+    });
 }
 
 #[cfg(test)]

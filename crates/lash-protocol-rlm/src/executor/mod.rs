@@ -560,7 +560,7 @@ async fn run_linked_cell(
     for (use_, binding) in &envelope.environment.uses {
         if invoked.contains(use_)
             && let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
-            && operation.offer.mode == lash_kernel_value::package::OperationMode::Read
+            && operation.mode == lash_kernel_value::package::OperationMode::Read
         {
             match ctx.operation_read_route(operation) {
                 Ok(route) => {
@@ -604,7 +604,6 @@ async fn run_linked_cell(
         history: ctx.read_history(),
         config: ctx.owner_config().clone(),
         cancel: ctx.cancellation(),
-        parent_wait: services.workers.config().tuning.parent_wait,
         ledgers: Arc::clone(&ledgers),
         limit: ctx.max_tool_calls(),
         caller: lash_core::ToolReadCaller::CodeBlock {
@@ -950,6 +949,32 @@ async fn run_linked_cell(
         }) if matches!(exceeded.bound, lash_kernel_vm::Bound::Guard { .. }) => Some(exceeded.limit),
         _ => None,
     };
+    let bound_fact = if recorded {
+        host.graph.lock_recover().state.bound.clone()
+    } else {
+        match &run {
+            Ok(KernelEnd::Ended {
+                end: End::Error(lash_kernel_vm::RunError::Bound(exceeded)),
+                ..
+            }) => {
+                use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+                let meters = services
+                    .workers
+                    .execution_budget()
+                    .and_then(|budget| budget.meters())
+                    .map(|meters| lash_kernel_vm::Meters {
+                        charged: meters.charged,
+                        memory: meters.memory,
+                        live_tasks: meters.live_tasks,
+                    });
+                Some(Box::new(lash_core::facade_support::bound_fact(
+                    exceeded, meters,
+                )))
+            }
+            _ => None,
+        }
+    };
+    host.graph.lock_recover().state.bound = bound_fact.clone();
     let answer = || -> ExecResponse {
         let collected = host.ledgers();
         let respond = |result| exec_response_from(&collected, &printed, result);
@@ -958,6 +983,15 @@ async fn run_linked_cell(
                 kind, message,
             )))
         };
+        if let Some(panic) = &collected.read_panic {
+            state.rollback_code_execution();
+            let mut failure = lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                panic.message.clone(),
+            );
+            failure.read_panic = Some(Box::new(panic.clone()));
+            return respond(lash_core::CellOutcome::Failed(failure));
+        }
         let end = match run {
             Ok(KernelEnd::Ended { end, .. }) => end,
             // The cell stays parked on waits that outlive this activation: its
@@ -1070,6 +1104,9 @@ async fn run_linked_cell(
         }
     };
     let mut response = answer();
+    if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
+        failure.bound = bound_fact;
+    }
     response.consumption = if recorded {
         host.graph.lock_recover().state.consumption.clone()
     } else {
@@ -1138,7 +1175,19 @@ async fn run_linked_cell(
                 entries.push(outcome.body);
             }
         }
-        ctx.cell_calls_committed(records, lash_vm_broker::round_graph::ReportView { entries });
+        ctx.cell_calls_committed(
+            records,
+            lash_vm_broker::round_graph::ReportView {
+                entries,
+                reads: graph
+                    .state
+                    .read_facts
+                    .items()
+                    .iter()
+                    .map(|read| read.0)
+                    .collect(),
+            },
+        );
     }
     if let Some(pages) = activation
         && !held
@@ -1479,6 +1528,7 @@ fn broker_failure(
 
 fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
+        read_facts: Default::default(),
         consumption: Vec::new(),
         prints_retained: None,
         prints: Vec::new(),
@@ -1562,6 +1612,7 @@ fn exec_response_from(
         prints_retained: None,
         prints: Vec::new(),
         calls: collected.executed_calls(),
+        read_facts: Arc::new(collected.read_facts.clone()),
         tool_calls: collected.tool_call_records(),
         printed_images: printed.to_vec(),
         result,

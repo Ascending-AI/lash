@@ -1639,6 +1639,7 @@ mod named_component_laws {
             lash_core_store::tool_surface::UseBinding::Fixed(
                 lash_core_store::tool_surface::RoutedOperation {
                     requirement: requirement.clone(),
+                    mode: lash::package::OperationMode::Waited,
                     route,
                     offer: lash::package::OperationOffer {
                         requirement,

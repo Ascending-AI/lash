@@ -181,9 +181,18 @@ pub struct RoundView {
     members: Vec<RoundMember>,
     cursor: Arc<RunCursor>,
     presented: bool,
+    reads: Vec<super::ModelReadPlan>,
+    read_facts: Vec<lash_core_store::checkpoint_graph::NodeId>,
 }
 
 impl RoundView {
+    pub fn reads(&self) -> &[super::ModelReadPlan] {
+        &self.reads
+    }
+    pub fn read_facts(&self) -> &[lash_core_store::checkpoint_graph::NodeId] {
+        &self.read_facts
+    }
+
     /// The owner.
     #[must_use]
     pub fn owner(&self) -> &OwnerKey {
@@ -435,7 +444,7 @@ fn fold_records(
             folded.reports.insert(run, report);
             continue;
         }
-        let view = fold_run(run, &records, waits, read)?;
+        let view = fold_run(facts, run, &records, waits, read)?;
         for member in &view.members {
             folded
                 .recoveries
@@ -472,6 +481,7 @@ fn fold_report(
 }
 
 fn fold_run(
+    facts: &RunFacts,
     run: RunSeq,
     records: &[&RunFactRow],
     waits: &PinnedWaits,
@@ -490,6 +500,34 @@ fn fold_run(
     let Record::Admit(body) = record.as_ref() else {
         return Err(out_of_order(admit));
     };
+    let corrupt_plan = |reason: &str| FoldRefusal::Undecodable {
+        run,
+        ordinal: ADMIT_ORDINAL,
+        reason: reason.into(),
+    };
+    let mut identities: std::collections::BTreeSet<_> = if body.reads.is_empty() {
+        std::collections::BTreeSet::new()
+    } else {
+        body.members
+            .iter()
+            .map(|member| member.call.clone())
+            .collect()
+    };
+    let mut previous = None;
+    for (index, plan) in body.reads.iter().enumerate() {
+        if plan.ordinal != index as u64 + 1
+            || plan.slot >= (body.members.len() + body.reads.len()) as u64
+            || previous.is_some_and(|slot| slot >= plan.slot)
+            || plan.metadata().call_id() != plan.call_id
+            || !matches!(plan.caller, crate::ToolReadCaller::ModelRound { .. })
+            || !identities.insert(plan.call_id.clone())
+        {
+            return Err(corrupt_plan(
+                "a saved model read plan has inconsistent identities or slots",
+            ));
+        }
+        previous = Some(plan.slot);
+    }
     let mut members: Vec<Option<RoundMember>> = Vec::new();
     members.resize_with(body.members.len(), || None);
     let drafts: Vec<ExecutionDraft> = body
@@ -503,6 +541,7 @@ fn fold_run(
             reason: reason.to_owned(),
         })?;
     let mut presented = false;
+    let mut read_facts = Vec::new();
     for row in &records[1..] {
         let record = read(row)?;
         match record.as_ref() {
@@ -607,7 +646,28 @@ fn fold_run(
                     due: DurableInstant(retry.due_at_ms),
                 };
             }
-            Record::Present => {
+            Record::Present(reads) => {
+                if reads.len() != body.reads.len() {
+                    return Err(out_of_order(row));
+                }
+                let mut decoder =
+                    lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits);
+                for (plan, node) in body.reads.iter().zip(reads) {
+                    let fact = super::graph::load_model_read(&mut decoder, *node)
+                        .map_err(|error| corrupt_plan(&error.to_string()))?
+                        .fact;
+                    if fact.call_id != plan.call_id
+                        || fact.ordinal != plan.ordinal
+                        || fact.caller != plan.caller
+                        || fact.provider != plan.provider
+                        || fact.tool != plan.definition.manifest.id.as_str()
+                    {
+                        return Err(corrupt_plan(
+                            "a saved model read fact disagrees with its plan",
+                        ));
+                    }
+                }
+                read_facts = reads.clone();
                 if presented
                     || row.call.is_some()
                     || members.iter().any(|member| {
@@ -639,6 +699,8 @@ fn fold_run(
         members,
         cursor: RunCursor::at(Ordinal(records.len() as u64)),
         presented,
+        reads: body.reads.clone(),
+        read_facts,
     })
 }
 

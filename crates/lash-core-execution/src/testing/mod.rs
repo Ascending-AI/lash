@@ -1724,10 +1724,15 @@ pub fn operation_environment(
                     OperationMode::Waited
                 },
             },
+            mode: if route.policy == lash_kernel_value::ExecutionPolicy::Read {
+                OperationMode::Read
+            } else {
+                OperationMode::Waited
+            },
             route,
         };
         operation.validate()?;
-        operation.route.require(&mut environment.requirements);
+        operation.require(&mut environment.requirements);
         environment.roots.insert(use_.link);
         if environment
             .uses

@@ -648,6 +648,7 @@ impl ModelStore {
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
                 let response = lash_core::ExecResponse {
+                    read_facts: Default::default(),
                     consumption: Vec::new(),
                     prints_retained: None,
                     prints: vec![lash_core::CellPrint {

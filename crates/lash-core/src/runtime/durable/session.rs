@@ -246,12 +246,14 @@ pub enum CellExit {
 pub struct CellToolCalls {
     pub records: Vec<crate::ToolCallRecord>,
     pub ledger: lash_core_execution::runtime::actor::round::graph::ReportView,
+    /// Read facts from the final stretch, saved by the consuming turn.
+    pub read_facts: Vec<crate::ReadFact>,
 }
 
 impl CellToolCalls {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ledger.entries.is_empty()
+        self.ledger.entries.is_empty() && self.ledger.reads.is_empty() && self.read_facts.is_empty()
     }
 }
 

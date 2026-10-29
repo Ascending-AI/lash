@@ -408,6 +408,7 @@ pub(crate) enum KernelRunOutput {
     /// published and owns, the waits it asked for since its last park and
     /// the waits it withdrew.
     Parked {
+        read_facts: Vec<lash_protocol_types::ReadFact>,
         read_count: u64,
         state: ParkedPage,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -441,6 +442,7 @@ pub(crate) enum KernelRunOutput {
     },
     /// The run ended.
     Ended {
+        read_facts: Vec<lash_protocol_types::ReadFact>,
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         outcome: Box<lash_execution_contracts::process::ProcessOutcome>,
         /// The segment's statement starts and empty-block entries, by

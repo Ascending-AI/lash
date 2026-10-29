@@ -66,6 +66,7 @@ fn admitted(identity: EffectId) -> Admission {
 fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_kernel_value::sites::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
+            read_facts: Vec::new(),
             read_count: 0,
             state: sealed(),
             issued,
@@ -307,6 +308,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
         &run2,
         completed(
             serde_json::to_string(&KernelRunOutput::Ended {
+                read_facts: Vec::new(),
                 outcome: Box::new(outcome.clone()),
                 ran: Default::default(),
                 caught: Vec::new(),
@@ -719,5 +721,42 @@ fn a_helper_called_from_another_link_keeps_its_defining_fills() {
                 other => panic!("unexpected helper result: {other:?}"),
             }
         }
+    }
+}
+
+/// KERNEL-BOUND-FACT: process projection preserves received and missing receipts.
+#[test]
+fn a_process_charge_bound_retains_limit_observation_and_consumption() {
+    for charged in [None, Some(101)] {
+        let exceeded = lash_kernel_vm::BoundExceeded {
+            bound: lash_kernel_vm::Bound::Charge,
+            limit: 100,
+            function: None,
+            site: None,
+        };
+        let meters = charged.map(|charged| lash_kernel_vm::Meters {
+            charged: Some(charged),
+            memory: 0,
+            live_tasks: 0,
+        });
+        let output = super::run::outcome_of_end(
+            lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(exceeded)),
+            meters,
+        );
+        let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
+        else {
+            panic!("a bound ends the process");
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("a bound fails the process");
+        };
+        let Some(lash_core::ToolFailureCause::ExecutionBound { fact }) = failure.cause.as_deref()
+        else {
+            panic!("the process retains its bound: {failure:?}");
+        };
+        assert_eq!(fact.resource, lash_core::CellResource::Charges);
+        assert_eq!(fact.limit, 100);
+        assert_eq!(fact.observed, charged);
+        assert_eq!(fact.consumed, charged.map(|_| 100));
     }
 }

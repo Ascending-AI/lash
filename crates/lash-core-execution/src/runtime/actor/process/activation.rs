@@ -63,7 +63,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects, record_ran};
-use super::node_trace::{NodeCloses, StepToolSpans};
+use super::node_trace::NodeCloses;
 use super::session_turn::SessionTurns;
 use super::step_admission::{Consumed, Handoff};
 use super::step_bodies::StepBodies;
@@ -321,8 +321,6 @@ impl ProcessActivation {
             steps: Arc::clone(&self.steps),
             runtime: Arc::new(StepRuntime::new(steps_cx.clone())),
             seen: Mutex::default(),
-            tracing: self.tracing.clone(),
-            spans: StepToolSpans::default(),
         });
         let mut live = Live {
             lifecycle: Lifecycle::new(

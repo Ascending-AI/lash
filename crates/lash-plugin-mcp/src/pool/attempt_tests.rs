@@ -470,6 +470,7 @@ async fn l13_mcp_propagates_the_tool_span_context_under_the_servers_policy() {
         assert!(value("network.transport").contains("pipe"));
         assert!(value("error.type").contains("tool_error"));
         assert!(value("jsonrpc.request.id").contains(&request["id"].to_string()));
+        Box::pin(process_mcp_trace(propagation)).await;
     }
 }
 
@@ -493,5 +494,228 @@ fn l13_mcp_trace_propagation_round_trips_and_omits_the_default() {
         assert_eq!(value.get("trace_propagation").cloned(), written);
         let back: McpServerConfig = serde_json::from_value(value).unwrap();
         assert_eq!(back.trace_propagation, propagation);
+    }
+}
+
+struct McpTraceComponent(Arc<crate::McpToolProvider>);
+
+impl lash_core::plugin::ProcessComponentFactory for McpTraceComponent {
+    fn declaration(&self) -> lash_core::plugin::ProcessComponentDeclaration {
+        lash_core::plugin::ProcessComponentDeclaration::initial(
+            "mcp",
+            lash_kernel_value::providers::FormatVersion::ONE,
+        )
+        .unwrap()
+    }
+    fn config_type(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<lash_tool_support::ToolSelectionConfig>()
+    }
+    fn validate(
+        &self,
+        entry: &lash_core::ProcessComponentEntry,
+        _: &lash_core::ProcessEnv,
+    ) -> Result<(), lash_core::ProcessEnvRefusal> {
+        entry
+            .config()
+            .decode::<lash_tool_support::ToolSelectionConfig>()
+            .map(|_| ())
+            .map_err(|error| lash_core::ProcessEnvRefusal::ConfigRefused {
+                id: entry.id().to_string(),
+                reason: error.to_string(),
+            })
+    }
+    fn recipe(
+        self: Arc<Self>,
+    ) -> Result<lash_core::plugin::ProcessRecipe, lash_execution_contracts::PluginError> {
+        lash_core::plugin::ProcessComponentSpec::new()
+            .with_tool_provider(lash_core::tool_provider_key!("servers"), self.0.clone())
+            .with_package_provider(lash_core::tool_provider_key!("servers"), self.0.clone())
+            .recipe("mcp")
+    }
+}
+
+/// Run the same MCP attempt through the production process owner, whose
+/// acknowledged outcome must close the body span with its annotations.
+async fn process_mcp_trace(propagation: crate::McpTracePropagation) {
+    use lash::package::*;
+    let scratch = tempfile::tempdir().unwrap();
+    let pool = connect_mock(
+        scratch.path(),
+        MockOptions {
+            behavior: "tool_error",
+            trace_propagation: propagation,
+            ..Default::default()
+        },
+    )
+    .await;
+    let provider = Arc::new(crate::McpToolProvider::new(Arc::clone(&pool)));
+    let definition = pool.advertised_tools().remove(0);
+    let component_key = lash_core::ProcessConfigKey::<lash_tool_support::ToolSelectionConfig>::new(
+        "mcp",
+        lash_kernel_value::providers::FormatVersion::ONE,
+    );
+    let component = Arc::new(McpTraceComponent(provider));
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(lash::durable::DurableSettings::standard())
+        .build()
+        .unwrap();
+    let workers = lash::vm::WorkerService::default();
+    let bounds = workers.config().run_bounds;
+    let sink = Arc::new(lash_core::testing::RecordingTraceSink::new());
+    let core = lash::LashCore::standard_builder(backend)
+        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+            workers,
+            "typescript",
+            bounds,
+        )))
+        .process_component(component, component_key)
+        .data_retention(lash::DataRetention::standard())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .trace_sink(sink.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("mcp-process-trace"),
+            lash::persistence::LeaseIncarnationId::new("mcp-process-trace-boot"),
+        ))
+        .unwrap();
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(
+            component_key,
+            &lash_tool_support::ToolSelectionConfig::default(),
+        )
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let artifacts = core.host_artifacts();
+    let pin = lash_core::HostArtifactPin::mint();
+    let context = PublicationContext {
+        domain: PublicationDomain(core.backend().binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("mcp-trace-law".into()),
+        root: Segment::new("law").unwrap(),
+    };
+    let packages = artifacts
+        .process_namespace(&pin, &env, context.clone())
+        .await
+        .unwrap();
+    let environment = lash::vm::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment: Attachment {
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+            members: Default::default(),
+            deferred: Default::default(),
+        },
+    };
+    let mut document = lash::workflow::document::parse_document(&format!("kernel 1\nimport 0 operation {}(input: Any) -> Any\nmain {{ let got = perform 0({{}}) as Any return got }}", definition.manifest.operation.effect_name())).unwrap();
+    for import in document.imports.values_mut() {
+        if let lash_kernel_value::ImportKind::Operation { signature } = &mut import.kind {
+            *signature = lash_kernel_value::json_schema::tool_signature(
+                &definition.contract.input_schema.canonical,
+                &definition.contract.output_schema.canonical,
+            );
+        }
+    }
+    let start = artifacts
+        .publish_workflow(
+            &pin,
+            &lash::workflow::document::DocumentBytes::from(document),
+            &StartSelector::Main,
+            &environment,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let env = artifacts
+        .link_process_env(
+            &env,
+            &lash::process::LinkTarget::Linked(start.clone()),
+            &packages,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
+    let env_ref = artifacts.publish_process_env(&pin, &env).await.unwrap();
+    let payload = json!({"code": lash::vm::KernelInlineRequest::Linked { start }, "args":{}});
+    let engine = lash_protocol_types::LASH_VM_ENGINE_KIND;
+    let settings = core.processes().engine_defaults(engine, &payload).unwrap();
+    let request = lash::process::ProcessStartRequest::engine(
+        engine,
+        payload,
+        lash::process::EngineLaunch::new(env_ref, settings),
+        lash::process::ProcessOriginator::host(),
+        lash::process::LifetimeDecision::Detached,
+    );
+    let process = core
+        .processes()
+        .start(request, core.effect_host())
+        .await
+        .unwrap()
+        .process_id;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        core.processes().await_output(&process),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    core.shutdown().await.unwrap();
+    pool.shutdown_all().await;
+    let request = received_call(scratch.path());
+    let records = sink.json_records().unwrap();
+    let completed: Vec<_> = records
+        .iter()
+        .filter(|record| {
+            record["type"] == "tool_call_completed"
+                && record["context"]["process_id"] == process.as_str()
+        })
+        .collect();
+    assert_eq!(
+        completed.len(),
+        1,
+        "the committing process closes its call once: {records:?}"
+    );
+    let completed = completed[0];
+    let attributes = completed["span_attributes"]
+        .as_array()
+        .expect("the process closer keeps body annotations");
+    let value = |key: &str| {
+        attributes
+            .iter()
+            .find(|attribute| attribute["key"] == key)
+            .unwrap_or_else(|| panic!("{key} is set: {attributes:?}"))["value"]
+            .to_string()
+    };
+    assert!(value("mcp.method.name").contains("tools/call"));
+    assert!(value("network.transport").contains("pipe"));
+    assert!(value("error.type").contains("tool_error"));
+    assert!(value("jsonrpc.request.id").contains(&request["id"].to_string()));
+    match propagation {
+        crate::McpTracePropagation::W3c => {
+            let parent = request["params"]["_meta"]["traceparent"]
+                .as_str()
+                .expect("a process propagates its body span");
+            let fields: Vec<_> = parent.split('-').collect();
+            assert_eq!(fields.len(), 4);
+            let span = completed["position"]["span"].to_string();
+            assert!(
+                span.contains(fields[1]) && span.contains(fields[2]),
+                "the propagated parent is the exported process call span: {completed:?} {parent}"
+            );
+        }
+        crate::McpTracePropagation::Off => {
+            assert!(request["params"]["_meta"].get("traceparent").is_none())
+        }
     }
 }

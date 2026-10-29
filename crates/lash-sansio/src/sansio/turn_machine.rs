@@ -4,6 +4,8 @@ use lash_protocol_types::ReportedFailure;
 use lash_protocol_types::llm::types::RetainedLlmRequest;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
+mod read_ids;
+
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
     pub fn adopt_prepared_messages(&mut self, messages: lash_protocol_types::MessageSequence) {

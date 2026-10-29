@@ -518,6 +518,16 @@
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
+        "bound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "defect": {
           "anyOf": [
             {
@@ -552,6 +562,16 @@
         },
         "message": {
           "type": "string"
+        },
+        "read_panic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadPanic"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "schema_admission": {
           "anyOf": [
@@ -941,6 +961,60 @@
           "type": "string"
         }
       ]
+    },
+    "ExecutionBoundFact": {
+      "description": "The bound that ended a kernel execution, with only the receipts received.",
+      "properties": {
+        "consumed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/CellResource"
+        },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "resource",
+        "limit"
+      ],
+      "type": "object"
     },
     "ExecutionEvidence": {
       "description": "Facts reported by the provider about the execution that produced a response.\n\nThese fields must never be filled from request intent. In particular,\n`reasoning_output_tokens: Some(0)` is distinct from an unreported value.",
@@ -2093,6 +2167,22 @@
         "provider",
         "endpoint",
         "model"
+      ],
+      "type": "object"
+    },
+    "ReadPanic": {
+      "description": "A provider panic has no admitted call id or attempt ordinal.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "message"
       ],
       "type": "object"
     },

@@ -28,7 +28,6 @@ pub use page_carry::{
 };
 #[doc(hidden)]
 pub use pages::check_parked_helpers;
-mod reads;
 mod replay;
 mod run;
 mod state;
@@ -1074,3 +1073,16 @@ pub fn kernel_process_engine_registration(
 }
 
 pub use lash_kernel_state::paged::HelperUpgradeCheckError;
+
+/// Decode the read facts retained by one kernel run's owning step outcome.
+/// This is an offline history projection and executes no engine or provider.
+#[doc(hidden)]
+pub fn saved_read_facts(
+    payload: &str,
+) -> Result<Vec<lash_protocol_types::ReadFact>, serde_json::Error> {
+    let output: state::KernelRunOutput = serde_json::from_str(payload)?;
+    Ok(match output {
+        state::KernelRunOutput::Ended { read_facts, .. }
+        | state::KernelRunOutput::Parked { read_facts, .. } => read_facts,
+    })
+}

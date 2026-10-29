@@ -828,6 +828,7 @@ fn rlm_exec_response_with_tool_calls(
             _ => None,
         });
     lash_core::ExecResponse {
+        read_facts: Default::default(),
         consumption: Vec::new(),
         prints_retained: None,
         prints: output

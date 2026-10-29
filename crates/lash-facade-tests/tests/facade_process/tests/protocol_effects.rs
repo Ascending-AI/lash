@@ -16,7 +16,7 @@ type Received = Arc<StdMutex<Vec<serde_json::Value>>>;
 
 /// A protocol whose every turn starts one code cell, with no code
 /// executor.
-struct TestProtocolFactory(Received, bool);
+struct TestProtocolFactory(Received, bool, bool);
 
 impl lash_core::facade_support::PluginFactory for TestProtocolFactory {
     fn id(&self) -> &'static str {
@@ -29,13 +29,14 @@ impl lash_core::facade_support::PluginFactory for TestProtocolFactory {
         let mut reg = lash::plugins::PluginRegistrar::<TestProtocolPlugin>::new(
             lash::plugins::PluginFactory::id(self.as_ref()),
         );
-        TestProtocolPlugin::declare(&mut reg, self.1)?;
+        TestProtocolPlugin::declare(&mut reg, self.1, self.2)?;
         let id = self.id();
-        Ok(lash::plugins::PluginRecipe::new(
-            id,
-            reg,
-            move |_ctx, _state| Ok(Arc::new(TestProtocolPlugin(Arc::clone(&self.0)))),
-        ))
+        Ok(
+            lash::plugins::PluginRecipe::new(id, reg, move |_ctx, _state| {
+                Ok(Arc::new(TestProtocolPlugin(Arc::clone(&self.0))))
+            })
+            .with_transcript_decoder(Arc::new(TestCellDecoder)),
+        )
     }
 }
 
@@ -61,8 +62,12 @@ impl TestProtocolPlugin {
     fn declare(
         reg: &mut lash::plugins::PluginRegistrar<Self>,
         fail_invocation: bool,
+        stopped: bool,
     ) -> std::result::Result<(), lash::plugins::PluginError> {
-        if fail_invocation {
+        if stopped {
+            reg.execution()
+                .code_executor(|_, _| Ok(Arc::new(StoppedExecutor)))?;
+        } else if fail_invocation {
             reg.execution()
                 .code_executor(|_, _| Ok(Arc::new(FailedInvocation)))?;
         }
@@ -153,6 +158,25 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
     ) -> Vec<lash_core::DriverAction> {
         let mut actions = Vec::new();
         if let Err(error) = result {
+            let record = lash_core::CellRecord {
+                id: "failed-cell".into(),
+                protocol_iteration: 0,
+                language: "code".into(),
+                code: "console.log('effect seam')".into(),
+                prints: Vec::new(),
+                prints_retained: None,
+                images: Vec::new(),
+                calls: Vec::new(),
+                read_facts: Vec::new(),
+                bindings: Default::default(),
+                consumption: Vec::new(),
+                result: lash_core::CellOutcome::Failed(error.clone().into()),
+            };
+            actions.push(lash_core::DriverAction::AppendEvents(vec![
+                lash_core::SessionHistoryRecord::Protocol(
+                    lash_core::ProtocolEvent::typed(PROTOCOL, record).expect("a cell encodes"),
+                ),
+            ]));
             let encoded = serde_json::to_value(&error).expect("an exec failure encodes");
             // The failure as the driver received it, reported as the turn's
             // error, so a host can read every field the driver was handed.
@@ -188,7 +212,7 @@ async fn a_failed_cell(
     let sink = Arc::new(lash::testing::RecordingTraceSink::new());
     let core = explicit_ephemeral_facets(
         LashCore::builder(sqlite_memory_store_backend().await).protocol_plugin(Arc::new(
-            TestProtocolFactory(Arc::clone(&received), fail_invocation),
+            TestProtocolFactory(Arc::clone(&received), fail_invocation, false),
         )),
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
@@ -267,7 +291,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
 async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     fn core(backend: lash_execution_contracts::backend::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(LashCore::builder(backend).protocol_plugin(Arc::new(
-            TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new())), false),
+            TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new())), false, false),
         )))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(lash_facade_tests::runtime_lease_owner())
@@ -383,5 +407,97 @@ async fn cell_failure_activity_distinguishes_unmeasured_from_measured_duration()
             assert!(completion["duration_ms"].is_u64(), "{completion}");
         }
     }
+    Ok(())
+}
+
+struct TestCellDecoder;
+impl lash_core::transcript::TranscriptDecoderPlugin for TestCellDecoder {
+    fn decode_event(
+        &self,
+        event: &lash_core::ProtocolEvent,
+    ) -> std::result::Result<
+        Option<lash_core::transcript::TranscriptItem>,
+        lash_core::StoredDataCorruption,
+    > {
+        Ok(event
+            .decode::<lash_core::CellRecord>(PROTOCOL)
+            .expect("the test protocol retains a cell")
+            .map(|cell| lash_core::transcript::TranscriptItem::Cell(Arc::new(cell))))
+    }
+}
+
+struct StoppedExecutor;
+#[async_trait]
+impl lash_core::plugin::CodeExecutorPlugin for StoppedExecutor {
+    async fn frame_switch_carries(
+        &self,
+        _: lash_core::plugin::ProtocolSessionContext<'_>,
+        _: &lash_core::FrameNodeId,
+        _: &[lash_core::SessionAppendNode],
+    ) -> std::result::Result<Vec<lash_core::ArtifactName>, lash_core::SessionError> {
+        Ok(Vec::new())
+    }
+    async fn execute_code(
+        &self,
+        _: lash_core::RuntimeExecutionContext<'_>,
+        _: lash_core::ExecRequest,
+    ) -> std::result::Result<lash_core::ExecResponse, lash_core::SessionError> {
+        Err(lash_core::SessionError::CodeExecutionRuntimeStopped)
+    }
+}
+
+/// CELL-FAILURE-CATEGORY: live return, committed completion and reopened history retain the executor's typed reason.
+#[tokio::test]
+async fn runtime_stopped_cell_failure_agrees_live_committed_and_reopened() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let build = || {
+        explicit_ephemeral_facets(LashCore::builder(backend.clone()).protocol_plugin(Arc::new(
+            TestProtocolFactory(Received::default(), false, true),
+        )))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(lash_facade_tests::runtime_lease_owner())
+    };
+    let core = build()?;
+    let id = lash_kernel_value::identity::SessionId::from("runtime-stopped-cell");
+    let session = core
+        .session(id.clone())
+        .create(lash::SessionCreation::root(mock_session_spec()))
+        .await?;
+    let output = session.send(TurnInput::text("run code")).output().await?;
+    let returned = output
+        .activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            lash::TurnEvent::CodeBlockReturned { result, .. } => Some(result.clone()),
+            _ => None,
+        })
+        .expect("the cell returned");
+    let completed = output
+        .activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            lash::TurnEvent::CodeBlockCompleted { result, .. } => Some(result.clone()),
+            _ => None,
+        })
+        .expect("the cell completion committed");
+    assert_eq!(returned, completed);
+    assert!(
+        matches!(&returned, lash_core::CellOutcome::Failed(failure) if failure.exec_failure == Some(lash_core::ExecCodeFailureReason::RuntimeStopped)),
+        "{returned:?}"
+    );
+    drop(session);
+    core.shutdown().await?;
+    let reopened = build()?;
+    let transcript = reopened.session(id).durable().await?.transcript().await?;
+    let saved = transcript
+        .entries()
+        .iter()
+        .find_map(|entry| match &entry.item {
+            lash::transcript::TranscriptItem::Cell(cell) => Some(cell.result.clone()),
+            _ => None,
+        })
+        .expect("the reopened cell is retained");
+    assert_eq!(saved, completed);
+    reopened.shutdown().await?;
     Ok(())
 }

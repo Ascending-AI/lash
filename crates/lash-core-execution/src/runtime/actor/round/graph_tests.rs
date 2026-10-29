@@ -212,6 +212,7 @@ fn every_round_fact_round_trips_through_its_node() {
     let request = Material::journal_local(owner(), MaterialRole::PreparedRequest, "r".to_owned());
     for fact in [
         RoundFact::Admit {
+            reads: Vec::new(),
             members: vec![AdmitMember::Pinned(Box::new(PinnedMember {
                 admitted_at: 0,
                 call: ToolCallId::fixture("a"),
@@ -245,7 +246,7 @@ fn every_round_fact_round_trips_through_its_node() {
             },
             due_at_ms: -5,
         },
-        RoundFact::Present,
+        RoundFact::Present { reads: Vec::new() },
         RoundFact::CellReport { report },
     ] {
         let node = fact.stage(&mut staging).unwrap();
@@ -293,6 +294,7 @@ fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
     let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
     let body = CallOutcome::body_node(&mut decoder, outcome).unwrap();
     let report = ReportView {
+        reads: Vec::new(),
         entries: vec![body],
     }
     .stage(&mut staged)

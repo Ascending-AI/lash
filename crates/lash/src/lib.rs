@@ -418,7 +418,9 @@ pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
 };
-pub use lash_core::{ToolCallExecution, ToolReadCaller, ToolReadMetadata};
+pub use lash_core::{
+    ExecutionBoundFact, ReadFact, ReadPanic, ToolCallExecution, ToolReadCaller, ToolReadMetadata,
+};
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
 /// validated at compile time.
 pub use lash_core::{hook_key, tool_provider_key};
@@ -708,7 +710,8 @@ pub mod tools {
     /// cell: the reader a provider registers beside itself, with the
     /// recipe's `provider_with_reads` (ADR 0144).
     pub use lash_core::{
-        ReadCall, ReadError, ReadHistory, ReadRoute, ToolProviderRegistration, ToolReads,
+        ReadCall, ReadError, ReadFailure, ReadHistory, ReadResult, ReadRoute,
+        ToolProviderRegistration, ToolReads,
     };
     pub use lash_execution_contracts::DeclaredStart;
     pub use lash_execution_contracts::DeclaredStartRefused;

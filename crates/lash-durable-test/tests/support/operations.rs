@@ -88,6 +88,7 @@ pub fn environment(
                     use_for(definition),
                     UseBinding::Fixed(RoutedOperation {
                         requirement: requirement.clone(),
+                        mode: offer.mode,
                         offer,
                         route,
                     })

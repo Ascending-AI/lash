@@ -2401,6 +2401,7 @@ dependencies = [
  "lash-internal-transport-failure",
  "lash-internal-vocabulary",
  "lash-kernel-value",
+ "lash-kernel-vm",
  "rmp-serde",
  "schemars",
  "serde",

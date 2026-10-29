@@ -576,6 +576,56 @@ fn json_value_type(value: &serde_json::Value) -> lash_kernel_value::Type {
     }
 }
 
+/// Convert an admitted read answer to the kernel boundary. Provider panics
+/// leave through the owner channel, never through a guest error value.
+pub fn read_answer(
+    expected: &lash_kernel_value::types::Type,
+    answer: Result<serde_json::Value, lash_protocol_types::ReadFailure>,
+) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_protocol_types::ReadPanic> {
+    use lash_protocol_types::ReadFailure;
+    let error =
+        |kind: &str, message: String, data: serde_json::Value| lash_kernel_doc::ErrorDatum {
+            kind: kind.into(),
+            message,
+            data: datum_from_json(&data.to_string()).unwrap_or(Datum::Null),
+        };
+    Ok(match answer {
+        Ok(value) => datum_from_tool_json(&value, expected).map_err(|refusal| {
+            refusal.error_datum().unwrap_or_else(|failure| {
+                error(
+                    "diagnostic_encoding",
+                    failure.to_string(),
+                    serde_json::Value::Null,
+                )
+            })
+        }),
+        Err(ReadFailure::Panicked(panic)) => return Err(panic),
+        Err(ReadFailure::Arguments(message)) => {
+            Err(error("tool_arguments", message, serde_json::Value::Null))
+        }
+        Err(ReadFailure::Tool(failure)) => Err(error(
+            if failure.code == "tool_call_limit" {
+                "tool_call_limit"
+            } else {
+                "tool_failed"
+            },
+            failure.message.clone(),
+            failure.to_json_value(),
+        )),
+        Err(ReadFailure::Reader { message, data }) => Err(error("tool_failed", message, data)),
+        Err(ReadFailure::Cancelled) => Err(error(
+            super::EFFECT_CANCELLED,
+            "the read was stopped with its owner".into(),
+            serde_json::Value::Null,
+        )),
+        Err(ReadFailure::TimedOut) => Err(error(
+            super::EFFECT_TIMED_OUT,
+            "the read exceeded its tool or parent deadline".into(),
+            serde_json::Value::Null,
+        )),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]

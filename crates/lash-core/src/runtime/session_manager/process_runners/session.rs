@@ -313,6 +313,11 @@ fn process_turn_stop_classification(
             "process_session_turn_max_turns",
             "background session turn reached its turn limit",
         ),
+        lash_protocol_types::session_model::TurnStop::ReadPanicked { .. } => (
+            Class::Internal,
+            "tool_read_panicked",
+            "a host reader panicked in the child turn",
+        ),
         lash_protocol_types::session_model::TurnStop::ToolPanicked { .. } => (
             Class::Internal,
             "tool_panicked",
@@ -503,6 +508,12 @@ fn output_from_process_turn(
         ).with_cause(lash_protocol_types::tool_output::ToolFailureCause::Panicked {
             tool_name: tool_name.clone(), call_id: call_id.clone(), message: message.clone(),
         }));
+    }
+    if let lash_protocol_types::session_model::TurnOutcome::Stopped(
+        lash_protocol_types::session_model::TurnStop::ReadPanicked { panic },
+    ) = &outcome
+    {
+        return lash_protocol_types::tool_output::ToolCallOutput::failure(panic.failure());
     }
     if state == lash_execution_contracts::process::ProcessStatus::Failed {
         return lash_protocol_types::tool_output::ToolCallOutput::failure(

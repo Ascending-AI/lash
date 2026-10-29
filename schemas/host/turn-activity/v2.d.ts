@@ -627,6 +627,7 @@ export type CellDefect = ({
  * Structured failure returned by a code executor.
  */
 export type CellFailure = {
+  "bound"?: (ExecutionBoundFact | null);
   /**
    * The rule of a session's cells the program broke, when that is why
    * the cell failed, kept typed through the plugin and host result.
@@ -645,6 +646,7 @@ export type CellFailure = {
   "feedback"?: Array<CellFailureRepair>;
   "kind": CellFailureKind;
   "message": string;
+  "read_panic"?: (ReadPanic | null);
   "schema_admission"?: (SchemaAdmissionError | null);
   /**
    * The session's `max_tool_calls` refusal, when that is why the cell
@@ -1283,6 +1285,19 @@ export type Exchange = (("deliver" | "seal" | "prepare" | "reset") | "handshake"
  * durable journal and trace surfaces.
  */
 export type ExecCodeFailureReason = ("executor_unavailable" | "runtime_stopped" | "session");
+
+/**
+ * The bound that ended a kernel execution, with only the receipts received.
+ */
+export type ExecutionBoundFact = {
+  "consumed"?: (number | null);
+  "function"?: (FunctionName | null);
+  "limit": number;
+  "observed"?: (number | null);
+  "resource": CellResource;
+  "site"?: (Site | null);
+  [key: string]: unknown;
+};
 
 /**
  * The lease one checkout of a worker runs under. The parent mints it and
@@ -2698,6 +2713,15 @@ export type QualifiedName = {
 };
 
 /**
+ * A provider panic has no admitted call id or attempt ordinal.
+ */
+export type ReadPanic = {
+  "message": string;
+  "tool_name": string;
+  [key: string]: unknown;
+};
+
+/**
  * A reasoning selection the recorded capability of the model under `key`
  * refuses.
  */
@@ -3907,6 +3931,14 @@ export type ToolFailureCause = ({
   "kind": "interrupted";
   [key: string]: unknown;
 } | {
+  "kind": "read_panicked";
+  "panic": ReadPanic;
+  [key: string]: unknown;
+} | {
+  "fact": ExecutionBoundFact;
+  "kind": "execution_bound";
+  [key: string]: unknown;
+} | {
   "call_id": string;
   "kind": "panicked";
   "message": string;
@@ -4527,11 +4559,15 @@ export type ToolReadCaller = ({
   "kind": "process";
   "process_id": string;
   [key: string]: unknown;
+} | {
+  "kind": "model_round";
+  "round_key": string;
+  [key: string]: unknown;
 });
 
 /**
- * Read-specific observation metadata, reusable if a save later retains reads.
- * This build keeps it only on live tool-call activity (ADR 0144 §5).
+ * Read observation identity and live measurements. The caller saves the read
+ * fact, while elapsed time and byte counts remain provisional activity.
  */
 export type ToolReadMetadata = {
   "answer_bytes": number;

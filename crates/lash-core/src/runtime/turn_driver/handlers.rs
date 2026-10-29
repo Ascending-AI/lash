@@ -808,6 +808,10 @@ impl RuntimeTurnDriver<'_> {
             // Bodies are transient: the original ledger nodes are retained
             // by the consuming commit, never copied into the turn.
             self.answered_cell_calls.records = output.tool_calls.clone();
+            self.answered_cell_calls
+                .records
+                .extend(output.read_facts.iter().map(crate::ReadFact::record));
+            self.answered_cell_calls.read_facts = output.read_facts.as_ref().clone();
         }
         let activity_close = match &result {
             Ok(output) => hold_and_observe_cell_return(
@@ -842,10 +846,7 @@ impl RuntimeTurnDriver<'_> {
                     language: language.clone(),
                     prints: None,
                     prints_retained: None,
-                    result: crate::CellOutcome::Failed(crate::CellFailure::new(
-                        crate::CellFailureKind::Host,
-                        error.message.clone(),
-                    )),
+                    result: crate::CellOutcome::Failed(error.clone().into()),
                     duration_ms: Some(cell_duration_ms),
                     tool_call_ids: None,
                     graph_key: graph_key.clone(),

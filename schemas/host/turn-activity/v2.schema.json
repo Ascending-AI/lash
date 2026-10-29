@@ -1795,6 +1795,16 @@
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
+        "bound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "defect": {
           "anyOf": [
             {
@@ -1829,6 +1839,16 @@
         },
         "message": {
           "type": "string"
+        },
+        "read_panic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadPanic"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "schema_admission": {
           "anyOf": [
@@ -3925,6 +3945,60 @@
           "type": "string"
         }
       ]
+    },
+    "ExecutionBoundFact": {
+      "description": "The bound that ended a kernel execution, with only the receipts received.",
+      "properties": {
+        "consumed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/CellResource"
+        },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "resource",
+        "limit"
+      ],
+      "type": "object"
     },
     "ExecutionLease": {
       "description": "The lease one checkout of a worker runs under. The parent mints it and\nfences it when the worker is lost, so a late message under an old lease is\nrefused rather than applied.",
@@ -8730,6 +8804,22 @@
       ],
       "type": "object"
     },
+    "ReadPanic": {
+      "description": "A provider panic has no admitted call id or attempt ordinal.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "message"
+      ],
+      "type": "object"
+    },
     "ReasoningRefused": {
       "description": "A reasoning selection the recorded capability of the model under `key`\nrefuses.",
       "properties": {
@@ -12446,6 +12536,39 @@
           "type": "object"
         },
         {
+          "description": "A declared reader panicked; its owner stops without a guest continuation.",
+          "properties": {
+            "kind": {
+              "const": "read_panicked",
+              "type": "string"
+            },
+            "panic": {
+              "$ref": "#/$defs/ReadPanic"
+            }
+          },
+          "required": [
+            "kind",
+            "panic"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "fact": {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            "kind": {
+              "const": "execution_bound",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "fact"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The host body panicked. It may already have performed outside work;\nthis terminal is never retried or sent back to the model for repair.",
           "properties": {
             "call_id": {
@@ -15152,11 +15275,27 @@
             "process_id"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "model_round",
+              "type": "string"
+            },
+            "round_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "round_key"
+          ],
+          "type": "object"
         }
       ]
     },
     "ToolReadMetadata": {
-      "description": "Read-specific observation metadata, reusable if a save later retains reads.\nThis build keeps it only on live tool-call activity (ADR 0144 \u00a75).",
+      "description": "Read observation identity and live measurements. The caller saves the read\nfact, while elapsed time and byte counts remain provisional activity.",
       "properties": {
         "answer_bytes": {
           "format": "uint",

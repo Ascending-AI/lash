@@ -108,6 +108,7 @@ pub(crate) fn settle_execution(
             record.prints_retained = response.prints_retained;
             record.result = response.result;
             record.consumption = response.consumption;
+            record.read_facts = std::sync::Arc::unwrap_or_clone(response.read_facts);
             if let Some(end) = terminal_end {
                 // A tool stopped the turn: the cell's own control never
                 // took effect, so it is not the cell's result.
@@ -125,6 +126,20 @@ pub(crate) fn settle_execution(
         // The effect failed before the executor answered: a host
         // failure that keeps its closed reason.
         Err(failure) => record.result = CellOutcome::Failed(failure.into()),
+    }
+
+    if let CellOutcome::Failed(failure) = &record.result
+        && let Some(panic) = &failure.read_panic
+    {
+        let stop = lash_protocol_types::TurnStop::ReadPanicked {
+            panic: panic.as_ref().clone(),
+        };
+        actions.push(DriverAction::AppendEvents(commit(record)));
+        actions.push(DriverAction::EndStep {
+            end: lash_protocol_types::StepEnd::Stop(stop),
+            superseded: Vec::new(),
+        });
+        return actions;
     }
 
     if let Some(lash_protocol_types::StepEnd::Completion(candidate)) = settled_control {

@@ -1004,12 +1004,17 @@ async fn phase_loop(
                     }
                 }
             }
-            Effect::ToolCalls { id, calls, .. } => {
+            Effect::ToolCalls { id, mut calls, .. } => {
                 model = None;
+                let tools = drive.tools()?;
+                let reads =
+                    tool_round::bind_reads(drive.as_mut(), tools.as_ref(), row, id, &mut calls)?;
                 let checkpoint = encode_checkpoint(drive.as_mut())?;
                 let current = iteration(drive.machine());
                 let done = tool_round::ModelDone {
                     checkpoint,
+                    reads,
+                    tools,
                     iteration: current,
                     answered_cell: &mut answered_cell,
                     present: &mut carry,

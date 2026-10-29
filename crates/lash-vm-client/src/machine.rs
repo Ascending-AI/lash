@@ -145,6 +145,7 @@ pub trait RunHost: Send + Sync {
         args: &[Datum],
         site: &lash_kernel_value::sites::PositionLabel,
         origin: &lash_kernel_value::sites::Site,
+        parent_remaining: std::time::Duration,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 
     /// One `print` call's value, in the order the run printed.
@@ -390,6 +391,7 @@ impl RemoteMachines {
             host: Arc::clone(&self.host),
             pages,
             candidate: None,
+            meters: None,
             ran: Default::default(),
             path: lash_kernel_vm::ExecutionPath::default(),
             caught: Vec::new(),
@@ -508,6 +510,7 @@ pub struct RemoteMachine {
     /// The root the last park sealed, until a delivery or a slice moves
     /// the run on.
     candidate: Option<NodeId>,
+    meters: Option<crate::RunMeters>,
     ran: std::collections::BTreeMap<u32, u64>,
     path: lash_kernel_vm::ExecutionPath,
     caught: Vec<lash_kernel_vm::WaitId>,
@@ -619,6 +622,7 @@ impl RemoteMachine {
                     // a host that outlasts its read deadline ends the run,
                     // and the waiting worker is discarded.
                     let bound = config.deadlines.host_read;
+                    let parent_deadline = std::time::Instant::now() + bound;
                     let answer = tokio::time::timeout(
                         bound,
                         answer(
@@ -626,6 +630,7 @@ impl RemoteMachine {
                             kind,
                             &request,
                             config.protocol.max_effect_value_bytes,
+                            parent_deadline,
                         ),
                     )
                     .await;
@@ -665,6 +670,7 @@ impl RemoteMachine {
                     candidate,
                     meters,
                 } => {
+                    self.meters = Some(meters);
                     #[cfg(feature = "testing")]
                     self.service.observe_run_meter(&self.owner, meters, false);
                     #[cfg(not(feature = "testing"))]
@@ -678,6 +684,7 @@ impl RemoteMachine {
                 }
                 RunStep::Slice { .. } => return Ok(Stop::Slice),
                 RunStep::Ended { end, seal, meters } => {
+                    self.meters = Some(meters);
                     #[cfg(feature = "testing")]
                     self.service.observe_run_meter(&self.owner, meters, true);
                     #[cfg(not(feature = "testing"))]
@@ -764,6 +771,7 @@ async fn answer(
     kind: HostReadKind,
     request: &EncodedPayload,
     bound: u64,
+    parent_deadline: std::time::Instant,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
         HostReadKind::Effect => {
@@ -771,7 +779,13 @@ async fn answer(
             wire::encode_within(
                 PayloadKind::HostAnswer,
                 &host
-                    .perform(&read.use_, &read.args, &read.site, &read.origin)
+                    .perform(
+                        &read.use_,
+                        &read.args,
+                        &read.site,
+                        &read.origin,
+                        parent_deadline.saturating_duration_since(std::time::Instant::now()),
+                    )
                     .await?,
                 bound,
             )
@@ -795,6 +809,14 @@ async fn answer(
 
 #[async_trait::async_trait]
 impl DrivenMachine for RemoteMachine {
+    fn meters(&self) -> Option<lash_kernel_vm::Meters> {
+        self.meters.map(|meters| lash_kernel_vm::Meters {
+            charged: meters.charged,
+            memory: meters.memory,
+            live_tasks: meters.live_tasks,
+        })
+    }
+
     async fn run(&mut self, slice: u64, cancel: bool) -> Result<MachineStep, KernelFailure> {
         self.candidate = None;
         let step = self

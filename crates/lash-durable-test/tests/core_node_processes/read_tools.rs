@@ -96,15 +96,43 @@ fn knowledge_with_reads(
     answered: &Arc<Answered>,
     reads: Arc<dyn lash::tools::ToolReads>,
 ) -> Arc<dyn lash::process::ProcessComponentFactory> {
+    knowledge_with_contract(answered, reads, lookup_definition(), false)
+}
+
+fn knowledge_with_contract(
+    answered: &Arc<Answered>,
+    reads: Arc<dyn lash::tools::ToolReads>,
+    definition: lash_vocabulary::tool_contract::ToolDefinition,
+    deny: bool,
+) -> Arc<dyn lash::process::ProcessComponentFactory> {
     let provider = Arc::new(lash::tools::StaticToolProvider::new(
-        vec![lookup_definition()],
+        vec![definition.clone()],
         LookupBody(Arc::clone(answered)),
     ));
     Arc::new(
         lash_core::plugin::StaticPluginFactory::new(
             lash_core::plugin::PluginDeclaration::initial(KNOWLEDGE.component()),
-            lash_core::facade_support::PluginSpec::new()
-                .with_tool_provider_registration(
+            {
+                let spec = lash_core::facade_support::PluginSpec::new();
+                let spec = if deny {
+                    spec.with_tool_args_check(
+                        lash::hook_key!("deny-read"),
+                        Arc::new(|_| {
+                            Box::pin(async {
+                                Ok(lash_core::plugin::BeforeToolDecision::Deny(
+                                    lash_core::ToolFailure::tool(
+                                        lash_core::ToolFailureClass::PermissionDenied,
+                                        "read_denied",
+                                        "read denied",
+                                    ),
+                                ))
+                            })
+                        }),
+                    )
+                } else {
+                    spec
+                };
+                spec.with_tool_provider_registration(
                     lash::tool_provider_key!("tools"),
                     lash::tools::ToolProviderRegistration::new(provider).with_reads(reads),
                 )
@@ -112,9 +140,10 @@ fn knowledge_with_reads(
                     lash::tool_provider_key!("lookup-package"),
                     Arc::new(operations::Packages {
                         provider: KNOWLEDGE.tool_provider(lash::tool_provider_key!("tools")),
-                        definitions: vec![lookup_definition()],
+                        definitions: vec![definition],
                     }),
-                ),
+                )
+            },
         )
         .as_component(KNOWLEDGE.format())
         .expect("a provider with its reader is a process component"),
@@ -342,7 +371,13 @@ async fn a_resumed_process_renews_its_page_lease_during_a_long_host_read_on_sqli
         });
         let (backend, core) =
             super::session_and_isolated_envs::booted(&ports, Vec::new(), "page-lease", |backend| {
-                let workers = sim::workers(&clock);
+                // Keep the 75-second read within its declared tool and parent
+                // allowances while it crosses the 60-second page lease.
+                let mut config = sim::untimed_workers().config().clone();
+                config.deadlines.host_read = lookup_definition().manifest.execution();
+                let worker_clock = Arc::clone(&clock);
+                let workers = lash::vm::WorkerService::new(config)
+                    .with_call_hold(Arc::new(move || Box::new(worker_clock.hold())));
                 let bounds = workers.config().run_bounds;
                 lash::LashCore::standard_builder(backend.clone())
                     .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
@@ -556,6 +591,207 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
         2,
         "replay consumes its tape without calling a reader"
     );
+    for event in activities
+        .iter()
+        .filter(|event| event["type"] == "tool_call_returned")
+    {
+        let id = lash::ToolCallId::parse(event["call_id"].as_str().unwrap()).unwrap();
+        let saved = core
+            .processes()
+            .tool_call(&process, &id)
+            .await
+            .unwrap()
+            .expect("the caller's save retains the live read row");
+        assert_eq!(saved.args, event["args"]);
+        assert_eq!(
+            serde_json::to_value(lash_protocol_types::Durable(&saved.output)).unwrap(),
+            event["output"]
+        );
+    }
     assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
     core.shutdown().await.unwrap();
+}
+
+struct RefusingRead {
+    kind: &'static str,
+    entered: tokio::sync::Notify,
+    count: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash::tools::ToolReads for RefusingRead {
+    async fn read(
+        &self,
+        _: lash::tools::ReadCall<'_>,
+    ) -> Result<serde_json::Value, lash::tools::ReadError> {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        self.entered.notify_one();
+        match self.kind {
+            "panic" => panic!("reader invariant failed"),
+            "invalid" => Ok(serde_json::json!(-1)),
+            "pending" => std::future::pending().await,
+            _ => panic!("a denying hook must not enter its reader"),
+        }
+    }
+}
+
+async fn process_read_refusal(kind: &'static str) {
+    let clock = lash_durable_test::SimClock::new();
+    let stores = Arc::new(sim::memory(Arc::clone(&clock)).await);
+    let ports: Arc<dyn StoreSet> = stores;
+    let answered = Arc::new(Answered::default());
+    let reader = Arc::new(RefusingRead {
+        kind,
+        entered: tokio::sync::Notify::new(),
+        count: AtomicUsize::new(0),
+    });
+    let mut definition = lookup_definition();
+    if kind == "invalid" {
+        definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
+            LOOKUP_TOOL,
+            "tools.lookup",
+            "",
+            serde_json::json!({"type":"object"}),
+            serde_json::json!({"type":"integer","minimum":0}),
+        )
+        .unwrap()
+        .declared_contract(lash_kernel_value::operations::ContractId::new("1"))
+        .with_execution(Duration::from_secs(120))
+        .with_execution_policy(lash_kernel_value::ExecutionPolicy::Read);
+    }
+    if kind == "pending" {
+        definition = definition.with_execution(Duration::from_millis(1_137));
+    }
+    let (_, core) =
+        super::session_and_isolated_envs::booted(&ports, Vec::new(), "read-refusal", |backend| {
+            let workers = sim::workers(&clock);
+            let bounds = workers.config().run_bounds;
+            lash::LashCore::standard_builder(backend.clone())
+                .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                    workers,
+                    "typescript",
+                    bounds,
+                )))
+                .process_component(
+                    knowledge_with_contract(&answered, reader.clone(), definition, kind == "hook"),
+                    KNOWLEDGE,
+                )
+        });
+    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
+        .component(KNOWLEDGE, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let source = if kind == "panic" {
+        LOOKUP.replace("  let got = perform 0(input) as Any\n  return got", "  try { do perform 0(input) as Any } catch error { return {continued: true} }\n  return {continued: true}")
+    } else {
+        LOOKUP.to_owned()
+    };
+    let (payload, env) = kernel_process::publish(&core, &source, &env).await;
+    let process = start_under(
+        &core,
+        &env,
+        lash_vm_runtime::LASH_VM_ENGINE_KIND,
+        payload,
+        |request| request,
+    )
+    .await;
+    if kind == "pending" {
+        tokio::time::timeout(Duration::from_secs(30), reader.entered.notified())
+            .await
+            .unwrap();
+        let deadline = clock.logical_ms() + 1_137;
+        tokio::time::timeout(Duration::from_secs(2), clock.wait_for_sleep(deadline))
+            .await
+            .expect("the tool deadline is armed on the injected clock");
+        clock.advance_to(deadline + 1).await;
+    }
+    let output = ended(&core, &process).await;
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("a refused read must fail its process: {output:?}");
+    };
+    if kind == "panic" {
+        assert!(
+            matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::ReadPanicked { panic }) if panic.message == "reader invariant failed"),
+            "{failure:?}"
+        );
+    }
+    let steps = lash_core_execution::runtime::process::steps::read_process_steps(
+        &core.effect_host(),
+        &process,
+    )
+    .await
+    .unwrap();
+    let mut facts = Vec::new();
+    for step in &steps {
+        if step.tool
+            == format!(
+                "{}/{}",
+                lash_vm_runtime::LASH_VM_ENGINE_KIND,
+                lash_vm_runtime::KERNEL_RUN_STEP
+            )
+            && let Some(payload) = step
+                .outcome
+                .as_ref()
+                .and_then(lash_core_store::tool_run::SettledOutput::payload)
+        {
+            facts.extend(lash_vm_runtime::process::saved_read_facts(payload).unwrap());
+        }
+    }
+    if kind == "hook" {
+        assert_eq!(reader.count.load(Ordering::SeqCst), 0);
+        assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
+        assert!(facts.is_empty(), "hooks bind Recorded");
+        assert!(format!("{steps:?}").contains("read_denied"));
+    } else {
+        let [fact] = facts.as_slice() else {
+            panic!("one saved refusal: {facts:?}");
+        };
+        let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else {
+            panic!("the refused read succeeded");
+        };
+        match kind {
+            "invalid" => assert!(
+                matches!(
+                    failure.cause.as_deref(),
+                    Some(lash_core::ToolFailureCause::Declaration { .. })
+                ),
+                "{failure:?}"
+            ),
+            "pending" => assert_eq!(failure.code, "read_timed_out"),
+            _ => {}
+        }
+        assert_eq!(
+            core.processes()
+                .tool_call(&process, &fact.call_id)
+                .await
+                .unwrap(),
+            Some(fact.record())
+        );
+    }
+    core.shutdown().await.unwrap();
+}
+
+/// READ-PANIC-TERMINAL: a process cannot catch a provider panic and continue.
+#[tokio::test]
+async fn a_reader_panic_stops_its_process_before_guest_catch_on_sqlite_memory() {
+    Box::pin(process_read_refusal("panic")).await;
+}
+
+/// READ-OUTPUT-ADMISSION: a process refuses the same schema-only constraint.
+#[tokio::test]
+async fn a_process_read_refuses_an_undeclared_negative_output_on_sqlite_memory() {
+    Box::pin(process_read_refusal("invalid")).await;
+}
+
+/// READ-INJECTED-CLOCK: a pending process read uses the injected tool deadline.
+#[tokio::test]
+async fn a_pending_process_read_times_out_on_the_injected_clock_on_sqlite_memory() {
+    Box::pin(process_read_refusal("pending")).await;
+}
+
+/// READ-HOOK-BINDING: a denying check forces Recorded and enters no reader.
+#[tokio::test]
+async fn a_denying_hook_prevents_process_reads_on_sqlite_memory() {
+    Box::pin(process_read_refusal("hook")).await;
 }

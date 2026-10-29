@@ -99,7 +99,7 @@ fn present(tx: &mut ActorTx, ordinal: Ordinal) {
         RUN,
         ordinal,
         None,
-        &super::records::Record::Present,
+        &super::records::Record::Present(Vec::new()),
     );
 }
 

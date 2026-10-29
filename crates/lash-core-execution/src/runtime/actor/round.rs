@@ -98,12 +98,14 @@ mod fold_tests;
 #[doc(hidden)]
 pub mod graph;
 pub mod lifecycle;
+mod model_reads;
 mod parked;
 mod records;
 mod rounds;
 mod runner;
 mod store_local;
 mod tools;
+pub use model_reads::{ModelReadPlan, ModelReadResult};
 mod transcript;
 
 #[doc(hidden)]
@@ -117,8 +119,8 @@ pub use records::StagedRecord;
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 
 pub use rounds::{
-    PinnedRound, PresentRecord, admit_round, pin_round, present, presentation, settle_retry,
-    start_retry,
+    PinnedRound, PresentRecord, admit_model_round, admit_round, pin_round, present, presentation,
+    settle_retry, start_retry,
 };
 pub use runner::{
     DeferredOutcome, PreparedRoundEnd, RoundEnd, RoundError, RoundRunner, SettledRound,
@@ -154,6 +156,11 @@ impl PinnedWait {
 /// admission retains.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionDraft {
+    pin: Arc<ExecutionPin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExecutionPin {
     admitted_at: lash_durable::DurableInstant,
     call: ToolCallId,
     tool: ToolId,
@@ -181,17 +188,19 @@ impl ExecutionDraft {
         park: Option<ParkDeadline>,
     ) -> Self {
         Self {
-            admitted_at,
-            call,
-            tool,
-            request,
-            policy,
-            limit,
-            park,
-            pinned: None,
-            trace: None,
-            declaration: None,
-            binding: None,
+            pin: Arc::new(ExecutionPin {
+                admitted_at,
+                call,
+                tool,
+                request,
+                policy,
+                limit,
+                park,
+                pinned: None,
+                trace: None,
+                declaration: None,
+                binding: None,
+            }),
         }
     }
 
@@ -199,7 +208,7 @@ impl ExecutionDraft {
     /// ([`MemberPin::binding`]).
     #[must_use]
     pub fn with_binding(mut self, binding: Option<crate::tool_run::AdmittedBinding>) -> Self {
-        self.binding = binding;
+        Arc::make_mut(&mut self.pin).binding = binding;
         self
     }
 
@@ -209,7 +218,7 @@ impl ExecutionDraft {
     /// answered the call at admission.
     #[must_use]
     pub fn binding(&self) -> Option<&crate::tool_run::AdmittedBinding> {
-        self.binding.as_ref()
+        self.pin.binding.as_ref()
     }
 
     /// This draft with `declaration`, the one its call settles under
@@ -219,7 +228,7 @@ impl ExecutionDraft {
         mut self,
         declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     ) -> Self {
-        self.declaration = declaration;
+        Arc::make_mut(&mut self.pin).declaration = declaration;
         self
     }
 
@@ -227,13 +236,13 @@ impl ExecutionDraft {
     /// call settles under. `None` when it pinned none.
     #[must_use]
     pub fn declaration(&self) -> Option<&lash_vocabulary::tool_declaration::ToolDeclaration> {
-        self.declaration.as_ref()
+        self.pin.declaration.as_ref()
     }
 
     /// This draft with `pinned`, the completion wait its round pinned.
     #[must_use]
     pub(crate) fn with_pinned_wait(mut self, pinned: Option<PinnedWait>) -> Self {
-        self.pinned = pinned;
+        Arc::make_mut(&mut self.pin).pinned = pinned;
         self
     }
 
@@ -241,57 +250,57 @@ impl ExecutionDraft {
     /// retains.
     #[must_use]
     pub fn with_trace(mut self, trace: Option<lash_trace::DurableTraceScope>) -> Self {
-        self.trace = trace;
+        Arc::make_mut(&mut self.pin).trace = trace;
         self
     }
 
     /// Durable admission instant, retained independently of execution limits.
     #[must_use]
     pub fn admitted_at(&self) -> lash_durable::DurableInstant {
-        self.admitted_at
+        self.pin.admitted_at
     }
 
     /// The call.
     #[must_use]
     pub fn call(&self) -> &ToolCallId {
-        &self.call
+        &self.pin.call
     }
 
     /// The tool.
     #[must_use]
     pub fn tool(&self) -> &ToolId {
-        &self.tool
+        &self.pin.tool
     }
 
     /// The request material.
     #[must_use]
     pub fn request(&self) -> &MaterialRef {
-        &self.request
+        &self.pin.request
     }
 
     /// The pinned policy.
     #[must_use]
     pub fn policy(&self) -> ExecutionPolicy {
-        self.policy
+        self.pin.policy
     }
 
     /// The pinned limit.
     #[must_use]
     pub fn limit(&self) -> ExecutionLimit {
-        self.limit
+        self.pin.limit
     }
 
     /// What a call that may park pinned for its park; `None` for a call
     /// that never parks.
     #[must_use]
     pub fn park(&self) -> Option<ParkDeadline> {
-        self.park
+        self.pin.park
     }
 
     /// The completion wait its round pinned, for a call that may park.
     #[must_use]
     pub fn pinned_wait(&self) -> Option<PinnedWait> {
-        self.pinned
+        self.pin.pinned
     }
 
     /// The call's trace scope its admission retained: every owner of the
@@ -299,7 +308,7 @@ impl ExecutionDraft {
     /// (FIG-5382). `None` for a call admitted untraced.
     #[must_use]
     pub fn trace(&self) -> Option<&lash_trace::DurableTraceScope> {
-        self.trace.as_ref()
+        self.pin.trace.as_ref()
     }
 }
 
@@ -865,14 +874,28 @@ pub fn admit_by(
     drafts: Vec<ExecutionDraft>,
     admissions: Vec<lash_core_store::checkpoint_graph::NodeId>,
 ) -> Result<Vec<AdmittedExecution>, AdmissionRefusal> {
-    check_drafts(&drafts)?;
+    admit_model_by(tx, owner, run, drafts, admissions, Vec::new())
+}
+
+/// Save a model round plan while admitting only its recorded members.
+pub fn admit_model_by(
+    tx: &mut ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    drafts: Vec<ExecutionDraft>,
+    admissions: Vec<lash_core_store::checkpoint_graph::NodeId>,
+    reads: Vec<ModelReadPlan>,
+) -> Result<Vec<AdmittedExecution>, AdmissionRefusal> {
+    if !drafts.is_empty() || reads.is_empty() {
+        check_drafts(&drafts)?;
+    }
     if !admissions.is_empty() && admissions.len() != drafts.len() {
         return Err(AdmissionRefusal::Admissions {
             drafts: drafts.len(),
             admissions: admissions.len(),
         });
     }
-    records::admit_record(tx, owner, run, &drafts, admissions);
+    records::admit_record(tx, owner, run, &drafts, admissions, reads);
     let cursor = RunCursor::at(first_start(drafts.len() as u64));
     let mut admitted = Vec::with_capacity(drafts.len());
     for (member, draft) in (0_u64..).zip(drafts) {
@@ -904,14 +927,50 @@ pub fn admitted_bindings_of(
     facts: &lash_durable::domain::graph::RunFacts,
     row: &lash_durable::domain::graph::RunFactRow,
 ) -> Result<Vec<(ToolCallId, Option<crate::tool_run::AdmittedBinding>)>, String> {
+    Ok(admitted_requirements_of(facts, row)?
+        .members
+        .into_iter()
+        .map(|pin| (pin.call, pin.binding))
+        .collect())
+}
+
+/// Recorded bindings and read plans from one checked admission.
+pub(super) struct AdmissionRequirements {
+    pub members: Vec<graph::PinnedMember>,
+    pub reads: Vec<ModelReadPlan>,
+}
+
+pub(super) fn admitted_requirements_of(
+    facts: &lash_durable::domain::RunFacts,
+    row: &lash_durable::domain::RunFactRow,
+) -> Result<AdmissionRequirements, String> {
     match records::read(facts, row)? {
-        records::Record::Admit(body) => Ok(body
-            .members
-            .into_iter()
-            .map(|pin| (pin.call, pin.binding))
-            .collect()),
+        records::Record::Admit(body) => Ok(AdmissionRequirements {
+            members: body.members,
+            reads: body.reads,
+        }),
         _ => Err("the row is not an admission".to_owned()),
     }
+}
+
+/// Read identities whose caller-saved results committed with presentation.
+pub fn presented_reads_of(
+    facts: &lash_durable::domain::RunFacts,
+    row: &lash_durable::domain::RunFactRow,
+) -> Result<Vec<ToolCallId>, String> {
+    let records::Record::Present(reads) = records::read(facts, row)? else {
+        return Ok(Vec::new());
+    };
+    let mut decoder =
+        lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits);
+    reads
+        .into_iter()
+        .map(|node| {
+            graph::load_model_read(&mut decoder, node)
+                .map(|saved| saved.fact.call_id)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
 }
 
 /// A final outcome's checked payload, for its owner's claim reducer.

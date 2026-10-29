@@ -112,12 +112,42 @@ impl Processes {
         process_id: &ProcessId,
         call_id: &crate::ToolCallId,
     ) -> Result<Option<crate::tools::ToolCallRecord>> {
-        Ok(lash_core::facade_support::read_process_tool_call(
-            &self.core.effect_host(),
-            process_id,
-            call_id,
-        )
-        .await?)
+        let host = self.core.effect_host();
+        if let Some(record) =
+            lash_core::facade_support::read_process_tool_call(&host, process_id, call_id).await?
+        {
+            return Ok(Some(record));
+        }
+        let kernel_run = format!(
+            "{}/{}",
+            lash_vm_runtime::LASH_VM_ENGINE_KIND,
+            lash_vm_runtime::KERNEL_RUN_STEP
+        );
+        for step in lash_core::facade_support::read_process_steps(&host, process_id).await? {
+            if step.tool != kernel_run {
+                continue;
+            }
+            let Some(payload) = step
+                .outcome
+                .as_ref()
+                .and_then(lash_core_store::tool_run::SettledOutput::payload)
+            else {
+                continue;
+            };
+            let facts = lash_vm_runtime::process::saved_read_facts(payload).map_err(|error| {
+                EmbedError::Durable(lash_core::durable_port::DurableError::Store(
+                    lash_core::durable_port::StoreFailure {
+                        code: None,
+                        kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                        message: format!("the kernel run's saved read facts: {error}"),
+                    },
+                ))
+            })?;
+            if let Some(fact) = facts.into_iter().find(|fact| fact.call_id == *call_id) {
+                return Ok(Some(fact.record()));
+            }
+        }
+        Ok(None)
     }
 
     /// Replay recorded run segments of a process observed at `counts`, on

@@ -137,9 +137,9 @@ pub(super) fn outcome(
                 TurnStop::Incomplete => failed(TraceTurnFailureReason::Incomplete),
                 TurnStop::InvalidInput => failed(TraceTurnFailureReason::InvalidInput),
                 TurnStop::MaxTurns => failed(TraceTurnFailureReason::MaxTurns),
-                TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
-                    failed(TraceTurnFailureReason::ToolFailure)
-                }
+                TurnStop::ToolFailure
+                | TurnStop::ToolPanicked { .. }
+                | TurnStop::ReadPanicked { .. } => failed(TraceTurnFailureReason::ToolFailure),
                 TurnStop::ProviderError { cause } => TraceTurnOutcome::Failed {
                     done_reason: TraceTurnFailureReason::ProviderError,
                     provider_validation: cause.provider_validation.clone(),

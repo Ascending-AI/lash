@@ -1079,6 +1079,7 @@ fn answer_cell(
     machine.handle_response(Response::ExecResult {
         id,
         result: Ok(lash_core::ExecResponse {
+            read_facts: Default::default(),
             consumption: Vec::new(),
             prints: Vec::new(),
             prints_retained: None,

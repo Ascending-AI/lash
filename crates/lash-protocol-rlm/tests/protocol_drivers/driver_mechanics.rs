@@ -288,6 +288,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
         result: Ok(lash_protocol_types::ExecResponse {
+            read_facts: Default::default(),
             consumption: Vec::new(),
             prints_retained: None,
             prints: vec![lash_protocol_types::CellPrint {
@@ -592,6 +593,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     machine.handle_response(Response::ExecResult {
         id: exec_id,
         result: Ok(lash_protocol_types::ExecResponse {
+            read_facts: Default::default(),
             consumption: Vec::new(),
             prints_retained: None,
             prints: vec![lash_protocol_types::CellPrint {

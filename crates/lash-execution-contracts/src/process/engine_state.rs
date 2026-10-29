@@ -224,27 +224,12 @@ pub trait EngineEffectReads: Send + Sync {
         input: Result<serde_json::Value, String>,
         at: EngineReadSite<'_>,
         cancel: &tokio_util::sync::CancellationToken,
-        deadline: std::time::Instant,
-    ) -> Result<Result<serde_json::Value, EngineReadError>, crate::plugin_error::PluginError>;
+        parent_remaining: std::time::Duration,
+    ) -> Result<lash_protocol_types::ReadResult, crate::plugin_error::PluginError>;
 }
 
-/// A catchable refusal of an inline process read.
-#[derive(Debug)]
-pub enum EngineReadError {
-    /// The guest operands cannot be projected into one tool input record.
-    Arguments(String),
-    /// The pinned contract or input does not fit the tool.
-    Tool(Box<crate::ToolFailure>),
-    /// The reader's own error, with its original data.
-    Reader {
-        message: String,
-        data: serde_json::Value,
-    },
-    /// The process stopped during the read.
-    Cancelled,
-    /// The tool or parent deadline elapsed.
-    TimedOut,
-}
+/// Read refusals and provider panics share the tool runner's vocabulary.
+pub use lash_protocol_types::ReadFailure as EngineReadError;
 
 /// What an engine step reads and stages heap pages under: the store's page
 /// publication and the process actor's fence, whose leases its reads hold.

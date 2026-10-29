@@ -4,7 +4,23 @@ use lash_core_store::tool_surface::{ExecutionEnvironment, RoutedOperation, UseBi
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
+use lash_kernel_value::names::OperationUse;
 use {lash_kernel_value::package::*, lash_vocabulary::claims::*};
+
+/// Availability checks supplied by the registered execution composition.
+trait RouteEligibility {
+    fn hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity>;
+    fn deferred(
+        &self,
+        grant: &DeferredGrant,
+        registry: RegistryKind,
+    ) -> Result<ClaimRequirements, EnginePortError>;
+    fn fixed(
+        &self,
+        route: &AdvertisedRoute,
+        mode: OperationMode,
+    ) -> Result<ClaimRequirements, EnginePortError>;
+}
 
 /// Candidate order has no authority. Distinct serving candidates for one pin
 /// are ambiguous; equal advertisements are harmless duplicates.
@@ -12,19 +28,51 @@ pub fn select_routes(
     inspection: &LinkInspection,
     registry: RegistryKind,
     candidates: &[AdvertisedRoute],
+    selected_routes: &std::collections::BTreeMap<
+        OperationUse,
+        (
+            lash_vocabulary::providers::ToolProviderHandle,
+            lash_vocabulary::ToolId,
+        ),
+    >,
     publications: Vec<lash_vocabulary::package::PublicationRecord>,
-    mut deferred: impl FnMut(&DeferredGrant, RegistryKind) -> Result<ClaimRequirements, EnginePortError>,
+    composition: &crate::plugin::ExecutionComposition,
+) -> Result<ExecutionEnvironment, EnginePortError> {
+    select_with(
+        inspection,
+        registry,
+        candidates,
+        selected_routes,
+        publications,
+        &CompositionEligibility(composition),
+    )
+}
+
+fn select_with(
+    inspection: &LinkInspection,
+    registry: RegistryKind,
+    candidates: &[AdvertisedRoute],
+    selected_routes: &std::collections::BTreeMap<
+        OperationUse,
+        (
+            lash_vocabulary::providers::ToolProviderHandle,
+            lash_vocabulary::ToolId,
+        ),
+    >,
+    publications: Vec<lash_vocabulary::package::PublicationRecord>,
+    eligibility: &dyn RouteEligibility,
 ) -> Result<ExecutionEnvironment, EnginePortError> {
     let mut environment = ExecutionEnvironment::empty(registry);
     environment.publications = publications;
     environment.roots.insert(inspection.link);
     environment.requirements.machine = inspection.machine.clone();
+    let hooks = eligibility.hooks();
     for (use_, need) in &inspection.operations {
         let binding = match need {
             OperationNeed::Deferred { grant, .. } => {
                 // Per-use registration owns discovery debt until its winner
                 // commits. Static environment debt must not retain a resolver.
-                deferred(grant, registry)?;
+                eligibility.deferred(grant, registry)?;
                 UseBinding::Deferred(grant.as_ref().clone())
             }
             OperationNeed::Fixed { name, requirement } => {
@@ -34,6 +82,9 @@ pub fn select_routes(
                         && name.type_member.is_none()
                         && candidate.definition.contract_id() == requirement.contract
                         && candidate.route.provider.registry() == registry
+                        && selected_routes.get(use_).is_none_or(|(provider, tool)| {
+                            *provider == candidate.route.provider && *tool == candidate.route.tool
+                        })
                 });
                 let selected = matching.next().ok_or(EnginePortError::Refused(
                     AdmissionRefusal::MissingRoute { use_: *use_ },
@@ -68,12 +119,29 @@ pub fn select_routes(
                             OperationMode::Waited
                         },
                     },
+                    mode: if selected.route.policy == lash_kernel_value::ExecutionPolicy::Read
+                        && hooks.is_empty()
+                    {
+                        OperationMode::Read
+                    } else {
+                        OperationMode::Waited
+                    },
                     route: selected.route.clone(),
                 };
                 operation.validate().map_err(|message| {
                     EnginePortError::Refused(AdmissionRefusal::InvalidDocument { message })
                 })?;
-                operation.route.require(&mut environment.requirements);
+                environment
+                    .requirements
+                    .extend(&eligibility.fixed(selected, operation.mode)?);
+                if operation.mode == OperationMode::Waited {
+                    environment.requirements.callbacks.extend(
+                        hooks
+                            .iter()
+                            .cloned()
+                            .map(|callback| CallbackRequirement { registry, callback }),
+                    );
+                }
                 UseBinding::Fixed(operation)
             }
         };
@@ -82,11 +150,109 @@ pub fn select_routes(
     Ok(environment)
 }
 
+struct CompositionEligibility<'a>(&'a crate::plugin::ExecutionComposition);
+
+impl RouteEligibility for CompositionEligibility<'_> {
+    fn hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
+        self.0.tool_call_hooks()
+    }
+
+    fn deferred(
+        &self,
+        grant: &DeferredGrant,
+        registry: RegistryKind,
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements, EnginePortError> {
+        self.0.validate_deferred_grant(grant, registry)
+    }
+
+    fn fixed(
+        &self,
+        candidate: &AdvertisedRoute,
+        mode: OperationMode,
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements, EnginePortError> {
+        use lash_vocabulary::claims::{CallbackRequirement, ClaimRequirements};
+        let route = &candidate.route;
+        let registry = route.provider.registry();
+        if !self.0.tool_registry().serves(&route.provider) {
+            return Err(EnginePortError::Refused(
+                AdmissionRefusal::ProviderNotHostable {
+                    provider: ProviderName {
+                        owner: route.provider.owner().into(),
+                        key: route.provider.key().into(),
+                    },
+                    registry,
+                },
+            ));
+        }
+        if mode == OperationMode::Read && self.0.tool_registry().reads(&route.provider).is_none() {
+            return Err(EnginePortError::Refused(
+                AdmissionRefusal::InvalidDocument {
+                    message: format!("provider `{}` registers no reader", route.provider),
+                },
+            ));
+        }
+        let mut requirements = ClaimRequirements::default();
+        requirements.providers.insert(route.provider.clone());
+        requirements.callbacks.insert(CallbackRequirement {
+            registry,
+            callback: if mode == OperationMode::Read {
+                route.provider.reads_identity()
+            } else {
+                route.provider.callback_identity()
+            },
+        });
+        if let Some(payload) = &route.payload {
+            if payload.codec.registry() != registry
+                || !self.0.tool_registry().serves(&payload.codec)
+            {
+                return Err(EnginePortError::Refused(
+                    AdmissionRefusal::InvalidDocument {
+                        message: format!("route codec `{}` is unavailable", payload.codec),
+                    },
+                ));
+            }
+            requirements
+                .codecs
+                .insert((payload.codec.clone(), payload.format));
+            requirements.callbacks.insert(CallbackRequirement {
+                registry,
+                callback: payload.codec.callback_identity(),
+            });
+        }
+        Ok(requirements)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use lash_kernel_value::claims::NodeRequirements;
     use lash_kernel_value::names::*;
+
+    struct Available;
+    impl RouteEligibility for Available {
+        fn hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
+            Vec::new()
+        }
+        fn deferred(
+            &self,
+            _: &DeferredGrant,
+            _: RegistryKind,
+        ) -> Result<ClaimRequirements, EnginePortError> {
+            unreachable!()
+        }
+        fn fixed(
+            &self,
+            route: &AdvertisedRoute,
+            mode: OperationMode,
+        ) -> Result<ClaimRequirements, EnginePortError> {
+            let mut requirements = ClaimRequirements::default();
+            let route = route.route.clone();
+            route.require(&mut requirements);
+            let _ = mode;
+            Ok(requirements)
+        }
+    }
 
     /// L-DISPATCH: one diagnostic name can require two independent contracts.
     #[test]
@@ -157,12 +323,13 @@ mod tests {
             artifacts: Vec::new(),
             signature: None,
         };
-        let selected = select_routes(
+        let selected = select_with(
             &inspection,
             RegistryKind::Process,
             &[two.clone(), one.clone()],
+            &Default::default(),
             Vec::new(),
-            |_, _| unreachable!(),
+            &Available,
         )
         .unwrap();
         assert_eq!(
@@ -176,12 +343,13 @@ mod tests {
         let mut duplicate = one.clone();
         duplicate.route.provider = two.route.provider.clone();
         assert!(
-            select_routes(
+            select_with(
                 &inspection,
                 RegistryKind::Process,
                 &[one, two, duplicate],
+                &Default::default(),
                 Vec::new(),
-                |_, _| unreachable!()
+                &Available
             )
             .is_err()
         );

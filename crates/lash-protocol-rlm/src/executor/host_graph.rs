@@ -644,6 +644,25 @@ impl PagedItem for ProcessEvent {
 
 // --- The host root -------------------------------------------------------
 
+/// A reference to one read fact, saved in the caller's event tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReadEvent(pub NodeId);
+
+impl TokenCodec for ReadEvent {
+    fn encode(&self, out: &mut TokenWriter) {
+        self.0.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        NodeId::decode(input).map(Self)
+    }
+}
+
+impl PagedItem for ReadEvent {
+    const PAGE: NodeKind = NodeKind::EVENT_PAGE;
+    const INDEX: NodeKind = NodeKind::EVENT_INDEX;
+    const STREAM: Option<u32> = Some(2);
+}
+
 /// Kind 24: a cell host's state at a park.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HostState {
@@ -661,11 +680,13 @@ pub struct HostState {
     /// against `max_tool_calls` beside its calls. A read made after the
     /// state was saved is made again after a crash, and counted again.
     pub reads: u64,
+    pub read_facts: Paged<ReadEvent>,
     /// The wall time, in milliseconds, the cell held workers up to this
     /// state, over every activation before it: the next activation's
     /// execution resumes its held wall time from it (FIG-6786).
     pub held_ms: u64,
     pub consumption: Vec<lash_core::CellConsumption>,
+    pub bound: Option<Box<lash_core::ExecutionBoundFact>>,
 }
 
 /// The host root's body: counts, roots and facts.
@@ -677,8 +698,10 @@ struct HostRootBody {
     prints: (u64, Option<NodeId>),
     processes: (u64, Option<NodeId>),
     reads: u64,
+    read_facts: (u64, Option<NodeId>),
     held_ms: u64,
     consumption: Vec<lash_core::CellConsumption>,
+    bound: Option<Box<lash_core::ExecutionBoundFact>>,
 }
 
 fn encode_tree_ref(tree: (u64, Option<NodeId>), out: &mut TokenWriter) {
@@ -698,7 +721,7 @@ fn usize_token(value: usize) -> u64 {
 
 impl TokenCodec for HostRootBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(9);
+        out.seq(11);
         encode_tree_ref(self.calls, out);
         match &self.tool_call_limit {
             None => out.none(),
@@ -722,12 +745,14 @@ impl TokenCodec for HostRootBody {
         encode_tree_ref(self.prints, out);
         encode_tree_ref(self.processes, out);
         out.unsigned(self.reads);
+        encode_tree_ref(self.read_facts, out);
         out.unsigned(self.held_ms);
         crate::consumption_record::encode(&self.consumption, out);
+        lash_vm_broker::round_graph::encode_opt_tree(self.bound.as_ref(), out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(9)?;
+        input.expect_struct(11)?;
         let calls = decode_tree_ref(input)?;
         let tool_call_limit = if input.option()? {
             input.expect_struct(4)?;
@@ -758,18 +783,42 @@ impl TokenCodec for HostRootBody {
             prints: decode_tree_ref(input)?,
             processes: decode_tree_ref(input)?,
             reads: input.unsigned()?,
+            read_facts: decode_tree_ref(input)?,
             held_ms: input.unsigned()?,
             consumption: crate::consumption_record::decode(input)?,
+            bound: lash_vm_broker::round_graph::decode_opt_tree(input)?,
         })
     }
 }
 
 impl HostState {
+    pub fn read_facts(
+        &self,
+        decoder: &mut GraphDecoder<'_>,
+    ) -> Result<Vec<lash_protocol_types::ReadFact>, GraphRefusal> {
+        self.read_facts
+            .items()
+            .iter()
+            .enumerate()
+            .map(|(ordinal, event)| {
+                let fact = lash_vm_broker::round_graph::load_read_fact(decoder, event.0)?;
+                if fact.ordinal != ordinal as u64 + 1 {
+                    return Err(shape(
+                        NodeKind::EVENT_PAGE,
+                        "a read fact disagrees with its saved ordinal",
+                    ));
+                }
+                Ok(fact)
+            })
+            .collect()
+    }
+
     /// Forgets every staged page: the commit was refused.
     pub fn unstaged(&mut self) {
         self.calls.unstaged();
         self.prints.unstaged();
         self.processes.unstaged();
+        self.read_facts.unstaged();
     }
 
     /// Stages the pages that changed and the root; returns the HostRoot,
@@ -792,8 +841,13 @@ impl HostState {
             prints: (self.prints.len(), self.prints.stage(staging, reads)?),
             processes: (self.processes.len(), self.processes.stage(staging, reads)?),
             reads: self.reads,
+            read_facts: (
+                self.read_facts.len(),
+                self.read_facts.stage(staging, reads)?,
+            ),
             held_ms: self.held_ms,
             consumption: self.consumption.clone(),
+            bound: self.bound.clone(),
         };
         Ok(staging.encode_value(NodeKind::HOST_ROOT, &body)?)
     }
@@ -843,8 +897,10 @@ impl HostState {
             prints: Paged::load(decoder, id, body.prints.1, body.prints.0)?,
             processes: Paged::load(decoder, id, body.processes.1, body.processes.0)?,
             reads: body.reads,
+            read_facts: Paged::load(decoder, id, body.read_facts.1, body.read_facts.0)?,
             held_ms: body.held_ms,
             consumption: body.consumption,
+            bound: body.bound,
         })
     }
 

@@ -146,11 +146,13 @@ pub mod facade_support {
     pub use crate::runtime::{
         DurableSessionOps, EMPTY_HEAD_REVISION, HostInputAdmission, QueueWithdrawalObservation,
     };
+    pub use lash_core_execution::kernel_runner::bound_fact;
     pub use lash_core_execution::runtime::actor::resolutions::{
         CommittedUse, FirstUse, ResolutionError, ResolutionValidator, registration,
         start_requirements,
     };
     pub use lash_core_execution::runtime::actor::route_selection::select_routes;
+    pub use lash_core_execution::tool_reads::{ReadContext, ReadTarget, run_read};
 
     pub use lash_core_execution::runtime::process::steps::{
         RecordedProcessStep, process_step_call, read_process_steps, read_process_tool_call,
@@ -592,6 +594,7 @@ pub use lash_protocol_types::ValueShapeLimits;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
 pub(crate) use lash_protocol_types::{BaseRenderCache, visible_response_parts};
 pub use lash_protocol_types::{CellConsumption, CellRecord, CellResource};
+pub use lash_protocol_types::{ExecutionBoundFact, ReadFact, ReadFailure, ReadPanic, ReadResult};
 
 pub use lash_kernel_value::json_schema::JsonSchema;
 pub use lash_kernel_value::json_schema::SchemaAdmissionError;

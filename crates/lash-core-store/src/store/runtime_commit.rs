@@ -330,7 +330,9 @@ impl TurnCommitOutcome {
                 TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
                 TurnStop::InvalidInput => Self::Failed(TurnCommitFailureCause::InvalidInput),
                 TurnStop::MaxTurns => Self::Failed(TurnCommitFailureCause::MaxTurns),
-                TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
+                TurnStop::ToolFailure
+                | TurnStop::ToolPanicked { .. }
+                | TurnStop::ReadPanicked { .. } => {
                     Self::Failed(TurnCommitFailureCause::ToolFailure)
                 }
                 TurnStop::ProviderError { .. } => {

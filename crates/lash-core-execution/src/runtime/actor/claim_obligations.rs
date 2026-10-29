@@ -489,8 +489,21 @@ impl RecordedWork {
     /// Whether `tx` appends or ends a record this traversal reads.
     #[must_use]
     pub fn touches(tx: &ActorTx) -> bool {
-        tx.domain().iter().any(|write| {
-            matches!(
+        tx.domain().iter().any(|write| match write {
+            DomainWrite::RunFact(RunFactWrite::Append {
+                kind: RunFactKind::Present,
+                record,
+                ..
+            }) => {
+                let source = StagedNodes(tx.graph());
+                let mut decoder =
+                    GraphDecoder::new(&source, lash_durable::domain::graph::OWNER_READ_LIMITS);
+                !matches!(
+                    super::round::graph::RoundFact::load(&mut decoder, *record),
+                    Ok(super::round::graph::RoundFact::Present { reads }) if reads.is_empty()
+                )
+            }
+            _ => matches!(
                 write,
                 DomainWrite::RunFact(RunFactWrite::Append {
                     kind: RunFactKind::Admit | RunFactKind::XOutcome,
@@ -502,7 +515,7 @@ impl RecordedWork {
                             | TurnWrite::Terminal { .. }
                     )
                     | DomainWrite::SessionCommit(_)
-            )
+            ),
         })
     }
 
@@ -538,10 +551,33 @@ impl RecordedWork {
         for row in &facts.rows {
             match row.kind {
                 RunFactKind::Admit => {
-                    for (call, binding) in super::round::admitted_bindings_of(facts, row)
-                        .map_err(|reason| corrupt("an admission", &reason))?
+                    let admission = super::round::admitted_requirements_of(facts, row)
+                        .map_err(|reason| corrupt("an admission", &reason))?;
+                    for plan in admission.reads {
+                        self.put(
+                            ObligationSite::Call {
+                                owner: row.owner.clone(),
+                                call: plan.call_id,
+                            },
+                            std::iter::once(plan.provider.reads_identity())
+                                .chain(plan.presentation.callbacks().cloned())
+                                .map(|callback| {
+                                    ObligationToken::for_callback(
+                                        plan.provider.registry(),
+                                        &callback,
+                                    )
+                                }),
+                        );
+                    }
+                    for member in admission.members {
+                        self.admit(row.owner.clone(), member.call, member.binding.as_ref());
+                    }
+                }
+                RunFactKind::Present => {
+                    for call in super::round::presented_reads_of(facts, row)
+                        .map_err(|reason| corrupt("saved model reads", &reason))?
                     {
-                        self.admit(row.owner.clone(), call, binding.as_ref());
+                        self.settle(&row.owner, &call);
                     }
                 }
                 RunFactKind::XOutcome => {

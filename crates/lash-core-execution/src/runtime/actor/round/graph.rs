@@ -1093,7 +1093,10 @@ pub fn admission_pin(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RoundFact {
     /// 0: the round's members, in declared order.
-    Admit { members: Vec<AdmitMember> },
+    Admit {
+        members: Vec<AdmitMember>,
+        reads: Vec<super::ModelReadPlan>,
+    },
     /// 1: member `member`'s attempt `attempt` started.
     Start { member: u64, attempt: u32 },
     /// 2: the attempt started at `start` parked.
@@ -1106,7 +1109,7 @@ pub enum RoundFact {
         due_at_ms: i64,
     },
     /// 5: the round's presentation, in admitted order.
-    Present,
+    Present { reads: Vec<NodeId> },
     /// 6: the attempt started at `start` settled the call, with the plugin
     /// state its completion resolved (as a tree), the CheckpointRoot of the
     /// heap pages it published, which the fact owns (FIG-6193), and
@@ -1134,7 +1137,7 @@ impl RoundFact {
             Self::Start { .. } => RunFactKind::XStart,
             Self::Wait { .. } => RunFactKind::XWait,
             Self::Retry { .. } => RunFactKind::Retry,
-            Self::Present => RunFactKind::Present,
+            Self::Present { .. } => RunFactKind::Present,
             Self::Outcome { .. } => RunFactKind::XOutcome,
             Self::CellReport { .. } => RunFactKind::CellReport,
         }
@@ -1208,7 +1211,7 @@ impl RoundFact {
     fn children(&self, decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<(), GraphRefusal> {
         let fact = self;
         match fact {
-            Self::Admit { members } => {
+            Self::Admit { members, .. } => {
                 for member in members {
                     if let AdmitMember::Admission(node) = member {
                         decoder.child_kind(id, *node, &[NodeKind::ADMISSION])?;
@@ -1231,7 +1234,12 @@ impl RoundFact {
             Self::CellReport { report } => {
                 decoder.child_kind(id, *report, &[NodeKind::REPORT_VIEW])?;
             }
-            Self::Start { .. } | Self::Present => {}
+            Self::Present { reads } => {
+                for read in reads {
+                    decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
+                }
+            }
+            Self::Start { .. } => {}
         }
         Ok(())
     }
@@ -1250,9 +1258,10 @@ impl TokenCodec for RoundFact {
     fn encode(&self, out: &mut TokenWriter) {
         let variant = self.kind().round_fact_variant();
         match self {
-            Self::Admit { members } => {
-                out.sum(variant, 1);
+            Self::Admit { members, reads } => {
+                out.sum(variant, 2);
                 members.encode(out);
+                encode_tree(reads, out);
             }
             Self::Start { member, attempt } => {
                 out.sum(variant, 2);
@@ -1274,7 +1283,10 @@ impl TokenCodec for RoundFact {
                 output.encode(out);
                 out.signed(*due_at_ms);
             }
-            Self::Present => out.sum(variant, 0),
+            Self::Present { reads } => {
+                out.sum(variant, 1);
+                reads.encode(out);
+            }
             Self::Outcome {
                 start,
                 output,
@@ -1307,9 +1319,10 @@ impl TokenCodec for RoundFact {
         let expect = |count| TokenReader::expect_fields(fields, count);
         Ok(match kind {
             RunFactKind::Admit => {
-                expect(1)?;
+                expect(2)?;
                 Self::Admit {
                     members: Vec::decode(input)?,
+                    reads: decode_tree(input)?,
                 }
             }
             RunFactKind::XStart => {
@@ -1335,8 +1348,10 @@ impl TokenCodec for RoundFact {
                 }
             }
             RunFactKind::Present => {
-                expect(0)?;
-                Self::Present
+                expect(1)?;
+                Self::Present {
+                    reads: Vec::decode(input)?,
+                }
             }
             RunFactKind::XOutcome => {
                 // An outcome retained before members kept their end has
@@ -1369,14 +1384,19 @@ impl TokenCodec for RoundFact {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReportView {
     pub entries: Vec<NodeId>,
+    pub reads: Vec<NodeId>,
 }
 impl TokenCodec for ReportView {
     fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
         self.entries.encode(out);
+        self.reads.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
         Ok(Self {
             entries: Vec::decode(input)?,
+            reads: Vec::decode(input)?,
         })
     }
 }
@@ -1391,6 +1411,9 @@ impl ReportView {
         for body in &view.entries {
             decoder.child_kind(id, *body, &[NodeKind::CALL_BODY])?;
         }
+        for read in &view.reads {
+            decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
+        }
         Ok(view)
     }
     /// Read typed bodies through the registered offline protocol decoder.
@@ -1399,12 +1422,67 @@ impl ReportView {
         id: NodeId,
         decoders: &lash_core_store::transcript::TranscriptDecoders,
     ) -> Result<Vec<crate::ToolCallRecord>, GraphRefusal> {
-        Self::load(decoder, id)?
+        let view = Self::load(decoder, id)?;
+        let mut records = view
             .entries
             .into_iter()
             .map(|body| decoders.decode_cell_call(decoder, body))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        for read in view.reads {
+            records.push(load_read_fact(decoder, read)?.record());
+        }
+        Ok(records)
     }
+}
+
+/// A read's archival node belongs only to its caller's save.
+pub fn stage_read_fact(
+    staging: &mut GraphStaging,
+    fact: &lash_protocol_types::ReadFact,
+) -> Result<NodeId, GraphRefusal> {
+    let value = serde_json::to_value(fact).map_err(|error| GraphRefusal::InvalidBody {
+        kind: NodeKind::FROZEN_VALUE.0,
+        reason: error.to_string(),
+    })?;
+    let MaterialNode::Value(node) = stage_value(staging, &value)? else {
+        unreachable!()
+    };
+    Ok(node)
+}
+
+pub fn load_read_fact(
+    decoder: &mut GraphDecoder<'_>,
+    node: NodeId,
+) -> Result<lash_protocol_types::ReadFact, GraphRefusal> {
+    serde_json::from_value(load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
+        kind: NodeKind::FROZEN_VALUE.0,
+        reason: error.to_string(),
+    })
+}
+
+/// A model read saves its final presentation beside its semantic fact.
+pub fn stage_model_read(
+    staging: &mut GraphStaging,
+    saved: &super::ModelReadResult,
+) -> Result<NodeId, GraphRefusal> {
+    let value = serde_json::to_value(saved).map_err(|error| GraphRefusal::InvalidBody {
+        kind: NodeKind::FROZEN_VALUE.0,
+        reason: error.to_string(),
+    })?;
+    let MaterialNode::Value(node) = stage_value(staging, &value)? else {
+        unreachable!()
+    };
+    Ok(node)
+}
+
+pub fn load_model_read(
+    decoder: &mut GraphDecoder<'_>,
+    node: NodeId,
+) -> Result<super::ModelReadResult, GraphRefusal> {
+    serde_json::from_value(load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
+        kind: NodeKind::FROZEN_VALUE.0,
+        reason: error.to_string(),
+    })
 }
 
 #[cfg(test)]

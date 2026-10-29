@@ -90,6 +90,7 @@ async fn recorded_attribution_survives_removal() {
     .reference(MaterialLocation::JournalLocal)
     .unwrap();
     let fact = RoundFact::Admit {
+        reads: Vec::new(),
         members: vec![AdmitMember::Pinned(Box::new(PinnedMember {
             admitted_at: 0,
             call: call.clone(),
