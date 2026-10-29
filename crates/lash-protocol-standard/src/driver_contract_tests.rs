@@ -385,7 +385,7 @@ fn a_settled_control_call_finishes_the_turn_at_before_completion() {
                 7,
             );
             let ready = drain(&mut machine);
-            let output = ToolCallOutput::finish(serde_json::json!({"value": 1}));
+            let output = ToolCallOutput::finish(serde_json::json!("terminal value"));
             let effects = if code {
                 let work = respond(
                     &mut machine,
@@ -393,7 +393,7 @@ fn a_settled_control_call_finishes_the_turn_at_before_completion() {
                     vec![LlmOutputPart::ToolCall {
                         call_id: "cell".into(),
                         tool_name: "execute_code".into(),
-                        input_json: serde_json::json!({"code": "await finish({value: 1});"})
+                        input_json: serde_json::json!({"code": "await finish('terminal value');"})
                             .to_string(),
                         replay: None,
                     }],
@@ -407,7 +407,7 @@ fn a_settled_control_call_finishes_the_turn_at_before_completion() {
                         tool_name: "finish".into(),
                         call_id: lash_core::ToolCallId::fixture("demo-call"),
                         control: lash_core::CellControl::Finish {
-                            value: serde_json::json!({"value": 1}).into(),
+                            value: serde_json::json!("terminal value").into(),
                         },
                     },
                 );
@@ -455,16 +455,23 @@ fn a_settled_control_call_finishes_the_turn_at_before_completion() {
                     );
                 } else {
                     assert!(!machine.is_done());
+                    assert!(turn_outcomes(&effects).is_empty());
                     llm_call_id(&effects);
                 }
             } else {
-                assert!(
-                    matches!(
-                        turn_outcomes(&effects).as_slice(),
-                        [TurnOutcome::Finished(_)]
-                    ),
+                assert_eq!(
+                    turn_outcomes(&effects),
+                    vec![TurnOutcome::Finished(TurnFinish::Finished {
+                        tool_name: if code { "finish" } else { "probe" }.to_string(),
+                        value: serde_json::json!("terminal value"),
+                    })],
                     "a successful answer may finish on the last iteration: {effects:?}"
                 );
+                assert_eq!(
+                    machine.decided_completions()[0].disposition,
+                    lash_core::CompletionDisposition::Accepted
+                );
+                assert!(machine.is_done());
             }
         }
     }
