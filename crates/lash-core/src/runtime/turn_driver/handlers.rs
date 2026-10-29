@@ -733,23 +733,23 @@ impl RuntimeTurnDriver<'_> {
                 let message = err.to_string();
                 // No executor response was available to observe; its timing,
                 // prints and calls are unavailable.
-                code_observations.observe(
+                let activity_close = hold_and_observe_cell_return(
+                    &mut code_observations,
                     cell_tx,
-                    crate::engine::ObservedEvent::Activity {
-                        correlation_id: Some(code_correlation_id.clone()),
-                        event: TurnEvent::CodeBlockReturned {
-                            consumption: Vec::new(),
-                            language: language.clone(),
-                            prints: None,
-                            prints_retained: None,
-                            result: crate::CellOutcome::Failed(crate::CellFailure::new(
-                                crate::CellFailureKind::Host,
-                                message,
-                            )),
-                            duration_ms: None,
-                            tool_call_ids: None,
-                            graph_key: graph_key.clone(),
-                        },
+                    &cell_key,
+                    code_correlation_id.clone(),
+                    TurnEvent::CodeBlockReturned {
+                        consumption: Vec::new(),
+                        language: language.clone(),
+                        prints: None,
+                        prints_retained: None,
+                        result: crate::CellOutcome::Failed(crate::CellFailure::new(
+                            crate::CellFailureKind::Host,
+                            message,
+                        )),
+                        duration_ms: None,
+                        tool_call_ids: None,
+                        graph_key: graph_key.clone(),
                     },
                 );
                 // A turn cancel never answers a cell: it stops the turn before
@@ -774,6 +774,7 @@ impl RuntimeTurnDriver<'_> {
                     machine,
                     err.with_effect_kind(RuntimeEffectKind::ExecCode),
                 )?;
+                self.answered_cell_close = Some((id, activity_close));
                 return Ok(CellExit::Answered);
             }
         };
