@@ -14,6 +14,7 @@ const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } final
 const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = flat.add(xs[0], call pause(xs[1])) return [call pair(first, xs[2]), xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
+const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
 const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
@@ -383,6 +384,7 @@ fn direct_call_entry_agrees() {
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         SOURCE_MEMBER,
+        SOURCE_BAD_MEMBER,
         READ_ADD_MISS,
         READ_ADD_FAIL,
         FORMATTED_APPEND,
@@ -483,6 +485,7 @@ fn direct_call_entry_agrees() {
             || body == ROOT_CALL_STORAGE
             || body == NESTED_CALL_STORAGE
             || body == READ_ADD_WRITE
+            || body == SOURCE_BAD_MEMBER
             || body == SOURCE_MEMBER
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
@@ -501,6 +504,16 @@ fn direct_call_entry_agrees() {
                 Mode::Source,
             );
             assert_eq!(plain, source_only, "source oracle: {body}");
+        }
+        if body == SOURCE_BAD_MEMBER {
+            assert_eq!(
+                reference.end,
+                format!("finished {:?}", Datum::List(vec![int(1)]))
+            );
+            assert_eq!(
+                reference.printed,
+                vec![Datum::Text("index_out_of_range".into()); 2]
+            );
         }
         assert_eq!(plain.end, reference.end, "untaped result: {body}");
         assert_eq!(
@@ -582,6 +595,7 @@ fn direct_call_entry_agrees() {
         if [
             READ_ADD_WRITE,
             SOURCE_MEMBER,
+            SOURCE_BAD_MEMBER,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
@@ -652,6 +666,7 @@ fn direct_call_entry_agrees() {
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         SOURCE_MEMBER,
+        SOURCE_BAD_MEMBER,
         SOURCE_UNIT,
         SOURCE_PENDING_UNIT,
         READ_ADD_MISS,
@@ -689,6 +704,7 @@ fn direct_call_entry_agrees() {
                 || body == ROOT_CALL_STORAGE
                 || body == NESTED_CALL_STORAGE
                 || body == READ_ADD_WRITE
+                || body == SOURCE_BAD_MEMBER
                 || body == SOURCE_MEMBER
                 || body == SOURCE_UNIT
                 || body == SOURCE_PENDING_UNIT

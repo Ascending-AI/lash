@@ -22,6 +22,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(index) = crate::compile::position(&index) else {
             return Ok(false);
         };
+        // An out-of-range source write raises its guest error on the precise
+        // path. It cannot be submitted as a malformed ownership transition.
+        let Ok(len) = self.arena.len(handle) else {
+            return Ok(false);
+        };
+        if index > len {
+            return Ok(false);
+        }
         // Keep the existing physical eligibility guard until its replacement
         // qualifies on every execution path in the atomic authority cutover.
         if self.arena.any_cold() || !self.resident_room(lash_kernel_state::arena::VALUE_BYTES) {
