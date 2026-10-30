@@ -308,6 +308,8 @@ fn tools(calls: &[crate::tools::ToolCallRecord]) -> Vec<String> {
 /// the approval answers `Revoked`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcript() -> Result<()> {
+    use lash_core::durable_port::domain::{DurableReads as _, RunFactKind};
+
     let (session_name, run) = ("retire-cancelled", "retire-cancelled-run");
     let mut world = World::new(false).await?;
     let session = world.session(session_name).await?;
@@ -316,7 +318,28 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         .id(lash_vocabulary::identity::TurnId::fixture(run))
         .await?;
     let input = handle.input_id().clone();
-    let key = world.parked().await;
+    let key = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let key = world.keys.recv().await.expect("the tools outlive the law");
+        let store = world.stores.durable_store();
+        let turn = lash_vocabulary::identity::TurnId::fixture(run);
+        // The key is sent inside the body, before Pending commits. Cancel
+        // only after that result is durable, while the approval is pending.
+        loop {
+            let roots = store.cell_roots(session.session_id(), &turn).await?;
+            let [root] = roots.as_slice() else {
+                panic!("the admitted approval retains its one cell: {roots:?}");
+            };
+            {
+                let facts = store.run_facts(&root.exec.owner()).await?;
+                if facts.rows.iter().any(|row| row.kind == RunFactKind::XWait) {
+                    return Ok::<_, lash_core::durable_port::DurableError>(key);
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the cell parks on its approval")?;
     let (settled, pending) =
         lash_core::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
             &world.core.effect_host(),
