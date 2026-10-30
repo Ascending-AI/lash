@@ -1,0 +1,296 @@
+{
+  "$defs": {
+    "PageAuthority": {
+      "description": "What authorizes a capability: the activation's lease on its committed\nroot, or its private staging.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A store root lease (S6), by its id.",
+          "properties": {
+            "root": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The activation's stage lease (S5), by its id.",
+          "properties": {
+            "stage": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stage"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PageCapability": {
+      "pattern": "^[0-9a-fA-F]{162}$",
+      "type": "string",
+      "x-lash-binary-bytes": 81,
+      "x-lash-binary-encoding": "page[32], authority-kind[1] (root=0, stage=1), authority-id[u64-le], epoch[u64-le], mac[32]",
+      "x-lash-packed-fields": {
+        "description": "A parent-issued capability to read one page: bound to its digest, its\nauthority and the activation epoch, under a MAC whose key never leaves\nthe parent. It is transport authority, never saved state: a fresh\nactivation derives new ones from its leased root. On the worker it is\nthe kernel's opaque 48-byte `PageGrant` (authority 8, epoch 8, MAC 32).\n\nIt crosses as its [`PAGE_CAPABILITY_BYTES`] fixed bytes, a page's\nworth of them per page every exchange names (FIG-6321): the digest, the\nauthority's kind and id, the epoch and the MAC; in a human-readable\npayload, as those bytes in hex.",
+        "properties": {
+          "authority": {
+            "$ref": "#/$defs/PageAuthority"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mac": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          },
+          "page": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "page",
+          "authority",
+          "epoch",
+          "mac"
+        ],
+        "type": "object"
+      }
+    },
+    "PageEnvelope": {
+      "description": "One page as it crosses: its complete envelope, with its digest.\n\nOnly the envelope crosses (FIG-6321): a page is named by the digest of\nits envelope, so the receiver derives the digest as it decodes. Every\npage envelope, decoded or built, is named by its envelope's digest by\nconstruction, so a receiver checks its framing and never hashes it\nagain (FIG-6932).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "PageExchangeId": {
+      "description": "Names one page exchange within a lease, so its reply answers exactly\nit.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "PageRefusal": {
+      "description": "Why the parent refused a page exchange. Every refusal ends the\nactivation as infrastructure; none is a guest outcome.",
+      "oneOf": [
+        {
+          "enum": [
+            "unauthorized",
+            "lease_lost",
+            "missing",
+            "corrupt",
+            "deadline",
+            "store_unavailable"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "batch_too_large": {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "pages": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pages",
+                "bytes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "batch_too_large"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "staging_exhausted": {
+              "properties": {
+                "bytes": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bytes"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "staging_exhausted"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PageReply": {
+      "description": "The parent's reply.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Each demanded page or its own fault, in request order. A later\nfault never discards a successful prefix.",
+          "properties": {
+            "read": {
+              "properties": {
+                "pages": {
+                  "items": {
+                    "$ref": "#/$defs/Result_of_ReadPage_or_PageRefusal"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "pages"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "read"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A stage capability for each sealed page, in request order.",
+          "properties": {
+            "sealed": {
+              "properties": {
+                "pages": {
+                  "items": {
+                    "$ref": "#/$defs/PageCapability"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "pages"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "sealed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "refused": {
+              "$ref": "#/$defs/PageRefusal"
+            }
+          },
+          "required": [
+            "refused"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ReadPage": {
+      "additionalProperties": false,
+      "description": "One page read, with a capability for each child its envelope declares,\nascending by digest.",
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/$defs/PageCapability"
+          },
+          "type": "array"
+        },
+        "page": {
+          "$ref": "#/$defs/PageEnvelope"
+        }
+      },
+      "required": [
+        "page",
+        "children"
+      ],
+      "type": "object"
+    },
+    "Result_of_ReadPage_or_PageRefusal": {
+      "oneOf": [
+        {
+          "properties": {
+            "Ok": {
+              "$ref": "#/$defs/ReadPage"
+            }
+          },
+          "required": [
+            "Ok"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "Err": {
+              "$ref": "#/$defs/PageRefusal"
+            }
+          },
+          "required": [
+            "Err"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/worker-page-reply/v6",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "maxItems": 2,
+  "minItems": 2,
+  "prefixItems": [
+    {
+      "$ref": "#/$defs/PageExchangeId"
+    },
+    {
+      "$ref": "#/$defs/PageReply"
+    }
+  ],
+  "title": "Tuple_of_PageExchangeId_and_PageReply",
+  "type": "array",
+  "x-lash-schema-version": 6,
+  "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
+}

@@ -13,14 +13,14 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 1;
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionStateGeneration"
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 2;
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
 
 /// The synthetic-next upgrade proof (ADR 0115 §6) uses version 2 with the
 /// baseline's shape; its registered lift reads what version 1 wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionStateGeneration"
-pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
+pub const CURRENT_SESSION_STATE_VERSION: u32 = 4;
 
 /// Successful admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]

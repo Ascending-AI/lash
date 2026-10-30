@@ -484,14 +484,14 @@ impl RuntimeCommitReceipt {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "RuntimeCommitReceipt"
-pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 6;
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 7;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with the current receipt shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "RuntimeCommitReceipt"
-pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 7;
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 8;
 
 /// Stable record-kind label the receipt's decode refusals carry.
 pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";

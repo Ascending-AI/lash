@@ -40,7 +40,7 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
 /// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
-pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 5;
+pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 6;
 
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION);
 
@@ -100,7 +100,7 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 7;
 /// format_manifest = "KernelSavedFunction"
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
-pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 2;
+pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 3;
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored

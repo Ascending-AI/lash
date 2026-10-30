@@ -252,7 +252,7 @@ pub struct PluginNativeView {
 /// version_surface = "migrate"
 /// format_manifest = "PluginAdmissionCheckpoint"
 /// version_guard(roots(PluginAdmissionCheckpoint))
-pub const PLUGIN_ADMISSION_CHECKPOINT_VERSION: u32 = 2;
+pub const PLUGIN_ADMISSION_CHECKPOINT_VERSION: u32 = 3;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
