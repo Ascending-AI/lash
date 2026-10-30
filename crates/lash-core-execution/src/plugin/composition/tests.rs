@@ -1030,15 +1030,16 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
             .expect("the read routes to the component's reader");
         let args = serde_json::json!({ "topic": "lash" });
         let answer = route
-            .read(
-                &crate::ToolCallId::fixture("composition-read"),
-                None,
-                &args,
-                &config,
-                &crate::runtime::SystemClock,
-                &tokio_util::sync::CancellationToken::new(),
-                std::time::Instant::now() + std::time::Duration::from_secs(30),
-            )
+            .read(crate::ReadCall {
+                call_id: &crate::ToolCallId::fixture("composition-read"),
+                history: None,
+                manifest: &route.definition.manifest,
+                args: &args,
+                config: &config,
+                clock: &crate::runtime::SystemClock,
+                cancel: &tokio_util::sync::CancellationToken::new(),
+                deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            })
             .await
             .expect("the reader answers");
         assert_eq!(answer, looked_up(&args), "{id}");

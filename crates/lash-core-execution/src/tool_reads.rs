@@ -73,8 +73,8 @@ impl ReadError {
 }
 
 /// What answers the calls of a provider's `Read` tools inside a code cell.
-/// It must change nothing outside: after a crash, a read the cell had not
-/// saved is made again, and its answer may differ.
+/// It must change nothing outside. Retention follows the caller's local-save
+/// or admitted-call policy; an uncommitted answer may be read again.
 #[async_trait::async_trait]
 pub trait ToolReads: Send + Sync {
     /// One read: the tool's result as JSON, or its failure.
@@ -149,32 +149,16 @@ impl ReadRoute {
         self.contract_changed.as_ref()
     }
 
-    /// One read of the tool with `args`, under `config`, bounded by
-    /// `cancel` and `deadline`.
+    /// One read using this route's pinned manifest and the caller's context.
     ///
     /// # Errors
     ///
     /// The read's own failure.
-    pub async fn read(
-        &self,
-        call_id: &crate::ToolCallId,
-        history: Option<&crate::ReadHistory>,
-        args: &serde_json::Value,
-        config: &OwnerConfigView,
-        clock: &dyn lash_core_ids::clock::Clock,
-        cancel: &CancellationToken,
-        deadline: Instant,
-    ) -> Result<serde_json::Value, ReadError> {
+    pub async fn read(&self, call: ReadCall<'_>) -> Result<serde_json::Value, ReadError> {
         self.reads
             .read(ReadCall {
-                call_id,
-                history,
-                clock,
                 manifest: &self.definition.manifest,
-                args,
-                config,
-                cancel,
-                deadline,
+                ..call
             })
             .await
     }
@@ -271,7 +255,11 @@ pub async fn run_read(
         let deadline = context.clock.now() + route.definition.manifest.execution().min(context.parent_remaining);
         use futures_util::FutureExt as _;
         let provider = std::panic::AssertUnwindSafe(async {
-            route.read(&read.call_id(), context.history, &args, context.config, context.clock, context.cancel, deadline).await
+            route.read(ReadCall {
+                call_id: &read.call_id(), history: context.history,
+                manifest: &route.definition.manifest, args: &args,
+                config: context.config, clock: context.clock, cancel: context.cancel, deadline,
+            }).await
         }).catch_unwind();
         let value = tokio::select! {
             biased;

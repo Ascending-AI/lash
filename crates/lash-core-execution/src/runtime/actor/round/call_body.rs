@@ -14,40 +14,42 @@ pub(super) struct StoredBody {
     pub(super) answer: Option<NodeId>,
 }
 
-fn encode_body(
-    call_id: &ToolCallId,
-    provider_call_id: &Option<String>,
-    tool: &str,
-    args: &serde_json::Value,
-    output: &ToolCallOutput,
-    read: Option<&lash_protocol_types::ToolReadIdentity>,
-    answer: Option<NodeId>,
-    out: &mut TokenWriter,
-) {
+struct BodyFields<'a> {
+    call_id: &'a ToolCallId,
+    provider_call_id: &'a Option<String>,
+    tool: &'a str,
+    args: &'a serde_json::Value,
+    output: &'a ToolCallOutput,
+    read: Option<&'a lash_protocol_types::ToolReadIdentity>,
+}
+
+fn encode_body(body: BodyFields<'_>, answer: Option<NodeId>, out: &mut TokenWriter) {
     out.seq(6);
-    out.text(call_id.as_str());
-    provider_call_id.encode(out);
-    out.text(tool);
-    args.encode(out);
+    out.text(body.call_id.as_str());
+    body.provider_call_id.encode(out);
+    out.text(body.tool);
+    body.args.encode(out);
     encode_output(
-        output,
+        body.output,
         &RefAnswer {
             node: Cell::new(answer),
         },
         out,
     );
-    encode_opt_tree(read, out);
+    encode_opt_tree(body.read, out);
 }
 
 impl TokenCodec for StoredBody {
     fn encode(&self, out: &mut TokenWriter) {
         encode_body(
-            &self.record.call_id,
-            &self.record.provider_call_id,
-            &self.record.tool,
-            &self.record.args,
-            &self.record.output,
-            self.record.read.as_deref(),
+            BodyFields {
+                call_id: &self.record.call_id,
+                provider_call_id: &self.record.provider_call_id,
+                tool: &self.record.tool,
+                args: &self.record.args,
+                output: &self.record.output,
+                read: self.record.read.as_deref(),
+            },
             self.answer,
             out,
         );
@@ -118,12 +120,14 @@ impl CallBody {
         };
         let mut body = TokenWriter::new();
         encode_body(
-            call_id,
-            provider_call_id,
-            tool,
-            args,
-            output,
-            read,
+            BodyFields {
+                call_id,
+                provider_call_id,
+                tool,
+                args,
+                output,
+                read,
+            },
             answer,
             &mut body,
         );
