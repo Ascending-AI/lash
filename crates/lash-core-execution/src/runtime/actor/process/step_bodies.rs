@@ -188,17 +188,16 @@ impl MemberBodies for StepBodies {
         parked: &'a Material<CompletionSource>,
         cancelled: bool,
     ) -> round::Discharge<'a> {
-        match self.step(execution.call()) {
-            Some((_, StepRequest::Tool { .. })) => {
-                crate::runtime::process::steps::discharge_tool_step(
-                    &self.runtime,
-                    execution,
-                    parked,
-                    cancelled,
-                )
+        Box::pin(async move {
+            match self.step(execution.call()) {
+                Some((record, step)) => {
+                    self.steps
+                        .discharge(&self.runtime, &record, &step, execution, parked, cancelled)
+                        .await
+                }
+                None => Ok(()),
             }
-            _ => Box::pin(async { Ok(()) }),
-        }
+        })
     }
 
     fn publish_state(

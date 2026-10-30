@@ -41,8 +41,9 @@ use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody, MemberOutcome};
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, dispatch_resolution, tool_step_output,
-    tool_step_refused, tool_step_resolved, tool_step_settled,
+    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, discharge_tool_step,
+    dispatch_resolution, tool_step_output, tool_step_refused, tool_step_resolved,
+    tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_store::tool_run::Material;
@@ -841,6 +842,21 @@ impl ProcessSteps for WorkerSteps {
             return SettledOutput::Interrupted;
         };
         tool_step_resolved(&process.id, parked, resolution)
+    }
+
+    fn discharge<'a>(
+        &'a self,
+        runtime: &'a Arc<StepRuntime>,
+        _process: &'a ProcessRecord,
+        step: &'a StepRequest,
+        execution: &'a AdmittedExecution,
+        parked: &'a Material<CompletionSource>,
+        cancelled: bool,
+    ) -> lash_core_execution::runtime::actor::round::Discharge<'a> {
+        match step {
+            StepRequest::Tool { .. } => discharge_tool_step(runtime, execution, parked, cancelled),
+            StepRequest::Engine { .. } => Box::pin(async { Ok(()) }),
+        }
     }
 }
 

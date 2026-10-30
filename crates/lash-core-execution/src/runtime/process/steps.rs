@@ -568,6 +568,18 @@ pub trait ProcessSteps: Send + Sync {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput;
+
+    fn discharge<'a>(
+        &'a self,
+        _runtime: &'a Arc<StepRuntime>,
+        _process: &'a ProcessRecord,
+        _step: &'a StepRequest,
+        _execution: &'a AdmittedExecution,
+        _parked: &'a Material<CompletionSource>,
+        _cancelled: bool,
+    ) -> crate::runtime::actor::round::Discharge<'a> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// A parked process call retains the request beside its completion metadata,
@@ -788,7 +800,7 @@ pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> Settled
     replace_payload(process, settled, output)
 }
 
-pub(crate) fn discharge_tool_step<'a>(
+pub fn discharge_tool_step<'a>(
     runtime: &'a StepRuntime,
     execution: &'a AdmittedExecution,
     parked: &'a Material<CompletionSource>,
