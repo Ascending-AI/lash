@@ -216,6 +216,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             None
         };
+        if self
+            .publish_binding(frame, site, value)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            return self.finish_statement(frame, site.leaves, None);
+        }
         if let Some(close) = &site.close
             && !self.close_in(close, site.covered)
         {

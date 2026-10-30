@@ -1,8 +1,10 @@
 use super::*;
+mod construction;
 
 /// The source publication protocol binds recovery, ownership, charge closes
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
+    construction::successors();
     use crate::compile::room::{self, Phase, Point, Selection, publication::*};
     use lash_kernel_doc::{TaskId, Value};
     use lash_kernel_state::kernel_internals::logical::{

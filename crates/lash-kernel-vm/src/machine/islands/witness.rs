@@ -61,11 +61,13 @@ pub type Counts = BTreeMap<(Family, Exit), u64>;
 thread_local! {
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
     static SCOPE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn begin() {
     SCOPE_PUBLICATIONS.with(|count| count.set(0));
+    CONSTRUCTION_PUBLICATIONS.with(|count| count.set(0));
     MEMBER_PUBLICATIONS.with(|count| count.set(0));
     COUNTS.with(|counts| *counts.borrow_mut() = Some(Counts::new()));
 }
@@ -97,4 +99,12 @@ pub(crate) fn member_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn member_published() {
     MEMBER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn construction_publications() -> u64 {
+    CONSTRUCTION_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine::islands) fn construction_published() {
+    CONSTRUCTION_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }

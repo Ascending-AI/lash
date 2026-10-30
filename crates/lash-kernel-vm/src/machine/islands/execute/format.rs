@@ -17,6 +17,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let floor = self.construction_floor(site.make.kind(), site.members);
         self.transient = self.transient.saturating_sub(floor);
         frame.state.transient = frame.state.transient.saturating_sub(floor);
+        if self
+            .publish_list_construction(frame, site)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            return Ok(Next::Continue);
+        }
         let values = site.items.iter().map(|reg| frame.regs[*reg as usize]);
         let answer = self.make(site.make, values);
         frame.state.transient += self.transient.saturating_sub(before);

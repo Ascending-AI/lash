@@ -268,7 +268,7 @@ pub(super) fn member_fault(
     match error {
         lash_kernel_state::kernel_internals::logical::MemberFault::Heap(error) => error,
         lash_kernel_state::kernel_internals::logical::MemberFault::Native(error) => {
-            malformed(&error.to_string())
+            publication::native_fault(error)
         }
     }
 }

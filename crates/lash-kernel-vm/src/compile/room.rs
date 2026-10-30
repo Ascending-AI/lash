@@ -265,6 +265,7 @@ pub(crate) struct Source {
     owners: OnceLock<Result<Arc<OwnerSlots>, Refused>>,
     intervals: std::sync::Mutex<BTreeMap<interval::Key, Arc<CompiledInterval>>>,
     first_events: std::sync::Mutex<BTreeMap<Site, Point>>,
+    next_commits: std::sync::Mutex<BTreeMap<Site, Point>>,
 }
 
 /// Source selectors receive stable indices within this exact immutable body.
@@ -501,6 +502,7 @@ impl Source {
             owners: OnceLock::new(),
             intervals: Default::default(),
             first_events: Default::default(),
+            next_commits: Default::default(),
             seed: Some(Seed {
                 unit,
                 params: params.into(),
@@ -537,6 +539,7 @@ impl Source {
             owners: OnceLock::new(),
             intervals: Default::default(),
             first_events: Default::default(),
+            next_commits: Default::default(),
         }
     }
     fn form(
@@ -776,6 +779,124 @@ impl Source {
         let point = first.0.ok_or(Refused::Path)?;
         cache.insert(at.clone(), point.clone());
         Ok(point)
+    }
+
+    /// This complete construction prefix ends in a checked local binding.
+    /// Other consumers need their own publication before they can retain an
+    /// operand produced here, including native calls and cleanup departures.
+    pub(crate) fn local_construction(&self, at: &Site) -> bool {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return false;
+        }
+        let mut node = doc::Node::Block(&self.body);
+        let mut site = self.site.clone();
+        let mut parents = Vec::new();
+        for index in &at.path[self.site.path.len()..] {
+            parents.push((node, site.clone()));
+            let Some(child) = node.children().get(*index as usize).copied() else {
+                return false;
+            };
+            node = child;
+            site = site.child(*index);
+        }
+        for (node, site) in parents.into_iter().rev() {
+            match node {
+                doc::Node::Expr(doc::Expr::List(_)) => continue,
+                doc::Node::Stmt(doc::Stmt::Let { name, .. }) => {
+                    return !self.persistent.contains_key(&site)
+                        && self.shared.get(&(site, name.clone())) != Some(&true);
+                }
+                doc::Node::Stmt(doc::Stmt::Assign {
+                    place: doc::Place::Variable(_),
+                    ..
+                }) => {
+                    return !self.assigns_cell(&site);
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// The first unpaid event after an expression's actual normal Commit.
+    /// Source syntax and the canonical walker determine the successor. A
+    /// required future branch/cursor decision declines instead of inventing it.
+    pub(crate) fn next_after_commit(&self, at: &Site) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit
+            || !at.path.starts_with(&self.site.path)
+            || at.path.len() <= self.site.path.len()
+        {
+            return Err(Refused::Path);
+        }
+        let mut cache = self.next_commits.lock().map_err(|_| Refused::Source)?;
+        if let Some(next) = cache.get(at) {
+            return Ok(next.clone());
+        }
+        let mut node = doc::Node::Block(&self.body);
+        let mut parent = node;
+        for index in &at.path[self.site.path.len()..] {
+            parent = node;
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        if !matches!(node, doc::Node::Expr(_))
+            || !self.room.peak_extra.contains_key(&point(at, Phase::Commit))
+        {
+            return Err(Refused::Path);
+        }
+        let mut enclosing = at.clone();
+        let index = enclosing.path.pop().ok_or(Refused::Path)?;
+        struct Next<'a> {
+            parent: &'a Site,
+            completed: &'a Site,
+            selected: Option<bool>,
+            passed: bool,
+            next: Option<Point>,
+        }
+        impl evaluate::Events for Next<'_> {
+            fn completed(&mut self, site: &Site) -> Option<ExitKind> {
+                if self.passed || site == self.parent {
+                    return None;
+                }
+                if site == self.completed {
+                    self.passed = true;
+                }
+                Some(ExitKind::Normal)
+            }
+            fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
+                if self.passed {
+                    self.next = Some(point(site, phase));
+                    Err(Refused::Path)
+                } else {
+                    Ok(ExitKind::Normal)
+                }
+            }
+            fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
+                if !self.passed && site == self.parent {
+                    self.selected.ok_or(Refused::Facts)
+                } else {
+                    Err(Refused::Facts)
+                }
+            }
+        }
+        let selected = match parent {
+            doc::Node::Expr(doc::Expr::If { .. }) if index == 1 || index == 2 => Some(index == 1),
+            _ => None,
+        };
+        let mut next = Next {
+            parent: &enclosing,
+            completed: at,
+            selected,
+            passed: false,
+            next: None,
+        };
+        let _ = evaluate::walk(self, &enclosing, &mut next, 32);
+        let successor = next.next.ok_or(Refused::Facts)?;
+        if !next.passed || !self.room.peak_extra.contains_key(&successor) {
+            return Err(Refused::Path);
+        }
+        cache.insert(at.clone(), successor.clone());
+        Ok(successor)
     }
 
     /// A finite source execution, including selected branches and repeated

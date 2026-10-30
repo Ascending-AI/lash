@@ -1,4 +1,6 @@
 //! Source activations outlive their physical packet windows.
+mod binding;
+mod construction;
 mod member;
 mod publication;
 mod scope;
@@ -15,6 +17,28 @@ pub(in crate::machine::islands) struct Activation {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    fn source_next_statement(&self, frame: &storage::Values<'_, '_>) -> Option<room::Point> {
+        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
+        let Position::Block(block, next) = frame.state.control.last()? else {
+            return None;
+        };
+        let block = self
+            .exe
+            .block(frame.state.callee.compiled.blocks[*block].id);
+        if let Some(next) = block.stmts.get(*next) {
+            source.first_event(&self.exe.stmt(*next).site).ok()
+        } else {
+            Some(room::Point {
+                site: block.site.clone(),
+                phase: if block.site == source.site {
+                    room::Phase::Fallthrough
+                } else {
+                    room::Phase::Leave
+                },
+            })
+        }
+    }
+
     pub(super) fn source_enter(
         &mut self,
         frame: &storage::Values<'_, '_>,

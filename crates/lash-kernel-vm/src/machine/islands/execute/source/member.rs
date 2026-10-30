@@ -225,7 +225,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             make,
-            |arena| arena.prepare_list_write(handle, index, value),
+            publication::Reserve(|arena: &mut Arena| {
+                arena.prepare_list_write(handle, index, value)
+            }),
             |arena, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list publication changed member arity");

@@ -51,6 +51,8 @@ impl PublicationValue {
 #[derive(Clone)]
 pub enum VirtualBody {
     List(Vec<PageValue>),
+    /// Evaluated resident members retain their native provenance and identities.
+    NativeList(Vec<Value>),
     Variable(PageValue),
     Closure(Vec<EntityId>),
     Map(Vec<(PageValue, PageValue)>),
@@ -58,12 +60,11 @@ pub enum VirtualBody {
     Record(Vec<(PageValue, PageValue)>),
 }
 impl VirtualBody {
-    fn holding(&self, heap: &PagedHeap) -> Result<Holding, HeapFault> {
+    fn holding(&self, heap: &PagedHeap, arena: &mut Arena) -> Result<Holding, HeapFault> {
         use lash_kernel_doc::heap::PageReader;
         let access = heap.pages();
         let mut body = Holding::scalar(Cost::OBJECT);
-        let mut add = |value: &PageValue, field: bool| -> Result<(), HeapFault> {
-            let holding = Holding::from_page(access, value)?;
+        let mut add = |holding: Holding, field: bool| -> Result<(), HeapFault> {
             let bytes = holding
                 .bytes
                 .checked_sub(if field { Cost::REFERENCE } else { 0 })
@@ -77,15 +78,23 @@ impl VirtualBody {
             })
         };
         match self {
-            Self::List(values) => {
+            Self::NativeList(values) => {
                 for value in values {
-                    add(value, false)?;
+                    add(Holding::from_native(arena, access, value)?, false)?;
                 }
             }
-            Self::Variable(value) => add(value, false)?,
+            Self::List(values) => {
+                for value in values {
+                    add(Holding::from_page(access, value)?, false)?;
+                }
+            }
+            Self::Variable(value) => add(Holding::from_page(access, value)?, false)?,
             Self::Closure(captures) => {
                 for entity in captures {
-                    add(&PageValue::Ref(Identity::Object(*entity)), false)?;
+                    add(
+                        Holding::from_page(access, &PageValue::Ref(Identity::Object(*entity)))?,
+                        false,
+                    )?;
                 }
             }
             Self::Map(entries) | Self::Record(entries) => {
@@ -101,8 +110,8 @@ impl VirtualBody {
                     if !keys.insert(digest) {
                         return Err(invalid("virtual table key occurs twice"));
                     }
-                    add(key, record)?;
-                    add(value, false)?;
+                    add(Holding::from_page(access, key)?, record)?;
+                    add(Holding::from_page(access, value)?, false)?;
                 }
             }
             Self::Set(values) => {
@@ -114,8 +123,8 @@ impl VirtualBody {
                     if !keys.insert(digest) {
                         return Err(invalid("virtual set key occurs twice"));
                     }
-                    add(key, false)?;
-                    add(&PageValue::Null, false)?;
+                    add(Holding::from_page(access, key)?, false)?;
+                    add(Holding::from_page(access, &PageValue::Null)?, false)?;
                 }
             }
         }
@@ -130,6 +139,9 @@ impl VirtualBody {
         };
         match (self, other) {
             (Self::List(a), Self::List(b)) | (Self::Set(a), Self::Set(b)) => values(a, b),
+            (Self::NativeList(a), Self::NativeList(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.same(b))
+            }
             (Self::Variable(a), Self::Variable(b)) => encode_body(a) == encode_body(b),
             (Self::Closure(a), Self::Closure(b)) => a == b,
             (Self::Map(a), Self::Map(b)) | (Self::Record(a), Self::Record(b)) => {
@@ -224,6 +236,11 @@ impl JournalEvent {
         Some(peak)
     }
     fn handles(&self, handles: &mut Vec<ArenaHandle>) {
+        for entity in &self.entities {
+            if let VirtualBody::NativeList(values) = &entity.body {
+                handles.extend(values.iter().filter_map(Value::handle));
+            }
+        }
         for (_, value) in &self.outputs {
             value.handles(handles);
         }
@@ -394,7 +411,7 @@ impl EvaluatedProgram {
                         body: Holding::scalar(Cost::OBJECT),
                     });
                 }
-                let body = entity.body.holding(heap)?;
+                let body = entity.body.holding(heap, registration.arena())?;
                 body.each_edge(access, &mut |edge| {
                     if let Identity::Object(id) = edge.target {
                         pending.push(id);
@@ -655,39 +672,46 @@ impl VirtualBody {
     > {
         use lash_kernel_doc::NativeResourceEntity as Kind;
         let mut members = Vec::new();
-        let mut add = |value: &PageValue| -> Result<(), HeapFault> {
-            members
-                .push(PublicationValue::Page(value.clone()).native_holding(heap, arena, owners)?);
+        let mut add = |value: PublicationValue| -> Result<(), HeapFault> {
+            members.push(value.native_holding(heap, arena, owners)?);
             Ok(())
         };
         let kind = match self {
+            Self::NativeList(values) => {
+                for value in values {
+                    add(PublicationValue::Native(*value))?;
+                }
+                Kind::List
+            }
             Self::List(values) => {
                 for value in values {
-                    add(value)?;
+                    add(PublicationValue::Page(value.clone()))?;
                 }
                 Kind::List
             }
             Self::Set(values) => {
                 for value in values {
-                    add(value)?;
-                    add(&PageValue::Null)?;
+                    add(PublicationValue::Page(value.clone()))?;
+                    add(PublicationValue::Page(PageValue::Null))?;
                 }
                 Kind::Set
             }
             Self::Variable(value) => {
-                add(value)?;
+                add(PublicationValue::Page(value.clone()))?;
                 Kind::Variable
             }
             Self::Closure(captures) => {
                 for id in captures {
-                    add(&PageValue::Ref(Identity::Object(*id)))?;
+                    add(PublicationValue::Page(PageValue::Ref(Identity::Object(
+                        *id,
+                    ))))?;
                 }
                 Kind::Closure
             }
             Self::Map(entries) => {
                 for (key, value) in entries {
-                    add(key)?;
-                    add(value)?;
+                    add(PublicationValue::Page(key.clone()))?;
+                    add(PublicationValue::Page(value.clone()))?;
                 }
                 Kind::Map
             }
@@ -700,7 +724,7 @@ impl VirtualBody {
                     names = names
                         .checked_add(text.summary.utf8_bytes)
                         .ok_or_else(|| invalid("record name overflow"))?;
-                    add(value)?;
+                    add(PublicationValue::Page(value.clone()))?;
                 }
                 Kind::Record {
                     field_name_bytes: names,

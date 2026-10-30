@@ -3,6 +3,11 @@
 use super::*;
 
 pub(super) trait Events {
+    /// Navigation may skip a completed source subtree. Pricing and interval
+    /// verification use the default and always visit their selected events.
+    fn completed(&mut self, _: &Site) -> Option<ExitKind> {
+        None
+    }
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused>;
     fn choose(&mut self, site: &Site) -> Result<bool, Refused>;
     fn selected_end(&self) -> bool {
@@ -190,6 +195,9 @@ impl<E: Events> Run<'_, E> {
         )
     }
     fn node(&mut self, node: doc::Node<'_>, site: &Site) -> Result<ExitKind, Stop> {
+        if let Some(exit) = self.events.completed(site) {
+            return Ok(exit);
+        }
         if matches!(node, doc::Node::Block(_)) {
             self.step(site, Phase::Enter)?;
             let mut exit = ExitKind::Normal;

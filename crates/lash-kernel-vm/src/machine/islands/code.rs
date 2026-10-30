@@ -147,7 +147,8 @@ macro_rules! operations {
                     record.site.verify(stream)?;
                     record.to.verify(stream)?;
                 }
-                self.verify_roles(stream)
+                self.verify_roles(stream)?;
+                self.verify_constructions(stream)
             }
 
             fn encode(&mut self, op: Op) -> Option<Packet> {
@@ -302,6 +303,7 @@ operations! {
                 miss: u32,
             }
             Make make {
+                pc: u32,
                 ahead: u64,
                 replay_guard: bool,
                 make: crate::compile::expr::Make,

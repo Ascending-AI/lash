@@ -118,7 +118,49 @@ impl Closes for crate::compile::ReadSite {
     }
 }
 
+impl sites::Make {
+    fn verify_source(&self, stream: &Stream) -> Result<(), Refused> {
+        use crate::compile::expr::Make;
+        use lash_kernel_exec::Op;
+        let (kind, items) = match stream.ops.get(self.pc as usize) {
+            Some(Op::MakeList { items }) => (Make::List, items),
+            Some(Op::MakeTuple { items }) => (Make::Tuple, items),
+            Some(Op::MakeSet { items }) => (Make::Set, items),
+            Some(Op::MakeMap { entries }) => (Make::Map, entries),
+            _ => return Err(Refused::Region { region: self.pc }),
+        };
+        let end = items
+            .start
+            .0
+            .checked_add(items.len)
+            .ok_or(Refused::Region { region: self.pc })?;
+        if self.make != kind
+            || self.reg != items.start.0
+            || self.items.len() != items.len as usize
+            || !self.items.iter().copied().eq(items.start.0..end)
+            || self.members
+                != if kind == Make::Map {
+                    self.items.len() / 2
+                } else {
+                    self.items.len()
+                }
+        {
+            return Err(Refused::Region { region: self.pc });
+        }
+        Ok(())
+    }
+}
+
 impl Code {
+    pub(super) fn verify_constructions(&self, stream: &Stream) -> Result<(), Refused> {
+        for make in &self.sites.make {
+            make.verify_source(stream)?;
+        }
+        for format in &self.sites.format {
+            format.value.parts.verify_source(stream)?;
+        }
+        Ok(())
+    }
     pub(super) fn verify_roles(&self, stream: &Stream) -> Result<(), Refused> {
         for (packet, recovery) in self.packets.iter().zip(&self.recovery) {
             if packet.opcode != Opcode::Call {

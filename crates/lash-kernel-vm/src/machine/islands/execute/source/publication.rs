@@ -1,7 +1,101 @@
 //! The resource owner and canonical journal commit at the same source frontier.
 use super::*;
 use crate::admission::{Allowance, SourceResources};
-use lash_kernel_state::kernel_internals::logical::{MemberEdit, Program};
+use doc::heap::EntityId;
+use lash_kernel_state::{
+    arena::{PreparedBatch, Registration},
+    kernel_internals::logical::{MemberEdit, Program, VirtualBody},
+};
+
+pub(super) trait StoragePreparation {
+    type Prepared;
+    const MATERIALIZES: bool = false;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        actual: &Program,
+    ) -> Result<Option<(Registration<'a>, Self::Prepared)>, HeapFault>;
+}
+pub(super) struct Reserve<F>(pub(super) F);
+impl<F, S> StoragePreparation for Reserve<F>
+where
+    F: FnOnce(&mut Arena) -> Result<Option<S>, HeapFault>,
+{
+    type Prepared = S;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        _: &Program,
+    ) -> Result<Option<(Registration<'a>, S)>, HeapFault> {
+        let Some(storage) = (self.0)(arena)? else {
+            return Ok(None);
+        };
+        let registration = arena.registration().map_err(native_fault)?;
+        Ok(Some((registration, storage)))
+    }
+}
+pub(super) struct ListConstruction {
+    pub(super) entity: EntityId,
+    pub(super) values: Vec<Value>,
+}
+pub(super) struct PreparedListConstruction {
+    pub(super) batch: PreparedBatch,
+    pub(super) value: Value,
+}
+impl StoragePreparation for ListConstruction {
+    type Prepared = PreparedListConstruction;
+    const MATERIALIZES: bool = true;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        actual: &Program,
+    ) -> Result<Option<(Registration<'a>, Self::Prepared)>, HeapFault> {
+        let [event] = actual.events() else {
+            return Ok(None);
+        };
+        let [entity] = event.entities.as_slice() else {
+            return Ok(None);
+        };
+        let VirtualBody::NativeList(values) = &entity.body else {
+            return Ok(None);
+        };
+        if !matches!(event.outputs.as_slice(), [(_, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(doc::heap::PageValue::List(id)))] if *id == self.entity)
+            || event.member.is_some()
+            || event.frame.is_some()
+            || !event.scratch.is_empty()
+            || entity.entity != self.entity
+            || values.len() != self.values.len()
+            || !values.iter().zip(&self.values).all(|(a, b)| a.same(b))
+        {
+            return Ok(None);
+        }
+        // No handle reservation survives a declined logical admission.
+        let mut nursery = doc::Nursery::unaccounted(arena.objects());
+        let value = nursery.allocate(doc::NewObject::List(self.values));
+        let mut installation = arena
+            .prepare_install(nursery.into_new())
+            .map_err(native_fault)?;
+        installation
+            .bind_entity(
+                value
+                    .handle()
+                    .ok_or_else(|| malformed("list construction lost its handle"))?,
+                self.entity,
+            )
+            .map_err(native_fault)?;
+        let (registration, batch) = installation.into_parts();
+        Ok(Some((
+            registration,
+            PreparedListConstruction { batch, value },
+        )))
+    }
+}
+pub(super) fn native_fault(error: doc::NativeError) -> HeapFault {
+    match error {
+        doc::NativeError::Host(error) => error,
+        error => malformed(&error.to_string()),
+    }
+}
 use room::publication::{Position, PublicationError};
 use std::sync::Arc;
 
@@ -26,19 +120,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             activation,
             prefix,
             make,
-            |_| Ok(Some(())),
+            Reserve(|_: &mut Arena| Ok(Some(()))),
             |arena, edits, ()| semantic(arena, edits),
         )
     }
 
-    pub(super) fn publish_source_prepared<S>(
+    pub(super) fn publish_source_prepared<S: StoragePreparation>(
         &mut self,
         callee: Callee<'_>,
         activation: &mut Activation,
         mut prefix: Prefix,
         make: impl Fn() -> Program,
-        prepare: impl FnOnce(&mut Arena) -> Result<Option<S>, HeapFault>,
-        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, S),
+        prepare: S,
+        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, S::Prepared),
     ) -> Result<bool, HeapFault> {
         let source = &self.exe.code(callee.plan.code).source_room;
         let store = self.logical.ledger();
@@ -110,17 +204,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(false);
         };
-        let Some(storage) = prepare(self.arena)? else {
+        let actual = make();
+        let Some((registration, storage)) = prepare.prepare(self.arena, &actual)? else {
             return Ok(false);
         };
         let prepared = match accepted.prepare_publication(
             frontier,
             &ledger,
-            self.arena
-                .registration()
-                .map_err(|error| malformed(&error.to_string()))?,
+            registration,
             self.heap,
-            make(),
+            actual,
             prefix.interval.exit(),
             &prefix.next,
         ) {
@@ -137,7 +230,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 PublicationError::Heap(error) => error,
                 PublicationError::Miss(reason) => malformed(reason),
             })?;
-        debug_assert!(committed.materializations.entities().is_empty());
+        if S::MATERIALIZES {
+            // The exact prepared batch was installed in the same semantic
+            // closure. Consume its materialization owner before another prefix.
+            committed
+                .materializations
+                .publish(&mut store.borrow_mut(), |_| {})?;
+        } else {
+            debug_assert!(committed.materializations.entities().is_empty());
+        }
         self.logical_memory.set(committed.balance.total()?);
         Ok(true)
     }

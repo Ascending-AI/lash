@@ -15,6 +15,7 @@ const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } fin
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
+const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
 const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
@@ -76,6 +77,18 @@ fn observe_source_or_register(
     cold_slices: bool,
     mode: Mode,
 ) -> Observed {
+    struct Context<'a>(&'a str, Layout, u64, Bounds, bool);
+    impl Drop for Context<'_> {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                eprintln!(
+                    "call observation: source={}, layout={:?}, slice={}, bounds={:?}, taped={}",
+                    self.0, self.1, self.2, self.3, self.4
+                );
+            }
+        }
+    }
+    let _context = Context(source, layout, slice, bounds, taped);
     crate::machine::islands::witness::begin();
     let prepared = CALL_LIBRARIES.with_borrow_mut(|libraries| {
         libraries
@@ -215,6 +228,7 @@ fn observe_source_or_register(
     let witnesses = crate::machine::islands::witness::take();
     let scopes = crate::machine::islands::witness::scope_publications();
     let members = crate::machine::islands::witness::member_publications();
+    let constructions = crate::machine::islands::witness::construction_publications();
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -225,6 +239,18 @@ fn observe_source_or_register(
         assert!(
             members >= 5,
             "each aliased append and replacement must publish its source member journal: {members}"
+        );
+    }
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CONSTRUCTION)
+    {
+        assert!(
+            constructions >= 4,
+            "nested and aliased lists must install every prepared source construction: {constructions}"
         );
     }
     if mode != Mode::Source
@@ -385,6 +411,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_BAD_MEMBER,
+        SOURCE_CONSTRUCTION,
         READ_ADD_MISS,
         READ_ADD_FAIL,
         FORMATTED_APPEND,
@@ -487,6 +514,7 @@ fn direct_call_entry_agrees() {
             || body == READ_ADD_WRITE
             || body == SOURCE_BAD_MEMBER
             || body == SOURCE_MEMBER
+            || body == SOURCE_CONSTRUCTION
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
             || body == FORMATTED_APPEND
@@ -545,6 +573,7 @@ fn direct_call_entry_agrees() {
         if [
             READ_ADD_WRITE,
             SOURCE_MEMBER,
+            SOURCE_CONSTRUCTION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
@@ -596,6 +625,7 @@ fn direct_call_entry_agrees() {
             READ_ADD_WRITE,
             SOURCE_MEMBER,
             SOURCE_BAD_MEMBER,
+            SOURCE_CONSTRUCTION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
@@ -667,6 +697,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_BAD_MEMBER,
+        SOURCE_CONSTRUCTION,
         SOURCE_UNIT,
         SOURCE_PENDING_UNIT,
         READ_ADD_MISS,
@@ -706,6 +737,7 @@ fn direct_call_entry_agrees() {
                 || body == READ_ADD_WRITE
                 || body == SOURCE_BAD_MEMBER
                 || body == SOURCE_MEMBER
+                || body == SOURCE_CONSTRUCTION
                 || body == SOURCE_UNIT
                 || body == SOURCE_PENDING_UNIT
                 || body == READ_ADD_MISS

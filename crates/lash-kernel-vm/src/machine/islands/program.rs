@@ -1296,6 +1296,7 @@ impl<'e> Build<'e> {
                     self.emit(Op::Keep(restart));
                 }
                 self.emit(Op::Make {
+                    pc,
                     ahead: *ahead,
                     replay_guard,
                     make: *make,

@@ -103,6 +103,7 @@ impl Build<'_> {
                     *mapped = self.ops.len();
                 }
                 let Op::Make {
+                    pc,
                     ahead,
                     replay_guard,
                     make,
@@ -138,6 +139,7 @@ impl Build<'_> {
                 };
                 instruction.op = Op::Format(Box::new(Format {
                     parts: crate::machine::islands::code::sites::Make {
+                        pc,
                         ahead,
                         replay_guard,
                         make,
