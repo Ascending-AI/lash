@@ -147,8 +147,11 @@ env = { LASH_MATRIX_THREADS = "4" }
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
+# FIG-7561 registers all 26 cancellation scenarios as whole matrices on each
+# store. Spread them across eight actions instead of scheduling twelve in one
+# aggregate after other laws. The 300 s action deadline is unchanged.
 targets = ["cell_restore_laws"]
-shards = 4
+shards = 8
 
 # Tool crash shard 4 spent 291.5 s on its first eight laws on main before
 # reaching the cell trace law (FIG-5967). The same twelve laws pass in

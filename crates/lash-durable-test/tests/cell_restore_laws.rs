@@ -2710,20 +2710,3 @@ async fn a_parked_cells_committed_match_is_required_on_sqlite_file() {
 async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory() {
     after_step_during_a_process_await(Dialect::SqliteMemory, None).await;
 }
-
-#[tokio::test]
-async fn explicit_call_cancel_is_durable_and_selective_before_cell_end() {
-    call_cancel::run_law().await;
-}
-
-/// The TypeScript source partition of the same law retains its complete
-/// matrices under the original action watchdog.
-#[tokio::test]
-async fn explicit_call_cancel_is_durable_and_selective_before_cell_end_from_typescript() {
-    call_cancel::run_typescript_law().await;
-}
-
-#[tokio::test]
-async fn explicit_call_cancel_is_durable_and_selective_before_cell_end_for_reads() {
-    call_cancel::run_read_law().await;
-}

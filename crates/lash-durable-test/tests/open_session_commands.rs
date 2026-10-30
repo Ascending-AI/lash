@@ -1358,7 +1358,8 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
         // Track the admission identity of the refused answer. The later
         // control.finish outcome is a different member, not a retry.
         let kind = if conflict_label == CommitLabel::ROUND_OUTCOME {
-            lash_durable::domain::RunFactKind::XOutcome
+            // A plain answer commits its final decision with its outcome.
+            lash_durable::domain::RunFactKind::XFinalOutcome
         } else {
             lash_durable::domain::RunFactKind::Admit
         };
