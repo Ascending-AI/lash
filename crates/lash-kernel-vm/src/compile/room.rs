@@ -798,9 +798,7 @@ impl Source {
         let mut parents = Vec::new();
         for index in &at.path[self.site.path.len()..] {
             parents.push((node, site.clone()));
-            let Some(child) = node.children().get(*index as usize).copied() else {
-                return None;
-            };
+            let child = node.children().get(*index as usize).copied()?;
             node = child;
             site = site.child(*index);
         }
