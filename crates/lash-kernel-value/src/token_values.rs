@@ -386,9 +386,10 @@ impl TokenCodec for serde_json::Number {
                 out.sum(1, 1);
                 out.signed(value);
             }
-            crate::json_number::NumberKind::Decimal(number) => {
+            crate::json_number::NumberKind::Float(_)
+            | crate::json_number::NumberKind::Decimal(_) => {
                 out.sum(2, 1);
-                out.text(&number.to_string());
+                out.text(&self.to_string());
             }
         }
     }
@@ -405,11 +406,13 @@ impl TokenCodec for serde_json::Number {
             }
             _ => {
                 let text = input.text()?;
-                let number: Self = text.parse().map_err(invalid)?;
-                if number.to_string() != text
-                    || number.as_u64().is_some()
-                    || number.as_i64().is_some()
-                {
+                let number = crate::json_number::parse_exact_number(text)
+                    .ok_or_else(|| invalid("a JSON decimal is not its number's one spelling"))?;
+                if matches!(
+                    crate::json_number::classify(&number),
+                    crate::json_number::NumberKind::Unsigned(_)
+                        | crate::json_number::NumberKind::Signed(_)
+                ) {
                     return Err(invalid("a JSON decimal is not its number's one spelling"));
                 }
                 Ok(number)

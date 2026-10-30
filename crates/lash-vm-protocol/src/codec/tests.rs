@@ -178,6 +178,16 @@ fn nesting_value_counts_and_declared_allocation_are_bounded() {
         })
     );
 
+    let mut decimal = vec![0xc8, 0x10, 0x01, 0x00];
+    decimal.extend(std::iter::repeat_n(b'1', 4097));
+    assert_eq!(
+        codec.decode_worker(&frame_around(&codec, &decimal)),
+        Err(CodecRefusal::AllocationExceeded {
+            limit: 4096,
+            requested: 4097,
+        })
+    );
+
     let many = DecodeLimits {
         max_allocation_bytes: u64::MAX,
         ..limits
@@ -366,7 +376,17 @@ fn observation_chunks_each_cross_in_one_frame_within_the_bounds() {
         },
     ] {
         let codec = FrameCodec::new(limits);
-        let observations = (0..40_000).map(observation).collect::<Vec<_>>();
+        let mut observations = (0..40_000).map(observation).collect::<Vec<_>>();
+        let spelling = "1.00000000000000000000000001";
+        if let Ok(number) = serde_json::from_str::<serde_json::Number>(spelling)
+            && number.to_string() == spelling
+        {
+            let value = serde_json::json!({"number": number});
+            observations.push(
+                rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(&value))
+                    .expect("an exact decimal observation encodes"),
+            );
+        }
         let mut chunker = codec.observation_chunker().expect("a chunker");
         for observation in &observations {
             chunker
@@ -398,13 +418,15 @@ fn observation_chunks_each_cross_in_one_frame_within_the_bounds() {
             codec
                 .decode_worker(&frame)
                 .unwrap_or_else(|refusal| panic!("{limits:?}: a frame is refused: {refusal}"));
-            let values: Vec<serde_json::Value> = rmp_serde::from_slice(&chunk.0).expect("an array");
+            let values: Vec<serde_json::Value> =
+                lash_kernel_value::json_number::decode(&chunk.0).expect("an array");
             received.extend(values);
         }
         let sent = observations
             .iter()
             .map(|observation| {
-                rmp_serde::from_slice::<serde_json::Value>(observation).expect("an observation")
+                lash_kernel_value::json_number::decode::<serde_json::Value>(observation)
+                    .expect("an observation")
             })
             .collect::<Vec<_>>();
         assert_eq!(received, sent, "{limits:?}: every observation, in order");

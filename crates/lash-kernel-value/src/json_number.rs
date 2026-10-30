@@ -3,83 +3,58 @@ use serde::ser::{self, Error as _, Serialize, Serializer};
 use serde_json::{Number, Value, value::RawValue};
 use std::fmt;
 
+mod decode;
+mod walk;
+pub use decode::{DecodeError, decode, deserialize_value, parse_exact_number};
+
+pub const DECIMAL_EXT_CODE: i8 = 0;
+
+#[derive(Clone, Copy)]
+pub enum Format {
+    Json,
+    MessagePack,
+}
+
 pub enum NumberKind<'a> {
     Unsigned(u64),
     Signed(i64),
+    Float(f64),
     Decimal(&'a Number),
 }
 
 pub fn classify(number: &Number) -> NumberKind<'_> {
     if let Some(value) = number.as_u64() {
         NumberKind::Unsigned(value)
-    } else if let Some(value) = number.as_i64() {
+    } else if let Some(value) = number.as_i64().filter(|value| *value < 0) {
         NumberKind::Signed(value)
+    } else if let Some(value) = number.as_f64().filter(|value| value.is_finite())
+        && Number::from_f64(value)
+            .is_some_and(|rendered| rendered.to_string() == number.to_string())
+    {
+        NumberKind::Float(value)
     } else {
         NumberKind::Decimal(number)
     }
 }
 
-fn decimal_parts(text: &str) -> Option<(bool, String, i64)> {
-    let (negative, text) = text.strip_prefix('-').map_or((false, text), |s| (true, s));
-    let (mantissa, exponent) = match text.find(['e', 'E']) {
-        Some(index) => (&text[..index], Some(&text[index + 1..])),
-        None => (text, None),
-    };
-    let fractional = mantissa.split_once('.').map_or(0, |(_, tail)| tail.len());
-    let mut digits: String = mantissa.chars().filter(|c| *c != '.').collect();
-    let first = digits.find(|c| c != '0');
-    let Some(first) = first else {
-        return Some((negative, String::new(), 0));
-    };
-    let exponent = exponent.map_or(Some(0), |value| value.parse::<i64>().ok())?;
-    digits.drain(..first);
-    let trimmed = digits.trim_end_matches('0').len();
-    let trailing = digits.len() - trimmed;
-    digits.truncate(trimmed);
-    let exponent = exponent
-        .checked_sub(i64::try_from(fractional).ok()?)?
-        .checked_add(i64::try_from(trailing).ok()?)?;
-    Some((negative, digits, exponent))
-}
-
-pub fn is_negative_zero(number: &Number) -> bool {
-    decimal_parts(&number.to_string())
-        .is_some_and(|(negative, digits, _)| negative && digits.is_empty())
-}
-
-fn exact_f64(number: &Number) -> Option<f64> {
-    let value = number.as_f64().filter(|value| value.is_finite())?;
-    let rendered = Number::from_f64(value)?;
-    let original = decimal_parts(&number.to_string())?;
-    (Some(original) == decimal_parts(&rendered.to_string())).then_some(value)
-}
-
-pub fn serialize<S: Serializer>(number: &Number, serializer: S) -> Result<S::Ok, S::Error> {
-    use ser::SerializeMap;
-    match classify(number) {
-        NumberKind::Unsigned(value) => serializer.serialize_u64(value),
-        NumberKind::Signed(value) => serializer.serialize_i64(value),
-        NumberKind::Decimal(number) => match exact_f64(number) {
-            Some(value) => serializer.serialize_f64(value),
-            None => {
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("$serde_json::private::Number", &number.to_string())?;
-                map.end()
-            }
-        },
-    }
-}
-
-pub fn serialize_canonical<S: Serializer>(
+pub fn serialize<S: Serializer>(
     number: &Number,
     serializer: S,
+    format: Format,
 ) -> Result<S::Ok, S::Error> {
     match classify(number) {
         NumberKind::Unsigned(value) => serializer.serialize_u64(value),
         NumberKind::Signed(value) => serializer.serialize_i64(value),
-        NumberKind::Decimal(number) => match exact_f64(number) {
-            Some(value) => serializer.serialize_f64(value),
-            None => number.serialize(serializer),
+        NumberKind::Float(value) => serializer.serialize_f64(value),
+        NumberKind::Decimal(number) => match format {
+            Format::Json => number.serialize(serializer),
+            Format::MessagePack => {
+                let text = number.to_string();
+                serializer.serialize_newtype_struct(
+                    rmp_serde::MSGPACK_EXT_STRUCT_NAME,
+                    &(DECIMAL_EXT_CODE, serde_bytes::Bytes::new(text.as_bytes())),
+                )
+            }
         },
     }
 }
@@ -105,16 +80,30 @@ pub fn deserialize_optional_f64<'de, D: Deserializer<'de>>(
         .transpose()
 }
 
-pub struct Native<T>(pub T);
+pub struct MessagePack<T>(pub T);
+pub struct Json<T>(pub T);
 
-impl<T: Serialize> Serialize for Native<T> {
+impl<T: Serialize> Serialize for MessagePack<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(Adapter(serializer))
+        self.0.serialize(Adapter(serializer, Format::MessagePack))
     }
 }
 
-struct Adapter<S>(S);
-struct Compound<T>(T);
+impl<T: Serialize> Serialize for Json<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(Adapter(serializer, Format::Json))
+    }
+}
+
+struct Nested<T>(T, Format);
+impl<T: Serialize> Serialize for Nested<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(Adapter(serializer, self.1))
+    }
+}
+
+struct Adapter<S>(S, Format);
+struct Compound<T>(T, Format);
 
 macro_rules! forward_scalar {
     ($($method:ident($ty:ty)),* $(,)?) => {$(
@@ -158,7 +147,7 @@ impl<S: Serializer> Serializer for Adapter<S> {
         self.0.serialize_none()
     }
     fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Self::Ok, Self::Error> {
-        self.0.serialize_some(&Native(value))
+        self.0.serialize_some(&Nested(value, self.1))
     }
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         self.0.serialize_unit()
@@ -179,7 +168,8 @@ impl<S: Serializer> Serializer for Adapter<S> {
         name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        self.0.serialize_newtype_struct(name, &Native(value))
+        self.0
+            .serialize_newtype_struct(name, &Nested(value, self.1))
     }
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
@@ -189,20 +179,26 @@ impl<S: Serializer> Serializer for Adapter<S> {
         value: &T,
     ) -> Result<Self::Ok, Self::Error> {
         self.0
-            .serialize_newtype_variant(name, index, variant, &Native(value))
+            .serialize_newtype_variant(name, index, variant, &Nested(value, self.1))
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        self.0.serialize_seq(len).map(Compound)
+        self.0
+            .serialize_seq(len)
+            .map(|value| Compound(value, self.1))
     }
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        self.0.serialize_tuple(len).map(Compound)
+        self.0
+            .serialize_tuple(len)
+            .map(|value| Compound(value, self.1))
     }
     fn serialize_tuple_struct(
         self,
         name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        self.0.serialize_tuple_struct(name, len).map(Compound)
+        self.0
+            .serialize_tuple_struct(name, len)
+            .map(|value| Compound(value, self.1))
     }
     fn serialize_tuple_variant(
         self,
@@ -213,10 +209,12 @@ impl<S: Serializer> Serializer for Adapter<S> {
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
         self.0
             .serialize_tuple_variant(name, index, variant, len)
-            .map(Compound)
+            .map(|value| Compound(value, self.1))
     }
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        self.0.serialize_map(len).map(Compound)
+        self.0
+            .serialize_map(len)
+            .map(|value| Compound(value, self.1))
     }
     fn serialize_struct(
         self,
@@ -226,15 +224,20 @@ impl<S: Serializer> Serializer for Adapter<S> {
         match name {
             "$serde_json::private::Number" => Ok(Structure::Number {
                 target: self.0,
+                format: self.1,
                 fields: serde_json::value::Serializer
                     .serialize_struct(name, len)
                     .map_err(S::Error::custom)?,
             }),
             "$serde_json::private::RawValue" => Ok(Structure::Raw {
                 target: self.0,
+                format: self.1,
                 text: None,
             }),
-            _ => self.0.serialize_struct(name, len).map(Structure::Ordinary),
+            _ => self
+                .0
+                .serialize_struct(name, len)
+                .map(|value| Structure::Ordinary(Compound(value, self.1))),
         }
     }
     fn serialize_struct_variant(
@@ -246,7 +249,7 @@ impl<S: Serializer> Serializer for Adapter<S> {
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.0
             .serialize_struct_variant(name, index, variant, len)
-            .map(Compound)
+            .map(|value| Compound(value, self.1))
     }
     fn collect_str<T: ?Sized + fmt::Display>(self, value: &T) -> Result<Self::Ok, Self::Error> {
         self.0.collect_str(value)
@@ -262,7 +265,7 @@ macro_rules! sequence {
             type Ok = T::Ok;
             type Error = T::Error;
             fn $method<V: ?Sized + Serialize>(&mut self, value: &V) -> Result<(), Self::Error> {
-                self.0.$method(&Native(value))
+                self.0.$method(&Nested(value, self.1))
             }
             fn end(self) -> Result<Self::Ok, Self::Error> {
                 self.0.end()
@@ -279,17 +282,18 @@ impl<T: ser::SerializeMap> ser::SerializeMap for Compound<T> {
     type Ok = T::Ok;
     type Error = T::Error;
     fn serialize_key<K: ?Sized + Serialize>(&mut self, key: &K) -> Result<(), Self::Error> {
-        self.0.serialize_key(&Native(key))
+        self.0.serialize_key(&Nested(key, self.1))
     }
     fn serialize_value<V: ?Sized + Serialize>(&mut self, value: &V) -> Result<(), Self::Error> {
-        self.0.serialize_value(&Native(value))
+        self.0.serialize_value(&Nested(value, self.1))
     }
     fn serialize_entry<K: ?Sized + Serialize, V: ?Sized + Serialize>(
         &mut self,
         key: &K,
         value: &V,
     ) -> Result<(), Self::Error> {
-        self.0.serialize_entry(&Native(key), &Native(value))
+        self.0
+            .serialize_entry(&Nested(key, self.1), &Nested(value, self.1))
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         self.0.end()
@@ -304,7 +308,7 @@ impl<T: ser::SerializeStructVariant> ser::SerializeStructVariant for Compound<T>
         key: &'static str,
         value: &V,
     ) -> Result<(), Self::Error> {
-        self.0.serialize_field(key, &Native(value))
+        self.0.serialize_field(key, &Nested(value, self.1))
     }
     fn skip_field(&mut self, key: &'static str) -> Result<(), Self::Error> {
         self.0.skip_field(key)
@@ -315,13 +319,15 @@ impl<T: ser::SerializeStructVariant> ser::SerializeStructVariant for Compound<T>
 }
 
 enum Structure<S: Serializer> {
-    Ordinary(S::SerializeStruct),
+    Ordinary(Compound<S::SerializeStruct>),
     Number {
         target: S,
+        format: Format,
         fields: <serde_json::value::Serializer as Serializer>::SerializeStruct,
     },
     Raw {
         target: S,
+        format: Format,
         text: Option<String>,
     },
 }
@@ -335,7 +341,7 @@ impl<S: Serializer> ser::SerializeStruct for Structure<S> {
         value: &V,
     ) -> Result<(), Self::Error> {
         match self {
-            Self::Ordinary(fields) => fields.serialize_field(key, &Native(value)),
+            Self::Ordinary(fields) => fields.0.serialize_field(key, &Nested(value, fields.1)),
             Self::Number { fields, .. } => {
                 fields.serialize_field(key, value).map_err(S::Error::custom)
             }
@@ -355,27 +361,38 @@ impl<S: Serializer> ser::SerializeStruct for Structure<S> {
     }
     fn skip_field(&mut self, key: &'static str) -> Result<(), Self::Error> {
         match self {
-            Self::Ordinary(fields) => fields.skip_field(key),
+            Self::Ordinary(fields) => fields.0.skip_field(key),
             _ => Err(S::Error::custom("invalid JSON scalar field")),
         }
     }
     fn end(self) -> Result<Self::Ok, Self::Error> {
         match self {
-            Self::Ordinary(fields) => fields.end(),
-            Self::Number { target, fields } => match fields.end().map_err(S::Error::custom)? {
-                Value::Number(number) => serialize(&number, target),
+            Self::Ordinary(fields) => fields.0.end(),
+            Self::Number {
+                target,
+                fields,
+                format,
+            } => match fields.end().map_err(S::Error::custom)? {
+                Value::Number(number) => serialize(&number, target, format),
                 _ => Err(S::Error::custom("invalid JSON number")),
             },
-            Self::Raw { target, text } => {
+            Self::Raw {
+                target,
+                text,
+                format,
+            } => {
                 let text = text.ok_or_else(|| S::Error::custom("missing raw JSON text"))?;
                 let raw: &RawValue = serde_json::from_str(&text).map_err(S::Error::custom)?;
-                Raw(raw).serialize(target)
+                match format {
+                    Format::Json => raw.serialize(target),
+                    Format::MessagePack => Raw(raw, format).serialize(target),
+                }
             }
         }
     }
 }
 
-struct Raw<'a>(&'a RawValue);
+struct Raw<'a>(&'a RawValue, Format);
 
 impl Serialize for Raw<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -387,7 +404,7 @@ impl Serialize for Raw<'_> {
                     serde_json::from_str(text).map_err(S::Error::custom)?;
                 let mut map = serializer.serialize_map(Some(entries.0.len()))?;
                 for (key, value) in entries.0 {
-                    map.serialize_entry(&key, &Raw(value))?;
+                    map.serialize_entry(&key, &Raw(value, self.1))?;
                 }
                 map.end()
             }
@@ -396,7 +413,7 @@ impl Serialize for Raw<'_> {
                     serde_json::from_str(text).map_err(S::Error::custom)?;
                 let mut sequence = serializer.serialize_seq(Some(values.len()))?;
                 for value in values {
-                    sequence.serialize_element(&Raw(value))?;
+                    sequence.serialize_element(&Raw(value, self.1))?;
                 }
                 sequence.end()
             }
@@ -409,7 +426,7 @@ impl Serialize for Raw<'_> {
             Some(b'n') => serializer.serialize_unit(),
             _ => {
                 let number: Number = serde_json::from_str(text).map_err(S::Error::custom)?;
-                serialize(&number, serializer)
+                serialize(&number, serializer, self.1)
             }
         }
     }

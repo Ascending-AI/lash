@@ -512,9 +512,9 @@ fn definition_id_golden_vectors_are_frozen() {
             // engine kind "lashvm"
             "0000000000000006",
             "6c617368766d",
-            // canonical value {"a":"x","b":[1,0.0]}
-            "0000000000000015",
-            "7b2261223a2278222c2262223a5b312c302e305d7d",
+            // canonical value {"a":"x","b":[1,-0.0]}
+            "0000000000000016",
+            "7b2261223a2278222c2262223a5b312c2d302e305d7d",
             // three artifacts, sorted by leaf bytes
             "0000000000000003",
             // process_env "env:1"
@@ -538,7 +538,7 @@ fn definition_id_golden_vectors_are_frozen() {
     );
     assert_eq!(
         with_artifacts.id().as_str(),
-        "lash.definition:sha256:52912849d4f829548407cf186037ddc9dd972ef16a1419ca9fd94a137d95bc9e"
+        "lash.definition:sha256:07de1fcc30ba72a99c1eb017d115d987c14b53e68a96967dc66243f52aa39e6c"
     );
 
     let bare = draft("scripted-engine", serde_json::json!({}), []);
@@ -607,7 +607,7 @@ fn definition_id_golden_vectors_are_frozen() {
 
     let parse = |json: &str| serde_json::from_str(json).expect("parse contract payload");
     let cases = vec![
-        ("signed zero", parse("-0.0"), parse("0.0"), true),
+        ("signed zero", parse("-0.0"), parse("0.0"), false),
         (
             "integer and float",
             serde_json::json!(1),
@@ -626,12 +626,18 @@ fn definition_id_golden_vectors_are_frozen() {
             serde_json::json!(u64::MAX as f64),
             false,
         ),
-        ("exponent and plain float", parse("1e0"), parse("1.0"), true),
+        (
+            "exponent and plain float",
+            parse("1e0"),
+            parse("1.0"),
+            serde_json::to_vec(&parse("1e0")).unwrap()
+                == serde_json::to_vec(&parse("1.0")).unwrap(),
+        ),
         (
             "nested signed zero and object order",
             parse(r#"{"outer":[{"zero":-0.0,"count":1}]}"#),
             parse(r#"{"outer":[{"count":1,"zero":0.0}]}"#),
-            true,
+            false,
         ),
         (
             "nested integer and float",
@@ -646,7 +652,10 @@ fn definition_id_golden_vectors_are_frozen() {
         assert_eq!(payloads_equal(&left, &right), expected, "{name}");
         assert_eq!(payloads_equal(&right, &left), expected, "{name} reversed");
     }
-    assert_eq!(payload_leaf(&parse("1e0")), b"1.0");
+    assert_eq!(
+        payload_leaf(&parse("1e0")),
+        serde_json::to_vec(&parse("1e0")).unwrap()
+    );
 
     let null = serde_json::Value::Null;
     let one = serde_json::json!(1);

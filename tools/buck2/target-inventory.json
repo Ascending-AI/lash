@@ -102514,8 +102514,10 @@
       "dependencies": [
         "blake3",
         "jsonschema",
+        "rmp-serde",
         "schemars",
         "serde",
+        "serde_bytes",
         "serde_json",
         "thiserror"
       ],

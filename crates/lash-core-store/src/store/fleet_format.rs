@@ -827,13 +827,14 @@ pub fn decode_versioned_msgpack_record_for_fleet<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let corrupt = |err: rmp_serde::decode::Error| undecodable(record_kind, err);
-    let mut value: serde_json::Value = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+    let corrupt = |err: lash_kernel_value::json_number::DecodeError| undecodable(record_kind, err);
+    let mut value: serde_json::Value =
+        lash_kernel_value::json_number::decode(bytes).map_err(corrupt)?;
     let actual =
         ensure_supported_record_schema_version_for_fleet(record_kind, &value, surface, fleet)?;
     let window = fleet.read_window(surface);
     if actual == window.newest() {
-        return rmp_serde::from_slice(bytes).map_err(corrupt);
+        return lash_kernel_value::json_number::decode(bytes).map_err(corrupt);
     }
     upcast_json_record(record_kind, surface, actual, window.newest(), &mut value)?;
     serde_json::from_value(value).map_err(|err| undecodable(record_kind, err))

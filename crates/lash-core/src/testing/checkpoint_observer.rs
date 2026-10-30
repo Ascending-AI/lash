@@ -447,8 +447,10 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         },
     }];
     if let Some(body) = checkpoint.component_body(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
-        let state = rmp_serde::from_slice::<lash_core_store::plugin_state::PluginStateMap>(body)
-            .expect("runtime plugin namespace map encodes");
+        let state = lash_kernel_value::json_number::decode::<
+            lash_core_store::plugin_state::PluginStateMap,
+        >(body)
+        .expect("runtime plugin namespace map encodes");
         components.push(CheckpointComponentWrite {
             component: CheckpointComponent::PluginState,
             kind: CheckpointComponentWriteKind::PluginState { state },
@@ -510,7 +512,8 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
 }
 
 fn checkpoint_encoded_len(value: &impl Serialize) -> Result<usize, rmp_serde::encode::Error> {
-    rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(value)).map(|bytes| bytes.len())
+    rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(value))
+        .map(|bytes| bytes.len())
 }
 
 /// `logical_bytes` presence marks the component as written this commit; the

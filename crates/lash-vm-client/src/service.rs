@@ -817,13 +817,14 @@ pub mod runtime_ops {
                 ));
             }
             request.restrict_namespaces();
-            let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&request))
-                .map_err(|error| {
-                    PoolError::payload(
-                        lash_protocol_types::engine_fault::PayloadKind::ServiceRequest,
-                        error,
-                    )
-                })?;
+            let bytes =
+                rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(&request))
+                    .map_err(|error| {
+                        PoolError::payload(
+                            lash_protocol_types::engine_fault::PayloadKind::ServiceRequest,
+                            error,
+                        )
+                    })?;
             let mut worker = self.pool()?.checkout(
                 bytes.len().saturating_add(4096),
                 OwnerEpoch(0),
@@ -846,12 +847,13 @@ pub mod runtime_ops {
             lash_vm_protocol::FrameCodec::new(self.config.protocol.decode)
                 .with_detail_limit(self.config.tuning.diagnostic_bytes)
                 .check_payload(&response.0)?;
-            let response = rmp_serde::from_slice(&response.0).map_err(|error| {
-                PoolError::payload(
-                    lash_protocol_types::engine_fault::PayloadKind::ServiceResponse,
-                    error,
-                )
-            })?;
+            let response =
+                lash_kernel_value::json_number::decode(&response.0).map_err(|error| {
+                    PoolError::payload(
+                        lash_protocol_types::engine_fault::PayloadKind::ServiceResponse,
+                        error,
+                    )
+                })?;
             // The worker that lowered the run's document starts the run.
             if for_run
                 && matches!(response, Response::Lowered { .. })

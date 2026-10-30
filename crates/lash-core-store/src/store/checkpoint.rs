@@ -621,7 +621,7 @@ impl HydratedSessionCheckpoint {
                 }
             });
         }
-        rmp_serde::from_slice(&body)
+        lash_kernel_value::json_number::decode(&body)
             .map(Some)
             .map_err(|error| StoreError::StoredDataCorrupt {
                 record_kind: "SessionCheckpoint component",

@@ -158,12 +158,11 @@ impl serde::Serialize for Canonical<'_> {
                 }
                 sequence.end()
             }
-            Value::Number(number) if lash_kernel_value::json_number::is_negative_zero(number) => {
-                serializer.serialize_f64(0.0)
-            }
-            Value::Number(number) => {
-                lash_kernel_value::json_number::serialize_canonical(number, serializer)
-            }
+            Value::Number(number) => lash_kernel_value::json_number::serialize(
+                number,
+                serializer,
+                lash_kernel_value::json_number::Format::Json,
+            ),
             value => value.serialize(serializer),
         }
     }
@@ -173,8 +172,8 @@ impl serde::Serialize for Canonical<'_> {
 mod tests {
     use super::*;
 
-    /// Opaque payload leaves preserve every field and scalar spelling except
-    /// negative zero, with recursive key order independent of input order.
+    /// Opaque payload leaves preserve every field and scalar spelling, with
+    /// recursive key order independent of input order.
     #[test]
     fn payload_leaf_streams_the_canonical_opaque_grammar() {
         let value: serde_json::Value = serde_json::from_str(
@@ -183,7 +182,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             payload_leaf(&value),
-            br#"{"a":{"a":1,"b":2},"z":[{"n":0.0,"title":"kept"},1,1.0,-2.5,true,null,"\n"]}"#
+            br#"{"a":{"a":1,"b":2},"z":[{"n":-0.0,"title":"kept"},1,1.0,-2.5,true,null,"\n"]}"#
         );
         for spelling in ["1.00000000000000000000000001", "1e+400", "-1e-400"] {
             if let Ok(serde_json::Value::Number(number)) =

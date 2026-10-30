@@ -16,7 +16,7 @@ pub(crate) fn perform(
     embedding: &Embedding,
     request: &EncodedPayload,
 ) -> Result<EncodedPayload, PoolError> {
-    let request: Request = rmp_serde::from_slice(&request.0)
+    let request: Request = lash_kernel_value::json_number::decode(&request.0)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
     let response = match request {
         Request::ToolCalls {
@@ -159,7 +159,7 @@ pub(crate) fn perform(
 }
 
 fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
-    rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(response))
+    rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(response))
         .map(EncodedPayload)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
 }

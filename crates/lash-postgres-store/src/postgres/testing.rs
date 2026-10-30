@@ -308,7 +308,7 @@ pub async fn read_stored_cells_for_testing(
                 .ok()
                 .and_then(structured)
                 .or_else(|| {
-                    rmp_serde::from_slice::<serde_json::Value>(&bytes)
+                    lash_kernel_value::json_number::decode::<serde_json::Value>(&bytes)
                         .ok()
                         .and_then(structured)
                 })

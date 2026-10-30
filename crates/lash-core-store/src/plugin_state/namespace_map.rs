@@ -245,8 +245,9 @@ impl NamespaceBody {
             if previous.is_some_and(|previous| previous.snapshot.get(key) == Some(value)) {
                 continue;
             }
-            let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(value))
-                .expect("namespace value encodes");
+            let bytes =
+                rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(value))
+                    .expect("namespace value encodes");
             let (root, nodes) = encode(&Body::Value(bytes));
             tree = Trie::change(
                 tree.as_ref(),
@@ -375,7 +376,7 @@ fn load_trie(
             };
             let key =
                 String::from_utf8(prefix.clone()).map_err(|error| invalid(error.to_string()))?;
-            let value = rmp_serde::from_slice(&bytes)
+            let value = lash_kernel_value::json_number::decode(&bytes)
                 .map_err(|error| invalid(format!("namespace value: {error}")))?;
             values.insert(key, value);
             let nodes = owned_nodes(graph, root, &BTreeSet::new())?;

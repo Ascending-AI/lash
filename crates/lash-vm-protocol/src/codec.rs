@@ -205,7 +205,7 @@ impl FrameCodec {
             limit: self.limits.max_frame_bytes as usize,
             refused: None,
         };
-        let result = lash_kernel_value::json_number::Native(frame)
+        let result = lash_kernel_value::json_number::MessagePack(frame)
             .serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
         if let Some(declared) = writer.refused {
             return Err(CodecRefusal::FrameTooLarge { limit, declared });
@@ -279,7 +279,7 @@ impl FrameCodec {
     /// the message crosses inside another.
     pub fn borrowed_frame_len(&self, frame: &BorrowedParentFrame<'_>) -> Result<u64, CodecRefusal> {
         let mut counted = CountingWriter(FRAME_HEADER_BYTES as u64);
-        lash_kernel_value::json_number::Native(frame)
+        lash_kernel_value::json_number::MessagePack(frame)
             .serialize(&mut rmp_serde::Serializer::new(&mut counted).with_struct_map())
             .map_err(|error| CodecRefusal::Malformed {
                 reason: Detail::new(format_args!("frame does not encode: {error}")),
@@ -335,7 +335,7 @@ impl FrameCodec {
         }
         let payload = &bytes[FRAME_HEADER_BYTES..total];
         charge_structure(payload, self.limits)?;
-        rmp_serde::from_slice(payload).map_err(|error| CodecRefusal::Malformed {
+        lash_kernel_value::json_number::decode(payload).map_err(|error| CodecRefusal::Malformed {
             reason: Detail::new(error),
         })
     }
@@ -875,6 +875,19 @@ impl StructureWalk<'_> {
                 let len = self.read_u32()?;
                 self.blob(len)
             }
+            0xc7 => {
+                let len = u64::from(self.take(1)?[0]);
+                self.extension(len)
+            }
+            0xc8 => {
+                let len = self.read_u16()?;
+                self.extension(len)
+            }
+            0xc9 => {
+                let len = self.read_u32()?;
+                self.extension(len)
+            }
+            0xd4..=0xd8 => self.extension(1_u64 << (marker - 0xd4)),
             0xdc => {
                 let len = self.read_u16()?;
                 self.container(len)
@@ -891,12 +904,22 @@ impl StructureWalk<'_> {
                 let len = self.read_u32()?;
                 self.container(len * 2)
             }
-            0xc1 | 0xc7..=0xc9 | 0xd4..=0xd8 => Err(CodecRefusal::Malformed {
+            0xc1 => Err(CodecRefusal::Malformed {
                 reason: Detail::new(format_args!(
                     "payload uses marker 0x{marker:02x}, which the protocol never writes"
                 )),
             }),
         }
+    }
+
+    fn extension(&mut self, len: u64) -> Result<Option<u64>, CodecRefusal> {
+        let code = self.take(1)?[0] as i8;
+        if code != lash_kernel_value::json_number::DECIMAL_EXT_CODE {
+            return Err(CodecRefusal::Malformed {
+                reason: Detail::new("unknown MessagePack extension code"),
+            });
+        }
+        self.blob(len)
     }
 
     fn container(&mut self, values: u64) -> Result<Option<u64>, CodecRefusal> {

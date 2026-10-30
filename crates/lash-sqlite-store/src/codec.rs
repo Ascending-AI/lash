@@ -225,7 +225,7 @@ pub(crate) fn encode_artifact_blob(
 }
 
 pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
-    let envelope = rmp_serde::from_slice::<StoredBlobEnvelope>(bytes)
+    let envelope = lash_kernel_value::json_number::decode::<StoredBlobEnvelope>(bytes)
         .map_err(|error| stored_data_corrupt("artifact blob envelope", error))?;
     if !blob_envelope_admits(envelope.version) {
         return Err(StoreError::UnsupportedRecordSchemaVersion {
@@ -372,16 +372,19 @@ pub(crate) fn encode_msgpack<T: serde::Serialize>(
     // Pre-size the buffer so the per-byte writes inside rmp_serde don't
     // walk the Vec through 0→4→8→16→32… reallocations on every call.
     let mut buf = Vec::with_capacity(1024);
-    rmp_serde::encode::write_named(&mut buf, &lash_kernel_value::json_number::Native(value))
-        .map_err(|error| StoreError::RecordEncodingFailed {
-            record_kind: record_kind.to_string(),
-            message: error.to_string(),
-        })?;
+    rmp_serde::encode::write_named(
+        &mut buf,
+        &lash_kernel_value::json_number::MessagePack(value),
+    )
+    .map_err(|error| StoreError::RecordEncodingFailed {
+        record_kind: record_kind.to_string(),
+        message: error.to_string(),
+    })?;
     Ok(buf)
 }
 
 pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
-    rmp_serde::from_slice(bytes).ok()
+    lash_kernel_value::json_number::decode(bytes).ok()
 }
 
 /// Read a revision's canonical configuration graph in the caller's snapshot.

@@ -264,19 +264,28 @@ fn push_json_value(
         serde_json::Value::Bool(false) => identity.tag(1),
         serde_json::Value::Bool(true) => identity.tag(2),
         serde_json::Value::Number(number) => {
-            if let Some(value) = number.as_i64() {
-                identity.tag(3);
-                identity.i64(value);
-            } else if let Some(value) = number.as_u64() {
-                identity.tag(4);
-                identity.u64(value);
-            } else if let Some(value) = number.as_f64() {
-                identity.tag(5);
-                identity.u64(value.to_bits());
-            } else {
-                return Err(StoreError::Backend(format!(
-                    "append identity cannot encode JSON number `{number}`"
-                )));
+            use lash_kernel_value::json_number::{NumberKind, classify};
+            match classify(number) {
+                NumberKind::Unsigned(value) if value <= i64::MAX as u64 => {
+                    identity.tag(3);
+                    identity.i64(value as i64);
+                }
+                NumberKind::Unsigned(value) => {
+                    identity.tag(4);
+                    identity.u64(value);
+                }
+                NumberKind::Signed(value) => {
+                    identity.tag(3);
+                    identity.i64(value);
+                }
+                NumberKind::Float(value) => {
+                    identity.tag(5);
+                    identity.u64(value.to_bits());
+                }
+                NumberKind::Decimal(number) => {
+                    identity.tag(9);
+                    identity.string(&number.to_string());
+                }
             }
         }
         serde_json::Value::String(value) => {
@@ -593,7 +602,7 @@ mod append_request_identity_tests {
 
     /// FIG-6518: a retry changing only the terminal fact is changed content.
     #[test]
-    fn append_request_identity_distinguishes_tool_result_status() {
+    fn append_request_identity_preserves_exact_terminal_facts() {
         let operation = operation("tool-result-status");
         let hashes = [
             lash_protocol_types::ToolCallStatus::Success,
@@ -619,6 +628,23 @@ mod append_request_identity_tests {
             for other in &hashes[index + 1..] {
                 assert_ne!(hash, other, "different terminal facts must not deduplicate");
             }
+        }
+        let spellings = ["1.00000000000000000001", "1.00000000000000000002"];
+        if let (Ok(left), Ok(right)) = (
+            serde_json::from_str::<serde_json::Number>(spellings[0]),
+            serde_json::from_str::<serde_json::Number>(spellings[1]),
+        ) && left.to_string() == spellings[0]
+            && right.to_string() == spellings[1]
+        {
+            let hashes = [left, right].map(|number| {
+                let event = crate::ProtocolEvent::new("tool", serde_json::Value::Number(number));
+                let node = crate::SessionAppendNode::protocol_event(event);
+                append_request_identity_hash(&operation, None, &[node]).expect("request identity")
+            });
+            assert_ne!(
+                hashes[0], hashes[1],
+                "different exact terminal facts must not deduplicate"
+            );
         }
     }
 }

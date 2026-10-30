@@ -380,15 +380,16 @@ pub fn read(frame: Arc<[u8]>) -> Result<WorkerLibrary, PoolError> {
 pub fn result(result: Result<(), WorkerLibraryRefusal>) -> Result<PoolStarted, PoolError> {
     Ok(PoolStarted {
         result: EncodedPayload(
-            rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&result))
+            rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(&result))
                 .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?,
         ),
     })
 }
 pub(crate) fn installed(reply: PoolStarted, codec: &FrameCodec) -> Result<(), PoolError> {
     codec.check_payload(&reply.result.0)?;
-    let result: Result<(), WorkerLibraryRefusal> = rmp_serde::from_slice(&reply.result.0)
-        .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?;
+    let result: Result<(), WorkerLibraryRefusal> =
+        lash_kernel_value::json_number::decode(&reply.result.0)
+            .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?;
     result.map_err(PoolError::Library)
 }
 

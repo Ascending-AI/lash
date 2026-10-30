@@ -187,12 +187,14 @@ impl PluginPublication {
             return Ok(());
         };
         let map: PluginStateMap =
-            rmp_serde::from_slice(body).map_err(|error| StoreError::StoredDataCorrupt {
-                record_kind: "SessionCheckpoint component",
-                message: format!(
-                    "the published `{}` body carries no readable format stamps: {error}",
-                    super::PLUGIN_STATE_CHECKPOINT_COMPONENT
-                ),
+            lash_kernel_value::json_number::decode(body).map_err(|error| {
+                StoreError::StoredDataCorrupt {
+                    record_kind: "SessionCheckpoint component",
+                    message: format!(
+                        "the published `{}` body carries no readable format stamps: {error}",
+                        super::PLUGIN_STATE_CHECKPOINT_COMPONENT
+                    ),
+                }
             })?;
         for (plugin, entry) in &map.plugins {
             self.push(plugin, FormatNamespace::State, entry.format_version);

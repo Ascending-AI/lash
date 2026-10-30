@@ -21,6 +21,8 @@ testing = []
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
+rmp-serde = { workspace = true }
+serde_bytes = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }

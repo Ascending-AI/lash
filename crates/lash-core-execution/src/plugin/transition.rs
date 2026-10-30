@@ -263,7 +263,7 @@ struct PluginAdmissionCheckpoint {
 
 impl PluginNativeView {
     pub fn encode(&self, fleet: crate::FleetFormat) -> Result<Arc<[u8]>, PluginError> {
-        rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(
+        rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(
             &PluginAdmissionCheckpoint {
                 format: fleet.writer_version(lash_core_store::surface_format!(
                     PLUGIN_ADMISSION_CHECKPOINT_VERSION
@@ -282,11 +282,12 @@ impl PluginNativeView {
         struct Stamp {
             format: u32,
         }
-        let corrupt = |error: rmp_serde::decode::Error| PluginError::StoredDataCorrupt {
-            record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
-            message: error.to_string(),
-        };
-        let stamp: Stamp = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+        let corrupt =
+            |error: lash_kernel_value::json_number::DecodeError| PluginError::StoredDataCorrupt {
+                record_kind: crate::store::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT.into(),
+                message: error.to_string(),
+            };
+        let stamp: Stamp = lash_kernel_value::json_number::decode(bytes).map_err(corrupt)?;
         if !fleet
             .read_window(lash_core_store::surface_format!(
                 PLUGIN_ADMISSION_CHECKPOINT_VERSION
@@ -301,7 +302,8 @@ impl PluginNativeView {
             }
             .into());
         }
-        let record: PluginAdmissionCheckpoint = rmp_serde::from_slice(bytes).map_err(corrupt)?;
+        let record: PluginAdmissionCheckpoint =
+            lash_kernel_value::json_number::decode(bytes).map_err(corrupt)?;
         Ok(record.view)
     }
 }
@@ -428,7 +430,7 @@ impl PluginSession {
 mod nested_format_tests {
     #[test]
     fn admission_refuses_a_foreign_format_before_reading_the_view() {
-        let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(
+        let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(
             &serde_json::json!({"format": u32::MAX}),
         ))
         .expect("stamp");

@@ -172,18 +172,51 @@ impl From<serde_json::Value> for ProtocolPayload {
     }
 }
 
+fn values_equal(left: &serde_json::Value, right: &serde_json::Value) -> bool {
+    use lash_kernel_value::json_number::{NumberKind, classify};
+    use serde_json::Value;
+
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => match (classify(left), classify(right)) {
+            (NumberKind::Unsigned(left), NumberKind::Unsigned(right)) => left == right,
+            (NumberKind::Signed(left), NumberKind::Signed(right)) => left == right,
+            (NumberKind::Float(left), NumberKind::Float(right)) => left == right,
+            (NumberKind::Decimal(left), NumberKind::Decimal(right)) => {
+                left.to_string() == right.to_string()
+            }
+            _ => false,
+        },
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| values_equal(left, right))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, left)| {
+                    right
+                        .get(key)
+                        .is_some_and(|right| values_equal(left, right))
+                })
+        }
+        _ => left == right,
+    }
+}
+
 impl PartialEq for ProtocolPayload {
     fn eq(&self, other: &Self) -> bool {
         Self::same(self, other)
             || matches!((&self.0.json, &other.0.json),
                 (PayloadJson::Encoded { text: a, .. }, PayloadJson::Encoded { text: b, .. }) if a == b)
-            || self.0.json.transient() == other.0.json.transient()
+            || values_equal(&self.0.json.transient(), &other.0.json.transient())
     }
 }
 
 impl PartialEq<serde_json::Value> for ProtocolPayload {
     fn eq(&self, other: &serde_json::Value) -> bool {
-        self.0.json.transient().as_ref() == other
+        values_equal(self.0.json.transient().as_ref(), other)
     }
 }
 

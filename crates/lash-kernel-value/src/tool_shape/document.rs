@@ -335,7 +335,9 @@ impl Serialize for IdentityValue<'_> {
                 }
                 sequence.end()
             }
-            Value::Number(number) => crate::json_number::serialize_canonical(number, serializer),
+            Value::Number(number) => {
+                crate::json_number::serialize(number, serializer, crate::json_number::Format::Json)
+            }
             other => other.serialize(serializer),
         }
     }

@@ -1782,8 +1782,10 @@ PACKAGE_DEPS = {
         "normal": {
             "blake3": "//third-party/rust:p0032",
             "jsonschema": "//third-party/rust:p0184",
+            "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0307",
             "serde": "//third-party/rust:p0315",
+            "serde_bytes": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0321",
             "thiserror": "//third-party/rust:p0374"
         }

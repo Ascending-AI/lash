@@ -702,6 +702,13 @@ impl<'de> Deserialize<'de> for ToolValue {
                 Ok(ToolValue::Null)
             }
 
+            fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                Number::deserialize(deserializer).map(ToolValue::Number)
+            }
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
@@ -725,7 +732,7 @@ impl<'de> Deserialize<'de> for ToolValue {
             }
         }
 
-        deserializer.deserialize_any(ToolValueVisitor)
+        lash_kernel_value::json_number::deserialize_value(deserializer, ToolValueVisitor)
     }
 }
 
