@@ -259,6 +259,8 @@ struct Spawn {
     target: Mutex<Option<ProcessId>>,
     /// The echo bodies the migrated-tools `batch` ran.
     echoes: Arc<AtomicUsize>,
+    /// Release child answers in phases, after the preceding parent outcome.
+    child_releases: Vec<tokio::sync::watch::Sender<bool>>,
 }
 
 /// What a request reading the migrated-tools step's results misread: an
@@ -297,6 +299,9 @@ impl Spawn {
             migrated: false,
             target: Mutex::default(),
             echoes: Arc::default(),
+            child_releases: (0..width)
+                .map(|_| tokio::sync::watch::channel(false).0)
+                .collect(),
         }
     }
 
@@ -319,6 +324,45 @@ impl Spawn {
             .expect("the database is built first")
     }
 
+    fn model(&self) -> lash_core::facade_support::ProviderHandle {
+        if self.width == 1 {
+            return served::model(Arc::clone(&self.scripts));
+        }
+        let scripts = Arc::clone(&self.scripts);
+        let releases = self.child_releases.clone();
+        lash_core::testing::TestProvider::builder()
+            .kind("tool-semantics-scripted")
+            .requires_streaming(true)
+            .complete(move |request: lash_core::LlmRequest| {
+                use lash_core::llm::types::{LlmContentBlock, LlmRole};
+                let scripts = Arc::clone(&scripts);
+                let release = releases.iter().enumerate().find_map(|(index, release)| {
+                    request
+                        .messages
+                        .iter()
+                        .any(|message| {
+                            message.role == LlmRole::User
+                                && message.blocks.iter().any(|block| {
+                                    matches!(block, LlmContentBlock::Text { text, .. }
+                                if text.as_ref() == child_task(index))
+                                })
+                        })
+                        .then(|| release.subscribe())
+                });
+                async move {
+                    if let Some(mut release) = release {
+                        release
+                            .wait_for(|released| *released)
+                            .await
+                            .expect("the scenario retains its child release");
+                    }
+                    Ok(scripts.respond(&request))
+                }
+            })
+            .build()
+            .into_handle()
+    }
+
     /// The deployment's core: it serves no node of its own, the simulated
     /// nodes run what its node runs.
     fn core(&self) -> lash::LashCore {
@@ -336,10 +380,7 @@ impl Spawn {
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .execution_budgets(lash::ExecutionBudgets::recommended())
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
-                    .serve_test_llm_profile(
-                        served::model(Arc::clone(&self.scripts)),
-                        served::metadata(),
-                    )
+                    .serve_test_llm_profile(self.model(), served::metadata())
                     .plugin(delegation());
                 let builder = if self.migrated {
                     builder
@@ -574,8 +615,13 @@ impl Scenario for Spawn {
             } else {
                 Vec::new()
             };
-        *self.backend.lock_recover() =
-            Some(served::configured_backend(stores, sim::settings(), engines));
+        let mut settings = sim::settings();
+        if self.width > 1 {
+            // Keep the parallel-spawn fixture's cut census independent of
+            // which member bodies happen to finish together.
+            settings.group_commit.max_members = 1;
+        }
+        *self.backend.lock_recover() = Some(served::configured_backend(stores, settings, engines));
         database
     }
 
@@ -623,6 +669,38 @@ impl Scenario for Spawn {
                 .map(|child| child.id.clone())
                 .filter(|child| Some(child) != target.as_ref()),
         );
+        if self.width > 1 && children.len() == self.width {
+            // Registration commits with each park. Once all parks exist,
+            // release one child, then the next only after a typed parent
+            // outcome committed. Ready replies cannot merge census cuts.
+            if let Some(turn) = nodes
+                .database()
+                .turn(&session())
+                .await
+                .expect("read parent")
+            {
+                let owner = lash_durable::domain::OwnerKey::Turn(session(), turn.run);
+                let facts = nodes
+                    .database()
+                    .run_facts(&owner)
+                    .await
+                    .expect("read parent facts");
+                let completed = facts
+                    .rows
+                    .iter()
+                    .filter(|row| {
+                        matches!(
+                            row.kind,
+                            lash_durable::domain::RunFactKind::XOutcome
+                                | lash_durable::domain::RunFactKind::XFinalOutcome
+                        )
+                    })
+                    .count();
+                for release in self.child_releases.iter().take(completed + 1) {
+                    release.send_replace(true);
+                }
+            }
+        }
         matches!(
             nodes.database().actor(&parent_actor()).await,
             Ok(Some(snapshot)) if snapshot.state == ActorState::Idle

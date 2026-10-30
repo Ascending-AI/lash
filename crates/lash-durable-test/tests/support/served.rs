@@ -231,7 +231,7 @@ impl Scripts {
     /// messages follow it. The step is read off the request, not counted
     /// per call, so a step a resumed turn asks again gets that step's
     /// answer.
-    fn respond(&self, request: &LlmRequest) -> LlmResponse {
+    pub(super) fn respond(&self, request: &LlmRequest) -> LlmResponse {
         let scripts = self.scripts.lock_recover().clone();
         let mut scenario = None;
         for (index, message) in request.messages.iter().enumerate() {
