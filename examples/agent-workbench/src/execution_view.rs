@@ -212,6 +212,7 @@ fn site_label(
         .to_owned(),
         NodeKind::Action(ActionNode::Yield) => "yield".to_owned(),
         NodeKind::Action(ActionNode::Cancel { .. }) => "cancel".to_owned(),
+        NodeKind::Action(ActionNode::CancelEffect { .. }) => "cancel effect".to_owned(),
         NodeKind::Action(ActionNode::Await { .. }) => "await".to_owned(),
         NodeKind::Block(_) | NodeKind::Stmt(_) | NodeKind::Expr(_) => site.site.to_string(),
     }

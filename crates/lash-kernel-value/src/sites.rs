@@ -352,14 +352,12 @@ impl WaitCancellation {
 }
 impl crate::tokens::TokenCodec for WaitCancellation {
     fn encode(&self, out: &mut crate::tokens::TokenWriter) {
-        use crate::tokens::TokenCodec as _;
         out.sum(u32::from(self.retains_wait()), 1);
         self.wait().encode(out);
     }
     fn decode(
         input: &mut crate::tokens::TokenReader<'_>,
     ) -> Result<Self, crate::tokens::TokenError> {
-        use crate::tokens::TokenCodec as _;
         let (variant, fields) = input.sum()?;
         crate::tokens::TokenReader::expect_fields(fields, 1)?;
         match variant {
