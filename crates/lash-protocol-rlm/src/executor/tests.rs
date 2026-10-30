@@ -202,6 +202,43 @@ await control.finish(winner);"#,
         "{refusal}"
     );
     assert_eq!(finish_of(&response), serde_json::json!("fast"));
+
+    // The same cancellation routes through the standard turn-step consumer.
+    // Call-local requests must leave it running; a turn stop must still stop it.
+    for (origin, stops) in [
+        (None, true),
+        (Some(lash_core::CancelOrigin::TurnStopped), true),
+        (Some(lash_core::CancelOrigin::ParentEnded), true),
+        (Some(lash_core::CancelOrigin::StartFailed), true),
+        (Some(lash_core::CancelOrigin::RunClosing), false),
+        (Some(lash_core::CancelOrigin::ModelRequested), false),
+        (Some(lash_core::CancelOrigin::OperatorRequested), false),
+    ] {
+        let mut cancellation = lash_core::ToolCancellation::runtime("selected call cancelled");
+        cancellation.origin = origin;
+        let end = lash_core::step_end_from_tool_output(
+            0,
+            &lash_core::ToolCallId::fixture("cancel-scope"),
+            "tools.selected",
+            &lash_core::ToolCallOutput::cancelled(cancellation),
+        );
+        if stops {
+            assert!(
+                matches!(
+                    end,
+                    lash_protocol_types::StepEnd::Stop(
+                        lash_protocol_types::TurnStop::Cancelled { .. }
+                    )
+                ),
+                "{origin:?}: a turn-stopping cancellation must still stop"
+            );
+        } else {
+            assert!(
+                matches!(end, lash_protocol_types::StepEnd::Continue),
+                "{origin:?}: a call-local cancellation must leave the turn running"
+            );
+        }
+    }
 }
 
 /// A finished cell's carry names pages its run committed when it parked

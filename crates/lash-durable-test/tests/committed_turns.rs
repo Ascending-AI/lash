@@ -1347,10 +1347,12 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
             .read_turn_tool_calls(&turns[0].turn_id)
             .await
             .unwrap();
-        let reads: Vec<_> = calls
-            .iter()
-            .filter(|call| call.tool == "reference-document-read")
-            .collect();
+        let reads: Vec<_> = calls.iter().filter(|call| call.read.is_some()).collect();
+        let expected_tool = if mode == "standard" {
+            "reference-document-read"
+        } else {
+            "tools.lookup"
+        };
         let expected_pages = if mode == "standard" {
             vec!["document-1"]
         } else {
@@ -1359,9 +1361,32 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
         assert_eq!(
             reads.len(),
             expected_pages.len(),
-            "every actual Read is retained, and the untaken branch emits none"
+            "every actual Read is retained, and the untaken branch emits none: {calls:#?}"
         );
         for (call, page) in reads.iter().zip(&expected_pages) {
+            assert_eq!(call.tool, expected_tool);
+            let read = call.read.as_ref().unwrap();
+            assert_eq!(
+                read.provider,
+                lash_vocabulary::providers::ToolProviderHandle::new(
+                    lash_vocabulary::claims::RegistryKind::Session,
+                    "reference-host",
+                    lash::tool_provider_key!("tools"),
+                )
+            );
+            assert!(matches!(
+                (&read.caller, mode),
+                (lash_core::ToolReadCaller::ModelRound { .. }, "standard")
+                    | (lash_core::ToolReadCaller::CodeBlock { .. }, "rlm")
+            ));
+            assert_eq!(
+                call.execution,
+                if mode == "standard" {
+                    lash_core::ToolCallExecution::Read
+                } else {
+                    lash_core::ToolCallExecution::Recorded
+                }
+            );
             assert_eq!(call.args, serde_json::json!({"document":{"id":page}}));
             if *page == "archive" {
                 let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
@@ -1402,7 +1427,7 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
             assert!(
                 live_rows
                     .iter()
-                    .any(|row| row.starts_with("read reference-document-read "))
+                    .any(|row| row.starts_with("read tools.lookup "))
             );
         }
         drop(feeds);
