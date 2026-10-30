@@ -14,7 +14,6 @@ const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } final
 const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = flat.add(xs[0], call pause(xs[1])) return [call pair(first, xs[2]), xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
-const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
@@ -450,7 +449,6 @@ fn direct_call_entry_agrees() {
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         SOURCE_MEMBER,
-        SOURCE_BAD_MEMBER,
         SOURCE_CELL,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
@@ -680,7 +678,6 @@ fn direct_call_entry_agrees() {
         if [
             READ_ADD_WRITE,
             SOURCE_MEMBER,
-            SOURCE_BAD_MEMBER,
             SOURCE_CELL,
             SOURCE_BAD_MEMBER,
             SOURCE_CONSTRUCTION,
@@ -754,7 +751,6 @@ fn direct_call_entry_agrees() {
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         SOURCE_MEMBER,
-        SOURCE_BAD_MEMBER,
         SOURCE_CELL,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
