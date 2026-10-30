@@ -9,6 +9,9 @@ const SUPERSEDED_RETURN: &str = "let cleanup = fn() { try { return [7] } finally
 const NESTED_RETURN: &str = "let cleanup = fn() { try { return [7] } finally { try { return [8] } finally { print \"nested cleanup\" return [9] } } } return apply cleanup()";
 
 const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = call pair(xs[0], xs[1]) let second = call pause(first) return [second, xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
+// K-EVAL-008: nested calls retain a pre-call operand and pending return
+// while reusing a wide caller's dead tail, then restore it for later writes.
+const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = flat.add(xs[0], call pause(xs[1])) return [call pair(first, xs[2]), xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const READ_ADD_MISS: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"missing\")) return total } return apply run(map{\"a\": 255})";
@@ -299,7 +302,12 @@ fn direct_call_entry_agrees() {
         "main { let reader = fn(obj) { let value = 0 set value = invoke helper.element_map_any(obj, \"a\") return value } return apply reader(map{\"a\":255}) }",
         CheckpointProjection::Close,
     );
-    for body in [SAVED_MEMBER, SUPERSEDED_RETURN, NESTED_RETURN] {
+    for body in [
+        SAVED_MEMBER,
+        SUPERSEDED_RETURN,
+        NESTED_RETURN,
+        NESTED_CALL_STORAGE,
+    ] {
         placement_witness(&format!("{definitions}main {{ {body} }}"), body);
     }
     let mut comparisons = 0;
@@ -309,6 +317,7 @@ fn direct_call_entry_agrees() {
         SUPERSEDED_RETURN,
         NESTED_RETURN,
         ROOT_CALL_STORAGE,
+        NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         READ_ADD_MISS,
         READ_ADD_FAIL,
@@ -405,6 +414,7 @@ fn direct_call_entry_agrees() {
             || body == SUPERSEDED_RETURN
             || body == NESTED_RETURN
             || body == ROOT_CALL_STORAGE
+            || body == NESTED_CALL_STORAGE
             || body == READ_ADD_WRITE
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
@@ -454,6 +464,7 @@ fn direct_call_entry_agrees() {
             FORMATTED_APPEND,
             FORMATTED_MISS,
             ROOT_CALL_STORAGE,
+            NESTED_CALL_STORAGE,
         ]
         .contains(&body)
         {
@@ -495,7 +506,14 @@ fn direct_call_entry_agrees() {
                 "the checkpoint must exercise an actual source memory refusal"
             );
         }
-        if [READ_ADD_WRITE, FORMATTED_APPEND, ROOT_CALL_STORAGE].contains(&body) {
+        if [
+            READ_ADD_WRITE,
+            FORMATTED_APPEND,
+            ROOT_CALL_STORAGE,
+            NESTED_CALL_STORAGE,
+        ]
+        .contains(&body)
+        {
             for limit in 0..charged {
                 let limits = Bounds {
                     charge_limit: limit,
@@ -555,6 +573,7 @@ fn direct_call_entry_agrees() {
         SUPERSEDED_RETURN,
         NESTED_RETURN,
         ROOT_CALL_STORAGE,
+        NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
         READ_ADD_MISS,
         READ_ADD_FAIL,
@@ -589,6 +608,7 @@ fn direct_call_entry_agrees() {
                 || body == SUPERSEDED_RETURN
                 || body == NESTED_RETURN
                 || body == ROOT_CALL_STORAGE
+                || body == NESTED_CALL_STORAGE
                 || body == READ_ADD_WRITE
                 || body == READ_ADD_MISS
                 || body == READ_ADD_FAIL
@@ -750,6 +770,23 @@ fn placement_witness(source: &str, body: &str) {
                 .map(|frame| (frame.code, frame.packet))
                 .collect::<Vec<_>>()
         );
+    } else if body == NESTED_CALL_STORAGE {
+        let reused = placements
+            .iter()
+            .find(|stack| {
+                stack.iter().any(|frame| {
+                    frame.waiting
+                        && frame.nested
+                        && frame.operands.len() < frame.source_operands
+                        && frame
+                            .departures
+                            .iter()
+                            .any(|held| held.value == Some(Datum::List(vec![int(7)])))
+                        && frame.retained.iter().any(|held| held.value == Some(int(7)))
+                })
+            })
+            .expect("the nested-call case must reuse its dead tail with both source owners live");
+        println!("nested call reuses its operand tail: {reused:?}");
     } else {
         let simultaneous = placements.iter().find(|stack| {
             stack.iter().any(|frame| {

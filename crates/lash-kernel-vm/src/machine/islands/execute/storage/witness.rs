@@ -16,6 +16,8 @@ pub(crate) struct FramePlacement {
     pub(crate) packet: usize,
     pub(crate) bindings: Range<usize>,
     pub(crate) operands: Range<usize>,
+    pub(crate) source_operands: usize,
+    pub(crate) nested: bool,
     pub(crate) pending: Range<usize>,
     pub(crate) waiting: bool,
     pub(crate) retained: Vec<Placed>,
@@ -66,6 +68,10 @@ impl Slab {
                         packet: frame.pc,
                         bindings: frame.bindings.clone(),
                         operands: frame.operands.clone(),
+                        source_operands: frame.callee.compiled.registers,
+                        nested: frame
+                            .continuation
+                            .is_some_and(|call| call.site.act.is_some()),
                         pending: frame.pending.clone(),
                         waiting: frame.continuation.is_some(),
                         retained: live

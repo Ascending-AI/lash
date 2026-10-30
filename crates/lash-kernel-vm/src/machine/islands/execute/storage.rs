@@ -166,8 +166,6 @@ impl Slab {
             self.calls += 1;
         }
         if let Some(continuation) = caller.continuation
-            && continuation.site.root.is_some()
-            && continuation.site.act.is_none()
             && caller.callee.compiled.restarts.is_empty()
         {
             let retained = std::iter::once(continuation.site.reg)
