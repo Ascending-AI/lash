@@ -59,6 +59,20 @@ fn every_item_and_filter_round_trips_as_tagged_json() {
                 },
             },
         },
+        ToolLiveItem::Emission {
+            cursor: cursor(6),
+            emission: ToolLiveEmission {
+                address: address(),
+                id: id(6),
+                payload: ToolLivePayload::Fact {
+                    fact: ToolLiveFact::Progress {
+                        progress: 0.5,
+                        total: None,
+                        message: None,
+                    },
+                },
+            },
+        },
         ToolLiveItem::OwnerOmitted {
             cursor: cursor(3),
             omission: ToolLiveOwnerOmission {
@@ -79,10 +93,53 @@ fn every_item_and_filter_round_trips_as_tagged_json() {
             reason: ToolLiveGapReason::Trimmed,
         },
     ];
-    let tags = ["emission", "emission", "owner_omitted", "fault", "gap"];
+    let tags = [
+        "emission",
+        "emission",
+        "emission",
+        "owner_omitted",
+        "fault",
+        "gap",
+    ];
     for (item, tag) in items.into_iter().zip(tags) {
         let wire = serde_json::to_value(&item).unwrap();
         assert_eq!(wire["kind"], tag);
+        let text = serde_json::to_vec(&item).unwrap();
+        assert_eq!(serde_json::from_slice::<ToolLiveItem>(&text).unwrap(), item);
+        if let ToolLiveItem::Emission { emission, .. } = &item {
+            let record = ToolLiveRecord::Call(emission.clone());
+            let text = serde_json::to_string(&record).unwrap();
+            assert_eq!(
+                serde_json::from_str::<ToolLiveRecord>(&text).unwrap(),
+                record
+            );
+            let exponent = text.replace("\"progress\":0.5", "\"progress\":5e-1");
+            assert_eq!(
+                serde_json::from_str::<ToolLiveRecord>(&exponent).unwrap(),
+                record
+            );
+            if matches!(
+                &emission.payload,
+                ToolLivePayload::Fact {
+                    fact: ToolLiveFact::Progress { total: None, .. }
+                }
+            ) {
+                let mut wire: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert!(
+                    wire.pointer_mut("/payload/fact")
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("total")
+                        .is_some()
+                );
+                let text = serde_json::to_vec(&wire).unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<ToolLiveRecord>(&text).unwrap(),
+                    record
+                );
+            }
+        }
         assert_eq!(serde_json::from_value::<ToolLiveItem>(wire).unwrap(), item);
     }
     for (filter, tag) in [

@@ -47,7 +47,12 @@ pub enum ToolLiveLogLevel {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToolLiveFact {
     Progress {
+        #[serde(deserialize_with = "lash_kernel_value::json_number::deserialize_f64")]
         progress: f64,
+        #[serde(
+            default,
+            deserialize_with = "lash_kernel_value::json_number::deserialize_optional_f64"
+        )]
         total: Option<f64>,
         message: Option<String>,
     },

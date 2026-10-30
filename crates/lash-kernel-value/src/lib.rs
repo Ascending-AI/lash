@@ -4,6 +4,7 @@ pub mod content_ids;
 pub mod data_limits;
 pub mod entry_schema;
 pub mod identity;
+pub mod json_number;
 pub mod json_schema;
 /// Caller-owned lookup state for sharing immutable schema preparations.
 pub mod schema_admissions {

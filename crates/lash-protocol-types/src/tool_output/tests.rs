@@ -300,6 +300,6 @@ fn durable_tool_carriers_preserve_the_decoded_wire_shape() {
         serde_json::json!({"status": "cancelled", "payload": cancellation}),
     );
     round_trip::<ToolCallRecord>(
-        serde_json::json!({"call_id": format!("tc_{}", "a".repeat(64)), "tool": "tool", "args": {}, "output": output}),
+        serde_json::json!({"call_id": format!("tc_{}", "a".repeat(64)), "tool": "tool", "args": {}, "output": output, "execution":"recorded", "read":null}),
     );
 }
