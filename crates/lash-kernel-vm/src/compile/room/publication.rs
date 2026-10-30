@@ -495,14 +495,12 @@ impl EventContext<'_> {
                 writes.insert(owner);
             }
         }
-        if event.point.phase == Phase::Leave {
+        if event.point.phase == Phase::Leave && event.point.site == source.site {
             reads.insert(logical::Owner::Frame {
                 task: occurrence.task,
                 invocation: occurrence.invocation,
             });
-            if event.point.site == source.site {
-                writes.insert(logical::Owner::Incoming(occurrence.task));
-            }
+            writes.insert(logical::Owner::Incoming(occurrence.task));
         }
         if event
             .inputs
