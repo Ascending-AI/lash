@@ -5,11 +5,9 @@ use lash_kernel_doc::TaskId;
 use lash_kernel_state::kernel_internals::logical::{Owner as Root, Slot};
 use std::collections::BTreeSet;
 
-type Resolution = (
-    BTreeMap<Owner, Site>,
-    BTreeMap<Owner, Owner>,
-    BTreeMap<Owner, (u32, bool)>,
-);
+type Scopes = BTreeMap<Owner, Site>;
+type Aliases = BTreeMap<Owner, Owner>;
+type Resolution = (Scopes, Aliases, BTreeMap<Owner, (u32, bool)>);
 pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resolution, Refused> {
     let binding_slots: BTreeMap<_, _> = source
         .bindings
@@ -27,10 +25,7 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
     let (scopes, aliases) = resolve(source, owners)?;
     Ok((scopes, aliases, binding_slots))
 }
-fn resolve(
-    source: &Description,
-    owners: &BTreeSet<Owner>,
-) -> Result<(BTreeMap<Owner, Site>, BTreeMap<Owner, Owner>), Refused> {
+fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Aliases), Refused> {
     let mut scopes = BTreeMap::new();
     for owner in owners {
         if let Owner::Binding { declared, .. } = owner {
@@ -160,7 +155,8 @@ pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Na
         .into_iter()
         .filter_map(|(owner, binding)| match (owner, binding) {
             (Owner::Visible { at, name }, Owner::Binding { declared, .. })
-                if source.shared.get(&(declared.clone(), name.clone())) == Some(&true) =>
+                if source.shared.get(&(declared.clone(), name.clone())) == Some(&true)
+                    && source.persistent.get(&declared) != Some(&name) =>
             {
                 Some((at, name))
             }

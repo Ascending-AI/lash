@@ -241,7 +241,10 @@ mod laws {
     /// a value whose register mirror was cleared, and never storage ghosts.
     #[test]
     fn source_normalization_ignores_unwritten_and_consumed_register_mirrors() {
-        let mut embedder = Embedder::new("main { return null }");
+        let mut embedder = Embedder::new(
+            "import 3 operation host.pair(a: Any, b: Any) -> Any \
+             main { let out = perform 3(true, \"abcd\") as Any return null }",
+        );
         let machine = &mut embedder.machine;
         let baseline = normalized_operands(machine);
         machine
