@@ -50,6 +50,9 @@ pub enum Retry {
 /// How a native call ends without a value.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum NativeError {
+    /// Host storage exhaustion remains an infrastructure failure, not a guest bound.
+    #[error(transparent)]
+    Host(#[from] crate::heap::HeapFault),
     /// The function raises this error value, built in its nursery.
     #[error("the native raised {0:?}")]
     Raised(Value),

@@ -754,6 +754,51 @@ impl Objects {
         }
     }
 
+    /// Reserves storage for a complete nursery batch without installing a body.
+    /// Every target must still be reserved, distinct and in installation order.
+    pub fn prepare_install(
+        &mut self,
+        handles: impl ExactSizeIterator<Item = ArenaHandle>,
+    ) -> Result<(), crate::heap::HeapFault> {
+        use crate::heap::{HeapFault, HostResource};
+        let exhausted = || HeapFault::Exhausted {
+            resource: HostResource::StagingBytes,
+        };
+        let mut seen = std::collections::HashSet::new();
+        seen.try_reserve(handles.len()).map_err(|_| exhausted())?;
+        let free = self.free.borrow();
+        let mut end = self.slots.len();
+        for handle in handles {
+            let index = handle.index as usize;
+            let valid = if index < self.slots.len() {
+                self.slots[index].generation == handle.generation
+                    && matches!(self.slots[index].body, Body::Free)
+                    && !free.contains(&handle.index)
+            } else {
+                let valid = index == end
+                    && handle.generation == 0
+                    && index < self.slots.len() + self.reserved.get() as usize;
+                end += 1;
+                valid
+            };
+            if !valid || !seen.insert(handle.index) {
+                return Err(HeapFault::Malformed(
+                    "a batch target is not a distinct reserved slot".into(),
+                ));
+            }
+        }
+        self.slots
+            .try_reserve(end - self.slots.len())
+            .map_err(|_| exhausted())
+    }
+
+    /// Returns an abandoned batch's reserved slots in reverse reservation order.
+    pub fn discard_install(&mut self, handles: impl DoubleEndedIterator<Item = ArenaHandle>) {
+        for handle in handles.rev() {
+            self.unreserve(handle);
+        }
+    }
+
     /// Writes `body` to the slot reserved as `handle`, in reservation
     /// order.
     pub fn install(&mut self, handle: ArenaHandle, body: Body) {

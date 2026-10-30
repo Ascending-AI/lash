@@ -190,7 +190,10 @@ impl Cx<'_> {
         match self.arena.install(new) {
             Ok(()) => Some(()),
             Err(error) => {
-                self.fault = Some(HeapFault::Malformed(error.to_string()));
+                self.fault = Some(match error {
+                    NativeError::Host(error) => error,
+                    error => HeapFault::Malformed(error.to_string()),
+                });
                 None
             }
         }
@@ -233,7 +236,10 @@ impl Cx<'_> {
         match made {
             Ok(value) => Some(value),
             Err(error) => {
-                self.fault = Some(HeapFault::Malformed(error.to_string()));
+                self.fault = Some(match error {
+                    NativeError::Host(error) => error,
+                    error => HeapFault::Malformed(error.to_string()),
+                });
                 None
             }
         }

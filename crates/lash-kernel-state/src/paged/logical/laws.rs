@@ -1148,6 +1148,82 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
 }
 
 fn checked_program_and_warm_balance() {
+    // A native batch rejected by a later table key must install no earlier body.
+    {
+        use lash_kernel_doc::{NewObject, Nursery, heap::LogicalBytes};
+        let mut arena = crate::arena::Arena::new();
+        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
+        let first = nursery.allocate(NewObject::List(vec![Value::Int(7)]));
+        nursery.allocate(NewObject::Map(vec![(Value::Absent, first)]));
+        let new = nursery.into_new();
+        let before = (arena.held(), arena.allocations(), arena.next_ordinal());
+        assert!(arena.install(new).is_err());
+        assert!(
+            arena.body(first.handle().unwrap()).is_err(),
+            "a rejected batch installed its first body"
+        );
+        assert_eq!(
+            (arena.held(), arena.allocations(), arena.next_ordinal()),
+            before
+        );
+        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
+        let retry = nursery.allocate(NewObject::List(vec![]));
+        assert!(retry.same(&first), "rejection returns the reserved slots");
+        let mut staged = arena.prepare_install(nursery.into_new()).unwrap();
+        let identity = EntityId {
+            family: FamilyId::PRIMARY,
+            ordinal: 0,
+        };
+        staged
+            .bind_entity(retry.handle().unwrap(), identity)
+            .unwrap();
+        drop(staged);
+        assert_eq!(
+            (arena.held(), arena.allocations(), arena.next_ordinal()),
+            before
+        );
+        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
+        let list = nursery.allocate(NewObject::List(vec![]));
+        assert!(list.same(&retry), "abandonment returns the reserved slots");
+        let text = nursery.text("a canonical long key with more than twenty three bytes");
+        let map = nursery.allocate(NewObject::Map(vec![
+            (text, Value::Int(1)),
+            (text, Value::Int(2)),
+        ]));
+        let mut new = nursery.into_new();
+        new[0].1 = NewObject::List(vec![text, list]);
+        arena.prepare_install(new).unwrap().publish();
+        assert!(
+            arena
+                .table_get(map.handle().unwrap(), &text)
+                .unwrap()
+                .unwrap()
+                .same(&Value::Int(2))
+        );
+        let members = arena.sequence(list.handle().unwrap()).unwrap();
+        assert_eq!(members.len(), 2);
+        assert!(members[0].same(&text) && members[1].same(&list));
+        assert_eq!(arena.allocations(), 2);
+        let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
+        nursery.allocate(NewObject::List(vec![list]));
+        let staged = arena.prepare_install(nursery.into_new()).unwrap();
+        let (mut registration, batch) = staged.into_parts();
+        assert!(batch.is_current(registration.arena()));
+        registration
+            .arena()
+            .list_set(list.handle().unwrap(), 0, Value::Null)
+            .unwrap();
+        assert!(
+            !batch.is_current(registration.arena()),
+            "changed member facts expire prepared storage"
+        );
+        drop(registration);
+        let mut next = arena.registration().unwrap();
+        assert!(
+            !batch.is_current(next.arena()),
+            "another registration cannot reuse abandoned preparation"
+        );
+    }
     use crate::arena::ProxyKind;
     use crate::paged::{EditEpoch, ObjectInit, SemanticHeap};
     use lash_kernel_doc::{Value, heap::PageValue};
@@ -1283,8 +1359,21 @@ fn checked_program_and_warm_balance() {
         }])
     };
     let expected = make().evaluate(&ledger, &arena).unwrap();
+    let mut nursery = lash_kernel_doc::Nursery::new(
+        arena.objects(),
+        lash_kernel_doc::heap::LogicalBytes(u64::MAX),
+    );
+    let refused_value = nursery.allocate(lash_kernel_doc::NewObject::List(vec![
+        Value::Int(1),
+        Value::Int(2),
+    ]));
+    let mut storage = arena.prepare_install(nursery.into_new()).unwrap();
+    storage
+        .bind_entity(refused_value.handle().unwrap(), entity)
+        .unwrap();
+    let (registration, _batch) = storage.into_parts();
     let prepared = expected
-        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .prepare(&ledger, registration, &heap, make())
         .unwrap();
     assert_eq!(prepared.balance().unwrap().entity_local_bytes, 66);
     assert!(
@@ -1296,15 +1385,45 @@ fn checked_program_and_warm_balance() {
         entity.ordinal,
         "a declined prefix consumes no identity"
     );
+    assert!(
+        arena.body(refused_value.handle().unwrap()).is_err(),
+        "refused admission installs no prepared body"
+    );
+    assert_eq!(arena.allocations(), 0);
     let expected = make().evaluate(&ledger, &arena).unwrap();
+    let mut nursery = lash_kernel_doc::Nursery::new(
+        arena.objects(),
+        lash_kernel_doc::heap::LogicalBytes(u64::MAX),
+    );
+    let value = nursery.allocate(lash_kernel_doc::NewObject::List(vec![
+        Value::Int(1),
+        Value::Int(2),
+    ]));
+    assert!(
+        value.same(&refused_value),
+        "refused admission returns the prepared slot"
+    );
+    let new = nursery.into_new();
+    let mut storage = arena.prepare_install(new).unwrap();
+    storage
+        .bind_entity(value.handle().unwrap(), entity)
+        .unwrap();
+    let (mut registration, batch) = storage.into_parts();
+    assert!(registration.arena().body(value.handle().unwrap()).is_err());
     let prepared = expected
-        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .prepare(&ledger, registration, &heap, make())
         .unwrap();
     let materializations = prepared
         .admit(98)
         .unwrap()
-        .publish(&mut ledger, |_, _| {})
+        .publish(&mut ledger, |arena, edits| {
+            assert!(edits.is_empty());
+            batch.publish(arena);
+        })
         .unwrap();
+    assert_eq!(arena.logical_handle(entity), value.handle());
+    assert_eq!(arena.logical_local(&value).unwrap(), 16);
+    assert_eq!(arena.sequence(value.handle().unwrap()).unwrap().len(), 2);
     assert_eq!(ledger.balance().unwrap().entity_local_bytes, 66);
     materializations.publish(&mut ledger, |_| {}).unwrap();
 }

@@ -1,7 +1,7 @@
 //! Ephemeral immutable reach facts and flat charge-size facts. Charge
 //! summaries retain a wider exact accumulator: a saturated answer can later
 //! shrink, so subtracting from a saturated u64 would undercharge.
-use super::{Arena, Facts};
+use super::Arena;
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::{NativeError, Value};
 
@@ -17,7 +17,7 @@ pub struct Summary {
     pub has_edges: bool,
 }
 
-pub(super) fn value_summary(facts: &[Facts], value: &Value) -> Summary {
+pub(super) fn value_summary(facts: &(impl super::FactTable + ?Sized), value: &Value) -> Summary {
     match value {
         Value::Tuple(handle) | Value::Error(handle) => facts
             .get(handle.index() as usize)
@@ -41,7 +41,7 @@ pub(super) fn value_summary(facts: &[Facts], value: &Value) -> Summary {
 }
 
 /// The summary of an immutable composite of `members`.
-pub(super) fn composite(facts: &[Facts], members: &[Value]) -> Summary {
+pub(super) fn composite(facts: &(impl super::FactTable + ?Sized), members: &[Value]) -> Summary {
     let mut summary = Summary {
         depth: 1,
         ..Summary::default()
@@ -135,55 +135,8 @@ impl Arena {
         ))
     }
 
-    /// Only leaf values qualify. An immutable outer composite does not prove
-    /// its descendants immutable, and shared entities must be counted once.
-    fn flat_member_size(&self, value: &Value) -> Option<MemberSize> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        crate::perf_witness::record(|work| work.flat_size_members += 1);
-        let extent = match value {
-            Value::Int(word) => u64::from(*word != 0),
-            Value::Text(text) => text.as_bytes().len() as u64,
-            Value::BigInt(handle) => match self.body(*handle).ok()? {
-                Body::BigInt(integer) => integer.bits().div_ceil(64),
-                _ => return None,
-            },
-            Value::LongText(handle) => match self.body(*handle).ok()? {
-                Body::LongText(text) => text.summary.utf8_bytes,
-                _ => return None,
-            },
-            Value::Bytes(handle) => match self.body(*handle).ok()? {
-                Body::Bytes(bytes) => bytes.len,
-                _ => return None,
-            },
-            Value::Tuple(_)
-            | Value::List(_)
-            | Value::Map(_)
-            | Value::Set(_)
-            | Value::Record(_)
-            | Value::Error(_) => return Some(MemberSize::Nested),
-            _ => 0,
-        };
-        Some(MemberSize::Leaf(extent.saturating_add(1)))
-    }
-
     pub(super) fn summarize_flat(&self, body: &Body) -> Option<FlatSize> {
-        let (values, skip, step) = match body {
-            Body::List(sequence) | Body::Tuple(sequence) => (sequence.chunks.values()?, 0, 1),
-            Body::Map(table) => (table.chunks.values()?, 0, 1),
-            Body::Set(table) => (table.chunks.values()?, 0, 2),
-            Body::Record(table) => (table.chunks.values()?, 1, 2),
-            _ => return None,
-        };
-        // A resident slice has at most isize::MAX / size_of::<Value>()
-        // members, each at most u64::MAX: their sum fits u128 exactly.
-        values
-            .iter()
-            .skip(skip)
-            .step_by(step)
-            .try_fold(FlatSize::new(0, 0), |sum, value| {
-                let (size, nested) = self.flat_member_size(value)?.parts();
-                Some(FlatSize::new(sum.get() + size, sum.nested + nested))
-            })
+        summarize_flat(&self.objects, body)
     }
 
     pub(super) fn rebuild_flat(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
@@ -223,10 +176,10 @@ impl Arena {
             return;
         };
         let old = old.map_or(Some(MemberSize::Leaf(0)), |value| {
-            self.flat_member_size(value)
+            flat_member_size(&self.objects, value)
         });
         let new = new.map_or(Some(MemberSize::Leaf(0)), |value| {
-            self.flat_member_size(value)
+            flat_member_size(&self.objects, value)
         });
         self.facts[handle.index() as usize].flat = old.zip(new).map(|(old, new)| {
             let (old_size, old_nested) = old.parts();
@@ -250,4 +203,58 @@ pub(super) fn is_mutable(body: &Body) -> bool {
             | Body::Closure { .. }
             | Body::Cell(_)
     )
+}
+
+/// Only leaf values qualify. An immutable outer composite does not prove
+/// its descendants immutable, and shared entities must be counted once.
+fn flat_member_size(objects: &(impl super::Bodies + ?Sized), value: &Value) -> Option<MemberSize> {
+    #[cfg(any(test, feature = "perf-witness"))]
+    crate::perf_witness::record(|work| work.flat_size_members += 1);
+    let extent = match value {
+        Value::Int(word) => u64::from(*word != 0),
+        Value::Text(text) => text.as_bytes().len() as u64,
+        Value::BigInt(handle) => match objects.get(*handle)? {
+            Body::BigInt(integer) => integer.bits().div_ceil(64),
+            _ => return None,
+        },
+        Value::LongText(handle) => match objects.get(*handle)? {
+            Body::LongText(text) => text.summary.utf8_bytes,
+            _ => return None,
+        },
+        Value::Bytes(handle) => match objects.get(*handle)? {
+            Body::Bytes(bytes) => bytes.len,
+            _ => return None,
+        },
+        Value::Tuple(_)
+        | Value::List(_)
+        | Value::Map(_)
+        | Value::Set(_)
+        | Value::Record(_)
+        | Value::Error(_) => return Some(MemberSize::Nested),
+        _ => 0,
+    };
+    Some(MemberSize::Leaf(extent.saturating_add(1)))
+}
+
+pub(super) fn summarize_flat(
+    objects: &(impl super::Bodies + ?Sized),
+    body: &Body,
+) -> Option<FlatSize> {
+    let (values, skip, step) = match body {
+        Body::List(sequence) | Body::Tuple(sequence) => (sequence.chunks.values()?, 0, 1),
+        Body::Map(table) => (table.chunks.values()?, 0, 1),
+        Body::Set(table) => (table.chunks.values()?, 0, 2),
+        Body::Record(table) => (table.chunks.values()?, 1, 2),
+        _ => return None,
+    };
+    // A resident slice has at most isize::MAX / size_of::<Value>()
+    // members, each at most u64::MAX: their sum fits u128 exactly.
+    values
+        .iter()
+        .skip(skip)
+        .step_by(step)
+        .try_fold(FlatSize::new(0, 0), |sum, value| {
+            let (size, nested) = flat_member_size(objects, value)?.parts();
+            Some(FlatSize::new(sum.get() + size, sum.nested + nested))
+        })
 }

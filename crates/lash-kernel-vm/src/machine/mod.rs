@@ -183,6 +183,7 @@ impl From<lash_kernel_doc::NativeError> for Interrupt {
     fn from(error: lash_kernel_doc::NativeError) -> Self {
         use lash_kernel_doc::NativeError;
         match error {
+            NativeError::Host(error) => Self::from(error),
             NativeError::Raised(error) => Self::raised(error),
             NativeError::Refused { kind, message } => Self::refused(kind, message),
             NativeError::Guard(error) => Self::from(Halt::Fault(format!(

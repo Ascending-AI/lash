@@ -43,6 +43,36 @@
 //! reaching zero since the last one. A projection marks nothing: it walks
 //! the new objects its roots reach and the dirty ones only.
 
+pub(super) trait Bodies {
+    fn get(&self, handle: ArenaHandle) -> Option<&Body>;
+}
+impl Bodies for Objects {
+    fn get(&self, handle: ArenaHandle) -> Option<&Body> {
+        self.get(handle)
+    }
+}
+pub(super) trait FactTable {
+    fn get(&self, index: usize) -> Option<&Facts>;
+}
+impl FactTable for [Facts] {
+    fn get(&self, index: usize) -> Option<&Facts> {
+        self.get(index)
+    }
+}
+impl FactTable for Vec<Facts> {
+    fn get(&self, index: usize) -> Option<&Facts> {
+        self.as_slice().get(index)
+    }
+}
+impl<const N: usize> FactTable for [Facts; N] {
+    fn get(&self, index: usize) -> Option<&Facts> {
+        self.as_slice().get(index)
+    }
+}
+
+mod batch;
+pub use batch::{PreparedBatch, PreparedInstallation};
+
 mod bench;
 mod chunks;
 mod keys;
@@ -226,6 +256,7 @@ pub struct Chilled {
 pub struct Arena {
     identity: std::rc::Rc<()>,
     registering: bool,
+    registration_epoch: u64,
     watching_members: bool,
     member_events: Vec<MemberEvent>,
     objects: Objects,
@@ -805,33 +836,10 @@ impl Arena {
         ))
     }
 
-    /// Installs what a native call built, in reservation order. None takes
-    /// a durable id: a projection that saves one gives it.
+    /// Prepares and atomically installs what a native call built, in reservation
+    /// order. None takes a durable id until the ledger or projection gives it.
     pub fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
-        let mut built = Vec::with_capacity(new.len());
-        for (handle, object) in new {
-            let (body, facts) = self.new_body(object)?;
-            self.install_one(handle, body, facts);
-            built.push(handle);
-        }
-        // Forward references in one native batch are now installed too.
-        for handle in &built {
-            self.rebuild_flat(*handle)?;
-        }
-        // Members are counted once the whole batch is placed: an object
-        // may hold one built after it in the same call.
-        for handle in built {
-            if let Some(body) = self.objects.get(handle) {
-                let facts = &mut self.facts;
-                each_member(body, &mut |value| {
-                    if let Some(handle) = value.handle()
-                        && let Some(facts) = facts.get_mut(handle.index() as usize)
-                    {
-                        facts.count = facts.count.saturating_add(1);
-                    }
-                });
-            }
-        }
+        self.prepare_install(new)?.publish();
         Ok(())
     }
 
@@ -957,12 +965,6 @@ impl Arena {
             }
         };
         Ok((body, self.created(index)))
-    }
-
-    fn install_one(&mut self, handle: ArenaHandle, body: Body, facts: Facts) {
-        self.resident = self.resident.saturating_add(body_values(&body));
-        self.objects.install(handle, body);
-        self.place(handle, facts);
     }
 
     /// Replaces a proxy's cold body with the contents the machine decoded,

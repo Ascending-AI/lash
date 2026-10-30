@@ -265,7 +265,10 @@ impl KernelMachine {
         self.arena
             .borrow_mut()
             .install(new)
-            .map_err(|error| fault(&error.to_string()))
+            .map_err(|error| match error {
+                NativeError::Host(error) => error.into(),
+                error => fault(&error.to_string()),
+            })
     }
 
     /// Allocates `object` outside a native call, counted.
@@ -1035,6 +1038,7 @@ impl KernelMachine {
                         )
                         .into());
                     }
+                    Err(NativeError::Host(error)) => return Err(error.into()),
                     Err(NativeError::Malformed(problem)) => return Err(fault(problem).into()),
                     Err(NativeError::Retry(_)) => {
                         return Err(fault("a native's retry left its call").into());

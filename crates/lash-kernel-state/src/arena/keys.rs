@@ -34,8 +34,8 @@ pub(super) struct KeyCache {
 impl KeyCache {
     fn with<R>(
         &self,
-        objects: &Objects,
-        facts: &[Facts],
+        objects: &(impl super::Bodies + ?Sized),
+        facts: &(impl super::FactTable + ?Sized),
         value: &Value,
         read: impl FnOnce(Option<&NormalKey>) -> Result<R, NativeError>,
     ) -> Result<R, NativeError> {
@@ -128,8 +128,8 @@ fn word_of(float: f64) -> Option<i64> {
 /// word's inline at the caller.
 #[inline(always)]
 pub(crate) fn key_of(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     value: &Value,
 ) -> Result<Option<Key>, NativeError> {
     match value {
@@ -142,8 +142,8 @@ pub(crate) fn key_of(
 /// [`key_of`] of a value that is neither a short text nor a word.
 #[inline(never)]
 fn other_key_of(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     value: &Value,
 ) -> Result<Option<Key>, NativeError> {
     match value {
@@ -166,7 +166,10 @@ fn other_key_of(
     Ok(normal_key(objects, facts, value)?.map(|normal| Key::Normal(Box::new(normal))))
 }
 
-fn body(objects: &Objects, handle: ArenaHandle) -> Result<&Body, NativeError> {
+fn body(
+    objects: &(impl super::Bodies + ?Sized),
+    handle: ArenaHandle,
+) -> Result<&Body, NativeError> {
     objects
         .get(handle)
         .ok_or(NativeError::Malformed("a stale handle reached the arena"))
@@ -185,7 +188,10 @@ fn whole<T>(object: ArenaHandle, chunks: &[Chunk<T>]) -> Result<Option<&T>, Nati
     }
 }
 
-fn sequence(objects: &Objects, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+fn sequence(
+    objects: &(impl super::Bodies + ?Sized),
+    handle: ArenaHandle,
+) -> Result<&[Value], NativeError> {
     match body(objects, handle)? {
         Body::List(Sequence { chunks, .. }) | Body::Tuple(Sequence { chunks, .. }) => {
             super::ops::values(handle, chunks)
@@ -196,7 +202,10 @@ fn sequence(objects: &Objects, handle: ArenaHandle) -> Result<&[Value], NativeEr
     }
 }
 
-fn table(objects: &Objects, handle: ArenaHandle) -> Result<(&Table, &[Value]), NativeError> {
+fn table(
+    objects: &(impl super::Bodies + ?Sized),
+    handle: ArenaHandle,
+) -> Result<(&Table, &[Value]), NativeError> {
     match body(objects, handle)? {
         Body::Map(table) | Body::Set(table) | Body::Record(table) => {
             Ok((table, super::tables::pairs(handle, table)?))
@@ -206,7 +215,10 @@ fn table(objects: &Objects, handle: ArenaHandle) -> Result<(&Table, &[Value]), N
 }
 
 /// A text's or a function name's UTF-8, whole.
-pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str, NativeError> {
+pub(crate) fn text<'a>(
+    objects: &'a (impl super::Bodies + ?Sized),
+    value: &'a Value,
+) -> Result<&'a str, NativeError> {
     match value {
         Value::Text(short) => Ok(short.as_str()),
         Value::LongText(handle) => match body(objects, *handle)? {
@@ -221,7 +233,10 @@ pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str
 }
 
 /// Bytes, whole.
-pub(crate) fn bytes(objects: &Objects, handle: ArenaHandle) -> Result<&[u8], NativeError> {
+pub(crate) fn bytes(
+    objects: &(impl super::Bodies + ?Sized),
+    handle: ArenaHandle,
+) -> Result<&[u8], NativeError> {
     match body(objects, handle)? {
         Body::Bytes(bytes) => Ok(whole(handle, &bytes.chunks)?.map_or(&[], |bytes| bytes)),
         _ => Err(NativeError::Malformed("a bytes handle names another body")),
@@ -229,7 +244,10 @@ pub(crate) fn bytes(objects: &Objects, handle: ArenaHandle) -> Result<&[u8], Nat
 }
 
 /// An integer value's integer.
-pub(crate) fn integer(objects: &Objects, value: &Value) -> Result<Option<Integer>, NativeError> {
+pub(crate) fn integer(
+    objects: &(impl super::Bodies + ?Sized),
+    value: &Value,
+) -> Result<Option<Integer>, NativeError> {
     Ok(match value {
         Value::Int(word) => Some(Integer::from(*word)),
         Value::BigInt(handle) => match body(objects, *handle)? {
@@ -246,7 +264,7 @@ pub(crate) fn integer(objects: &Objects, value: &Value) -> Result<Option<Integer
 
 /// A timestamp value's nanoseconds.
 pub(crate) fn nanoseconds(
-    objects: &Objects,
+    objects: &(impl super::Bodies + ?Sized),
     value: &Value,
 ) -> Result<Option<Integer>, NativeError> {
     Ok(match value {
@@ -265,8 +283,8 @@ pub(crate) fn nanoseconds(
 
 /// `value`'s normal form, or `None` when it is no legal key.
 pub(crate) fn normal_key(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     value: &Value,
 ) -> Result<Option<NormalKey>, NativeError> {
     let mut out = TokenWriter::new();
@@ -295,8 +313,8 @@ pub fn text_key(text: &str) -> NormalKey {
 }
 
 fn tokens(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     value: &Value,
     out: &mut TokenWriter,
 ) -> Result<bool, NativeError> {
@@ -389,8 +407,8 @@ enum Step<'a> {
 /// Guest equality (`K-VAL-020`): structural for immutables and
 /// collections, by identity for closures, tasks and refs.
 pub(crate) fn equal(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     a: &Value,
     b: &Value,
 ) -> Result<bool, NativeError> {
@@ -518,8 +536,8 @@ pub(crate) fn equal(
 /// The value a resident table holds under `key`.
 #[inline]
 pub(crate) fn lookup<'a>(
-    objects: &'a Objects,
-    facts: &'a [Facts],
+    objects: &'a (impl super::Bodies + ?Sized),
+    facts: &'a (impl super::FactTable + ?Sized),
     handle: ArenaHandle,
     key: &Key,
 ) -> Result<Option<&'a Value>, NativeError> {

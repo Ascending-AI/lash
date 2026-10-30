@@ -1,4 +1,4 @@
-//! Process-local fact versions and rollback of unpublished identity grants.
+//! Process-local fact versions and rollback of unpublished identity and slot grants.
 use super::*;
 
 /// A borrowed content fact belongs to one arena, handle generation and value
@@ -55,6 +55,10 @@ impl Arena {
         if self.registering {
             return Err(malformed("nested identity registration"));
         }
+        self.registration_epoch = self
+            .registration_epoch
+            .checked_add(1)
+            .ok_or_else(|| malformed("identity registrations overflow"))?;
         self.registering = true;
         let next = self.next_ordinal;
         let dirty = self.dirty.len();
@@ -63,21 +67,50 @@ impl Arena {
             next,
             dirty,
             committed: false,
+            batch: Vec::new(),
         })
     }
 }
 
-/// The mutation owner stages bodies separately. This guard only reserves the
-/// identities used by a ledger journal. Abandoning it restores the cursor and
-/// every new identity grant; immutable edge caches are suppressed while active.
+/// The mutation owner stages bodies separately. This guard owns the identities
+/// and uninstalled slots used by a ledger journal. Abandoning it restores the
+/// cursor and grants; immutable edge caches are suppressed while active.
 /// Its exclusive borrow cannot survive a callback or another arena writer.
 pub struct Registration<'a> {
     arena: &'a mut Arena,
     next: u64,
     dirty: usize,
     committed: bool,
+    batch: Vec<(ArenaHandle, NewObject)>,
 }
 impl Registration<'_> {
+    pub(super) fn reserve_batch(
+        &mut self,
+        new: Vec<(ArenaHandle, NewObject)>,
+    ) -> Result<(), NativeError> {
+        assert!(self.batch.is_empty());
+        self.batch = new;
+        let result = self
+            .arena
+            .objects
+            .prepare_install(self.batch.iter().map(|(handle, _)| *handle));
+        if matches!(result, Err(lash_kernel_doc::heap::HeapFault::Malformed(_))) {
+            // Forged slots confer no authority to return a live or unreserved slot.
+            self.batch.clear();
+        }
+        result.map_err(NativeError::from)
+    }
+    pub(super) fn batch_len(&self) -> usize {
+        self.batch.len()
+    }
+    pub(super) fn take_batch_object(&mut self, at: usize) -> (ArenaHandle, NewObject) {
+        let (handle, object) = &mut self.batch[at];
+        (
+            *handle,
+            std::mem::replace(object, NewObject::List(Vec::new())),
+        )
+    }
+
     pub fn reserve_entity(&mut self) -> Result<EntityId, NativeError> {
         let entity = EntityId {
             family: lash_kernel_doc::heap::FamilyId::PRIMARY,
@@ -100,6 +133,9 @@ impl Registration<'_> {
 impl Drop for Registration<'_> {
     fn drop(&mut self) {
         if !self.committed {
+            self.arena
+                .objects
+                .discard_install(self.batch.iter().map(|(handle, _)| *handle));
             let mut kept = self.dirty;
             for at in self.dirty..self.arena.dirty.len() {
                 let handle = self.arena.dirty[at];

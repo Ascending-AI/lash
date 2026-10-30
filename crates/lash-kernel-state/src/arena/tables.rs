@@ -430,8 +430,8 @@ fn invalid_key() -> NativeError {
 /// met again keeps its first position and spelling and takes the later
 /// value (`K-KEY-003`).
 pub(super) fn build(
-    objects: &Objects,
-    facts: &[Facts],
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
     layouts: &Layouts,
     mut entries: impl ExactSizeIterator<Item = (Value, Value)>,
 ) -> Result<(Table, Index), NativeError> {
