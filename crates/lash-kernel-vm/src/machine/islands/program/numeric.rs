@@ -109,9 +109,6 @@ impl Build<'_> {
     ) -> BTreeSet<usize> {
         let mut removed = BTreeSet::new();
         for at in 0..self.ops.len() {
-            if let Some(range) = self.member_input(at, targets) {
-                removed.extend(range);
-            }
             if let Some(range) = self.value_input(at, targets, protected) {
                 removed.extend(range);
             }
@@ -126,12 +123,6 @@ impl Build<'_> {
         protected: &BTreeSet<usize>,
     ) -> Option<std::ops::Range<usize>> {
         let count = match &self.ops[at].op {
-            Op::Heap {
-                args,
-                resident: Some(HeapKernel::Read { .. }),
-                inputs: HeapInputs::Registers,
-                ..
-            } if args.len() == 2 => 2,
             Op::Store {
                 index: Some(_),
                 field: None,
@@ -148,17 +139,6 @@ impl Build<'_> {
             .map(|instruction| Read::source(&instruction.op))
             .collect::<Option<Vec<_>>>()?;
         match &mut self.ops[at].op {
-            Op::Heap { args, inputs, .. } => {
-                if !reads
-                    .iter()
-                    .zip(args.iter())
-                    .all(|(read, reg)| read.reg() == *reg)
-                {
-                    return None;
-                }
-                let reads = <[Read; 2]>::try_from(reads).ok()?;
-                *inputs = HeapInputs::Read(Box::new(reads));
-            }
             Op::Store {
                 target,
                 index: Some(index),

@@ -456,6 +456,9 @@ impl KernelMachine {
         } else if self.paced {
             self.charged += cost;
         }
+        // Reconstruction withheld an initial cursor before this charge.
+        // Publish it now, even if the following metered charge refuses.
+        let _ = self.frame(task)?.control.last_mut();
         self.logical_flush_controls(task, exe)?;
         self.logical_flush()?;
         self.warm_cursor(task)?;

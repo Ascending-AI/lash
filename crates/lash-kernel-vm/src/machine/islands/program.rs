@@ -948,12 +948,9 @@ impl<'e> Build<'e> {
                         (self.root.is_some() || invoke.is_some_and(|invoke| invoke.call))
                             && matches!(function.run, LibRun::Body(_)),
                     );
-                    let args = self.args(args)?;
-                    let close = self.ordered_closes(closes, reg);
-                    self.open = None;
                     let site = HeapSite {
                         lib: *lib,
-                        close,
+                        close: closes.first().copied(),
                         pc,
                         reg,
                         depth,
@@ -964,28 +961,7 @@ impl<'e> Build<'e> {
                             .and_then(|invoke| invoke.act),
                         root: self.root,
                     };
-                    if args.len() == 2
-                        && let Some(units) = self.member_charge(*lib)
-                    {
-                        self.emit(Op::Heap {
-                            site,
-                            args: args.clone(),
-                            resident: Some(HeapKernel::Read {
-                                units,
-                                to: Destination::Register,
-                            }),
-                            inputs: HeapInputs::Registers,
-                        });
-                    } else {
-                        self.emit(Op::Heap {
-                            site,
-                            args: args.clone(),
-                            resident: None,
-                            inputs: HeapInputs::Registers,
-                        });
-                    }
-                    self.result(reg, &args);
-                    return Some(());
+                    return self.heap(site, args, closes);
                 };
                 site.root = self.root;
                 site.counted = site.counted.or_else(|| {
