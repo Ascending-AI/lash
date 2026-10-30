@@ -746,7 +746,7 @@ pub(super) fn emit(
         "static {copy_ident}: p::CopyLoop = p::CopyLoop {{ kind: p::CopyKind::{kind}, read: {read}, read_units: {units}, loop_units: {loop_units}, temporary_values: {room} }};\n"
     );
     let descriptor = format!(
-        "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {depth}, callees: &[], heap: Some(p::HeapTemplate {{ entry: None, depth: {depth}, writes: false, copy: Some(&{copy_ident}), element: None, record_write: None, callees: &[] }}), forwards: p::Forwards {{ floats: None, ints: None, texts: None }} }})"
+        "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {depth}, callees: &[], heap: Some(p::HeapTemplate {{ entry: None, depth: {depth}, writes: false, copy: Some(&{copy_ident}), element: None, record_write: None, callees: &[] }}), forwards: p::Forwards {{ floats: None, ints: None, texts: None, identity: None }} }})"
     );
     Some((descriptor, code))
 }

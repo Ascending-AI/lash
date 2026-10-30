@@ -388,6 +388,9 @@ struct State {
     /// Whether the path declared or assigned a plan variable, with a bind
     /// step or without one.
     declares: bool,
+    identity_bodies: Vec<FunctionId>,
+    identity_requires: Vec<(FunctionId, lash_kernel_doc::SymbolicNative)>,
+    identity_unproven: bool,
 }
 
 impl State {
@@ -833,6 +836,9 @@ impl Evaluator<'_> {
             native.specialization().symbolic == Some(lash_kernel_doc::SymbolicNative::Kind)
         }) && let Some(kind) = args.first()?.kind
         {
+            state
+                .identity_requires
+                .push((function, lash_kernel_doc::SymbolicNative::Kind));
             let handle = ArenaHandle::new(0, 0);
             let sample = match kind {
                 ValueKind::Null => Value::Null,
@@ -891,6 +897,10 @@ impl Evaluator<'_> {
             .map(|arg| arg.constant)
             .collect::<Option<Vec<_>>>()
         {
+            match registered.native()?.specialization().symbolic {
+                Some(fact) => state.identity_requires.push((function, fact)),
+                None => state.identity_unproven = true,
+            }
             return Symbol::constant((entry.entry)(&values)?);
         }
         let index = match self.callees.iter().position(|callee| *callee == function) {
@@ -958,6 +968,7 @@ impl Evaluator<'_> {
         depth: u32,
     ) -> Option<Symbol> {
         let body = definition.body()?;
+        state.identity_bodies.push(definition.identity());
         let mut nested = State {
             heap: self.heap,
             charging: matches!(definition.metering(), lash_kernel_doc::Metering::Statements)
@@ -975,6 +986,9 @@ impl Evaluator<'_> {
             depth: depth + 1,
             probes: Vec::new(),
             declares: false,
+            identity_bodies: Vec::new(),
+            identity_requires: Vec::new(),
+            identity_unproven: false,
         };
         let mut results = self.block(&body.block, &mut nested, depth + 1);
         if results.is_empty() {
@@ -985,6 +999,9 @@ impl Evaluator<'_> {
         }
         if results.len() == 1 {
             let (nested, value) = results.pop()?;
+            state.identity_bodies.extend(nested.identity_bodies);
+            state.identity_requires.extend(nested.identity_requires);
+            state.identity_unproven |= nested.identity_unproven;
             state.charges.extend(nested.charges);
             state.steps.extend(nested.steps);
             return value.or_else(|| Symbol::constant(Value::Null));
@@ -1251,6 +1268,9 @@ struct Pass {
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
     forwards: lash_kernel_doc::plan::Forwards,
+    identity_kinds: u32,
+    identity_bodies: Vec<FunctionId>,
+    identity_requires: Vec<(FunctionId, lash_kernel_doc::SymbolicNative)>,
     text_forwards: BTreeMap<Vec<&'static str>, u8>,
     /// Whether a path of an arm writes an arena object.
     writes: bool,
@@ -1288,6 +1308,9 @@ impl Evaluator<'_> {
         let mut pass = Pass {
             arms: BTreeMap::new(),
             forwards: Default::default(),
+            identity_kinds: 0,
+            identity_bodies: Vec::new(),
+            identity_requires: Vec::new(),
             text_forwards: BTreeMap::new(),
             depth: 1,
             writes: false,
@@ -1414,6 +1437,7 @@ impl Evaluator<'_> {
                 for (state, _) in &results {
                     pass.depth = pass.depth.max(state.depth);
                 }
+                forwarding::identity(&mut pass, &names, &results);
                 if let [(state, Some(value))] = results.as_slice()
                     && let Some(native) = self.forwarded(&names, &state.steps, value)
                 {
@@ -1527,15 +1551,20 @@ pub(crate) fn emit(
     let heap = evaluator
         .pass(definition, &kinds)
         .filter(|pass| !pass.arms.is_empty());
-    if scalar.forwards.floats.is_none() && scalar.forwards.ints.is_none() && heap.is_none() {
+    if scalar.forwards.floats.is_none()
+        && scalar.forwards.ints.is_none()
+        && scalar.identity_kinds == 0
+        && heap.is_none()
+    {
         return None;
     }
     let forward = |native: Option<u8>| native.map_or("None".to_string(), |k| format!("Some({k})"));
     let forwards = format!(
-        "p::Forwards {{ floats: {}, ints: {}, texts: {} }}",
+        "p::Forwards {{ floats: {}, ints: {}, texts: {}, identity: {} }}",
         forward(scalar.forwards.floats),
         forward(scalar.forwards.ints),
-        forward(forwarding::texts(&scalar, heap.as_ref()))
+        forward(forwarding::texts(&scalar, heap.as_ref())),
+        forwarding::identity_descriptor(&scalar)
     );
     let mut descriptor = format!(
         "Some(p::HelperTemplate {{ entry: None, metered: None, depth: {}, callees: &[",

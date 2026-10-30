@@ -58,7 +58,7 @@ const TS_GET_NUMERIC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_numeric,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.get_numeric`.
@@ -99,7 +99,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_get_computed,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.get_computed`.
@@ -152,7 +152,7 @@ const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `ts.set`.
@@ -259,7 +259,7 @@ const LAW_ELEMENT_READ_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_element_read,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::Read, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Kind) },p::NativeRequirement { function: p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), fact: p::NativeFact::Symbolic(lash_kernel_doc::SymbolicNative::Same) },p::NativeRequirement { function: p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"), fact: p::NativeFact::Resident(lash_kernel_doc::ResidentRead::Length(p::Collection::Tuple)) },] }), record_write: None, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `law.element_read`.
@@ -784,7 +784,7 @@ const LAW_DECLINING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_declining,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: true, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `law.declining`.
@@ -903,7 +903,7 @@ const LAW_COPY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: law_copy_length,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("95f54d09b25388b777b1793410fdd74a19eb1f13b18512f9050bd546efc73689"), ], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `law.copy_length`.
@@ -1019,7 +1019,7 @@ const LAW_COPY_SNAPSHOT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: law_copy_snapshot,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 5, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 5, writes: false, copy: Some(&LAW_COPY_SNAPSHOT_COPY), element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `law.copy_snapshot`.

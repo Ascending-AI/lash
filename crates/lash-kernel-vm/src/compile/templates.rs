@@ -35,6 +35,7 @@ pub(crate) enum Entry {
         /// callee is missing.
         heap: OnceLock<Option<Box<[super::LibId]>>>,
         element: Option<&'static lash_kernel_doc::plan::ElementPath>,
+        identity: Option<&'static lash_kernel_doc::plan::IdentityPath>,
     },
 }
 
@@ -78,10 +79,29 @@ impl Entry {
                 registered.native()?.specialization().immediate
             })
             .collect::<Option<Box<[_]>>>()?;
+        let identity = template.forwards.identity.filter(|path| {
+            path.bodies.iter().all(|id| {
+                registry.get(id).is_some_and(|registered| {
+                    registered.native().is_none()
+                        && registered.definition().guard.is_none()
+                        && registered.definition().body().is_some()
+                })
+            }) && path.requires.iter().all(|requirement| {
+                registry
+                    .get(&requirement.function)
+                    .is_some_and(|registered| {
+                        registered.definition().guard.is_none()
+                            && registered.native().is_some_and(|native| {
+                                requirement.fact.accepts(&native.specialization())
+                            })
+                    })
+            })
+        });
         if template.entry.is_none()
             && template.heap.is_none()
             && template.forwards.ints.is_none()
             && template.forwards.floats.is_none()
+            && identity.is_none()
         {
             return None;
         }
@@ -100,6 +120,7 @@ impl Entry {
         Some(Self::Template {
             template,
             natives,
+            identity,
             heap: OnceLock::new(),
             element: template
                 .heap
@@ -128,13 +149,22 @@ impl Entry {
         match self {
             Self::Native(entry) => (entry.entry)(args),
             Self::Template {
-                template, natives, ..
+                template,
+                natives,
+                identity,
+                ..
             } => {
                 if template.metered.is_some() {
                     return None;
                 }
                 if let Some(entry) = template.entry {
                     return entry(args, natives);
+                }
+                if let [value] = args
+                    && super::scalar(value)
+                    && identity.is_some_and(|path| path.kinds & (1 << value.kind() as u32) != 0)
+                {
+                    return Some(*value);
                 }
                 let native = match args {
                     [Value::Int(_), Value::Int(_)] => template.forwards.ints?,
@@ -197,12 +227,15 @@ impl Entry {
     pub(crate) fn immediate(&self) -> bool {
         match self {
             Self::Native(_) => true,
-            Self::Template { template, .. } => {
+            Self::Template {
+                template, identity, ..
+            } => {
                 template.metered.is_none()
                     && (template.entry.is_some()
                         || template.forwards.ints.is_some()
                         || template.forwards.floats.is_some()
-                        || template.forwards.texts.is_some())
+                        || template.forwards.texts.is_some()
+                        || identity.is_some())
             }
         }
     }

@@ -269,6 +269,7 @@ fn start(source: &str) -> (KernelMachine, String) {
 #[test]
 fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
     for source in [
+        "function empty_loop(n) { var j; for (j = 0; j < n; j++) {} return j; } console.log(empty_loop(10));",
         "function sum() { let s = 0; for (let i = 0; i < 10; i++) s = s + i * 2; return s; } console.log(sum());",
         "function sum() { var s, i; s = 0; for (i = 0; i < 10; i++) s += i * 2; return s; } console.log(sum());",
         "function sum() { var s, i, a; s = 0; a = 0.5; for (i = 0; i < 10; i++) { s += a * a; a += 1; } return s; } console.log(sum());",
@@ -285,13 +286,21 @@ fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
             "{text}"
         );
         let work = lash_kernel_vm::perf_witness::register_work(&tape);
+        if source.contains("empty_loop") {
+            assert!(
+                work.blocks > 0,
+                "Number loop executed no whole iteration: {work:?}\n{text}"
+            );
+        }
         assert!(
             work.typed_packets > 0,
             "Number loop executed no typed scalar packet: {work:?}\n{text}"
         );
         assert_eq!(
             console.lines,
-            if source.contains("0.5") {
+            if source.contains("empty_loop") {
+                vec!["10"]
+            } else if source.contains("0.5") {
                 vec!["332.5"]
             } else {
                 vec!["90"]

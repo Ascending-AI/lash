@@ -64,6 +64,7 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                 "ts.number.format_value",
                 "ts.to_string",
                 "ts.to_number",
+                "ts.to_numeric",
             ][..],
         ),
     ] {
@@ -115,9 +116,9 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                     "{name}'s canonical native must answer"
                 );
             } else if registered.native().is_none() {
-                // A number is ts.to_number's identity arm. Exercise its
-                // conversion so this witness requires a helper body entry.
-                let input = if name == &"ts.to_number" {
+                // Exercise the general body independently of any scalar
+                // forwarding path, including unary identity forwarding.
+                let input = if matches!(*name, "ts.to_number" | "ts.to_numeric") {
                     "true"
                 } else if dialect == "python" {
                     "1"
@@ -131,9 +132,9 @@ fn generated_scalar_contracts_agree_with_their_bodies() {
                 );
                 let mut document = lash_kernel_doc::parse_document(&source).unwrap();
                 document.library.insert(*function);
-                let program = crate::linked::program(Arc::new(document), base.library.clone());
+                let program = crate::linked::program(Arc::new(document), general.clone());
                 let (_, census) = crate::projection::counted(|| {
-                    run::<0>(&case, &program, &mut Projector::default())
+                    run::<1>(&case, &program, &mut Projector::default())
                 });
                 assert!(
                     census.register_entries > 0,

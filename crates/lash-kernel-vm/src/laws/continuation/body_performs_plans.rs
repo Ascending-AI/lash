@@ -391,7 +391,7 @@ const PKG_NOOP_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: pkg_noop,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 1, writes: false, copy: None, element: None, record_write: None, callees: &[] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `pkg.noop`.

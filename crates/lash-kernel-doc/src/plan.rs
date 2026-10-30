@@ -152,6 +152,19 @@ pub struct Forwards {
     /// All four combinations of inline and long texts forward these same
     /// operands to this native, with no other calls, guards or forms.
     pub texts: Option<u8>,
+    /// A unary scalar path that returns its unchanged operand.
+    pub identity: Option<&'static IdentityPath>,
+}
+
+/// A source-derived identity path, checked against the installed library.
+#[derive(Debug)]
+pub struct IdentityPath {
+    /// Accepted immediate kinds, one bit per [`crate::ValueKind`].
+    pub kinds: u32,
+    /// Inlined helpers must still execute their exact unguarded bodies.
+    pub bodies: &'static [FunctionId],
+    /// Native facts used to eliminate the source's constant kind tests.
+    pub requires: &'static [NativeRequirement],
 }
 
 /// A native composition over the canonical heap contract.
