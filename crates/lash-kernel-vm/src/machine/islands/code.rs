@@ -66,7 +66,7 @@ macro_rules! operations {
         inputs { $( $input:ident { $( $input_field:ident: $input_ty:ty ),* $(,)? } )* }
         hot_structs { $( $hot:ident { $( $hot_field:ident: $hot_ty:ty ),* $(,)? } )* }
         hot_tuples { $( $hot_tuple:ident ( $hot_tuple_ty:ty ) )* }
-        structs { $( $name:ident $table:ident { $( $field:ident: $ty:ty ),* $(,)? } )* }
+        structs { $( [ $( $manual:ident $manual_table:ident )? ] { $( $name:ident $table:ident { $( $field:ident: $ty:ty ),* $(,)? } )* } )* }
         tuples { $( $tuple:ident $tuple_table:ident ( $tuple_ty:ty ) )* }
         units { $( $unit:ident )* }
     ) => {
@@ -75,7 +75,7 @@ macro_rules! operations {
             $( $input { $( $input_field: $input_ty ),* }, )*
             $( $hot { $( $hot_field: $hot_ty ),* }, )*
             $( $hot_tuple($hot_tuple_ty), )*
-            $( $name { $( $field: $ty ),* }, )*
+            $( $( $name { $( $field: $ty ),* }, )* )*
             $( $tuple($tuple_ty), )*
             $( $unit, )*
         }
@@ -88,7 +88,7 @@ macro_rules! operations {
             Operator,
             $( $hot, )*
             $( $hot_tuple, )*
-            $( $name, )*
+            $( $( $manual, )? $( $name, )* )*
             $( $tuple, )*
             $( $unit, )*
         }
@@ -101,9 +101,17 @@ macro_rules! operations {
                 pub(in crate::machine::islands) covered: bool,
                 pub(in crate::machine::islands) to: Destination,
             }
-            $( pub(in crate::machine::islands) struct $name {
+            pub(in crate::machine::islands) struct Native {
+                pub(in crate::machine::islands) site: NativeSite,
+                pub(in crate::machine::islands) args: Box<[u32]>,
+            }
+            pub(in crate::machine::islands) struct Kind {
+                pub(in crate::machine::islands) site: Box<KindTest>,
+                pub(in crate::machine::islands) src: u32,
+            }
+            $( $( pub(in crate::machine::islands) struct $name {
                 $( pub(in crate::machine::islands) $field: $ty, )*
-            } )*
+            } )* )*
             $( pub(in crate::machine::islands) struct $tuple {
                 pub(in crate::machine::islands) value: $tuple_ty,
             } )*
@@ -114,15 +122,19 @@ macro_rules! operations {
             pub(super) begin: Vec<StatementEntry>,
             pub(super) operator: Vec<sites::Operator>,
             pub(super) collection: Vec<(std::sync::Arc<CollectionStep>, bool)>,
-            $( pub(super) $table: Vec<sites::$name>, )*
+            $( $( pub(super) $manual_table: Vec<sites::$manual>, )?
+               $( pub(super) $table: Vec<sites::$name>, )* )*
             $( pub(super) $tuple_table: Vec<sites::$tuple>, )*
         }
 
         impl Code {
             pub(in crate::machine::islands) fn verify(&self, stream: &Stream) -> Result<(), crate::compile::islands::Refused> {
+                $( $( for record in &self.sites.$manual_table {
+                    record.site.verify(stream)?;
+                } )?
                 $( for record in &self.sites.$table {
                     $( check_field!(record, stream, $field); )*
-                } )*
+                } )* )*
                 $( for record in &self.sites.$tuple_table {
                     check_tuple!($tuple, record, stream);
                 } )*
@@ -143,11 +155,11 @@ macro_rules! operations {
                     _ => {}
                 }
                 let (opcode, x) = match op {
-                    $( Op::$name { $( $field ),* } => {
+                    $( $( Op::$name { $( $field ),* } => {
                         let at = u32::try_from(self.sites.$table.len()).ok()?;
                         self.sites.$table.push(sites::$name { $( $field ),* });
                         (Opcode::$name, at)
-                    }, )*
+                    }, )* )*
                     $( Op::$tuple(value) => {
                         let at = u32::try_from(self.sites.$tuple_table.len()).ok()?;
                         self.sites.$tuple_table.push(sites::$tuple { value });
@@ -185,13 +197,13 @@ operations! {
             property: Box<compiled::MemberWrite>,
             finish: Option<u32>,
         }
-        DirectNative {
+        Native {
             site: NativeSite,
-            reads: Box<[Read]>,
+            inputs: NativeInputs,
         }
-        DirectKind {
+        Kind {
             site: Box<KindTest>,
-            reads: Box<[Read]>,
+            input: KindInput,
         }
     }
     hot_structs {
@@ -238,153 +250,148 @@ operations! {
         Cancel (u32)
     }
     structs {
-        Try try_ {
-            id: StmtId,
-            finally: Option<usize>,
-            after: usize,
+        [] {
+            Try try_ {
+                id: StmtId,
+                finally: Option<usize>,
+                after: usize,
+            }
+            Loop loop_ {
+                id: StmtId,
+                header: usize,
+                texts: Box<[usize]>,
+            }
+            For for_ {
+                id: StmtId,
+                header: usize,
+                reg: u32,
+                pc: u32,
+                via: bool,
+                texts: Box<[usize]>,
+            }
+            Header header {
+                repeat: Option<Box<RepeatSite>>,
+                id: StmtId,
+                cost: u64,
+                metered: u64,
+                at: Option<usize>,
+                item_hook: bool,
+                otherwise: usize,
+                after: usize,
+            }
+            LoopBranch loop_branch {
+                reg: u32,
+                pc: u32,
+                otherwise: usize,
+            }
+            Depart depart {
+                continuing: bool,
+            }
+            ReturnLiteral return_literal {
+                entry: Option<usize>,
+                id: StmtId,
+                index: usize,
+                ahead: u64,
+                value: Value,
+                close: Option<crate::compile::expr::Close>,
+                covered: bool,
+                reg: u32,
+            }
         }
-        Loop loop_ {
-            id: StmtId,
-            header: usize,
-            texts: Box<[usize]>,
+        [Native native] {
+            Heap heap {
+                site: HeapSite,
+                args: Box<[u32]>,
+                resident: Option<HeapKernel>,
+            }
+            Reserve reserve {
+                kind: lash_kernel_doc::ValueKind,
+                members: usize,
+                miss: u32,
+            }
+            Make make {
+                ahead: u64,
+                replay_guard: bool,
+                make: crate::compile::expr::Make,
+                items: Box<[u32]>,
+                reg: u32,
+                members: usize,
+                miss: u32,
+            }
+            Record record {
+                ahead: u64,
+                names: Box<[Value]>,
+                values: Box<[u32]>,
+                reg: u32,
+                members: usize,
+                miss: u32,
+            }
+            Closure closure {
+                code: CodeId,
+                reg: u32,
+                miss: u32,
+            }
+            Store store {
+                target: u32,
+                index: Option<u32>,
+                value: u32,
+                field: Option<usize>,
+                pc: u32,
+                inputs: Option<Box<StoreInputs>>,
+                cache: bool,
+                finish: Option<u32>,
+            }
+            Remove remove {
+                target: u32,
+                index: u32,
+                pc: u32,
+            }
+            Unit unit {
+                site: UnitSite,
+                src: u32,
+            }
         }
-        For for_ {
-            id: StmtId,
-            header: usize,
-            reg: u32,
-            pc: u32,
-            via: bool,
-            texts: Box<[usize]>,
+        [Kind kind] {
+            Index index {
+                site: Option<crate::compile::ReadSite>,
+                dst: u32,
+                miss: u32,
+            }
+            Call call {
+                site: CallSite,
+                read: bool,
+                args: Box<[u32]>,
+            }
+            Cond cond {
+                reg: u32,
+                close: Option<crate::compile::expr::Close>,
+                pc: u32,
+                otherwise: usize,
+            }
+            Close close {
+                close: crate::compile::expr::Close,
+                covered: bool,
+            }
+            Write write {
+                site: Box<WriteSite>,
+            }
+            Done done {
+                leaves: u32,
+                empty: Option<crate::compile::BlockId>,
+            }
+            Branch branch {
+                reg: u32,
+                pc: u32,
+                otherwise: usize,
+                opens: [Option<usize>; 2],
+            }
+            Publish publish {
+                name: u32,
+                reg: u32,
+                pc: u32,
+                bind: bool,
+            }
         }
-        Header header {
-            repeat: Option<Box<RepeatSite>>,
-            id: StmtId,
-            cost: u64,
-            metered: u64,
-            at: Option<usize>,
-            item_hook: bool,
-            otherwise: usize,
-            after: usize,
-        }
-        LoopBranch loop_branch {
-            reg: u32,
-            pc: u32,
-            otherwise: usize,
-        }
-        Depart depart {
-            continuing: bool,
-        }
-        ReturnLiteral return_literal {
-            entry: Option<usize>,
-            id: StmtId,
-            index: usize,
-            ahead: u64,
-            value: Value,
-            close: Option<crate::compile::expr::Close>,
-            covered: bool,
-            reg: u32,
-        }
-        Native native {
-            site: NativeSite,
-            args: Box<[u32]>,
-        }
-
-        Heap heap {
-            site: HeapSite,
-            args: Box<[u32]>,
-            resident: Option<HeapKernel>,
-        }
-        Reserve reserve {
-            kind: lash_kernel_doc::ValueKind,
-            members: usize,
-            miss: u32,
-        }
-        Make make {
-            ahead: u64,
-            replay_guard: bool,
-            make: crate::compile::expr::Make,
-            items: Box<[u32]>,
-            reg: u32,
-            members: usize,
-            miss: u32,
-        }
-        Record record {
-            ahead: u64,
-            names: Box<[Value]>,
-            values: Box<[u32]>,
-            reg: u32,
-            members: usize,
-            miss: u32,
-        }
-        Closure closure {
-            code: CodeId,
-            reg: u32,
-            miss: u32,
-        }
-        Store store {
-            target: u32,
-            index: Option<u32>,
-            value: u32,
-            field: Option<usize>,
-            pc: u32,
-            inputs: Option<Box<StoreInputs>>,
-            cache: bool,
-            finish: Option<u32>,
-        }
-        Remove remove {
-            target: u32,
-            index: u32,
-            pc: u32,
-        }
-        Unit unit {
-            site: UnitSite,
-            src: u32,
-        }
-        Kind kind {
-            site: Box<KindTest>,
-            src: u32,
-        }
-
-        Index index {
-            site: Option<crate::compile::ReadSite>,
-            dst: u32,
-            miss: u32,
-        }
-        Call call {
-            site: CallSite,
-            read: bool,
-            args: Box<[u32]>,
-        }
-        Cond cond {
-            reg: u32,
-            close: Option<crate::compile::expr::Close>,
-            pc: u32,
-            otherwise: usize,
-        }
-        Close close {
-            close: crate::compile::expr::Close,
-            covered: bool,
-        }
-        Write write {
-            site: Box<WriteSite>,
-        }
-        Done done {
-            leaves: u32,
-            empty: Option<crate::compile::BlockId>,
-        }
-        Branch branch {
-            reg: u32,
-            pc: u32,
-            otherwise: usize,
-            opens: [Option<usize>; 2],
-        }
-        Publish publish {
-            name: u32,
-            reg: u32,
-            pc: u32,
-            bind: bool,
-        }
-
     }
     tuples {
         Keep keep(compiled::Restart)
@@ -407,6 +414,16 @@ pub(crate) enum OperatorInputs {
 pub(crate) enum ScalarInputs {
     Unary(Operand),
     Binary([Operand; 2]),
+}
+
+pub(crate) enum NativeInputs {
+    Registers(Box<[u32]>),
+    Source(Box<[Read]>),
+}
+
+pub(crate) enum KindInput {
+    Register(u32),
+    Source(Read),
 }
 
 /// Source-certified resident selection at an ordinary heap call. Arguments,
@@ -573,22 +590,23 @@ impl Code {
                     reads.map(|reads| (*reads).into_iter().collect::<Box<[_]>>()),
                 )
             }
-            Op::DirectNative { site, reads } => {
+            Op::Native { site, inputs } => {
+                let (args, reads) = match inputs {
+                    NativeInputs::Registers(args) => (args, None),
+                    NativeInputs::Source(reads) => (Box::default(), Some(reads)),
+                };
                 let x = u32::try_from(self.sites.native.len()).ok()?;
-                self.sites.native.push(sites::Native {
-                    site,
-                    args: Box::default(),
-                });
-                (Opcode::Native, x, Some(reads))
+                self.sites.native.push(sites::Native { site, args });
+                (Opcode::Native, x, reads)
             }
-            Op::DirectKind { site, reads } => {
-                let [read] = &*reads else { return None };
+            Op::Kind { site, input } => {
+                let (src, reads) = match input {
+                    KindInput::Register(src) => (src, None),
+                    KindInput::Source(read) => (read.reg(), Some(Box::new([read]) as Box<[Read]>)),
+                };
                 let x = u32::try_from(self.sites.kind.len()).ok()?;
-                self.sites.kind.push(sites::Kind {
-                    site,
-                    src: read.reg(),
-                });
-                (Opcode::Kind, x, Some(reads))
+                self.sites.kind.push(sites::Kind { site, src });
+                (Opcode::Kind, x, reads)
             }
             _ => unreachable!("only compiler input facts select an input mode"),
         };
@@ -622,13 +640,10 @@ impl Code {
                     Op::Local { .. } | Op::Session { .. } | Op::Field { .. } | Op::Index { .. } => {
                         Reason::ResidentRead
                     }
-                    Op::Operator { .. }
-                    | Op::Unit { .. }
-                    | Op::Kind { .. }
-                    | Op::DirectKind { .. }
-                    | Op::Access(_) => Reason::Operator,
+                    Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } | Op::Access(_) => {
+                        Reason::Operator
+                    }
                     Op::Native { .. }
-                    | Op::DirectNative { .. }
                     | Op::Heap { .. }
                     | Op::MemberStore { .. }
                     | Op::MemberAccess { .. } => Reason::Native,
@@ -646,7 +661,7 @@ impl Code {
             },
             #[cfg(any(test, feature = "perf-witness"))]
             library: match op {
-                Op::Native { site, .. } | Op::DirectNative { site, .. } => Some(site.lib),
+                Op::Native { site, .. } => Some(site.lib),
                 Op::Operator { site, .. } => Some(site.lib),
                 Op::Heap { site, .. }
                 | Op::MemberStore { site, .. }

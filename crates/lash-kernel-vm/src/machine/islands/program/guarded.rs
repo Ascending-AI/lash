@@ -27,15 +27,16 @@ impl Build<'_> {
         self.site(kind.depth, kind.body_when_observed);
         self.site(same.depth, same.body_when_observed);
         if let Some(reads) = self.reads(std::slice::from_ref(&inner_args[0])) {
+            let [read] = reads.into_vec().try_into().ok()?;
             self.open = None;
-            self.emit(Op::DirectKind {
+            self.emit(Op::Kind {
                 site: Box::new(KindTest {
                     kind,
                     same,
                     literal,
                     memo: Default::default(),
                 }),
-                reads,
+                input: KindInput::Source(read),
             });
             self.result(expr.reg, &[inner_args[0].reg]);
             return Some(true);
@@ -49,7 +50,7 @@ impl Build<'_> {
                 literal,
                 memo: Default::default(),
             }),
-            src: inner_args[0].reg,
+            input: KindInput::Register(inner_args[0].reg),
         });
         self.result(expr.reg, &[inner_args[0].reg]);
         Some(true)
@@ -63,7 +64,10 @@ impl Build<'_> {
         }
         if !matches!(
             self.ops.get(head).map(|op| &op.op),
-            Some(Op::DirectKind { .. })
+            Some(Op::Kind {
+                input: KindInput::Source(_),
+                ..
+            })
         ) {
             return;
         }
@@ -86,8 +90,14 @@ impl Build<'_> {
                 | Op::Local { .. }
                 | Op::Field { .. }
                 | Op::Index { .. }
-                | Op::DirectKind { .. } => {}
-                Op::DirectNative { site, .. } if site.direct(self.exe).is_some() => {
+                | Op::Kind {
+                    input: KindInput::Source(_),
+                    ..
+                } => {}
+                Op::Native {
+                    site,
+                    inputs: NativeInputs::Source(_),
+                } if site.direct(self.exe).is_some() => {
                     fixed += total(site.close);
                 }
                 Op::Operator {
@@ -138,25 +148,26 @@ impl Build<'_> {
             return;
         };
         let op = std::mem::replace(&mut self.ops[head].op, Op::Jump(head + 1));
-        let Op::DirectKind { site, reads } = op else {
+        let Op::Kind {
+            site,
+            input: KindInput::Source(read),
+        } = op
+        else {
             unreachable!("a guarded read's head is a kind test");
         };
         if let Some(shape) = self
-            .field_path(head, &path, &site, &reads)
-            .or_else(|| self.index_path(&path, &site, &reads))
-            .or_else(|| self.length_path(&path, &site, &reads))
+            .field_path(head, &path, &site, std::slice::from_ref(&read))
+            .or_else(|| self.index_path(&path, &site, std::slice::from_ref(&read)))
+            .or_else(|| self.length_path(&path, &site, std::slice::from_ref(&read)))
         {
             let Op::Write { site: written } = &self.ops[write].op else {
                 unreachable!()
             };
             let at = written.at;
             let leaves = written.leaves;
-            let Some(target) = reads.into_vec().pop() else {
-                unreachable!()
-            };
             self.ops[head].op = Op::Access(Box::new(AccessSite {
                 kind: site,
-                target,
+                target: read,
                 shape,
                 hole: None,
                 consumer: None,
@@ -171,16 +182,19 @@ impl Build<'_> {
             }));
             return;
         }
-        self.ops[head].op = Op::DirectKind { site, reads };
+        self.ops[head].op = Op::Kind {
+            site,
+            input: KindInput::Source(read),
+        };
     }
 
     fn length_path(&self, path: &[usize], kind: &KindTest, reads: &[Read]) -> Option<AccessShape> {
         let [branch, length, convert, write] = path else {
             return None;
         };
-        let Op::DirectNative {
+        let Op::Native {
             site: native,
-            reads: target,
+            inputs: NativeInputs::Source(target),
         } = &self.ops[*length].op
         else {
             return None;
@@ -289,9 +303,9 @@ impl Build<'_> {
         if !matches!(&self.ops[*first].op, Op::Branch { reg, .. } if *reg == kind.same.reg) {
             return None;
         }
-        let Op::DirectNative {
+        let Op::Native {
             site: len,
-            reads: operands,
+            inputs: NativeInputs::Source(operands),
         } = &self.ops[*length].op
         else {
             return None;
@@ -458,9 +472,9 @@ impl Build<'_> {
         if *reg != kind.same.reg {
             return None;
         }
-        let Op::DirectNative {
+        let Op::Native {
             site: contains,
-            reads: operands,
+            inputs: NativeInputs::Source(operands),
         } = &self.ops[*member].op
         else {
             return None;

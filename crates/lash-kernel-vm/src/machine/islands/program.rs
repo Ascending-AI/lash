@@ -2,7 +2,7 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
-use crate::machine::islands::code::{OperatorInputs, ScalarInputs};
+use crate::machine::islands::code::{KindInput, NativeInputs, OperatorInputs, ScalarInputs};
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
@@ -1059,7 +1059,10 @@ impl<'e> Build<'e> {
                 {
                     let consumed: Vec<_> = reads.iter().map(Read::reg).collect();
                     self.open = None;
-                    self.emit(Op::DirectNative { site, reads });
+                    self.emit(Op::Native {
+                        site,
+                        inputs: NativeInputs::Source(reads),
+                    });
                     self.result(reg, &consumed);
                     return Some(());
                 }
@@ -1068,7 +1071,7 @@ impl<'e> Build<'e> {
                 self.open = None;
                 self.emit(Op::Native {
                     site,
-                    args: args.clone(),
+                    inputs: NativeInputs::Registers(args.clone()),
                 });
                 self.result(reg, &args);
             }

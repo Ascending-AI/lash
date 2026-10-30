@@ -54,7 +54,7 @@ impl Build<'_> {
                         Op::Constant { dst, .. },
                         Op::Native {
                             site: join,
-                            args: joined,
+                            inputs: NativeInputs::Registers(joined),
                         },
                         Op::Operator {
                             site: append,
@@ -119,7 +119,7 @@ impl Build<'_> {
                 };
                 let Op::Native {
                     site: join,
-                    args: joined_args,
+                    inputs: NativeInputs::Registers(joined_args),
                 } = joined.op
                 else {
                     unreachable!();
