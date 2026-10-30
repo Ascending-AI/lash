@@ -318,15 +318,19 @@ impl Ledger {
         // Declare all headers before their member edges. This permits cycles
         // without recursively allocating a body or losing a forward edge.
         let mut changes = Vec::new();
-        for entity in bodies.keys() {
-            changes.push(Change::Allocate {
-                entity: *entity,
-                body: Holding::scalar(Cost::OBJECT),
-            });
-        }
+        let mut members = Vec::new();
         for (entity, body) in bodies {
-            changes.push(Change::Mutate { entity, body });
+            if body.links.is_empty() {
+                changes.push(Change::Allocate { entity, body });
+            } else {
+                changes.push(Change::Allocate {
+                    entity,
+                    body: Holding::scalar(Cost::OBJECT),
+                });
+                members.push(Change::Mutate { entity, body });
+            }
         }
+        changes.extend(members);
         Ok(changes)
     }
 }
