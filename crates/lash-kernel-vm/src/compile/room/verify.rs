@@ -523,7 +523,7 @@ fn obligations(
             doc::Stmt::Assign {
                 place: doc::Place::Variable(name),
                 ..
-            } => delta.push((
+            } if !source.assigns_cell(site) => delta.push((
                 release([Owner::Visible {
                     at: site.clone(),
                     name: name.clone(),

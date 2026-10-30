@@ -400,4 +400,505 @@ pub(super) fn checked_source_publication() {
     assert_eq!(frontier.position(), &next);
     assert_eq!(ledger_store.borrow().balance().unwrap(), committed_balance);
     assert_eq!(charged, committed_charge);
+    shared_cell_publication();
+}
+
+fn shared_cell_publication() {
+    use crate::compile::CodeId;
+    use crate::compile::room::{self, Phase, Point, Selection, publication::*};
+    use lash_kernel_doc::{self as doc, TaskId, Value, arena::ArenaHandle, heap::Identity};
+    use lash_kernel_state::kernel_internals::logical::{
+        self, JournalEvent, Member, MemberEdit, Program, PublicationValue, RootValue, Slot,
+    };
+    use lash_kernel_value::Name;
+    use lash_kernel_value::sites::Site;
+    use std::sync::Arc;
+
+    struct Facts {
+        assignment: Site,
+        rhs: Site,
+        visible_price: i128,
+        dependencies: [ArenaHandle; 1],
+    }
+    impl room::Facts for Facts {
+        fn dependencies(&self) -> Option<&[ArenaHandle]> {
+            Some(&self.dependencies)
+        }
+        fn measure(&self, measure: &room::Measure) -> Option<i128> {
+            match measure {
+                room::Measure::Local(room::Owner::Operand(site)) if site == &self.rhs => Some(18),
+                room::Measure::MemberDelta(site) if site == &self.assignment => Some(1),
+                room::Measure::Release(owners) => {
+                    owners.iter().try_fold(0, |total, owner| match owner {
+                        room::Owner::Operand(site) if site == &self.rhs => Some(total + 18),
+                        room::Owner::Visible { at, name }
+                            if at == &self.assignment && *name == Name::new("n") =>
+                        {
+                            Some(total + self.visible_price)
+                        }
+                        _ => None,
+                    })
+                }
+                _ => None,
+            }
+        }
+        fn call(&self, _: &Site, _: room::CallSource) -> Option<&room::CheckedRoom> {
+            None
+        }
+        fn raised(&self) -> bool {
+            false
+        }
+        fn resolved(&self, _: &Site) -> Option<lash_kernel_value::FunctionId> {
+            None
+        }
+    }
+    struct Execution<'a>(&'a Facts);
+    impl room::Execution for Execution<'_> {
+        fn event(&mut self, _: &Point) -> Option<Box<dyn room::Facts + '_>> {
+            Some(Box::new(Facts {
+                assignment: self.0.assignment.clone(),
+                rhs: self.0.rhs.clone(),
+                visible_price: self.0.visible_price,
+                dependencies: self.0.dependencies,
+            }))
+        }
+        fn choose(&mut self, _: &Site) -> Option<bool> {
+            None
+        }
+    }
+    fn resources<'a>(
+        charged: &'a mut u64,
+        counters: &'a mut crate::machine::tasks::Occurrences,
+    ) -> crate::admission::SourceResources<'a> {
+        crate::admission::SourceResources {
+            charged,
+            counters,
+            bound: 10,
+            slice: 10,
+            depth: 0,
+            limit: 10,
+            safe_point: 7,
+        }
+    }
+
+    for (text, extra) in [
+        (
+            "main { let n = 1 let f = fn(rhs) { set n = rhs return n } return apply f(256) }",
+            0,
+        ),
+        (
+            "main { let f = fn(rhs) { let n = 1 let keep = fn() { return n } set n = rhs return apply keep() } return apply f(256) }",
+            16,
+        ),
+    ] {
+        let run = Embedder::new(text);
+        let (program, _) = run.program(false);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("shared-cell program admits"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("shared-cell program compiles"));
+        let n = Name::new("n");
+        let rhs = Name::new("rhs");
+        let code = (0..exe.code_count())
+            .map(|index| exe.code(CodeId(index as u32)))
+            .find(|code| {
+                code.source_room.params.as_ref() == [rhs.clone()]
+                    && code.source_room.body.iter().any(|stmt| {
+                        matches!(
+                            stmt,
+                            doc::Stmt::Assign {
+                                place: doc::Place::Variable(name),
+                                value: doc::Rhs::Expr(doc::Expr::Variable(value)),
+                                ..
+                            } if name == &n && value == &rhs
+                        )
+                    })
+            })
+            .unwrap();
+        let source = Arc::clone(&code.source_room);
+        let assignment_index = source
+            .body
+            .iter()
+            .position(|stmt| {
+                matches!(
+                    stmt,
+                    doc::Stmt::Assign {
+                        place: doc::Place::Variable(name),
+                        value: doc::Rhs::Expr(doc::Expr::Variable(value)),
+                        ..
+                    } if name == &n && value == &rhs
+                )
+            })
+            .unwrap();
+        let assignment = source.site.child(assignment_index.try_into().unwrap());
+        let rhs_site = assignment.child(0);
+        let commit = Point {
+            site: assignment.clone(),
+            phase: Phase::Commit,
+        };
+        let selections = [
+            Selection::Event {
+                at: Point {
+                    site: rhs_site.clone(),
+                    phase: Phase::Commit,
+                },
+                exit: room::ExitKind::Normal,
+            },
+            Selection::Event {
+                at: commit.clone(),
+                exit: room::ExitKind::Normal,
+            },
+        ];
+        let interval = source
+            .compile_between(&commit, &commit, &selections, 32)
+            .unwrap();
+        let mut following = doc::Node::Stmt(&source.body[assignment_index + 1]);
+        let mut following_site = source
+            .site
+            .child((assignment_index + 1).try_into().unwrap());
+        while let Some(child) = following.children().first().copied() {
+            following = child;
+            following_site = following_site.child(0);
+        }
+        let next_point = Point {
+            site: following_site,
+            phase: if matches!(
+                following,
+                doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_))
+            ) {
+                Phase::Enter
+            } else {
+                Phase::Commit
+            },
+        };
+        let heap = run.machine.source_law_heap();
+        let ledger_store = heap.logical_ledger();
+        let mut arena = lash_kernel_state::arena::Arena::new();
+        let first = arena.new_cell(Value::Int(1));
+        let second = arena.new_cell(Value::Int(1));
+        let first_ref = Value::ObjectRef(first);
+        let second_ref = Value::ObjectRef(second);
+        let rhs_value = Value::Int(256);
+        let mut ledger = ledger_store.borrow_mut();
+        let baseline = ledger.balance().unwrap().total().unwrap();
+        let (caller, prepared) = ledger
+            .prepare_enter(
+                TaskId::MAIN,
+                &mut arena,
+                heap.pages(),
+                &[],
+                &[
+                    (Slot::Binding(0), RootValue::Value(&first_ref)),
+                    (Slot::Binding(1), RootValue::Value(&second_ref)),
+                ],
+            )
+            .unwrap();
+        ledger
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let invocation = ledger.prospective_invocation(TaskId::MAIN);
+        let owners = source.owner_slots().unwrap();
+        let visible = owners
+            .root(
+                &room::Owner::Visible {
+                    at: assignment.clone(),
+                    name: n,
+                },
+                TaskId::MAIN,
+                invocation.id(),
+            )
+            .unwrap();
+        let logical::Owner::Value { slot: n_slot, .. } = visible else {
+            panic!("visible variable has no frame slot");
+        };
+        let n_value = match n_slot {
+            Slot::Capture(_) => RootValue::Capture(first),
+            Slot::Binding(_) => RootValue::Value(&first_ref),
+            _ => panic!("visible variable has another source slot"),
+        };
+        let rhs_index = code
+            .slots
+            .iter()
+            .position(|slot| slot.name == rhs && slot.declared == source.site)
+            .unwrap();
+        let logical::Owner::Value { slot: rhs_slot, .. } = source
+            .binding_root(rhs_index as u32, TaskId::MAIN, invocation.id())
+            .unwrap()
+        else {
+            panic!("formal argument has no frame slot");
+        };
+        let (invocation, prepared) = ledger
+            .prepare_enter(
+                TaskId::MAIN,
+                &mut arena,
+                heap.pages(),
+                &[],
+                &[(n_slot, n_value), (rhs_slot, RootValue::Value(&rhs_value))],
+            )
+            .unwrap();
+        ledger
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let operand = owners
+            .root(
+                &room::Owner::Operand(rhs_site.clone()),
+                TaskId::MAIN,
+                invocation.id(),
+            )
+            .unwrap();
+        let prepared = ledger
+            .prepare_ownership(
+                &mut arena,
+                heap.pages(),
+                &[],
+                &[(operand, RootValue::Value(&rhs_value))],
+            )
+            .unwrap();
+        ledger
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let before = baseline + 294 + extra;
+        assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
+        let first_id = arena.identify(first).unwrap();
+        drop(ledger);
+        let ledger = ledger_store.borrow();
+        let start = Position {
+            at: commit.clone(),
+            unpaid: Some(commit.clone()),
+            recovery: [1; 32],
+            occurrence: Occurrence {
+                task: TaskId::MAIN,
+                invocation: invocation.id(),
+                loops: vec![],
+                action: None,
+                departure: None,
+            },
+        };
+        let next = Position {
+            at: commit,
+            unpaid: Some(next_point),
+            recovery: [2; 32],
+            ..start.clone()
+        };
+        let mut frontier = source
+            .frontier(
+                &ledger,
+                heap,
+                &invocation,
+                program.link,
+                doc::KernelVersion::One,
+                start,
+            )
+            .unwrap();
+        let facts = Facts {
+            assignment,
+            rhs: rhs_site,
+            visible_price: extra.into(),
+            dependencies: [first],
+        };
+        let make = |target, consume_visible, replace_visible| {
+            let mut inputs = vec![operand];
+            if consume_visible {
+                inputs.push(visible);
+            }
+            Program::new(vec![JournalEvent {
+                inputs,
+                outputs: if replace_visible {
+                    vec![(visible, PublicationValue::Existing(visible))]
+                } else {
+                    vec![]
+                },
+                member: Some(MemberEdit {
+                    handle: target,
+                    member: Member::Variable,
+                    next: Some(rhs_value),
+                }),
+                ..Default::default()
+            }])
+        };
+        let allowance = crate::admission::Allowance {
+            occurrences: vec![],
+            before: 0,
+            units: 1,
+            close: None,
+            strict: true,
+            depth: 1,
+            safe_point: 7,
+        };
+        let mut charged = 0;
+        let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
+        for bound in 0..=before + 18 {
+            let resource_facts = resources(&mut charged, &mut counters)
+                .facts(&allowance)
+                .unwrap();
+            let evaluated = frontier
+                .evaluate_interval(
+                    Arc::clone(&interval),
+                    &mut Execution(&facts),
+                    &ledger,
+                    &arena,
+                    heap,
+                    make(first, false, false),
+                    next.clone(),
+                    allowance.clone(),
+                    resource_facts,
+                )
+                .unwrap_or_else(|error| panic!("valid variable-cell publication: {error:?}"));
+            assert!(
+                evaluated
+                    .admit_interval(
+                        &frontier,
+                        &ledger,
+                        &arena,
+                        resources(&mut charged, &mut counters),
+                        &allowance,
+                        bound,
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
+            assert_eq!(charged, 0);
+            assert!(matches!(arena.cell(first).unwrap(), Value::Int(1)));
+            assert!(matches!(arena.cell(second).unwrap(), Value::Int(1)));
+        }
+        for (target, consume_visible, replace_visible) in [
+            (second, false, false),
+            (first, true, false),
+            (first, true, true),
+        ] {
+            let resource_facts = resources(&mut charged, &mut counters)
+                .facts(&allowance)
+                .unwrap();
+            if let Ok(evaluated) = frontier.evaluate_interval(
+                Arc::clone(&interval),
+                &mut Execution(&facts),
+                &ledger,
+                &arena,
+                heap,
+                make(target, consume_visible, replace_visible),
+                next.clone(),
+                allowance.clone(),
+                resource_facts,
+            ) {
+                if let Some(accepted) = evaluated
+                    .admit_interval(
+                        &frontier,
+                        &ledger,
+                        &arena,
+                        resources(&mut charged, &mut counters),
+                        &allowance,
+                        before + 19,
+                    )
+                    .unwrap()
+                {
+                    assert!(
+                        accepted
+                            .prepare_publication(
+                                &frontier,
+                                &ledger,
+                                arena.registration().unwrap(),
+                                heap,
+                                make(target, consume_visible, replace_visible),
+                                interval.exit(),
+                                &next,
+                            )
+                            .is_err()
+                    );
+                }
+            }
+            assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
+            assert_eq!(charged, 0);
+            assert!(matches!(arena.cell(first).unwrap(), Value::Int(1)));
+            assert!(matches!(arena.cell(second).unwrap(), Value::Int(1)));
+        }
+        let resource_facts = resources(&mut charged, &mut counters)
+            .facts(&allowance)
+            .unwrap();
+        let evaluated = frontier
+            .evaluate_interval(
+                Arc::clone(&interval),
+                &mut Execution(&facts),
+                &ledger,
+                &arena,
+                heap,
+                make(first, false, false),
+                next.clone(),
+                allowance.clone(),
+                resource_facts,
+            )
+            .unwrap();
+        let accepted = evaluated
+            .admit_interval(
+                &frontier,
+                &ledger,
+                &arena,
+                resources(&mut charged, &mut counters),
+                &allowance,
+                before + 19,
+            )
+            .unwrap()
+            .unwrap();
+        let prepared = accepted
+            .prepare_publication(
+                &frontier,
+                &ledger,
+                arena.registration().unwrap(),
+                heap,
+                make(first, false, false),
+                interval.exit(),
+                &next,
+            )
+            .unwrap();
+        drop(ledger);
+        let committed = prepared
+            .publish(
+                &mut frontier,
+                &mut ledger_store.borrow_mut(),
+                |arena, members| {
+                    for edit in members {
+                        if let Member::Variable = edit.member {
+                            arena.cell_set(edit.handle, edit.next.unwrap()).unwrap();
+                        } else {
+                            panic!("unexpected member edit");
+                        }
+                    }
+                },
+            )
+            .unwrap();
+        committed
+            .materializations
+            .publish(&mut ledger_store.borrow_mut(), |_| {})
+            .unwrap();
+        assert_eq!(charged, 1);
+        assert_eq!(
+            ledger_store.borrow().balance().unwrap().total().unwrap(),
+            baseline + 277 + extra
+        );
+        assert!(matches!(arena.cell(first).unwrap(), Value::Int(256)));
+        assert!(matches!(arena.cell(second).unwrap(), Value::Int(1)));
+        for owner in [caller.owner(Slot::Binding(0)), visible] {
+            let mut edges = Vec::new();
+            ledger_store
+                .borrow()
+                .holding(owner, heap.pages())
+                .unwrap()
+                .unwrap()
+                .visit_edges(heap.pages(), &mut |identity, _| {
+                    edges.push(identity);
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(edges, [Identity::Object(first_id)]);
+        }
+    }
 }

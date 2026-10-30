@@ -11,7 +11,6 @@ type Resolution = (
     BTreeMap<Owner, (u32, bool)>,
 );
 pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resolution, Refused> {
-    let mut scopes = BTreeMap::new();
     let binding_slots: BTreeMap<_, _> = source
         .bindings
         .iter()
@@ -25,6 +24,14 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
             )
         })
         .collect();
+    let (scopes, aliases) = resolve(source, owners)?;
+    Ok((scopes, aliases, binding_slots))
+}
+fn resolve(
+    source: &Description,
+    owners: &BTreeSet<Owner>,
+) -> Result<(BTreeMap<Owner, Site>, BTreeMap<Owner, Owner>), Refused> {
+    let mut scopes = BTreeMap::new();
     for owner in owners {
         if let Owner::Binding { declared, .. } = owner {
             let mut node = doc::Node::Block(&source.body);
@@ -90,7 +97,76 @@ pub(super) fn form(source: &Source, owners: &BTreeSet<Owner>) -> Result<Resoluti
             }
         }
     }
-    Ok((scopes, aliases, binding_slots))
+    Ok((scopes, aliases))
+}
+pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Name>, Refused> {
+    let mut owners = BTreeSet::new();
+    for (declared, name) in source.shared.keys() {
+        owners.insert(Owner::Binding {
+            declared: declared.clone(),
+            name: name.clone(),
+        });
+    }
+    for name in &source.params {
+        owners.insert(Owner::Binding {
+            declared: source.site.clone(),
+            name: name.clone(),
+        });
+    }
+    let mut pending = vec![(source.site.clone(), doc::Node::Block(&source.body))];
+    while let Some((at, node)) = pending.pop() {
+        match node {
+            doc::Node::Stmt(doc::Stmt::Let { name, .. })
+            | doc::Node::Expr(doc::Expr::Let { name, .. }) => {
+                owners.insert(Owner::Binding {
+                    declared: at.clone(),
+                    name: name.clone(),
+                });
+            }
+            doc::Node::Stmt(doc::Stmt::For { binding, .. }) => {
+                owners.insert(Owner::Binding {
+                    declared: child(&at, 1),
+                    name: binding.clone(),
+                });
+            }
+            doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
+                catch: Some(catch), ..
+            })) => {
+                owners.insert(Owner::Binding {
+                    declared: child(&at, 1),
+                    name: catch.binding.clone(),
+                });
+            }
+            doc::Node::Stmt(doc::Stmt::Assign {
+                place: doc::Place::Variable(name),
+                ..
+            }) => {
+                owners.insert(Owner::Visible {
+                    at: at.clone(),
+                    name: name.clone(),
+                });
+            }
+            _ => {}
+        }
+        pending.extend(
+            node.children()
+                .into_iter()
+                .enumerate()
+                .map(|(index, node)| (child(&at, index), node)),
+        );
+    }
+    let (_, aliases) = resolve(source, &owners)?;
+    Ok(aliases
+        .into_iter()
+        .filter_map(|(owner, binding)| match (owner, binding) {
+            (Owner::Visible { at, name }, Owner::Binding { declared, .. })
+                if source.shared.get(&(declared.clone(), name.clone())) == Some(&true) =>
+            {
+                Some((at, name))
+            }
+            _ => None,
+        })
+        .collect())
 }
 impl OwnerSlots {
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {

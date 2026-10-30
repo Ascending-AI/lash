@@ -85,15 +85,16 @@ impl Step {
                 }) => Some(name.clone()),
                 _ => None,
             },
-            member: matches!(
-                node,
-                doc::Node::Stmt(
-                    doc::Stmt::Assign {
-                        place: doc::Place::Member(_),
-                        ..
-                    } | doc::Stmt::Remove { .. }
-                )
-            ),
+            member: source.assigns_cell(&event.point.site)
+                || matches!(
+                    node,
+                    doc::Node::Stmt(
+                        doc::Stmt::Assign {
+                            place: doc::Place::Member(_),
+                            ..
+                        } | doc::Stmt::Remove { .. }
+                    )
+                ),
         };
         Ok(Self {
             publication,

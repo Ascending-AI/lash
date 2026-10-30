@@ -335,9 +335,17 @@ pub(crate) struct Description {
     pub(crate) params: Box<[Name]>,
     pub(crate) shared: BTreeMap<(Site, Name), bool>,
     pub(crate) persistent: BTreeMap<Site, Name>,
+    cell_assignments: Result<BTreeMap<Site, Name>, Refused>,
     pub(super) bulk: Option<&'static doc::plan::CopyLoop>,
     pub(crate) calls: BTreeMap<FunctionId, CallSource>,
     pub(crate) room: SourceRoom,
+}
+impl Description {
+    fn assigns_cell(&self, at: &Site) -> bool {
+        self.cell_assignments
+            .as_ref()
+            .is_ok_and(|assignments| assignments.contains_key(at))
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Refused {
@@ -610,6 +618,7 @@ impl Source {
             params: params.into(),
             shared,
             persistent,
+            cell_assignments: Ok(BTreeMap::new()),
             bulk,
             calls,
             room: SourceRoom {
@@ -621,6 +630,7 @@ impl Source {
                 exits: Box::new([]),
             },
         };
+        source.cell_assignments = root_owners::cell_assignments(&source);
         source.room = derive::body(&source);
         source
     }
@@ -674,6 +684,12 @@ impl Source {
                         name: name.clone(),
                     });
                 }
+                for (at, name) in self.cell_assignments.as_ref().map_err(|error| *error)? {
+                    owners.insert(Owner::Visible {
+                        at: at.clone(),
+                        name: name.clone(),
+                    });
+                }
                 for ((declared, name), shared) in &self.shared {
                     if *shared && declared == &self.site {
                         owners.insert(Owner::Binding {
@@ -703,7 +719,10 @@ impl Source {
     }
     fn verify_identity(&self) -> Result<(), Refused> {
         let description = std::ops::Deref::deref(self);
-        if self.owner != description.owner || self.site != description.site {
+        if self.owner != description.owner
+            || self.site != description.site
+            || description.cell_assignments.is_err()
+        {
             return Err(Refused::Source);
         }
         Ok(())

@@ -382,6 +382,50 @@ struct EventContext<'a> {
     arena: &'a Arena,
 }
 impl EventContext<'_> {
+    fn check_cell(
+        &self,
+        owner: logical::Owner,
+        handle: lash_kernel_doc::arena::ArenaHandle,
+    ) -> Result<(), Refused> {
+        let entity = self
+            .arena
+            .facts(handle)
+            .map_err(|_| Refused::Facts)?
+            .entity
+            .ok_or(Refused::Facts)?;
+        let holding = self
+            .ledger
+            .holding(owner, self.heap.pages())
+            .map_err(|_| Refused::Facts)?
+            .ok_or(Refused::Retained)?;
+        let mut edge = None;
+        let mut unique = true;
+        holding
+            .visit_edges(self.heap.pages(), &mut |identity, count| {
+                unique &= edge.replace((identity, count)).is_none();
+                Ok(())
+            })
+            .map_err(|_| Refused::Facts)?;
+        let bytes = if matches!(
+            owner,
+            logical::Owner::Value {
+                slot: logical::Slot::Capture(_),
+                ..
+            }
+        ) {
+            0
+        } else {
+            Cost::REFERENCE
+        };
+        if !unique
+            || edge != Some((doc::heap::Identity::Object(entity), 1))
+            || holding.bytes() != bytes
+            || !matches!(self.arena.body(handle), Ok(doc::arena::Body::Cell(_)))
+        {
+            return Err(Refused::Retained);
+        }
+        Ok(())
+    }
     fn check(
         &self,
         event: &Event,
@@ -433,8 +477,23 @@ impl EventContext<'_> {
                 name: name.clone(),
             })
             .ok_or(Refused::Source)?;
-            reads.insert(owner);
-            writes.insert(owner);
+            if source.assigns_cell(&event.point.site) {
+                let edit = actual
+                    .member
+                    .filter(|edit| {
+                        matches!(edit.member, logical::Member::Variable) && edit.next.is_some()
+                    })
+                    .ok_or(Refused::Retained)?;
+                if actual.inputs.contains(&owner)
+                    || actual.outputs.iter().any(|(output, _)| *output == owner)
+                {
+                    return Err(Refused::Retained);
+                }
+                self.check_cell(owner, edit.handle)?;
+            } else {
+                reads.insert(owner);
+                writes.insert(owner);
+            }
         }
         if event.point.phase == Phase::Leave {
             reads.insert(logical::Owner::Frame {

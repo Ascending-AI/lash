@@ -451,7 +451,7 @@ fn formula(
             doc::Stmt::Assign {
                 place: doc::Place::Variable(name),
                 ..
-            } => (
+            } if !authority.assigns_cell(site) => (
                 zero.clone(),
                 zero.term(
                     release([Owner::Visible {
