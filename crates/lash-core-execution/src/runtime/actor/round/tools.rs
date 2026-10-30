@@ -605,14 +605,14 @@ pub async fn settle_cancelled(
     run: RunSeq,
 ) -> Result<Vec<ExecutionDraft>, RoundError> {
     let open = open_members(cx, owner, run).await?;
-    for execution in &open {
+    for (execution, cancellation) in &open {
         settle(
             tx,
             execution,
             SettledOutput::Cancelled {
-                cancellation: lash_protocol_types::ToolCancellation::runtime(
-                    "the call was cancelled",
-                ),
+                cancellation: cancellation.clone().unwrap_or_else(|| {
+                    lash_protocol_types::ToolCancellation::runtime("the call was cancelled")
+                }),
                 evidence: AvailableEvidence::default(),
             },
             Vec::new(),
@@ -621,7 +621,7 @@ pub async fn settle_cancelled(
     }
     Ok(open
         .into_iter()
-        .map(|execution| execution.draft().clone())
+        .map(|(execution, _)| execution.draft().clone())
         .collect())
 }
 
@@ -639,7 +639,7 @@ pub async fn unsettled(
     Ok(open_members(cx, owner, run)
         .await?
         .into_iter()
-        .map(|execution| execution.draft().clone())
+        .map(|(execution, _)| execution.draft().clone())
         .collect())
 }
 
@@ -649,7 +649,7 @@ async fn open_members(
     cx: &ActorContext,
     owner: &OwnerKey,
     run: RunSeq,
-) -> Result<Vec<AdmittedExecution>, RoundError> {
+) -> Result<Vec<(AdmittedExecution, Option<crate::ToolCancellation>)>, RoundError> {
     let reads = cx.durable_reads()?;
     let mut rows = reads.run_facts_of(owner, run).await?;
     rows.read_limits = cx.backend().config().settings().graph_reads.owner();
@@ -662,6 +662,6 @@ async fn open_members(
         .members()
         .iter()
         .filter(|member| member.outcome().is_none())
-        .map(|member| view.execution(member))
+        .map(|member| (view.execution(member), member.cancellation().cloned()))
         .collect())
 }
