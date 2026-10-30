@@ -122,6 +122,10 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 15;
 ///         path = "crates/lash-sqlite-store/src/schema_fragments.rs", SESSION_INGRESS_TABLE,
 ///         SESSION_RUNS_TABLES, elide = "sql_idempotent_index",
 ///     ),
+///     items(
+///         path = "crates/lash-sqlite-store/src/durable/graph.rs", TABLES,
+///         elide = "sql_idempotent_index",
+///     ),
 ///     catalog(path = "crates/lash-sqlite-store/src/migration.rs", CATALOG),
 /// )
 /// version_surface = "migrate"
