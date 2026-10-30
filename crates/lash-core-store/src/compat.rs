@@ -131,7 +131,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 15;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 13;
+pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 14;
 
 /// What this build declares about a store component whose provisioning DDL
 /// is at `version`: it reads and writes exactly that version.
