@@ -1012,6 +1012,7 @@ PACKAGE_DEPS = {
     "lash-internal-protocol-types": {
         "build": {},
         "dev": {
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "proptest": "//third-party/rust:p0250",
             "rmp_serde": "//third-party/rust:p0285"
         },

@@ -42,5 +42,6 @@ schemars = { workspace = true }
 serde-transcode = "=1.1.1"
 
 [dev-dependencies]
+lash-vocabulary = { workspace = true, features = ["testing"] }
 proptest = "1"
 rmp-serde = { workspace = true }

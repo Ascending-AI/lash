@@ -117,11 +117,11 @@ fn digest(draft: &PendingTurnInputDraft) -> String {
 fn submission_digest_is_pinned() {
     assert_eq!(
         digest(&submission(active(), "hello")),
-        "turn-input-submission:v1:blake3:9e21f41b5602f8fc559eb39be1aa37d809851e016e398c094ae90e1fa234a378"
+        "turn-input-submission:v3:blake3:b9b72f099bd6a513fc685c59b7ead18a36fde463a9308fad3fbc03732a612bcb"
     );
     assert_eq!(
         digest(&submission(next(), "hello")),
-        "turn-input-submission:v1:blake3:23da023c1ede8d24906bc158f1149eecbdd8b742409841a3ccc7c4d7771e9981"
+        "turn-input-submission:v3:blake3:ac1d5fa346ab55716bd830a4088251bb72068fefb3a9cf92d8a6ac4c31571589"
     );
 }
 

@@ -119,7 +119,6 @@ pub use tool_catalog::{
     ToolCatalog, ToolCatalogBuildInput, ToolCatalogContribution, ToolCatalogEntry,
     ToolContractResolver, build_tool_catalog,
 };
-#[cfg(feature = "schema-validation")]
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin, CancelRequest,
     ModelToolOutcome, ModelToolReturn, ModelToolReturnPart, NextRun, NonFiniteToolViewPriority,
