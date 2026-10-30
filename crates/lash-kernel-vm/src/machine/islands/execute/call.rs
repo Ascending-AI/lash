@@ -24,13 +24,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let triple;
         let mut wide;
         let inputs = if let Some(inputs) = &site.inputs {
-            if let Some(held) = inputs.held() {
-                frame.regs[held.reg() as usize] = self.operand(frame, held)?;
-            }
             let callee = if let Some(callee) = &inputs.callee {
                 Some(
                     self.operand(frame, callee)
-                        .inspect_err(|_| self.call_prefix(frame, site, None))?,
+                        .inspect_err(|_| self.call_prefix(site, None))?,
                 )
             } else {
                 None
@@ -40,7 +37,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 [arg] => {
                     small = [
                         self.operand(frame, arg)
-                            .inspect_err(|_| self.call_prefix(frame, site, callee))?,
+                            .inspect_err(|_| self.call_prefix(site, callee))?,
                         Value::Absent,
                     ];
                     &small[..1]
@@ -48,10 +45,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 [left, right] => {
                     let x = self
                         .operand(frame, left)
-                        .inspect_err(|_| self.call_prefix(frame, site, callee))?;
+                        .inspect_err(|_| self.call_prefix(site, callee))?;
                     let y = self.operand(frame, right).inspect_err(|_| {
                         self.scratch.exit.regs.push((left.reg(), x));
-                        self.call_prefix(frame, site, callee);
+                        self.call_prefix(site, callee);
                     })?;
                     small = [x, y];
                     &small
@@ -59,15 +56,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 [first, second, third] if inputs.member().is_none() => {
                     let x = self
                         .operand(frame, first)
-                        .inspect_err(|_| self.call_prefix(frame, site, callee))?;
+                        .inspect_err(|_| self.call_prefix(site, callee))?;
                     let y = self.operand(frame, second).inspect_err(|_| {
                         self.scratch.exit.regs.push((first.reg(), x));
-                        self.call_prefix(frame, site, callee);
+                        self.call_prefix(site, callee);
                     })?;
                     let z = self.operand(frame, third).inspect_err(|_| {
                         self.scratch.exit.regs.push((first.reg(), x));
                         self.scratch.exit.regs.push((second.reg(), y));
-                        self.call_prefix(frame, site, callee);
+                        self.call_prefix(site, callee);
                     })?;
                     triple = [x, y, z];
                     &triple
@@ -92,7 +89,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             for (arg, value) in args[..index].iter().zip(&wide) {
                                 self.scratch.exit.regs.push((arg.reg(), *value));
                             }
-                            self.call_prefix(frame, site, callee);
+                            self.call_prefix(site, callee);
                         })?;
                     }
                     &wide[..args.len()]
@@ -240,12 +237,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if answer.is_err()
             && let (Some(inputs), Some((callee, values))) = (&site.inputs, inputs)
         {
-            if let Some(held) = inputs.held() {
-                self.scratch
-                    .exit
-                    .regs
-                    .push((held.reg(), frame.regs[held.reg() as usize]));
-            }
             if let Some(callee) = callee {
                 self.scratch.exit.regs.push((site.reg, callee));
             }
@@ -257,15 +248,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     }
     /// A partial input read keeps the already evaluated source prefix.
     #[cold]
-    fn call_prefix(&mut self, frame: &Values<'_, 'e>, site: &CallSite, callee: Option<Value>) {
+    fn call_prefix(&mut self, site: &CallSite, callee: Option<Value>) {
         if let Some(callee) = callee {
             self.scratch.exit.regs.insert(0, (site.reg, callee));
-        }
-        if let Some(held) = site.inputs.as_ref().and_then(|inputs| inputs.held()) {
-            self.scratch
-                .exit
-                .regs
-                .insert(0, (held.reg(), frame.regs[held.reg() as usize]));
         }
     }
 }

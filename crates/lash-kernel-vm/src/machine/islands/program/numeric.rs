@@ -112,9 +112,6 @@ impl Build<'_> {
             if let Some(range) = self.member_input(at, targets) {
                 removed.extend(range);
             }
-            if let Some(range) = self.call_input(at, targets) {
-                removed.extend(range);
-            }
             if let Some(range) = self.value_input(at, targets, protected) {
                 removed.extend(range);
             }
@@ -132,6 +129,7 @@ impl Build<'_> {
             Op::Heap {
                 args,
                 resident: Some(HeapKernel::Read { .. }),
+                inputs: HeapInputs::Registers,
                 ..
             } if args.len() == 2 => 2,
             Op::Store {
@@ -204,92 +202,26 @@ impl Build<'_> {
     }
     /// Pure call inputs retain source order. Only the call uses their
     /// values; no operator, charge or external callback moves across them.
-    fn call_input(
+    pub(super) fn call_reads(
         &mut self,
-        call: usize,
-        targets: &BTreeSet<usize>,
-    ) -> Option<std::ops::Range<usize>> {
-        let Op::Call { site, read, args } = &self.ops[call].op else {
-            return None;
-        };
-        let count = args.len() + usize::from(*read);
-        if count == 0 || count > MAX_ARGS || call < count {
+        callee: &Callee,
+        args: &[Expr],
+        reg: u32,
+    ) -> Option<(Option<Read>, Box<[Read]>)> {
+        let count = args.len() + usize::from(matches!(callee, Callee::Read(_)));
+        if count == 0 || count > MAX_ARGS {
             return None;
         }
-        let mut start = call - count;
-        if (start + 1..=call).any(|at| targets.contains(&at) || self.ops[at].begin.is_some()) {
-            return None;
-        }
-        let wanted = read
-            .then_some(site.reg)
-            .into_iter()
-            .chain(args.iter().copied());
-        let mut reads = self.ops[start..call]
-            .iter()
-            .zip(wanted)
-            .map(|(instruction, reg)| match instruction.op {
-                Op::Constant { dst, value } if dst == reg => Some(Read::Literal { reg, value }),
-                Op::Local {
-                    dst,
-                    at,
-                    shared,
-                    miss,
-                } if dst == reg => Some(Read::Local {
-                    reg,
-                    at,
-                    shared,
-                    miss,
-                }),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()?;
-        let callee = if *read { Some(reads.remove(0)) } else { None };
-        let held = if start > 0 && !targets.contains(&start) && self.ops[start].begin.is_none() {
-            match self.ops[start - 1].op {
-                Op::Local {
-                    dst,
-                    at,
-                    shared,
-                    miss,
-                } if self.ops[start].live.contains(&dst)
-                    && !reads.iter().any(|read| read.reg() == dst)
-                    && callee.as_ref().is_none_or(|read| read.reg() != dst) =>
-                {
-                    start -= 1;
-                    Some(Operand::from(Read::Local {
-                        reg: dst,
-                        at,
-                        shared,
-                        miss,
-                    }))
-                }
-                _ => None,
-            }
-        } else {
-            None
+        let callee = match callee {
+            Callee::Read(read) if read.reg == reg => Some(
+                self.reads(std::slice::from_ref(read.as_ref()))?
+                    .into_vec()
+                    .pop()?,
+            ),
+            Callee::Read(_) => return None,
+            Callee::Declared(_) => None,
         };
-        let property = if callee.is_none() && held.is_none() {
-            self.member_write(site, &reads)
-        } else {
-            None
-        };
-        let begin = self.ops[start].begin.take();
-        let live = self.ops[start].live.clone();
-        let Op::Call { site, .. } = &mut self.ops[call].op else {
-            unreachable!()
-        };
-        site.inputs = Some(Box::new(CallInputs {
-            prefix: match (held, property) {
-                (Some(held), None) => CallPrefix::Held(held),
-                (_, Some(member)) => CallPrefix::Member(member),
-                (None, None) => CallPrefix::None,
-            },
-            callee: callee.map(Operand::from),
-            args: reads.into_iter().map(Operand::from).collect(),
-        }));
-        self.ops[call].begin = begin;
-        self.ops[call].live = live;
-        Some(start..call)
+        Some((callee, self.reads(args)?))
     }
 }
 
@@ -470,36 +402,17 @@ pub(crate) enum Destination {
 /// Reads evaluated inside a call, before its close and admission. Their
 /// values become caller roots only when the call suspends that caller.
 pub(crate) struct CallInputs {
-    prefix: CallPrefix,
+    pub(super) member: Option<Box<super::super::MemberWrite>>,
     pub(in crate::machine::islands) callee: Option<Operand>,
     pub(in crate::machine::islands) args: Box<[Operand]>,
 }
 
-enum CallPrefix {
-    None,
-    Held(Operand),
-    Member(Box<super::super::MemberWrite>),
-}
-
 impl CallInputs {
-    pub(in crate::machine::islands) fn held(&self) -> Option<&Operand> {
-        match &self.prefix {
-            CallPrefix::Held(held) => Some(held),
-            _ => None,
-        }
-    }
-
     pub(in crate::machine::islands) fn member(&self) -> Option<&super::super::MemberWrite> {
-        match &self.prefix {
-            CallPrefix::Member(member) => Some(member),
-            _ => None,
-        }
+        self.member.as_deref()
     }
 
     pub(in crate::machine::islands) fn reads(&self) -> impl Iterator<Item = &Operand> {
-        self.held()
-            .into_iter()
-            .chain(self.callee.iter())
-            .chain(self.args.iter())
+        self.callee.iter().chain(self.args.iter())
     }
 }

@@ -1115,14 +1115,21 @@ impl<'e> Build<'e> {
                 closes,
                 site,
             } => {
+                let inputs = self.call_reads(callee, args, reg);
                 let (read, declared) = match callee {
                     Callee::Read(read) => {
-                        self.expr(read)?;
+                        if inputs.is_none() {
+                            self.expr(read)?;
+                        }
                         (true, None)
                     }
                     Callee::Declared(code) => (false, Some(*code)),
                 };
-                let args = self.args(args)?;
+                let args = if inputs.is_some() {
+                    args.iter().map(|arg| arg.reg).collect()
+                } else {
+                    self.args(args)?
+                };
                 self.open = None;
                 let library = self
                     .root
@@ -1146,6 +1153,11 @@ impl<'e> Build<'e> {
                 {
                     let depth = Depth::Template(extra);
                     self.site(depth, true);
+                    let inputs = match inputs {
+                        Some((None, reads)) => HeapInputs::Read(reads.try_into().ok()?),
+                        Some((Some(_), _)) => unreachable!(),
+                        None => HeapInputs::Registers,
+                    };
                     self.emit(Op::Heap {
                         site: HeapSite {
                             lib,
@@ -1163,30 +1175,43 @@ impl<'e> Build<'e> {
                             units,
                             to: Destination::Register,
                         }),
-                        inputs: HeapInputs::Registers,
+                        inputs,
                     });
                     self.result(reg, &args);
                     return Some(());
                 }
                 let after = self.start();
+                let mut call_site = CallSite {
+                    checked: invoke.checked || self.root_checked(),
+                    inputs: None,
+                    root: self.root,
+                    library,
+                    answers: library
+                        .filter(|lib| self.exe.lib(*lib).arity == args.len())
+                        .and_then(|lib| super::answer_depth(self.exe, lib)),
+                    callee: declared,
+                    close: closes.first().copied(),
+                    pc,
+                    reg,
+                    act: invoke.act,
+                    occurrence: invoke.counted(),
+                    site: *site,
+                    after,
+                };
+                if let Some((callee, reads)) = inputs {
+                    let member = if callee.is_none() {
+                        self.member_write(&call_site, &reads)
+                    } else {
+                        None
+                    };
+                    call_site.inputs = Some(Box::new(CallInputs {
+                        member,
+                        callee: callee.map(Operand::from),
+                        args: reads.into_vec().into_iter().map(Operand::from).collect(),
+                    }));
+                }
                 self.emit(Op::Call {
-                    site: CallSite {
-                        checked: invoke.checked || self.root_checked(),
-                        inputs: None,
-                        root: self.root,
-                        library,
-                        answers: library
-                            .filter(|lib| self.exe.lib(*lib).arity == args.len())
-                            .and_then(|lib| super::answer_depth(self.exe, lib)),
-                        callee: declared,
-                        close: closes.first().copied(),
-                        pc,
-                        reg,
-                        act: invoke.act,
-                        occurrence: invoke.counted(),
-                        site: *site,
-                        after,
-                    },
+                    site: call_site,
                     read,
                     args: args.clone(),
                 });
