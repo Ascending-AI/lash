@@ -716,6 +716,7 @@ fn run_cell(
     let mut pending: Vec<Request> = Vec::new();
     let mut script = deliveries.iter();
     let mut epochs = Vec::new();
+    let mut cancellation_epochs = Vec::new();
     let mut delivered = Vec::new();
     let (logged, end) = drive(source, effects(), session.clone(), |logged, park, text| {
         pending.retain(|request| {
@@ -730,6 +731,10 @@ fn run_cell(
             logged,
         });
         pending.extend(park.requests);
+        if !park.cancel_requests.is_empty() {
+            cancellation_epochs.push(epochs.len() - 1);
+            return Vec::new();
+        }
         let batch = match script.next() {
             Some(batch) => batch.clone(),
             None => {
@@ -757,6 +762,19 @@ fn run_cell(
         asked: Vec::new(),
         logged,
     });
+    let mut stretches: Vec<Epoch> = Vec::new();
+    let mut after_cancel = false;
+    for (index, epoch) in epochs.into_iter().enumerate() {
+        if after_cancel {
+            assert!(epoch.delivered.is_empty());
+            let previous = stretches.last_mut().unwrap();
+            previous.asked.extend(epoch.asked);
+            previous.logged.extend(epoch.logged);
+        } else {
+            stretches.push(epoch);
+        }
+        after_cancel = cancellation_epochs.contains(&index);
+    }
     let carried = match &end {
         End::Finished(finished) => Some(Session {
             root: finished.carry,
@@ -766,7 +784,7 @@ fn run_cell(
     };
     (
         Recorded {
-            epochs,
+            epochs: stretches,
             end: ending(end),
         },
         carried,

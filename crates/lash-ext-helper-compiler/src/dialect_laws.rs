@@ -620,10 +620,13 @@ fn cancelling_python_sleep_takes_a_turn_before_the_handler() {
             assert_eq!(effect.args, [Datum::Int(5.into())]);
         }
     }
-    assert!(matches!(
-        machine.run(&mut script, u64::MAX).unwrap(),
-        Step::Ended(End::Finished(_))
-    ));
+    loop {
+        match machine.run(&mut script, u64::MAX).unwrap() {
+            Step::Parked(park) if !park.cancel_requests.is_empty() && park.requests.is_empty() => {}
+            Step::Ended(End::Finished(_)) => break,
+            other => panic!("unexpected sleep cancellation continuation {other:?}"),
+        }
+    }
     assert_eq!(
         script.printed,
         ["other", "later", "caught"].map(|s| Datum::Text(s.into()))

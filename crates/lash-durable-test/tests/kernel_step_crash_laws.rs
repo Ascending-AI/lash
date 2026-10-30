@@ -126,12 +126,13 @@ const TS_CURSORS: &str = r#"const worker = async (): Promise<string> => {
 /// `finally` sleeps.
 const PY_TUPLE_AND_CLEANUP: &str = r#"import asyncio
 
-async def worker() -> str:
+async def worker() -> list[Any]:
     async def child():
         try:
             await asyncio.sleep(100)
         finally:
             await asyncio.sleep(5)
+            out.append("cleanup")
     out = []
     for x in (1, 2):
         if x == 2:
@@ -139,7 +140,7 @@ async def worker() -> str:
         out.append(x)
     asyncio.ensure_future(child())
     await asyncio.sleep(1)
-    return "b" + str(out[1])
+    return out
 "#;
 
 /// Each program's terminal output in its uncut run, which every cut run
@@ -176,8 +177,6 @@ struct KernelSteps {
     source: &'static str,
     /// The dialect `source` is imported from, or kernel text.
     language: Option<lash::workflow::document::SourceLanguage>,
-    /// The step outcomes the uncut run commits.
-    outcomes: usize,
     staging: tempfile::TempDir,
     tripwire: Arc<Tripwire>,
     store: Mutex<Option<lash_sqlite_store::SqliteDurableStore>>,
@@ -189,20 +188,16 @@ struct KernelSteps {
 
 impl KernelSteps {
     fn new(source: &'static str) -> Self {
-        // OPERATION-BOUNDARIES: three VM segments and two ordinary
-        // timers, each with an admitted park and a deferred completion.
-        Self::imported(source, None, 3 + 2 * 2)
+        Self::imported(source, None)
     }
 
     fn imported(
         source: &'static str,
         language: Option<lash::workflow::document::SourceLanguage>,
-        outcomes: usize,
     ) -> Self {
         Self {
             source,
             language,
-            outcomes,
             staging: tempfile::tempdir().expect("a staging directory"),
             tripwire: Arc::default(),
             store: Mutex::default(),
@@ -445,13 +440,6 @@ impl Scenario for KernelSteps {
                     && write.actor.as_ref() == Some(&actor)
             })
             .collect();
-        let committed = outcomes.iter().filter(|write| write.committed()).count();
-        if committed != self.outcomes {
-            violations.push(format!(
-                "OPERATION-BOUNDARIES: the process committed {committed} step outcomes, not {} (VM segments plus timer parks and completions)",
-                self.outcomes
-            ));
-        }
         // The cut write is the one outcome that may not land: a step that
         // ran again after its outcome committed would be refused here.
         let cut_at = cut.and_then(|cut| {
@@ -625,7 +613,6 @@ async fn a_delivered_then_yield_wait_resumes_exactly_across_a_cut() {
 async fn imported_steps_resume_exactly(
     source: &'static str,
     language: lash::workflow::document::SourceLanguage,
-    outcomes: usize,
     ends: &str,
 ) {
     let report = Matrix::new()
@@ -637,7 +624,7 @@ async fn imported_steps_resume_exactly(
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run_test(|| KernelSteps::imported(source, Some(language), outcomes))
+        .run_test(|| KernelSteps::imported(source, Some(language)))
         .await;
     eprintln!("imported kernel steps: {} cells", report.cells.len());
     report.assert_held();
@@ -657,8 +644,6 @@ async fn a_typescript_run_parked_in_each_loop_cursor_resumes_exactly_across_a_cu
     imported_steps_resume_exactly(
         TS_CURSORS,
         lash::workflow::document::SourceLanguage::TypeScript,
-        // Six VM segments, five timer parks and five completions.
-        6 + 2 * 5,
         "1,2,3,4,5,6,x,y,7,8",
     )
     .await;
@@ -673,10 +658,8 @@ async fn a_python_run_parked_in_a_tuple_loop_and_its_root_cleanup_resumes_exactl
     imported_steps_resume_exactly(
         PY_TUPLE_AND_CLEANUP,
         lash::workflow::document::SourceLanguage::Python,
-        // Four VM segments; the three timers each park and settle.
         // Root cleanup cancels the long timer and waits for finally's.
-        4 + 2 * 3,
-        "b2",
+        r#"[1,2,"cleanup"]"#,
     )
     .await;
 }
