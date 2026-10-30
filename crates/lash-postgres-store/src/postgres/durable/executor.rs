@@ -228,7 +228,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &turns::END_LOCAL,
         &snapshots::CLEAR_UNDER,
         &graph::ADMISSIONS_UNDER,
-        &run_records::DELETE_UNDER,
+        &run_records::DELETE_TURN,
         &turns::TERMINAL_STATE,
         // What ends with a turn: its scope, its waits, its prompt texts.
         &waits::REVOKE_SCOPE,

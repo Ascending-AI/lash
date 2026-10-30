@@ -53,6 +53,12 @@ crate::statements! {
         /// process's. Returns each RoundFact node it held.
         delete_owner = "DELETE FROM run_records WHERE owner_key = ?1 RETURNING record_ref";
 
+        /// A terminal turn's exact owner `?1` and its cells under `?2`.
+        /// Both ledgers retire together; every removed reference is returned.
+        delete_turn = "DELETE FROM run_records
+             WHERE owner_key = ?1 OR substr(owner_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
+             RETURNING record_ref";
+
         /// Delete every fact whose owner key starts with `?1`: the cells of
         /// one turn at its end, or every owner of one session at its delete.
         /// Returns each RoundFact node it held.

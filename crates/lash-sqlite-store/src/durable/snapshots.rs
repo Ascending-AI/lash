@@ -180,7 +180,7 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
 }
 
 /// Delete every execution root whose key starts with `prefix`, with the
-/// admissions and run facts of each: the cells one turn stopped in, at its
+/// admissions of each: the cells one turn stopped in, at its
 /// end, or one session's, at its delete. Answers every root they held: the
 /// caller's to peel.
 pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
@@ -189,7 +189,6 @@ pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Ve
         .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect::<rusqlite::Result<_>>()?;
     roots.extend(super::graph::clear_admissions_under(tx, prefix)?);
-    roots.extend(super::run_records::delete_under(tx, prefix)?);
     Ok(roots)
 }
 

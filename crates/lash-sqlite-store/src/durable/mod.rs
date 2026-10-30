@@ -168,6 +168,10 @@ pub(crate) fn retire_session_rows(
         tx,
         &ExecKey::session_cells(session),
     )?);
+    roots.extend(run_records::delete_under(
+        tx,
+        &ExecKey::session_cells(session),
+    )?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }

@@ -253,6 +253,23 @@ pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Ve
         .collect()
 }
 
+/// Retire the terminal turn's ledger and every cell ledger it owns.
+pub(super) fn delete_turn(
+    tx: &Connection,
+    session: &lash_kernel_value::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
+) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.delete_turn.sql())?
+        .query_map(
+            rusqlite::params![
+                OwnerKey::Turn(session.clone(), run.clone()).stored(),
+                lash_durable::domain::ExecKey::turn_cells(session, run),
+            ],
+            |row| crate::codec::hash_column(row, 0),
+        )?
+        .collect()
+}
+
 fn read_limited(
     tx: &Connection,
     owner: &OwnerKey,
@@ -469,6 +486,70 @@ pub(super) fn request_call_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TURN-FACT-RETIRE: one terminal write returns exactly its turn and
+    /// cell roots, including duplicate root references, and keeps other owners.
+    #[tokio::test]
+    async fn turn_retirement_preserves_other_owners_in_one_write() {
+        use lash_durable::domain::CellId;
+        use lash_kernel_value::identity::SessionId;
+        use lash_vocabulary::identity::TurnId;
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::schema::SCHEMA).unwrap();
+        conn.execute_batch(TABLES).unwrap();
+        let session = SessionId::from("s/%");
+        let turn = TurnId::from("t/%");
+        let owners = [
+            OwnerKey::Turn(session.clone(), turn.clone()),
+            OwnerKey::Cell(session.clone(), turn.clone(), CellId::new("one")),
+            OwnerKey::Cell(session.clone(), turn.clone(), CellId::new("two")),
+            OwnerKey::Turn(session.clone(), "t/%more".into()),
+            OwnerKey::Cell(session.clone(), "t/%more".into(), CellId::new("one")),
+            OwnerKey::Cell("s/%more".into(), turn.clone(), CellId::new("one")),
+            OwnerKey::Process(lash_vocabulary::identity::ProcessId::fixture("other-owner")),
+        ];
+        let root = [7_u8; 32];
+        conn.execute(
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 1)",
+            [root.as_slice()],
+        )
+        .unwrap();
+        for owner in &owners {
+            conn.execute(
+                "INSERT INTO run_records VALUES (?1, 1, 0, 'admit', NULL, ?2, 1)",
+                rusqlite::params![owner.stored(), root.as_slice()],
+            )
+            .unwrap();
+        }
+        crate::observed_sql::enable(&conn);
+        let (retired, receipt) =
+            lash_core_ids::operational_metrics::sql::collect("turn.fact_retire", "sqlite", async {
+                delete_turn(&conn, &session, &turn)
+            })
+            .await;
+        assert_eq!(
+            retired.unwrap(),
+            vec![lash_core_store::checkpoint_graph::NodeId(root).to_hex(); 3]
+        );
+        let remaining = conn
+            .prepare("SELECT owner_key FROM run_records ORDER BY owner_key")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let mut expected: Vec<_> = owners[3..].iter().map(OwnerKey::stored).collect();
+        expected.sort();
+        assert_eq!(remaining, expected);
+        assert_eq!(
+            receipt
+                .shapes
+                .values()
+                .map(|shape| shape.statements)
+                .sum::<u64>(),
+            1
+        );
+    }
 
     /// STORE-GRAPH-POLICY: SQLite's hydration refuses the deployment's byte budget.
     #[tokio::test]

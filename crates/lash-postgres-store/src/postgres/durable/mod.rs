@@ -259,6 +259,7 @@ pub(crate) async fn retire_session_rows(
     roots.extend(run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
     roots.extend(model_calls::delete_session(&mut *tx, session).await?);
     roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
+    roots.extend(run_records::delete_under(&mut *tx, &cells).await?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
         waits::delete_owned(&mut *tx, &actor).await?;
     }

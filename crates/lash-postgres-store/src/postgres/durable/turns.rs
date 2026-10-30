@@ -380,15 +380,15 @@ fn terminal_steps(
     for entry in [
         &super::snapshots::CLEAR_UNDER,
         &super::graph::ADMISSIONS_UNDER,
-        &super::run_records::DELETE_UNDER,
     ] {
         program.push(Step::any(entry, vec![Value::text(cells.as_str())]));
     }
     program.push(Step::any(
-        &super::run_records::DELETE_OWNER,
-        vec![Value::text(
-            OwnerKey::Turn(session.clone(), run.clone()).stored(),
-        )],
+        &super::run_records::DELETE_TURN,
+        vec![
+            Value::text(OwnerKey::Turn(session.clone(), run.clone()).stored()),
+            Value::text(cells),
+        ],
     ));
     // The turn's phase row and namespaces go with it, and their roots with
     // them: its working execution, receipt and namespace values whole, its

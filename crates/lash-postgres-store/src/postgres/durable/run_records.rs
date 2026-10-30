@@ -101,9 +101,9 @@ pub(super) fn append_step(epoch: Epoch, writes: &[&RunFactWrite]) -> Result<Step
 }
 pub(super) static DELETE_OWNER: Entry =
     Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Returning).retiring("record_ref");
-/// Every fact of the owners under a key: a terminal's cells.
-pub(super) static DELETE_UNDER: Entry =
-    Entry::new(|| &SQL.delete_under, &[Ty::Text], Shape::Returning).retiring("record_ref");
+/// The terminal turn's ledger and all its cell ledgers share one retirement.
+pub(super) static DELETE_TURN: Entry =
+    Entry::new(|| &SQL.delete_turn, &[Ty::Text, Ty::Text], Shape::Returning).retiring("record_ref");
 pub(super) static PRUNE: Entry =
     Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Returning).retiring("record_ref");
 

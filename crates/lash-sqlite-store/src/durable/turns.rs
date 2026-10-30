@@ -501,8 +501,7 @@ pub(super) fn apply(
             for root in super::snapshots::retire_under(tx, &ExecKey::turn_cells(session, run))? {
                 commit.retired.stored(root);
             }
-            let owner = lash_durable::domain::OwnerKey::Turn(session.clone(), run.clone());
-            for record in super::run_records::delete_owner(tx, &owner.stored())? {
+            for record in super::run_records::delete_turn(tx, session, run)? {
                 commit.retired.stored(record);
             }
             cached_execute(

@@ -248,7 +248,7 @@ pub(super) async fn under_limited(
 }
 
 /// Delete every execution root whose key starts with `prefix`, with the
-/// admissions and run facts of each: the cells one turn stopped in, at its
+/// admissions of each: the cells one turn stopped in, at its
 /// end, or one session's, at its delete. Answers every root they held: the
 /// caller's to peel.
 pub(super) async fn retire_under(
@@ -260,6 +260,5 @@ pub(super) async fn retire_under(
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await?;
     roots.extend(super::graph::clear_admissions_under(&mut *tx, prefix).await?);
-    roots.extend(super::run_records::delete_under(tx, prefix).await?);
     Ok(roots)
 }

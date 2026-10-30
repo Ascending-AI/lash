@@ -1434,9 +1434,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry a89694c3ef9a8fa4); a call
+    -- Generated from this build's statements (registry c2ef0f624ff7bcad); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'a89694c3ef9a8fa4'
+    IF p_registry IS DISTINCT FROM 'c2ef0f624ff7bcad'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1998,10 +1998,10 @@ BEGIN
                 v_rows := v_rows + 1;
                 IF v_row."admission_ref" IS NOT NULL THEN v_retired := v_retired || v_row."admission_ref"::BYTEA; END IF;
             END LOOP;
-        WHEN 'durable_run_record.delete_under' THEN
+        WHEN 'durable_run_record.delete_turn' THEN
             v_rows := 0;
             FOR v_row IN DELETE FROM lash_run_records
-             WHERE substr(owner_key, 1, length(CAST((v_p->>0) AS TEXT))) = CAST((v_p->>0) AS TEXT)
+             WHERE owner_key = (v_p->>0) OR substr(owner_key, 1, length(CAST((v_p->>1) AS TEXT))) = CAST((v_p->>1) AS TEXT)
              RETURNING record_ref LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
