@@ -449,20 +449,26 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     // FIG-7510 profiles: retain fixed room bounds in the hot access callers.
     #[inline(always)]
     pub(super) fn resident_room(&self, bytes: u64) -> bool {
+        !self.tight
+            && self.tape.is_none()
+            && self.projection().is_none()
+            && self.storage_room(bytes)
+    }
+
+    /// Physical storage eligibility for a prepared source operation. Its
+    /// accepted source journal supplies semantic and logical admission.
+    pub(super) fn storage_room(&self, bytes: u64) -> bool {
         #[cfg(test)]
         if self.scratch.chilled {
             return false;
         }
-        !self.tight
-            && self.tape.is_none()
-            && self.projection().is_none()
-            && (!self.memory
-                || bytes
-                    <= self
-                        .ceiling
-                        .saturating_sub(self.register_bytes)
-                        .saturating_sub(self.arena.held())
-                        .saturating_sub(self.transient))
+        !self.memory
+            || bytes
+                <= self
+                    .ceiling
+                    .saturating_sub(self.register_bytes)
+                    .saturating_sub(self.arena.held())
+                    .saturating_sub(self.transient)
     }
 
     pub(super) fn construction_floor(

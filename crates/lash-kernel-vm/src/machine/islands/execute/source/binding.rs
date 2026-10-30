@@ -200,7 +200,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 |arena, edits, storage| {
                     debug_assert!(edits.is_empty());
                     storage.batch.publish(arena);
-                    frame.slots[site.at] = SlotState::Cell(storage.cell);
+                    frame.slots[site.at] = SlotState::Cell(storage.handle);
                 },
             )?
         } else {

@@ -33,6 +33,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         Ok(Next::Continue)
     }
 
+    pub(super) fn construct_closure(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        site: &sites::Closure,
+    ) -> Result<Next, Stop> {
+        match self
+            .publish_closure_construction(frame, site)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            source::ValuePublication::Published(_) => return Ok(Next::Continue),
+            source::ValuePublication::Declined => return Err(self.at(site.miss)),
+            source::ValuePublication::Unavailable => {}
+        }
+        let closure = self.retaining(&mut frame.state.transient, |island| {
+            island.fresh_closure(frame.state.callee, frame.slots, site.code)
+        });
+        let value = Value::Closure(closure.ok_or_else(|| self.at(site.miss))?);
+        frame.regs[site.reg as usize] = self.source_result(value)?;
+        Ok(Next::Continue)
+    }
+
     pub(super) fn format(
         &mut self,
         frame: &mut Values<'_, 'e>,

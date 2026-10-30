@@ -480,13 +480,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 regs[*reg as usize] = self.source_result(value)?;
             }
             Opcode::Closure => {
-                let sites::Closure { code, reg, miss } = &code.sites.closure[packet.x as usize];
-
-                let closure = self.retaining(&mut frame.state.transient, |island| {
-                    island.fresh_closure(frame.state.callee, frame.slots, *code)
-                });
-                let value = Value::Closure(closure.ok_or_else(|| self.at(*miss))?);
-                regs[*reg as usize] = self.source_result(value)?;
+                return self.construct_closure(frame, &code.sites.closure[packet.x as usize]);
             }
             Opcode::Store => {
                 let sites::Store {

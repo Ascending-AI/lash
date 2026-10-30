@@ -665,26 +665,12 @@ impl Arena {
     }
 
     fn hold_members(&mut self, body: &Body) {
-        each_member(body, &mut |value| {
-            if let Some(handle) = value.handle()
-                && let Some(facts) = self.facts.get_mut(handle.index() as usize)
-            {
-                facts.count = facts.count.saturating_add(1);
-            }
-        });
-        if let Body::Closure { captures, .. } = body {
-            for cell in captures {
-                self.hold_handle(*cell);
-            }
-        }
+        each_handle(body, &mut |handle| self.hold_handle(handle));
     }
 
     fn unhold_members(&mut self, body: &Body) {
         let mut members = Vec::new();
-        each_member(body, &mut |value| members.extend(value.handle()));
-        if let Body::Closure { captures, .. } = body {
-            members.extend(captures.iter().copied());
-        }
+        each_handle(body, &mut |handle| members.push(handle));
         for handle in members {
             self.unhold_handle(handle);
         }
@@ -1515,6 +1501,19 @@ fn body_values(body: &Body) -> u64 {
             Body::Closure { captures, .. } => captures.len() as u64,
             _ => 0,
         }
+}
+
+/// Values and captured cells share the same physical ownership traversal.
+#[inline]
+fn each_handle(body: &Body, visit: &mut impl FnMut(ArenaHandle)) {
+    each_member(body, &mut |value| {
+        if let Some(handle) = value.handle() {
+            visit(handle);
+        }
+    });
+    if let Body::Closure { captures, .. } = body {
+        captures.iter().copied().for_each(visit);
+    }
 }
 
 /// Visits every value `body` holds resident. A closure's captured cells

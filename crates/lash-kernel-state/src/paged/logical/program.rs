@@ -95,7 +95,11 @@ impl VirtualBody {
             Self::Closure(captures) => {
                 for entity in captures {
                     add(
-                        Holding::from_page(access, &PageValue::Ref(Identity::Object(*entity)))?,
+                        Holding::with_edges(
+                            Cost::ENTITY_EDGE,
+                            [Identity::Object(*entity)],
+                            access,
+                        )?,
                         false,
                     )?;
                 }
@@ -731,12 +735,17 @@ impl VirtualBody {
                 Kind::Variable
             }
             Self::Closure(captures) => {
-                for id in captures {
-                    add(PublicationValue::Page(PageValue::Ref(Identity::Object(
-                        *id,
-                    ))))?;
-                }
-                Kind::Closure
+                let members = captures
+                    .iter()
+                    .map(|id| {
+                        let mut holding =
+                            PublicationValue::Page(PageValue::Ref(Identity::Object(*id)))
+                                .native_holding(heap, arena, owners)?;
+                        holding.bytes = Cost::ENTITY_EDGE;
+                        Ok(holding)
+                    })
+                    .collect::<Result<Vec<_>, HeapFault>>()?;
+                return Ok((Kind::Closure, members));
             }
             Self::Map(entries) => {
                 for (key, value) in entries {

@@ -131,6 +131,23 @@ impl Arena {
         Ok((handle, Self::prepare_registered(registration)?))
     }
 
+    /// Prepare a closure and its actual capture cells before source acceptance.
+    /// The local code cache is implementation state, installed with the body.
+    pub fn prepare_closure(
+        &mut self,
+        identity: std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
+        captures: Vec<ArenaHandle>,
+        code: lash_kernel_doc::arena::LocalCode,
+    ) -> Result<(ArenaHandle, PreparedInstallation<'_>), NativeError> {
+        let mut registration = self.registration()?;
+        let handle = registration.reserve_body(Body::Closure {
+            identity,
+            captures: captures.into_boxed_slice(),
+            code: Some(code),
+        })?;
+        Ok((handle, Self::prepare_registered(registration)?))
+    }
+
     fn prepare_registered(
         mut registration: Registration<'_>,
     ) -> Result<PreparedInstallation<'_>, NativeError> {
@@ -249,20 +266,25 @@ impl Arena {
                 indices: &indices,
             };
             let mut error = None;
-            each_member(&entries[at].body, &mut |value| {
-                if let Some(handle) = value.handle() {
-                    if Bodies::get(&view, handle).is_none_or(|body| matches!(body, Body::Free)) {
-                        error = Some(malformed("a batch member names a stale object"));
-                    } else if !indices.contains_key(&handle.index()) {
-                        if let Some(version) = arena.content_version(handle) {
-                            if let Err(fault) = reserve(&mut dependencies, 1) {
-                                error = Some(fault.into());
-                            } else {
-                                dependencies.push(version);
-                            }
+            if let Body::Closure { captures, .. } = &entries[at].body
+                && captures
+                    .iter()
+                    .any(|handle| !matches!(Bodies::get(&view, *handle), Some(Body::Cell(_))))
+            {
+                return Err(malformed("a closure capture is not a variable cell"));
+            }
+            each_handle(&entries[at].body, &mut |handle| {
+                if Bodies::get(&view, handle).is_none_or(|body| matches!(body, Body::Free)) {
+                    error = Some(malformed("a batch member names a stale object"));
+                } else if !indices.contains_key(&handle.index()) {
+                    if let Some(version) = arena.content_version(handle) {
+                        if let Err(fault) = reserve(&mut dependencies, 1) {
+                            error = Some(fault.into());
                         } else {
-                            error = Some(malformed("a batch member has no fresh content fact"));
+                            dependencies.push(version);
                         }
+                    } else {
+                        error = Some(malformed("a batch member has no fresh content fact"));
                     }
                 }
             });
@@ -354,11 +376,9 @@ impl PreparedBatch {
             let Some(body) = arena.objects.get(*handle) else {
                 unreachable!("the prepared batch lost an installed target");
             };
-            each_member(body, &mut |value| {
-                if let Some(handle) = value.handle() {
-                    let facts = &mut arena.facts[handle.index() as usize];
-                    facts.count = facts.count.saturating_add(1);
-                }
+            each_handle(body, &mut |handle| {
+                let facts = &mut arena.facts[handle.index() as usize];
+                facts.count = facts.count.saturating_add(1);
             });
         }
     }
@@ -405,4 +425,45 @@ pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
             data,
         }),
     })
+}
+
+#[cfg(test)]
+impl Arena {
+    pub(crate) fn check_prepared_closure_edges() {
+        // These fields are inert storage metadata here; no source admission or
+        // function call is manufactured by this arena-only lifetime oracle.
+        let identity = std::sync::Arc::new(lash_kernel_doc::arena::ClosureIdentity {
+            capture_names: vec![lash_kernel_value::Name::new("captured")],
+            callable: COLD_CLOSURE_SITE.callable,
+            site: COLD_CLOSURE_SITE.site.clone(),
+        });
+        let code = lash_kernel_doc::arena::LocalCode {
+            executable: 0,
+            code: 0,
+        };
+        let mut arena = Arena::new();
+        let cell = arena.new_cell(Value::Int(256));
+        let (abandoned, storage) = arena
+            .prepare_closure(identity.clone(), vec![cell], code)
+            .unwrap();
+        let (mut registration, batch) = storage.into_parts();
+        assert!(registration.arena().body(abandoned).is_err());
+        registration
+            .arena()
+            .cell_set(cell, Value::Int(257))
+            .unwrap();
+        assert!(
+            !batch.is_current(registration.arena()),
+            "a captured cell write invalidates its prepared closure"
+        );
+        drop(registration);
+        let (closure, storage) = arena.prepare_closure(identity, vec![cell], code).unwrap();
+        assert_eq!(closure, abandoned);
+        storage.publish();
+        arena.release(&mut |visit| visit(&Value::Closure(closure)));
+        assert!(
+            arena.cell(cell).unwrap().same(&Value::Int(257)),
+            "a prepared closure retains its captured cell after the declaring root leaves"
+        );
+    }
 }

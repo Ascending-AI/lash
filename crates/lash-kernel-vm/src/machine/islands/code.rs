@@ -321,6 +321,7 @@ operations! {
                 miss: u32,
             }
             Closure closure {
+                pc: u32,
                 code: CodeId,
                 reg: u32,
                 miss: u32,

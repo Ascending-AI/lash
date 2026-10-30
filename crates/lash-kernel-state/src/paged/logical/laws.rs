@@ -1148,6 +1148,7 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
 }
 
 fn checked_program_and_warm_balance() {
+    crate::arena::Arena::check_prepared_closure_edges();
     // A native batch rejected by a later table key must install no earlier body.
     {
         use lash_kernel_doc::{NewObject, Nursery, heap::LogicalBytes};
@@ -1488,4 +1489,42 @@ fn checked_program_and_warm_balance() {
     assert_eq!(arena.logical_handle(entity), Some(cell));
     assert_eq!(ledger.balance().unwrap().entity_local_bytes, 50);
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 66);
+
+    // A closure captures a cell edge, not another guest value occurrence.
+    // The existing cell remains shared by its binding and the new closure.
+    let closure = EntityId {
+        family: FamilyId::PRIMARY,
+        ordinal: arena.next_ordinal(),
+    };
+    let make = || {
+        Program::new(vec![JournalEvent {
+            entities: vec![VirtualEntity {
+                entity: closure,
+                body: VirtualBody::Closure(vec![entity]),
+            }],
+            outputs: vec![(
+                owner(1),
+                PublicationValue::Page(PageValue::Closure(closure)),
+            )],
+            ..Default::default()
+        }])
+    };
+    let expected = make().evaluate(&ledger, &arena).unwrap();
+    let prepared = expected
+        .prepare(&ledger, arena.registration().unwrap(), &heap, make())
+        .unwrap();
+    assert_eq!(
+        prepared.peak(),
+        122,
+        "a captured cell edge costs 8, not a 16-byte holding"
+    );
+    assert_eq!(prepared.balance().unwrap().entity_local_bytes, 90);
+    assert!(prepared.admit(121).is_none());
+    let (_, members) = VirtualBody::Closure(vec![entity])
+        .native_members(&heap, &arena, &Default::default())
+        .unwrap();
+    assert_eq!(
+        members[0].bytes, 8,
+        "the native recipe uses the same closure-edge price"
+    );
 }

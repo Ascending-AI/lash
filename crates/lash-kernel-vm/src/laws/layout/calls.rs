@@ -236,6 +236,7 @@ fn observe_source_or_register(
     let returns = crate::machine::islands::witness::return_publications();
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
+    let closure_constructions = crate::machine::islands::witness::closure_constructions();
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -250,6 +251,10 @@ fn observe_source_or_register(
         assert!(
             cell_constructions > 0,
             "the shared binding must install its prepared source cell"
+        );
+        assert!(
+            closure_constructions >= 2,
+            "both captured closures must install through source acceptance: {closure_constructions}"
         );
     }
     if mode != Mode::Source

@@ -1341,6 +1341,7 @@ impl<'e> Build<'e> {
             }
             Kind::Closure { code, miss } => {
                 self.emit(Op::Closure {
+                    pc,
                     code: *code,
                     reg,
                     miss: *miss,
