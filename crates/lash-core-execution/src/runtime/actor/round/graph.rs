@@ -555,6 +555,7 @@ impl TokenCodec for SettledFact {
 /// Kind 20: one settled tool call's live metadata and shared archival body.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallOutcome {
+    pub read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
     pub call_id: ToolCallId,
     /// The Admission its request lives under; `None` for a turn round's
     /// member, whose request the turn holds.
@@ -649,6 +650,7 @@ impl CallOutcome {
     #[must_use]
     pub fn of(completed: &CompletedCall, admission: Option<NodeId>, attempt: u64) -> Self {
         Self {
+            read: completed.read.clone(),
             call_id: completed.call_id.clone(),
             admission,
             args: completed.args.clone(),
@@ -688,6 +690,7 @@ impl CallOutcome {
             &self.tool_name,
             &self.args,
             &self.output,
+            self.read.as_deref(),
         )?;
         let presentation = staging.encode_value(NodeKind::PRESENTATION, &self.presentation)?;
         let mut encoded = TokenWriter::new();
@@ -718,6 +721,7 @@ impl CallOutcome {
         }
         let record = CallBody::load(decoder, stored.body)?.record;
         Ok(Self {
+            read: record.read,
             call_id: record.call_id,
             admission: stored.admission,
             args: record.args,
@@ -765,6 +769,7 @@ impl CallOutcome {
     /// As [`presented`](Self::presented).
     pub fn completed(&self, args: serde_json::Value) -> Result<CompletedCall, GraphRefusal> {
         Ok(CompletedCall {
+            read: self.read.clone(),
             control_origin: lash_sansio::ToolControlOrigin::OwnCall,
             call_id: self.call_id.clone(),
             provider_call_id: self.provider_call_id.clone(),

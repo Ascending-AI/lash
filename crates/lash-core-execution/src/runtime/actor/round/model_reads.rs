@@ -44,6 +44,7 @@ pub struct ModelReadResult {
 impl ModelReadResult {
     pub fn completed(&self, call: &lash_sansio::sansio::PendingToolCall) -> super::CompletedCall {
         super::CompletedCall {
+            read: None,
             call_id: call.call_id.clone(),
             provider_call_id: call.provider_call_id.clone(),
             tool_name: call.tool_name.clone(),

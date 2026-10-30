@@ -79,6 +79,7 @@ async fn ordinary_services_are_code_only_and_use_injected_reads() {
                 &services.definitions[&format!("{}.{member}", dialect.package())].manifest;
             let value = services
                 .read(ReadCall {
+                    call_id: &lash_core_execution::ToolCallId::fixture("service-read"),
                     history: None,
                     clock: &clock,
                     manifest,

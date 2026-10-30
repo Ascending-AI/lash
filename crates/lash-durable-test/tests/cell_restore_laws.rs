@@ -50,7 +50,7 @@
 
 #[path = "support/call_cancel.rs"]
 mod call_cancel;
-use call_cancel::{CancelCase, CancelSource, CommitOrder, written_x};
+use call_cancel::{CancelCase, CancelSource, CommitOrder, definition_at, written_x};
 
 #[path = "support/dialect.rs"]
 mod dialect;
@@ -338,6 +338,14 @@ impl StaticToolExecute for ExtTools {
             .push((call.tool_id().as_str().to_owned(), call.args.clone()));
         match call.tool_id().as_str() {
             SLOW => {
+                assert!(
+                    !self
+                        .world
+                        .cancel_case
+                        .lock_recover()
+                        .is_some_and(|case| case.read),
+                    "Read tools must enter the registered reader, never execute"
+                );
                 let case = *self.world.cancel_case.lock_recover();
                 if case.is_some_and(|case| case.order == CommitOrder::TypedCancel)
                     && written_x(call.args) == Some(1)
@@ -544,29 +552,6 @@ fn definition(
     output: Value,
 ) -> lash_vocabulary::tool_contract::ToolDefinition {
     definition_at(name, &format!("tools.{name}"), policy, output)
-}
-
-/// The tool `name` at `operation`.
-fn definition_at(
-    name: &str,
-    operation: &str,
-    policy: ExecutionPolicy,
-    output: Value,
-) -> lash_vocabulary::tool_contract::ToolDefinition {
-    lash_vocabulary::tool_contract::ToolDefinition::raw(
-        name,
-        operation,
-        "A host call the cell restore laws watch.",
-        json!({
-            "type": "object",
-            "additionalProperties": false,
-            "properties": { "x": { "type": "number" } }
-        }),
-        output,
-    )
-    .expect("the tool's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(policy)
 }
 
 /// The definition the resolver grants for `tools.ext_granted`, or the one
@@ -786,6 +771,12 @@ fn ext_tools(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
         ExecutionPolicy::Once
     };
     let slow = if world
+        .cancel_case
+        .lock_recover()
+        .is_some_and(|case| case.read)
+    {
+        definition(SLOW, ExecutionPolicy::Read, json!({ "type": "object" }))
+    } else if world
         .cancel_case
         .lock_recover()
         .is_some_and(|case| case.hint.is_some())
@@ -1285,7 +1276,9 @@ impl CellTurn {
                                 Ok(input.previous)
                             })
                         }))
-                        .with_tool_provider(lash::tool_provider_key!("tools"), tools)
+                        .with_tool_provider_registration(lash::tool_provider_key!("tools"),
+                            lash_core::ToolProviderRegistration::new(tools)
+                                .with_reads(Arc::new(ExtTools { world: Arc::clone(&self.world) })))
                         .with_package_provider(
                             lash::tool_provider_key!("tools"),
                             packages::operation_provider(
@@ -2728,4 +2721,9 @@ async fn explicit_call_cancel_is_durable_and_selective_before_cell_end() {
 #[tokio::test]
 async fn explicit_call_cancel_is_durable_and_selective_before_cell_end_from_typescript() {
     call_cancel::run_typescript_law().await;
+}
+
+#[tokio::test]
+async fn explicit_call_cancel_is_durable_and_selective_before_cell_end_for_reads() {
+    call_cancel::run_read_law().await;
 }

@@ -114,6 +114,7 @@ async fn legal_tool_identities_remain_visible_in_call_ledger_projections() {
         output: output.clone(),
     };
     let completed = round::CompletedCall {
+        read: None,
         call_id: answered,
         provider_call_id: None,
         tool_name: expected.tool.clone(),

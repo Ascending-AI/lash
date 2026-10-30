@@ -613,14 +613,27 @@ impl DurableSnapshotStore {
         if matches!(phase, SavePhase::Ended { .. }) {
             if ledger.executions().next().is_some() {
                 members.close().await.map_err(refused)?;
+                let folded = members.fold().await.map_err(refused)?;
+                for admitted in ledger.executions() {
+                    let output = final_output(&folded, &self.exec, admitted)
+                        .ok_or_else(|| refused("a closing call has no committed outcome"))?;
+                    // Closing settles observation too. Retain the committed
+                    // record in the host ledger without delivering to the guest.
+                    let _ = host.outcome(admitted, output);
+                }
             }
             ledger.close();
         }
         // A cancelling execution whose outcome committed is no longer open.
         if ledger.has_cancellations() {
             let folded = members.fold().await.map_err(refused)?;
-            ledger
-                .drop_cancelling(|admitted| final_output(&folded, &self.exec, admitted).is_some());
+            ledger.drop_cancelling(|admitted| {
+                let Some(output) = final_output(&folded, &self.exec, admitted) else {
+                    return false;
+                };
+                let _ = host.outcome(admitted, output);
+                true
+            });
         }
         struct Requested {
             identity: EffectId,

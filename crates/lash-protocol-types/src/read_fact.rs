@@ -1,4 +1,4 @@
-//! Tool reads retained by the caller's next save, without admitted executions.
+//! Read facts retain the local or admitted execution that produced them.
 
 /// Whether tool-call activity describes a recorded call or an unrecorded read.
 #[derive(
@@ -81,6 +81,7 @@ impl ReadPanic {
 /// The complete fact saved with a cell, process park or model tool results.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReadFact {
+    pub execution: ToolCallExecution,
     pub caller: ToolReadCaller,
     pub ordinal: u64,
     pub call_id: crate::ToolCallId,
@@ -96,7 +97,7 @@ pub struct ReadFact {
 impl ReadFact {
     pub fn record(&self) -> crate::ToolCallRecord {
         crate::ToolCallRecord {
-            execution: crate::ToolCallExecution::Read,
+            execution: self.execution,
             read: Some(Box::new(crate::ToolReadIdentity {
                 caller: self.caller.clone(),
                 provider: self.provider.clone(),

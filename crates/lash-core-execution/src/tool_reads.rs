@@ -2,19 +2,13 @@
 //! declares [`ExecutionPolicy::Read`](lash_kernel_value::tool_contract::ExecutionPolicy::Read) inside
 //! a code cell.
 //!
-//! A provider that serves `Read` tools registers a reader beside itself
-//! ([`ToolProviderRegistration::with_reads`]). A cell's read of one of
-//! those tools runs inside the statement that performs it: the cell's host
-//! hands the reader the tool, its arguments, the run's configuration, a
-//! cancellation and a deadline, and the answer goes straight back into the
-//! cell. The caller retains the read fact with its next saved state; a
-//! crash before that save reads it
-//! again, and the answer may differ.
-//!
-//! The reader is a narrow interface on purpose: it gets no attempt context,
-//! no completion client, no intents and no admitted call identity. Its
-//! live activity has only an observation identity derived from caller and ordinal. A provider whose call needs any of them declares its tool
-//! `Once` or `Repeatable`.
+//! A provider registers a reader beside itself with
+//! [`ToolProviderRegistration::with_reads`]. Code-cell tool reads have a
+//! durable admission and use the actor's final/cancel decision. The reader
+//! receives that call identity and its cooperative token, without attempt,
+//! completion or declaration authority. Committed records retain caller,
+//! provider and ordinal attribution. Pure kernel service reads stay local;
+//! their caller saves the fact and an unsaved read may run again.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,6 +25,8 @@ use lash_vocabulary::tool_contract::ToolManifest;
 /// arguments it projected from the guest's, the run's configuration, and
 /// what bounds it.
 pub struct ReadCall<'a> {
+    /// The identity of this invocation, retained by its saving owner.
+    pub call_id: &'a crate::ToolCallId,
     /// The cell's immutable run history; absent for workflow reads.
     pub history: Option<&'a crate::ReadHistory>,
     pub clock: &'a dyn lash_core_ids::clock::Clock,
@@ -42,7 +38,7 @@ pub struct ReadCall<'a> {
     /// The configuration the run was resolved under: what the provider
     /// advertised the tool under.
     pub config: &'a OwnerConfigView,
-    /// Cancelled when the run stops or its owner loses the run.
+    /// The admitted call's cooperative stop, or the local saving owner's stop.
     pub cancel: &'a CancellationToken,
     /// When the read must have answered: the sooner of the tool's
     /// execution bound and how long the cell's worker waits on its host.
@@ -161,6 +157,7 @@ impl ReadRoute {
     /// The read's own failure.
     pub async fn read(
         &self,
+        call_id: &crate::ToolCallId,
         history: Option<&crate::ReadHistory>,
         args: &serde_json::Value,
         config: &OwnerConfigView,
@@ -170,6 +167,7 @@ impl ReadRoute {
     ) -> Result<serde_json::Value, ReadError> {
         self.reads
             .read(ReadCall {
+                call_id,
                 history,
                 clock,
                 manifest: &self.definition.manifest,
@@ -273,7 +271,7 @@ pub async fn run_read(
         let deadline = context.clock.now() + route.definition.manifest.execution().min(context.parent_remaining);
         use futures_util::FutureExt as _;
         let provider = std::panic::AssertUnwindSafe(async {
-            route.read(context.history, &args, context.config, context.clock, context.cancel, deadline).await
+            route.read(&read.call_id(), context.history, &args, context.config, context.clock, context.cancel, deadline).await
         }).catch_unwind();
         let value = tokio::select! {
             biased;
@@ -297,6 +295,7 @@ pub async fn run_read(
     };
     ReadResult {
         fact: lash_protocol_types::ReadFact {
+            execution: lash_protocol_types::ToolCallExecution::Read,
             call_id: read.call_id(),
             caller: read.caller,
             ordinal: read.ordinal,

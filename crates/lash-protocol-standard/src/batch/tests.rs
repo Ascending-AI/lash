@@ -78,6 +78,7 @@ fn wrapper(call_id: &str, members: &[&str]) -> PendingToolCall {
 
 fn answered(slot: &PendingToolCall, output: ToolCallOutput) -> CompletedToolCall {
     CompletedToolCall {
+        read: None,
         control_origin: lash_core::sansio::ToolControlOrigin::OwnCall,
         call_id: slot.call_id.clone(),
         provider_call_id: slot.provider_call_id.clone(),

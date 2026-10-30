@@ -150,6 +150,7 @@ fn completed_call(
     output: ToolCallOutput,
 ) -> sansio::CompletedToolCall {
     sansio::CompletedToolCall {
+        read: None,
         control_origin: sansio::ToolControlOrigin::OwnCall,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),

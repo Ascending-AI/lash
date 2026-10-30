@@ -188,7 +188,7 @@ pub(super) fn load_cell(
                 LedgerCallState::Completed {
                     record: Box::new(lash_core::ToolCallRecord {
                         execution: Default::default(),
-                        read: None,
+                        read: call.read,
                         call_id: loaded.call_id,
                         provider_call_id: loaded.provider_call_id,
                         tool: loaded.tool_name,
@@ -200,6 +200,12 @@ pub(super) fn load_cell(
         };
         ledgers.calls.push(LedgerCall {
             control: state.control_attempt == Some(summary.ordinal),
+            read: cell
+                .environment
+                .fixed(&summary.operation)
+                .is_some_and(|operation| {
+                    operation.route.policy == lash_core::ExecutionPolicy::Read
+                }),
             operation: summary.operation,
             effect: summary.effect.clone(),
             state: call_state,

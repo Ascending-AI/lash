@@ -623,7 +623,7 @@ pub fn tool_step_output(
         settled => {
             let record = completed_call(&settled).map(|completed| crate::ToolCallRecord {
                 execution: Default::default(),
-                read: None,
+                read: completed.read.clone(),
                 call_id: completed.call_id.clone(),
                 provider_call_id: completed.provider_call_id.clone(),
                 tool: completed.tool_name.clone(),

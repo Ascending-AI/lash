@@ -796,21 +796,34 @@ impl HostState {
         &self,
         decoder: &mut GraphDecoder<'_>,
     ) -> Result<Vec<lash_protocol_types::ReadFact>, GraphRefusal> {
-        self.read_facts
+        let facts = self
+            .read_facts
             .items()
             .iter()
-            .enumerate()
-            .map(|(ordinal, event)| {
-                let fact = lash_vm_broker::round_graph::load_read_fact(decoder, event.0)?;
-                if fact.ordinal != ordinal as u64 + 1 {
-                    return Err(shape(
-                        NodeKind::EVENT_PAGE,
-                        "a read fact disagrees with its saved ordinal",
-                    ));
-                }
-                Ok(fact)
-            })
-            .collect()
+            .map(|event| lash_vm_broker::round_graph::load_read_fact(decoder, event.0))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ordinals = facts.iter().map(|fact| fact.ordinal).collect::<Vec<_>>();
+        for summary in self.calls.items() {
+            let admission = lash_vm_broker::kernel::graph::Admission::load(
+                decoder,
+                summary.admission,
+                &super::host::DataProjections,
+            )?;
+            if let lash_vm_broker::kernel::graph::FrozenRequest::Tool { call, .. } =
+                admission.request
+                && let Some(read) = call.read
+            {
+                ordinals.push(read.ordinal);
+            }
+        }
+        ordinals.sort_unstable();
+        if ordinals.len() as u64 != self.reads || ordinals.iter().copied().ne(1..=self.reads) {
+            return Err(shape(
+                NodeKind::EVENT_PAGE,
+                "local and admitted reads disagree with the saved ordinal census",
+            ));
+        }
+        Ok(facts)
     }
 
     /// Forgets every staged page: the commit was refused.

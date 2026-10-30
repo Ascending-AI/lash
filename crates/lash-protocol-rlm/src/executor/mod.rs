@@ -1192,6 +1192,12 @@ async fn run_linked_cell(
     }
     response.consumption = consumption;
     if !response.suspended && !ctx.has_nested_effect_error() {
+        // Closing may have committed sibling outcomes after answer() captured
+        // the cell. Project every call from the now-settled owning ledger.
+        let collected = host.ledgers();
+        response.calls = collected.executed_calls();
+        response.tool_calls = collected.tool_call_records();
+        response.read_facts = Arc::new(collected.read_facts);
         let graph = host.graph.lock_recover();
         let mut records = Vec::new();
         let mut entries = Vec::new();

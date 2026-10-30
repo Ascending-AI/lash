@@ -1240,6 +1240,7 @@ impl KernelEffects for LawHost {
                 contract: lash_kernel_value::operations::ContractId::new("1"),
                 execution_grant: None,
                 issuing_language_node_id: None,
+                read: None,
             },
             request.args.clone(),
             &LawArgs,

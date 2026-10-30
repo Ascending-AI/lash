@@ -45,6 +45,7 @@ fn every_legal_tool_identity_keeps_its_answer_in_the_transcript() {
     for member in members.iter().rev() {
         let output = ToolCallOutput::success(serde_json::json!({"found": true}));
         let answer = CompletedCall {
+            read: None,
             call_id: member.draft().call().clone(),
             provider_call_id: None,
             tool_name: "tools.lookup".to_owned(),
@@ -367,6 +368,7 @@ fn an_acknowledged_commits_staged_records_are_the_records_its_rows_read_as() {
     let mut records = RunRecords::new(rows(&tx));
     let output = ToolCallOutput::success(serde_json::json!({"answer": "\u{1}\"\\".repeat(500)}));
     let answer = CompletedCall {
+        read: None,
         control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: ToolCallId::fixture("a"),
         provider_call_id: Some("provider-a".to_owned()),

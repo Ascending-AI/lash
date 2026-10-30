@@ -611,21 +611,7 @@ impl ExecutionEnvironment {
 impl RoutedOperation {
     /// Claim debt follows the saved invocation mode, never current hooks.
     pub fn require(&self, requirements: &mut ClaimRequirements) {
-        let mut route = ClaimRequirements::default();
-        self.route.require(&mut route);
-        if self.mode == OperationMode::Waited
-            && self.route.policy == lash_kernel_value::ExecutionPolicy::Read
-        {
-            route.callbacks.remove(&CallbackRequirement {
-                registry: self.route.provider.registry(),
-                callback: self.route.provider.reads_identity(),
-            });
-            route.callbacks.insert(CallbackRequirement {
-                registry: self.route.provider.registry(),
-                callback: self.route.provider.callback_identity(),
-            });
-        }
-        requirements.extend(&route);
+        self.route.require(requirements);
     }
 
     /// Check the fixed pin and accepted metadata without consulting a live advertisement.

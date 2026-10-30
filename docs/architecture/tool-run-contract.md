@@ -40,8 +40,8 @@ A call has one durable home: the admitted execution that runs it.
   in declared order. A member that parks records an `x_wait` before its
   `x_outcome`; see Pending calls.
 - **A code cell** (`tool_dispatch::CellMembers`, `lash_vm_broker::members`).
-  Every recorded call a cell makes is its own admitted execution (planned
-  `Read` tools run inside their statement and survive only in saved cell state): the
+  Every tool call a cell makes, including `Read`, is its own admitted execution. Pure
+  kernel service reads stay local. The
   quiet point of the operation that issues it admits it in `cell.snapshot+admit`, under the
   policy and limit its tool declares and, for a tool that may defer, a
   pinned `tool_completion` wait. Its body runs through the same member

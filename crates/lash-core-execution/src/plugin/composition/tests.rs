@@ -1031,6 +1031,7 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
         let args = serde_json::json!({ "topic": "lash" });
         let answer = route
             .read(
+                &crate::ToolCallId::fixture("composition-read"),
                 None,
                 &args,
                 &config,

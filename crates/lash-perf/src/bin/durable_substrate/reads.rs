@@ -40,8 +40,8 @@ impl Variant {
     fn recorded(self) -> usize {
         match self {
             Self::Recorded => READS,
-            Self::Mixed => 1,
-            _ => 0,
+            Self::Mixed => 3,
+            Self::Read => READS,
         }
     }
 }
@@ -223,9 +223,8 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
     ]);
     expected.insert("model.done+cell.snapshot+admit", 1);
     let admissions = match variant {
-        Variant::Recorded => READS - 1,
-        Variant::Mixed => 1,
-        _ => 0,
+        Variant::Recorded | Variant::Read => READS - 1,
+        Variant::Mixed => 2,
     };
     if admissions > 0 {
         expected.insert("cell.snapshot+admit", admissions);

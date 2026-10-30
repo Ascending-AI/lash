@@ -391,6 +391,7 @@ impl RuntimeExecutionContext<'_> {
             this.emit_tool_call_returned_activity(call_key, &record, Some(duration_ms));
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
+                    read: None,
                     control_origin: crate::sansio::ToolControlOrigin::OwnCall,
                     call_id: ids.call_id,
                     provider_call_id: ids.provider_call_id,
@@ -535,7 +536,7 @@ impl RuntimeExecutionContext<'_> {
     ) {
         let record = ToolCallRecord {
             execution: Default::default(),
-            read: None,
+            read: completed.read.clone(),
             call_id: completed.call_id.clone(),
             provider_call_id: completed.provider_call_id.clone(),
             tool: completed.tool_name.clone(),

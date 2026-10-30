@@ -283,6 +283,7 @@ fn fold_wrapper(
     let mut parts = vec![ModelToolReturnPart::text(presented)];
     parts.extend(attachments);
     CompletedToolCall {
+        read: None,
         control_origin,
         call_id: wrapper.call_id.clone(),
         provider_call_id: wrapper.provider_call_id.clone(),

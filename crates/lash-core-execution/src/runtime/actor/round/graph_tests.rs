@@ -48,6 +48,7 @@ fn owner() -> MaterialOwner {
 
 fn completed(output: ToolCallOutput, model_return: ModelToolReturn) -> CompletedCall {
     CompletedCall {
+        read: None,
         control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: ToolCallId::fixture("call"),
         provider_call_id: Some("provider-7".to_owned()),
@@ -245,6 +246,7 @@ fn every_round_fact_round_trips_through_its_node() {
     let output = ToolCallOutput::failure(plan.refusal.clone().unwrap());
     let saved = super::super::ModelReadResult {
         fact: lash_protocol_types::ReadFact {
+            execution: lash_protocol_types::ToolCallExecution::Read,
             caller: plan.caller.clone(),
             ordinal: plan.ordinal,
             call_id: plan.call_id.clone(),
@@ -421,6 +423,7 @@ fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
 #[test]
 fn saved_read_fact_rejects_unknown_members() {
     let fact = lash_protocol_types::ReadFact {
+        execution: lash_protocol_types::ToolCallExecution::Read,
         caller: lash_protocol_types::ToolReadCaller::ModelRound {
             round_key: "round".into(),
         },

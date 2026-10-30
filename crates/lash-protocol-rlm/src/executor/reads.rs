@@ -1,4 +1,4 @@
-//! A cell's planned reads (ADR 0144): the `perform`s its read plan binds,
+//! A cell's local kernel service reads (ADR 0144): the `perform`s its read plan binds,
 //! answered inside the statement that makes them.
 //!
 //! A read is no admitted execution. Its call identity is observational; it mints no wait,

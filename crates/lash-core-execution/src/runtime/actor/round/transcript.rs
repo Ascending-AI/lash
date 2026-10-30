@@ -268,7 +268,7 @@ impl TurnTranscript {
                         })?;
                     records.push(crate::ToolCallRecord {
                         execution: Default::default(),
-                        read: None,
+                        read: completed.read.clone(),
                         call_id: completed.call_id,
                         provider_call_id: completed.provider_call_id,
                         tool: completed.tool_name,

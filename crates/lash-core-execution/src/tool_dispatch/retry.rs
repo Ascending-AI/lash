@@ -135,6 +135,9 @@ async fn execute_attempt_body(
     // nest under its tool span; its exit, however it exits, revokes it.
     let outcome =
         std::panic::AssertUnwindSafe(body.guard(attempt_context.trace().instrument(async {
+            if authority.manifest().execution_policy == ExecutionPolicy::Read {
+                return execute_read(context, authority, prepared, attempt_context).await;
+            }
             context
                 .tools
                 .execute(crate::ToolCall::new(
@@ -151,6 +154,78 @@ async fn execute_attempt_body(
     match unheld_launch(&outcome, attempt_context) {
         Some(env_ref) => launch_not_held(&env_ref).into(),
         None => outcome,
+    }
+}
+
+/// Read tools use the same admitted attempt and final/cancel arbitration as
+/// other tools. The reader receives no completion or declaration authority.
+async fn execute_read(
+    context: &ToolDispatchContext<'_>,
+    authority: &AttemptAuthority<'_>,
+    prepared: &PreparedToolCall,
+    attempt: &crate::AttemptContext<'_>,
+) -> crate::ToolAttemptOutcome {
+    let granted = match authority {
+        AttemptAuthority::Granted(grant) => Some(grant.provider()),
+        AttemptAuthority::Catalog { .. } => None,
+    };
+    let reader = context
+        .routed_provider(&prepared.tool_id, granted)
+        .and_then(|provider| context.routes.registry().reads(provider));
+    let Some(reader) = reader else {
+        return ToolOutcome::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Unavailable,
+            "read_unavailable",
+            "the admitted Read tool has no registered reader",
+        ))
+        .into();
+    };
+    let cancel = attempt.cancellation_token().cloned().unwrap_or_default();
+    let elapsed = std::time::Duration::from_millis(
+        context
+            .clock
+            .timestamp_ms()
+            .saturating_sub(u64::try_from(attempt.admission_now().0).unwrap_or(0)),
+    );
+    let deadline = context.clock.now() + authority.manifest().execution().saturating_sub(elapsed);
+    let answer = std::panic::AssertUnwindSafe(reader.read(crate::ReadCall {
+        call_id: &prepared.call_id,
+        history: attempt.read_history(),
+        clock: context.clock.as_ref(),
+        manifest: authority.manifest(),
+        args: &prepared.args,
+        config: attempt.config(),
+        cancel: &cancel,
+        deadline,
+    }))
+    .catch_unwind();
+    let answer = tokio::select! {
+        biased;
+        answer = answer => answer,
+        () = context.clock.sleep_until(deadline) => return ToolOutcome::failure(
+            crate::ToolFailure::runtime(crate::ToolFailureClass::Timeout,
+                "read_timed_out", "the read exceeded its tool or parent deadline")).into(),
+    };
+    let answer = match answer {
+        Ok(answer) => answer,
+        Err(payload) => {
+            return ToolOutcome::failure(
+                lash_protocol_types::ReadPanic {
+                    tool_name: prepared.tool_name.clone(),
+                    message: crate::panic_containment::payload_message(payload.as_ref()),
+                }
+                .failure(),
+            )
+            .into();
+        }
+    };
+    match answer {
+        Ok(value) => ToolOutcome::ok(value).into(),
+        Err(error) => ToolOutcome::failure(
+            crate::ToolFailure::new("read_failed", error.message)
+                .with_raw(crate::ToolValue::untrusted_json(error.data)),
+        )
+        .into(),
     }
 }
 

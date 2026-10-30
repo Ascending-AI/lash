@@ -50,6 +50,9 @@ pub enum ToolControlOrigin {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>"))]
 pub struct CompletedToolCall<I = ()> {
+    /// Attribution frozen by admission for an admitted Read tool.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
     pub call_id: lash_protocol_types::ToolCallId,
     /// See [`PendingToolCall::provider_call_id`].
     #[serde(default, skip_serializing_if = "Option::is_none")]

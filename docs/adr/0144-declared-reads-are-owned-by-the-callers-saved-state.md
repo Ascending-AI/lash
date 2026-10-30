@@ -1,5 +1,27 @@
 # 0144: Declared reads are owned by the caller's saved state
 
+## Code-cell cancellation amendment, FIG-7561
+
+Code-cell Read tools now use durable admission and the existing actor-issued
+final/cancel decision. The admitted attempt calls the registered reader with
+its real `ToolCallId` and per-call cooperative token. Python task cancellation,
+TypeScript abort and explicit host cancellation reach that body; ordinary
+observer withdrawal and aggregate selection cancel nothing. A committed final
+is reused after recovery and cannot be replaced by cancellation.
+
+Caller, provider, ordinal, site and origin are frozen with admission. The
+archival call record retains that attribution beside the committed output.
+The cell's public `read_facts` view is projected from that record, without a
+second read-history authority. Read ordinals cover local and admitted reads;
+`max_tool_calls` counts each invocation once. The immutable clock/random
+service packages keep statement-local execution. The remaining local-read
+and model/process policies below retain their existing ownership rules.
+
+This supersedes the statement-local bypass and zero-call-phase claim below
+for code-cell tool Reads. The existing declared-read workload measures the
+additional admission and outcome commits without changing its 50-read chain.
+
+
 Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
 
 ## Status

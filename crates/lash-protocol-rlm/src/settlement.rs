@@ -94,6 +94,27 @@ pub(crate) fn settle_execution(
                 &response.tool_calls,
                 dialect.presentation().call_feedback.max_result_bytes(),
             );
+            // Admitted Read tools retain the public read-fact view from their
+            // one committed call record. No second read outcome is written.
+            record.read_facts = std::sync::Arc::unwrap_or_clone(response.read_facts);
+            record
+                .read_facts
+                .extend(response.tool_calls.iter().filter_map(|call| {
+                    let read = call.read.as_ref()?;
+                    Some(lash_protocol_types::ReadFact {
+                        execution: call.execution,
+                        caller: read.caller.clone(),
+                        provider: read.provider.clone(),
+                        ordinal: read.ordinal,
+                        site: read.site.clone(),
+                        origin: read.origin.clone(),
+                        call_id: call.call_id.clone(),
+                        tool: call.tool.clone(),
+                        args: call.args.clone(),
+                        outcome: call.output.outcome.clone(),
+                    })
+                }));
+            record.read_facts.sort_by_key(|read| read.ordinal);
             actions.extend(
                 response
                     .tool_calls
@@ -108,7 +129,6 @@ pub(crate) fn settle_execution(
             record.prints_retained = response.prints_retained;
             record.result = response.result;
             record.consumption = response.consumption;
-            record.read_facts = std::sync::Arc::unwrap_or_clone(response.read_facts);
             if let Some(end) = terminal_end {
                 // A tool stopped the turn: the cell's own control never
                 // took effect, so it is not the cell's result.

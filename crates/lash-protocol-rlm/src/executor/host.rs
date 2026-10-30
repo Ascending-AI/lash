@@ -9,8 +9,8 @@
 //!   policy, limit and completion wait its tool declares
 //!   ([`CellHost::admit`]). The cell is answered from the call's committed
 //!   outcome alone ([`CellHost::outcome`]).
-//!   A `perform` the cell's read plan binds is no call: it is answered
-//!   inside its statement by the cell's reads ([`super::reads`]).
+//!   Pure kernel service reads stay inside the statement ([`super::reads`]);
+//!   cancellable tool reads use this same admitted-call path.
 //! - a `print` is an observation, kept in order.
 //! - clock and random are ordinary package Read operations.
 //!
@@ -68,6 +68,7 @@ pub(super) struct LedgerCall {
     /// The effect the cell performed, as its source names it.
     pub operation: OperationUse,
     pub control: bool,
+    pub read: bool,
     /// Where the cell performed it.
     pub effect: EffectId,
     pub state: LedgerCallState,
@@ -125,7 +126,7 @@ impl CellHostLedgers {
     pub(super) fn counted(&self) -> usize {
         self.calls
             .iter()
-            .filter(|call| !call.control())
+            .filter(|call| !call.control() && !call.read)
             .count()
             .saturating_add(usize::try_from(self.reads).unwrap_or(usize::MAX))
     }
@@ -491,7 +492,22 @@ impl CellHost<'_> {
         let invocation = ToolInvocation::new(call, route.tool.clone(), args)
             .with_issuing_language_node_id(request.identity.position().to_string())
             .with_execution_grant(grant);
-        let cell = CellCall::of(&invocation, contract);
+        let mut cell = CellCall::of(&invocation, contract);
+        if route.policy == lash_core::ExecutionPolicy::Read {
+            let ordinal = self.ledgers.lock_recover().reads + 1;
+            cell.read = Some(Box::new(lash_protocol_types::ToolReadIdentity {
+                caller: lash_core::ToolReadCaller::CodeBlock {
+                    graph_key: self
+                        .ctx
+                        .code_block_graph_key()
+                        .unwrap_or_else(|| self.execution.0.clone()),
+                },
+                provider: route.provider.clone(),
+                ordinal,
+                site: request.identity.position().to_string(),
+                origin: request.origin.to_string(),
+            }));
+        }
         let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &projection)
             .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, cell, frozen))
@@ -657,8 +673,13 @@ impl KernelEffects for CellHost<'_> {
                 ledgers.tool_call_limit.get_or_insert(exceeded);
                 return Ok(Err(refused(TOOL_CALL_LIMIT, exceeded.to_string())));
             }
+            let read = cell.read.is_some();
+            if read {
+                ledgers.reads += 1;
+            }
             ledgers.calls.push(LedgerCall {
                 control,
+                read,
                 operation: request.use_,
                 effect: request.identity.clone(),
                 state: LedgerCallState::Pending {
@@ -783,6 +804,11 @@ impl KernelEffects for CellHost<'_> {
         }
         if let Some(record) = reply.record {
             let mut ledgers = self.ledgers.lock_recover();
+            if let Some(lash_core::facade_support::TurnStop::ReadPanicked { panic }) =
+                record.output.tool_panic_stop()
+            {
+                ledgers.read_panic = Some(panic);
+            }
             if let Some(call) = ledgers
                 .calls
                 .iter_mut()
@@ -1006,6 +1032,7 @@ pub(super) fn call_outcome(
     let model_return =
         lash_protocol_types::ModelToolReturn::from_output(record.tool.clone(), &record.output);
     lash_vm_broker::round_graph::CallOutcome {
+        read: record.read.clone(),
         call_id: record.call_id.clone(),
         admission: Some(admission),
         args: record.args.clone(),

@@ -672,6 +672,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         contract: definition.contract_id(),
         execution_grant: Some(Box::new(grant)),
         issuing_language_node_id: None,
+        read: None,
     });
     let opener = crate::EffectOpener::turn("test-session", "test-turn");
     let members = CellMembers::new(&context, opener.clone()).unwrap();

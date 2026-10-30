@@ -75,6 +75,7 @@ fn outcome(
     let presented =
         lash_core::facade_support::ModelToolReturn::from_output("read".to_owned(), &output);
     let completed = lash_core::CompletedToolCall {
+        read: None,
         control_origin: lash_core::sansio::ToolControlOrigin::OwnCall,
         call_id: call_id(ordinal),
         provider_call_id: None,

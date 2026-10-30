@@ -254,6 +254,27 @@ pub(super) async fn link_cell(
         ctx.package_composition().as_ref(),
     )
     .map_err(package_error)?;
+    // Cancellable tool reads need broker admission before their body can run.
+    // Only the immutable dialect service packages keep statement-local reads.
+    for (use_, binding) in &mut environment.uses {
+        if let lash_core_store::tool_surface::UseBinding::Fixed(operation) = binding
+            && operation.mode == lash_kernel_value::OperationMode::Read
+        {
+            let local = fulfilled.inspection.operations.get(use_).is_some_and(|need| {
+                matches!(need, lash_execution_contracts::process::linking::OperationNeed::Fixed { name, .. }
+                    if lash_vm_runtime::DIALECT_SERVICE_PACKAGES.iter()
+                        .any(|package| package.path == name.package
+                            && matches!(package.members.get(&name.member),
+                                Some(lash_kernel_value::package::Member { kind:
+                                    lash_kernel_value::package::MemberKind::Operation(offer), .. })
+                                    if offer.requirement == operation.requirement
+                                        && offer.mode == lash_kernel_value::OperationMode::Read)))
+            });
+            if !local {
+                operation.mode = lash_kernel_value::OperationMode::Waited;
+            }
+        }
+    }
     environment.retained_code.extend(
         state
             .lowering_functions()

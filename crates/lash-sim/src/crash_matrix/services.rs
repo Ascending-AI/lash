@@ -984,6 +984,7 @@ impl RoundTools for Catalog {
             )),
         };
         CompletedCall {
+            read: None,
             control_origin: lash_sansio::ToolControlOrigin::OwnCall,
             call_id: call.call_id.clone(),
             provider_call_id: call.provider_call_id.clone(),

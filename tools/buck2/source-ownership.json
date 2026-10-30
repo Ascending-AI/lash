@@ -290,6 +290,7 @@
         "tests/cell_restore_laws.rs",
         "tests/support/call_cancel.rs",
         "tests/support/call_cancel_authority.rs",
+        "tests/support/call_cancel_reads.rs",
         "tests/support/dialect.rs",
         "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",

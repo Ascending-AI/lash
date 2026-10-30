@@ -32,6 +32,7 @@ pub(super) struct CancelCase {
     pub(super) order: CommitOrder,
     pub(super) hint: Option<lash_core::CancelHint>,
     pub(super) explicit: bool,
+    pub(super) read: bool,
 }
 
 /// The `x` a call was made with. A cell's numbers are its dialect's: a
@@ -60,6 +61,7 @@ impl CancelCase {
             order,
             hint,
             explicit,
+            read: false,
         }
     }
 }
@@ -71,6 +73,7 @@ impl CancelCase {
             order,
             hint,
             explicit,
+            read: false,
         }
     }
 }
@@ -107,6 +110,9 @@ impl CellTurn {
     ) -> Vec<String> {
         let mut violations = turn_ended(nodes).await;
         violations.extend(self.world.authority_violations.lock_recover().clone());
+        if case.read {
+            violations.extend(reads::attribution(self).await);
+        }
         if case.order.final_wins() {
             let view = lash_core_execution::store::SessionStore::new(
                 self.backend().stores().session_store_factory(),
@@ -126,7 +132,8 @@ impl CellTurn {
                 .and_then(|state| state.plugins.get("tools"))
                 .and_then(|namespace| namespace.values.get("count"))
                 .and_then(Value::as_u64);
-            if count != Some(2) {
+            let expected_count = if case.read { None } else { Some(2) };
+            if count != expected_count {
                 violations.push(format!(
                     "the retained final and its sibling must each increment once: {count:?}"
                 ));
@@ -353,6 +360,7 @@ fn host(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool)
         order,
         hint,
         explicit,
+        read: false,
     }
 }
 
@@ -375,6 +383,9 @@ macro_rules! cancellation_cases {
         }
     };
 }
+
+#[path = "call_cancel_reads.rs"]
+mod reads;
 
 cancellation_cases! {
     host_typed_cancel_on_postgres => host(CommitOrder::TypedCancel, None, true);
@@ -406,6 +417,10 @@ mod typescript {
 
 pub(super) async fn run_typescript_law() {
     run_cases(Dialect::SqliteMemory, None, &typescript::cases()).await;
+}
+
+pub(super) async fn run_read_law() {
+    reads::run_law().await;
 }
 
 pub(super) async fn run_law() {
@@ -708,4 +723,27 @@ pub(super) async fn host_request(world: &ExternalWorld) {
             nodes.script().settled(settled + 1).await;
         }
     }
+}
+
+/// The tool `name` at `operation`.
+pub(super) fn definition_at(
+    name: &str,
+    operation: &str,
+    policy: ExecutionPolicy,
+    output: Value,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
+        name,
+        operation,
+        "A host call the cell restore laws watch.",
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "x": { "type": "number" } }
+        }),
+        output,
+    )
+    .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_execution_policy(policy)
 }

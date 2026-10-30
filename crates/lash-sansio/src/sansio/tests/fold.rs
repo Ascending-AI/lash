@@ -140,6 +140,7 @@ fn completion(
 ) -> CompletedToolCall {
     let output = ToolCallOutput::success(value);
     CompletedToolCall {
+        read: None,
         control_origin: crate::ToolControlOrigin::OwnCall,
         call_id: call_id.clone(),
         provider_call_id: None,

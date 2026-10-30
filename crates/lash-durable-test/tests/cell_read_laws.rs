@@ -9,8 +9,6 @@
 //! so a read made again answers differently. The nodes are simulated (A
 //! and B).
 //!
-//! - **READ-CRASH-RECOMPUTES:** a node lost before the save that follows a
-//!   read makes the read again, and the cell goes on with the new answer.
 //! - **READ-SAVED-STATE-EXACT:** once a save holds a read's answer, a node
 //!   lost after it never makes the read again: the cell resumes with the
 //!   answer the save holds.
@@ -21,8 +19,8 @@
 //!   under every fault, the write between two reads reaches the world at
 //!   most once, with an answer a read made, and is lost only where a `Once`
 //!   call may be interrupted.
-//! - **READ-ZERO-CALL-PHASES:** a cell that reads 50 times commits exactly
-//!   what a cell that reads once does, and no read runs a tool body.
+//! Admitted tool reads also obey the explicit cancellation law in cell_restore_laws.
+//! The declared-read workload owns their per-call commit/fact geometry.
 //!
 //! READ-EXACT-CHARGE is a law of the machine across both dialects, in
 //! `lash-vm-worker`'s `read_laws`.
@@ -62,7 +60,7 @@ use lash_durable::domain::WaitKind;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorDispatch, ActorKey, ActorState, CommitLabel, DurableStore};
 use lash_durable_test::{
-    Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Tripwire, WriteKind,
+    Cut, Fault, Matrix, Scenario, Script, SimClock, SimNodes, SimNodesConfig, Tripwire,
 };
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
@@ -110,8 +108,6 @@ fn actor() -> ActorKey {
 enum Cell {
     /// A read, a `Once` write of its answer, and another read.
     ReadWriteRead,
-    /// `n` reads in a loop.
-    Reads(u32),
     /// A read, then a durable sleep of [`SLEEP_MS`].
     ReadThenSleep,
     /// A loop, a taken branch, an untaken branch, and a failed read.
@@ -143,11 +139,6 @@ impl Cell {
                  const b = await reads.extRead({ x: 2 });\n\
                  console.log([a.v, b.v]);"
                 .to_owned(),
-            Self::Reads(n) => format!(
-                "let s = 0;\n\
-                 for (let i = 0; i < {n}; i++) {{ const r = await reads.extRead({{ x: i }}); s = s + r.v; }}\n\
-                 console.log(s);"
-            ),
             Self::ReadActivity => "for (let i = 1; i <= 3; i++) {
                 const r = await reads.extRead({ x: i });
                 if (i === 1) { await reads.extRead({ x: 10 }); }
@@ -450,8 +441,6 @@ fn shipped_backend(stores: Arc<dyn StoreSet>) -> Backend {
 /// Which law a run is held to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Law {
-    /// Cut at the save after the first read, before it entered the store.
-    Recomputes,
     /// Cut at the save after the first read, once it committed.
     SavedExact,
     /// Cut anywhere.
@@ -696,17 +685,7 @@ impl ReadTurn {
         if first.is_empty() || first.len() > 2 {
             violations.push(format!("the first read was made {first:?}"));
         }
-        let cut_save = cut.filter(|cut| cut.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT);
-        match (self.law, cut_save.map(|cut| cut.fault)) {
-            (Law::Recomputes, Some(Fault::Abort)) => {
-                if first.len() != 2 || writes != [first[1]] {
-                    violations.push(format!(
-                        "READ-CRASH-RECOMPUTES: the save after the first read was lost, so the \
-                         read is made again and the write carries its new answer: reads \
-                         {first:?}, writes {writes:?}"
-                    ));
-                }
-            }
+        match (self.law, cut.map(|cut| cut.fault)) {
             (Law::SavedExact, Some(Fault::CommitThenAbort)) => {
                 if first.len() != 1 || writes.iter().any(|x| *x != first[0]) {
                     violations.push(format!(
@@ -716,7 +695,7 @@ impl ReadTurn {
                     ));
                 }
             }
-            (Law::Recomputes | Law::SavedExact, _) | (Law::Writes, None) => {
+            (Law::SavedExact, _) | (Law::Writes, None) => {
                 if first.len() != 1 || writes != [first[0]] {
                     violations.push(format!(
                         "an unlost run reads once and writes its answer once: reads {first:?}, \
@@ -821,18 +800,6 @@ impl Scenario for ReadTurn {
     async fn check(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = match self.cell {
             Cell::ReadWriteRead => self.read_write_read_laws(cut),
-            Cell::Reads(n) => {
-                let reads = self.world.reads().len();
-                let mut violations = Vec::new();
-                if reads != usize::try_from(n).unwrap() {
-                    violations.push(format!("the cell made {reads} reads, not {n}"));
-                }
-                let bodies = self.world.other_bodies();
-                if !bodies.is_empty() {
-                    violations.push(format!("a read ran a tool body: {bodies:?}"));
-                }
-                violations
-            }
             Cell::ReadThenSleep
             | Cell::ReadActivity
             | Cell::Panic
@@ -1055,15 +1022,22 @@ impl Scenario for ReadTurn {
                     }
                     return Ok(());
                 }
+                if self.cell == Cell::Panic {
+                    let turn = transcript.entries().iter().find_map(|entry| entry.provenance.turn_id.clone()).ok_or("the stopped turn is retained")?;
+                    let calls = durable.read_turn_tool_calls(&turn).await.map_err(|e|e.to_string())?;
+                    let [call] = calls.as_slice() else { return Err(format!("one terminal Read call: {calls:?}")); };
+                    if !matches!(&call.output.outcome, lash_core::ToolCallOutcome::Failure(failure)
+                        if matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::ReadPanicked { panic }) if panic.message == "reader invariant failed"))
+                        || call.read.is_none() {
+                        return Err(format!("READ-PANIC-TYPED: {call:?}"));
+                    }
+                    if !self.world.writes().is_empty() { return Err("a guest continued after a reader panic".into()); }
+                    return Ok(());
+                }
                 let cell = transcript.entries().iter().find_map(|entry| match &entry.item { lash::transcript::TranscriptItem::Cell(cell) => Some(cell), _ => None }).ok_or("the failed cell is retained")?;
                 let [fact] = cell.read_facts.as_slice() else { return Err(format!("one failed read fact is retained: {:?}", cell.read_facts)); };
                 let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else { return Err("the refused read succeeded".into()); };
                 match self.cell {
-                    Cell::Panic => {
-                        if !matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::ReadPanicked { panic }) if panic.message == "reader invariant failed") { return Err(format!("READ-PANIC-TYPED: {failure:?}")); }
-                        if !self.world.writes().is_empty() { return Err("a guest continued after a reader panic".into()); }
-                        if !matches!(&cell.result, lash_core::CellOutcome::Failed(failure) if failure.read_panic.is_some()) { return Err("the owner lost terminal reader panic evidence".into()); }
-                    }
                     Cell::InvalidOutput => {
                         if !matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::Declaration { .. })) { return Err(format!("READ-OUTPUT-ADMISSION: {failure:?}")); }
                     }
@@ -1190,25 +1164,6 @@ const FAULTS: [Fault; 5] = [
     Fault::CommitThenAbort,
 ];
 
-/// READ-CRASH-RECOMPUTES: the save that admits the write, the first after
-/// the first read, is lost before it enters the store. The node that takes
-/// the cell over resumes it from its start's save and reads again, and the
-/// write carries the new answer.
-#[tokio::test]
-async fn a_read_lost_with_its_unsaved_stretch_is_made_again_on_sqlite_memory() {
-    let report = Matrix::new()
-        .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
-        .faults(&[Fault::Abort])
-        .horizon(Duration::from_secs(600))
-        .run_test(|| ReadTurn::new(Cell::ReadWriteRead, Law::Recomputes))
-        .await;
-    report.assert_held();
-    assert!(
-        !report.cells.is_empty(),
-        "the matrix cut no save after the read"
-    );
-}
-
 /// READ-SAVED-STATE-EXACT: the save that admits the write commits and its
 /// node dies before it sees the reply. The node that takes the cell over
 /// resumes it with the answer that save holds, and makes no read again.
@@ -1243,60 +1198,6 @@ async fn reads_around_a_write_neither_lose_nor_duplicate_it_on_sqlite_memory() {
         report.labels().len()
     );
     report.assert_held();
-}
-
-/// The owner commits of an uncut run of `cell`, through the turn's answer.
-async fn owner_commits(cell: Cell) -> Vec<CommitLabel> {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| ReadTurn::new(cell, Law::Counted))
-        .await;
-    report.assert_held();
-    let all: Vec<_> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    let answer = all
-        .iter()
-        .position(|label| *label == CommitLabel::TURN_COMMIT)
-        .expect("the turn committed its host answer");
-    all[..=answer].to_vec()
-}
-
-/// READ-ZERO-CALL-PHASES: 50 reads commit nothing a single read does not.
-/// No read is admitted, waited on, started, settled or traced, and none
-/// runs a tool body: the cell saves its start once, with the model's
-/// response, and its end with the commit that consumes its answer.
-#[tokio::test]
-async fn fifty_reads_commit_what_one_read_does_on_sqlite_memory() {
-    let one = owner_commits(Cell::Reads(1)).await;
-    let fifty = owner_commits(Cell::Reads(50)).await;
-    eprintln!("one read: {one:?}\nfifty reads: {fifty:?}");
-    assert_eq!(fifty, one, "a read adds no commit");
-    for per_call in [
-        CommitLabel::ROUND_START,
-        CommitLabel::ROUND_OUTCOME,
-        CommitLabel::ROUND_RETRY,
-        CommitLabel::CELL_SNAPSHOT_ADMIT,
-        CommitLabel::CELL_INJECT,
-        CommitLabel::WAIT_MINT,
-        CommitLabel::TOOL_EFFECT,
-    ] {
-        assert!(
-            !fifty.contains(&per_call),
-            "a read commits no {per_call}: {fifty:?}"
-        );
-    }
-    assert_eq!(
-        fifty
-            .iter()
-            .filter(|label| **label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT)
-            .count(),
-        1,
-        "the cell saves its start once, with the model's response: {fifty:?}"
-    );
 }
 
 /// What a probe node serving `serves` and offering `capabilities` reads as the session's claim
@@ -1490,79 +1391,6 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
         caller.is_string(),
         "the enclosing code block has a graph key"
     );
-    let reads: Vec<_> = events
-        .iter()
-        .filter(|event| event["execution"] == "read")
-        .map(|event| {
-            json!({
-                "type": event["type"], "graph_key": event["graph_key"],
-                "caller": event["read"]["caller"], "ordinal": event["read"]["ordinal"],
-                "name": event["name"], "provider": event["read"]["provider"], "args": event["args"],
-                "outcome": event["output"]["outcome"]["status"],
-            })
-        })
-        .collect();
-    let mut expected = Vec::new();
-    for (ordinal, x, answered) in [(1, 1, true), (2, 10, true), (3, 2, true), (4, 3, false)] {
-        for (kind, outcome) in [
-            ("tool_call_started", Value::Null),
-            (
-                "tool_call_returned",
-                json!(if answered { "success" } else { "failure" }),
-            ),
-        ] {
-            expected.push(json!({
-                "type": kind, "graph_key": caller,
-                "caller": {"kind":"code_block", "graph_key":caller},
-                "ordinal":ordinal, "name":READ,
-                "provider":{"registry":"session", "owner":READER, "key":"reads"},
-                "args":{"x":x}, "outcome":outcome,
-            }));
-        }
-    }
-    assert_eq!(
-        reads, expected,
-        "actual reads use the ordinary start/return family"
-    );
-    let mut ids = std::collections::BTreeSet::new();
-    let read_events: Vec<_> = events
-        .iter()
-        .filter(|event| event["execution"] == "read")
-        .collect();
-    for pair in read_events.as_chunks::<2>().0 {
-        let id = pair[0]["call_id"].as_str().unwrap();
-        assert_eq!(pair[0]["call_id"], pair[1]["call_id"]);
-        assert!(ids.insert(id));
-        assert!(
-            !events
-                .iter()
-                .any(|event| event["type"] == "tool_call_completed" && event["call_id"] == id)
-        );
-        lash::ToolCallId::parse(id).expect("a read has a valid ToolCallId");
-    }
-    let returned: Vec<_> = read_events.iter().skip(1).step_by(2).collect();
-    assert_eq!(
-        returned
-            .iter()
-            .map(|event| event["read"]["args_bytes"].as_u64().unwrap())
-            .collect::<Vec<_>>(),
-        [7, 8, 7, 7]
-    );
-    assert_eq!(
-        returned
-            .iter()
-            .map(|event| event["read"]["answer_bytes"].as_u64().unwrap())
-            .collect::<Vec<_>>(),
-        [7, 7, 7, 0]
-    );
-    assert_eq!(returned[0]["read"]["site"], returned[2]["read"]["site"]);
-    assert_eq!(returned[0]["read"]["site"], returned[3]["read"]["site"]);
-    assert_ne!(returned[0]["read"]["site"], returned[1]["read"]["site"]);
-    let last = read_events.last().unwrap();
-    assert_eq!(
-        last["output"]["outcome"]["payload"]["message"],
-        "page unavailable"
-    );
     assert_eq!(turn.world.reads(), [(1, 1), (10, 2), (2, 3), (3, 4)]);
     turn.core.lock_recover().take();
     let durable = turn
@@ -1572,25 +1400,71 @@ async fn actual_reads_stream_their_caller_arguments_and_outcomes_on_sqlite_memor
         .await
         .unwrap();
     let transcript = durable.transcript().await.unwrap();
-    let turn_id = transcript
+    let entry = transcript
         .entries()
         .iter()
-        .find_map(|entry| entry.provenance.turn_id.clone())
+        .find(|entry| matches!(entry.item, lash::transcript::TranscriptItem::Cell(_)))
         .unwrap();
-    for event in returned {
+    let turn_id = entry.provenance.turn_id.clone().unwrap();
+    let lash::transcript::TranscriptItem::Cell(cell) = &entry.item else {
+        unreachable!()
+    };
+    assert_eq!(
+        cell.read_facts.len(),
+        4,
+        "only the four taken reads are retained"
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    for (fact, (ordinal, x, answered)) in
+        cell.read_facts
+            .iter()
+            .zip([(1, 1, true), (2, 10, true), (3, 2, true), (4, 3, false)])
+    {
+        assert_eq!(fact.ordinal, ordinal);
+        assert_eq!(written_x(&fact.args), Some(x));
+        assert!(ids.insert(&fact.call_id));
+        assert_eq!(
+            serde_json::to_value(&fact.caller).unwrap(),
+            json!({"kind":"code_block","graph_key":caller})
+        );
+        assert_eq!(
+            serde_json::to_value(&fact.provider).unwrap(),
+            json!({"registry":"session","owner":READER,"key":"reads"})
+        );
+        assert!(!fact.site.is_empty() && !fact.origin.is_empty());
+        assert_eq!(fact.record().output.is_success(), answered);
+        if !answered {
+            let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else {
+                unreachable!()
+            };
+            assert_eq!(failure.message, "page unavailable");
+        }
+        for kind in [
+            "tool_call_started",
+            "tool_call_returned",
+            "tool_call_completed",
+        ] {
+            let observed = events
+                .iter()
+                .filter(|event| event["type"] == kind && event["call_id"] == fact.call_id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(observed.len(), 1, "each admitted Read has one {kind}");
+            assert_eq!(observed[0]["graph_key"], caller);
+            assert_eq!(observed[0]["args"]["x"].as_f64(), Some(x as f64));
+        }
         let call = lash::TurnToolCallRef {
             turn_id: turn_id.clone(),
-            call_id: lash::ToolCallId::parse(event["call_id"].as_str().unwrap()).unwrap(),
+            call_id: fact.call_id.clone(),
         };
         let lash::ToolCallRead::Settled { record } = durable.read_tool_call(&call).await.unwrap()
         else {
-            panic!("the saved read is retained")
+            panic!("the admitted Read's saved fact is retained")
         };
-        let saved = serde_json::to_value(lash_protocol_types::Durable(record.as_ref())).unwrap();
-        assert_eq!(saved["execution"], "read");
-        assert_eq!(saved["read"]["caller"], event["read"]["caller"]);
-        assert_eq!(saved["read"]["ordinal"], event["read"]["ordinal"]);
+        assert_eq!(*record, fact.record());
     }
+    assert_eq!(cell.read_facts[0].site, cell.read_facts[2].site);
+    assert_eq!(cell.read_facts[0].site, cell.read_facts[3].site);
+    assert_ne!(cell.read_facts[0].site, cell.read_facts[1].site);
 }
 
 /// READ-PANIC-TERMINAL: catch cannot continue a cell after its reader panics.

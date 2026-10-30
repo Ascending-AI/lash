@@ -62,6 +62,8 @@ pub struct CellCall {
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     /// The language node that issued it, for traces.
     pub issuing_language_node_id: Option<String>,
+    /// Read attribution frozen with admission, projected from the committed outcome.
+    pub read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
 }
 
 impl CellCall {
@@ -79,6 +81,7 @@ impl CellCall {
             contract,
             execution_grant: invocation.execution_grant.clone(),
             issuing_language_node_id: invocation.issuing_language_node_id.clone(),
+            read: None,
         }
     }
 
@@ -111,11 +114,12 @@ impl CellCall {
     /// node. A frozen request holds this once, with the guest's own
     /// arguments, never their tool JSON (FIG-5887 §3).
     pub fn encode_dispatch(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(5);
         out.text(self.tool_id.as_str());
         self.contract.encode(out);
         encode_opt_tree(self.execution_grant.as_deref(), out);
         self.issuing_language_node_id.encode(out);
+        encode_opt_tree(self.read.as_deref(), out);
     }
 
     /// Reads what [`encode_dispatch`](Self::encode_dispatch) wrote, as the
@@ -129,7 +133,7 @@ impl CellCall {
         id: crate::ToolCallId,
         args: serde_json::Value,
     ) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        input.expect_struct(5)?;
         Ok(Self {
             id,
             tool_id: lash_vocabulary::tool_contract::ToolId::new(input.text()?),
@@ -137,6 +141,7 @@ impl CellCall {
             contract: lash_kernel_value::operations::ContractId::decode(input)?,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
+            read: decode_opt_tree(input)?.map(Box::new),
         })
     }
 }
@@ -214,6 +219,7 @@ impl CellTools {
                 traced_scope: execution.draft().trace().cloned(),
                 closing: Some(self.closing.clone()),
                 stop: None,
+                read: call.read.clone(),
             },
         )
     }
@@ -282,7 +288,7 @@ fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolI
     let completed = cell_answer(call, output);
     let record = ToolCallRecord {
         execution: Default::default(),
-        read: None,
+        read: completed.read.clone(),
         call_id: completed.call_id.clone(),
         provider_call_id: completed.provider_call_id.clone(),
         tool: completed.tool_name.clone(),
@@ -425,7 +431,11 @@ impl CellMembers {
     #[must_use]
     pub fn reply(&self, member: &CellMember, output: &SettledOutput) -> ToolInvocationReply {
         let CellMember::Tool(call) = member;
-        reply(&call.pending(), output)
+        let mut answer = reply(&call.pending(), output);
+        if let Some(record) = &mut answer.record {
+            record.read.clone_from(&call.read);
+        }
+        answer
     }
 
     /// What the cell is answered with for the call `call`, from its
@@ -490,7 +500,7 @@ impl MemberBodies for CellMembers {
             let completed = cell_answer(&pending, output);
             let record = ToolCallRecord {
                 execution: Default::default(),
-                read: None,
+                read: call.read.clone(),
                 call_id: completed.call_id,
                 provider_call_id: completed.provider_call_id,
                 tool: completed.tool_name,

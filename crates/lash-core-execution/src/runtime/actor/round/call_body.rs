@@ -20,10 +20,11 @@ fn encode_body(
     tool: &str,
     args: &serde_json::Value,
     output: &ToolCallOutput,
+    read: Option<&lash_protocol_types::ToolReadIdentity>,
     answer: Option<NodeId>,
     out: &mut TokenWriter,
 ) {
-    out.seq(5);
+    out.seq(6);
     out.text(call_id.as_str());
     provider_call_id.encode(out);
     out.text(tool);
@@ -35,6 +36,7 @@ fn encode_body(
         },
         out,
     );
+    encode_opt_tree(read, out);
 }
 
 impl TokenCodec for StoredBody {
@@ -45,13 +47,14 @@ impl TokenCodec for StoredBody {
             &self.record.tool,
             &self.record.args,
             &self.record.output,
+            self.record.read.as_deref(),
             self.answer,
             out,
         );
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(6)?;
         let call_id = decode_call_id(input)?;
         let provider_call_id = Option::decode(input)?;
         let tool = input.text()?.to_owned();
@@ -63,7 +66,7 @@ impl TokenCodec for StoredBody {
         Ok(Self {
             record: crate::ToolCallRecord {
                 execution: Default::default(),
-                read: None,
+                read: decode_opt_tree(input)?.map(Box::new),
                 call_id,
                 provider_call_id,
                 tool,
@@ -88,6 +91,7 @@ impl CallBody {
             &self.record.tool,
             &self.record.args,
             &self.record.output,
+            self.record.read.as_deref(),
         )
     }
 
@@ -98,6 +102,7 @@ impl CallBody {
         tool: &str,
         args: &serde_json::Value,
         output: &ToolCallOutput,
+        read: Option<&lash_protocol_types::ToolReadIdentity>,
     ) -> Result<NodeId, GraphRefusal> {
         let answer = match &output.outcome {
             crate::ToolCallOutcome::Success(value) => {
@@ -118,6 +123,7 @@ impl CallBody {
             tool,
             args,
             output,
+            read,
             answer,
             &mut body,
         );

@@ -82,6 +82,7 @@ pub(super) fn answered(
     output: ToolCallOutput,
 ) -> CompletedCall {
     CompletedCall {
+        read: None,
         control_origin: lash_sansio::ToolControlOrigin::OwnCall,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
@@ -453,7 +454,7 @@ impl ProductionToolHandlers<'_> {
             call.call_id.as_str(),
             &ToolCallRecord {
                 execution: Default::default(),
-                read: None,
+                read: completed.read.clone(),
                 call_id: completed.call_id.clone(),
                 provider_call_id: completed.provider_call_id.clone(),
                 tool: completed.tool_name.clone(),
@@ -501,6 +502,7 @@ pub(super) struct MemberAttempts {
     /// The round owner's accepted stop: an answer an attempt decides after
     /// it is the stop's.
     pub(super) stop: Option<AcceptedStop>,
+    pub(super) read: Option<Box<lash_protocol_types::ToolReadIdentity>>,
 }
 
 /// The body of `execution`, an attempt of the member `call` invoked as
@@ -522,6 +524,7 @@ pub(super) fn member_body(
         traced_scope,
         closing,
         stop,
+        read,
     } = attempts;
     let context = context.clone();
     let owner = owner.clone();
@@ -633,7 +636,8 @@ pub(super) fn member_body(
             };
             let mut result = match end {
                 MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
-                MemberEnd::Settled(completed, settlement) => {
+                MemberEnd::Settled(mut completed, settlement) => {
+                    completed.read = read;
                     let output = match &settlement {
                         crate::runtime::actor::round::SettlementIntent::Cancelled {
                             cancellation,
@@ -648,6 +652,10 @@ pub(super) fn member_body(
                         settlement,
                         ..output.into()
                     }
+                }
+                MemberEnd::Final(mut completed) => {
+                    completed.read = read;
+                    member_output(&owner, MemberEnd::Final(completed)).into()
                 }
                 end => member_output(&owner, end).into(),
             };
@@ -786,7 +794,7 @@ pub(super) async fn present_resolved(
         call.call_id.as_str(),
         &ToolCallRecord {
             execution: Default::default(),
-            read: None,
+            read: completed.read.clone(),
             call_id: completed.call_id.clone(),
             provider_call_id: completed.provider_call_id.clone(),
             tool: completed.tool_name.clone(),
@@ -917,7 +925,7 @@ pub(super) fn member_record(
     );
     ToolCallRecord {
         execution: Default::default(),
-        read: None,
+        read: completed.read,
         call_id: completed.call_id,
         provider_call_id: completed.provider_call_id,
         tool: completed.tool_name,
