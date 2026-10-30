@@ -50,6 +50,7 @@
 
 #[path = "support/call_cancel.rs"]
 mod call_cancel;
+use call_cancel::{CancelCase, CancelSource, CommitOrder};
 
 #[path = "support/dialect.rs"]
 mod dialect;
@@ -182,37 +183,6 @@ enum Cell {
     CancelledBeforeSave,
     /// A first stretch of many slices, then one `Once` call.
     LongStretch,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CancelSource {
-    Host,
-    Python,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CommitOrder {
-    CancelFirst,
-    FinalFirst,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CancelCase {
-    source: CancelSource,
-    order: CommitOrder,
-    hint: Option<lash_core::CancelHint>,
-    explicit: bool,
-}
-
-impl CancelCase {
-    fn python(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool) -> Self {
-        Self {
-            source: CancelSource::Python,
-            order,
-            hint,
-            explicit,
-        }
-    }
 }
 
 impl Cell {
@@ -409,6 +379,14 @@ impl StaticToolExecute for ExtTools {
                         ]),
                     );
                 }
+                if written_x(call.args) == Some(1)
+                    && case.is_some_and(|case| case.order == CommitOrder::PlainFinalFirst)
+                {
+                    return lash_core::ToolAttemptOutcome::done_without_intents(
+                        lash_core::ToolOutcomeDone::ok(json!({ "final": 1 }))
+                            .with_state(call_cancel::increment_state()),
+                    );
+                }
                 if let Some(hint) = case.and_then(|case| case.hint) {
                     let mut pending = lash_core::PendingCompletion::new();
                     pending.on_cancel = hint;
@@ -418,7 +396,7 @@ impl StaticToolExecute for ExtTools {
                         ),
                     );
                 }
-                if case.is_some_and(|case| case.order == CommitOrder::FinalFirst) {
+                if case.is_some_and(|case| case.order.final_wins()) {
                     loop {
                         let changed = self.world.changed.notified();
                         tokio::pin!(changed);
@@ -471,26 +449,30 @@ impl StaticToolExecute for ExtTools {
             FAST if self.world.cancel_case.lock_recover().is_some() => {
                 let case = self.world.cancel_case.lock_recover().unwrap();
                 let backend = self.world.cancel_backend.lock_recover().clone().unwrap();
-                loop {
-                    let changed = self.world.changed.notified();
-                    tokio::pin!(changed);
-                    changed.as_mut().enable();
-                    let ready = if case.order == CommitOrder::FinalFirst {
-                        self.world
-                            .final_presenting
-                            .load(std::sync::atomic::Ordering::SeqCst)
-                    } else if case.hint.is_some() {
-                        cancel_children(&backend).await.len() == 2
-                    } else {
-                        self.world.ready.lock_recover().len() == 2
-                    };
-                    if ready {
-                        break;
-                    }
-                    if case.hint.is_some() {
-                        tokio::task::yield_now().await;
-                    } else {
-                        changed.await;
+                if case.order == CommitOrder::PlainFinalFirst {
+                    call_cancel::wait_plain_final(&self.world).await;
+                } else {
+                    loop {
+                        let changed = self.world.changed.notified();
+                        tokio::pin!(changed);
+                        changed.as_mut().enable();
+                        let ready = if case.order == CommitOrder::FinalFirst {
+                            self.world
+                                .final_presenting
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                        } else if case.hint.is_some() {
+                            cancel_children(&backend).await.len() == 2
+                        } else {
+                            self.world.ready.lock_recover().len() == 2
+                        };
+                        if ready {
+                            break;
+                        }
+                        if case.hint.is_some() {
+                            tokio::task::yield_now().await;
+                        } else {
+                            changed.await;
+                        }
                     }
                 }
                 if case.source == CancelSource::Host && case.explicit {
@@ -1273,8 +1255,18 @@ impl CellTurn {
                                         let trace = nodes.script().trace();
                                         let fast = world.entries().into_iter().find_map(|(id, entries)|
                                             entries.iter().any(|(tool, _)| tool == FAST).then_some(id));
-                                        let fast_outcome = trace.iter().rposition(|write| write.committed()
-                                            && write.facts.rows.iter().any(|row| row.kind == lash_durable::domain::RunFactKind::XOutcome && row.call == fast));
+                                        let fast_outcome = trace.iter().rposition(|write| {
+                                            if !write.committed() { return false; }
+                                            let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(
+                                                write.facts.as_ref(), lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX));
+                                            write.facts.rows.iter().any(|row| {
+                                                row.call == fast && matches!(
+                                                    lash_core_execution::runtime::actor::round::graph::RoundFact::load(&mut decoder, row.record),
+                                                    Ok(lash_core_execution::runtime::actor::round::graph::RoundFact::Outcome { .. }
+                                                        | lash_core_execution::runtime::actor::round::graph::RoundFact::FinalOutcome { .. })
+                                                )
+                                            })
+                                        });
                                         if fast_outcome.is_some() { break; }
                                         let settled = trace.iter().filter(|write| write.stored != Stored::Pending).count();
                                         nodes.script().settled(settled + 1).await;

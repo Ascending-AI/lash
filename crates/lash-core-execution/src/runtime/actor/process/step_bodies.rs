@@ -84,7 +84,7 @@ impl MemberBodies for StepBodies {
         if !facts
             .rows
             .iter()
-            .any(|row| row.kind == RunFactKind::XOutcome)
+            .any(|row| matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XFinalOutcome))
         {
             return Ok(());
         }
@@ -94,7 +94,7 @@ impl MemberBodies for StepBodies {
             .clone()
             .ok_or_else(|| corrupt("process obligations", "no driver was observed"))?;
         for row in &facts.rows {
-            if row.kind != RunFactKind::XOutcome {
+            if !matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XFinalOutcome) {
                 continue;
             }
             let Some(call) = &row.call else {

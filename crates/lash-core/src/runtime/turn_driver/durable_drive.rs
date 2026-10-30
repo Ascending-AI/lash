@@ -595,6 +595,11 @@ fn cell_calls_from_ledger(
                 start: settled,
                 output,
                 ..
+            }
+            | RoundFact::FinalOutcome {
+                start: settled,
+                output,
+                ..
             } = RoundFact::load(&mut decoder, row.record)
                 .map_err(|error| TurnError::Exec(error.to_string()))?
                 && settled == start.0

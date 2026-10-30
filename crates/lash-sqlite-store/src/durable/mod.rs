@@ -1241,6 +1241,7 @@ impl DurableStore for SqliteDurableStore {
                         .map(lash_kernel_value::identity::SessionId::as_str)
                 ])?;
                 let mut opened: Option<(OpenedActor, Option<_>)> = None;
+                let mut requests = Vec::new();
                 while let Some(row) = rows.next()? {
                     let (opened, _) = match &mut opened {
                         Some(opened) => opened,
@@ -1263,6 +1264,12 @@ impl DurableStore for SqliteDurableStore {
                                 )),
                                 None => None,
                             };
+                            requests =
+                                match run_records::call_cancels(&actor, row.get_ref(29)?.as_str()?)
+                                {
+                                    Ok(requests) => requests,
+                                    Err(error) => return Ok(Err(error)),
+                                };
                             opened.insert((
                                 OpenedActor {
                                     actor: actor.clone(),
@@ -1306,10 +1313,6 @@ impl DurableStore for SqliteDurableStore {
                         Err(error) => return Ok(Err(error)),
                     };
                 }
-                let requests = match run_records::call_cancels(connection, &opened.actor)? {
-                    Ok(requests) => requests,
-                    Err(error) => return Ok(Err(error)),
-                };
                 Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
             })
             .await
@@ -1336,6 +1339,7 @@ impl DurableStore for SqliteDurableStore {
                     capacity
                 ])?;
                 let mut opened: Option<OpenedActor> = None;
+                let mut requests = Vec::new();
                 let mut partial = false;
                 while let Some(row) = rows.next()? {
                     if opened.is_none() {
@@ -1373,6 +1377,11 @@ impl DurableStore for SqliteDurableStore {
                         } else {
                             None
                         };
+                        requests =
+                            match run_records::call_cancels(&actor, row.get_ref(17)?.as_str()?) {
+                                Ok(requests) => requests,
+                                Err(error) => return Ok(Err(error)),
+                            };
                         opened = Some(OpenedActor {
                             actor: actor.clone(),
                             epoch,
@@ -1417,10 +1426,6 @@ impl DurableStore for SqliteDurableStore {
                 if partial {
                     opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
                 }
-                let requests = match run_records::call_cancels(connection, &opened.actor)? {
-                    Ok(requests) => requests,
-                    Err(error) => return Ok(Err(error)),
-                };
                 Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
             })
             .await

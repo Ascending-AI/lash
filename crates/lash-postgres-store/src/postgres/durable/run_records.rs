@@ -50,12 +50,12 @@ lash_store_sql::statements! {
                      AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.ordinal = item.ordinal - 1))
-                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                   OR (item.kind IN ('x_outcome', 'x_final_outcome') AND item.call_id IS NOT NULL AND (
                      EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
-                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                       AND held.run_seq = item.run_seq AND held.kind IN ('x_outcome', 'x_final_outcome') AND held.call_id = item.call_id)
                      OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
-                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+                       AND earlier.kind IN ('x_outcome', 'x_final_outcome') AND earlier.call_id = item.call_id)))
              ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal";
     }
 }
@@ -140,7 +140,9 @@ pub(super) async fn apply(
             call,
             ..
         } => {
-            let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
+            let call = call
+                .as_ref()
+                .filter(|_| matches!(kind, RunFactKind::XOutcome | RunFactKind::XFinalOutcome));
             Err(refused(tx, owner, *run, *ordinal, call).await?)
         }
         RunFactWrite::Prune { .. } => Err(corrupt("run fact prune", "refused a delete")),
@@ -290,34 +292,32 @@ pub(super) async fn delete_under(
 }
 
 /// Read requests even after a phase acknowledged their wake.
-pub(super) async fn call_cancels(
-    tx: &mut PgConnection,
+pub(super) fn call_cancels(
     actor: &lash_durable::ActorKey,
+    json: &str,
 ) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
     use lash_durable::domain::ToolCallCancelRequest;
-    if actor.kind() != lash_durable::ActorKind::Session {
+    let rows: Vec<(String, String, String, Option<String>, Option<String>)> =
+        serde_json::from_str(json).map_err(|_| corrupt("call cancel rows", json))?;
+    if rows.is_empty() {
         return Ok(Vec::new());
+    }
+    if actor.kind() != lash_durable::ActorKind::Session {
+        return Err(corrupt("call cancel actor", actor.as_str()));
     }
     let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
         .map_err(|_| corrupt("call cancel session", actor.id()))?;
-    let rows = crate::observed_sql::query(SQL.call_cancels.sql())
-        .bind(actor.id())
-        .fetch_all(crate::observed_sql::executor(tx))
-        .await
-        .map_err(sqlx_failure)?;
     rows.into_iter()
-        .map(|row| {
-            let run: String = row.try_get(0).map_err(sqlx_failure)?;
-            let call: String = row.try_get(1).map_err(sqlx_failure)?;
+        .map(|(run, call, request_id, origin, reason)| {
             Ok(ToolCallCancelRequest {
                 session: session.clone(),
                 run: lash_vocabulary::identity::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("call cancel run", &run))?,
                 call: ToolCallId::try_from(call.as_str())
                     .map_err(|_| corrupt("call cancel id", &call))?,
-                request_id: row.try_get(2).map_err(sqlx_failure)?,
-                origin: row.try_get(3).map_err(sqlx_failure)?,
-                reason: row.try_get(4).map_err(sqlx_failure)?,
+                request_id,
+                origin,
+                reason,
             })
         })
         .collect()
@@ -353,7 +353,7 @@ pub(super) async fn request_call_cancel(
         .await
         .map_err(sqlx_failure)?;
     match decision.as_deref() {
-        Some("x_final") => return Ok((A::FinalWon, None)),
+        Some("x_final" | "x_final_outcome") => return Ok((A::FinalWon, None)),
         Some("x_cancel") => return Ok((A::Cancelled, None)),
         Some("x_outcome") => return Ok((A::AlreadyDecided, None)),
         None => return Ok((A::UnknownOrRevoked, None)),

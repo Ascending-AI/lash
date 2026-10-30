@@ -2,6 +2,48 @@
 use super::*;
 use lash_vocabulary::identity::RunIdCoreSupport as _;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CancelSource {
+    Host,
+    Python,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CommitOrder {
+    CancelFirst,
+    FinalFirst,
+    PlainFinalFirst,
+}
+
+impl CommitOrder {
+    pub(super) fn final_wins(self) -> bool {
+        matches!(self, Self::FinalFirst | Self::PlainFinalFirst)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CancelCase {
+    pub(super) source: CancelSource,
+    pub(super) order: CommitOrder,
+    pub(super) hint: Option<lash_core::CancelHint>,
+    pub(super) explicit: bool,
+}
+
+impl CancelCase {
+    pub(super) fn python(
+        order: CommitOrder,
+        hint: Option<lash_core::CancelHint>,
+        explicit: bool,
+    ) -> Self {
+        Self {
+            source: CancelSource::Python,
+            order,
+            hint,
+            explicit,
+        }
+    }
+}
+
 impl CellTurn {
     pub(super) async fn cancellation_laws(
         &self,
@@ -10,7 +52,7 @@ impl CellTurn {
         case: CancelCase,
     ) -> Vec<String> {
         let mut violations = turn_ended(nodes).await;
-        if case.order == CommitOrder::FinalFirst {
+        if case.order.final_wins() {
             let view = lash_core_execution::store::SessionStore::new(
                 self.backend().stores().session_store_factory(),
                 session(),
@@ -111,7 +153,7 @@ impl CellTurn {
                 GraphDecoder::new(write.facts.as_ref(), DecodeLimits::within_total(u64::MAX));
             for row in &write.facts.rows {
                 let Some(call) = &row.call else { continue };
-                if matches!(row.kind, Kind::XCancel | Kind::XFinal)
+                if matches!(row.kind, Kind::XCancel | Kind::XFinal | Kind::XFinalOutcome)
                     && decisions.insert(call.clone(), row.kind).is_some()
                 {
                     violations.push(format!(
@@ -119,7 +161,10 @@ impl CellTurn {
                     ));
                 }
                 if decisions.get(call) == Some(&Kind::XCancel)
-                    && matches!(row.kind, Kind::XStart | Kind::Retry | Kind::XFinal)
+                    && matches!(
+                        row.kind,
+                        Kind::XStart | Kind::Retry | Kind::XFinal | Kind::XFinalOutcome
+                    )
                 {
                     violations.push(format!(
                         "call {call} retried or declared after cancellation"
@@ -143,13 +188,15 @@ impl CellTurn {
                         ));
                     }
                 }
-                if row.kind == Kind::XOutcome {
+                if matches!(row.kind, Kind::XOutcome | Kind::XFinalOutcome) {
                     if outcomes.insert(call.clone(), ()).is_some() {
                         violations.push(format!("call {call} committed two outcomes"));
                     }
                     if Some(call) == selected.as_ref() {
                         let fact = RoundFact::load(&mut decoder, row.record).unwrap();
-                        if let RoundFact::Outcome { output, .. } = fact {
+                        if let RoundFact::Outcome { output, .. }
+                        | RoundFact::FinalOutcome { output, .. } = fact
+                        {
                             let cancelled = matches!(
                                 output.outcome,
                                 lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
@@ -166,17 +213,20 @@ impl CellTurn {
             }
         }
         if let Some(selected) = selected {
-            let expected = if case.order == CommitOrder::FinalFirst {
-                Kind::XFinal
-            } else {
-                Kind::XCancel
+            let expected = match case.order {
+                CommitOrder::FinalFirst => Kind::XFinal,
+                CommitOrder::PlainFinalFirst => Kind::XFinalOutcome,
+                CommitOrder::CancelFirst => Kind::XCancel,
             };
             let trace = nodes.script().trace();
             let decision_at = trace.iter().position(|write| {
                 write.committed()
                     && write.facts.rows.iter().any(|row| {
                         row.call.as_ref() == Some(&selected)
-                            && matches!(row.kind, Kind::XFinal | Kind::XCancel)
+                            && matches!(
+                                row.kind,
+                                Kind::XFinal | Kind::XFinalOutcome | Kind::XCancel
+                            )
                     })
             });
             let cut_at = trace.iter().position(|write| write.cut.is_some());
@@ -211,6 +261,7 @@ pub(super) async fn run_law() {
     for case in [
         host(CommitOrder::CancelFirst, None, true),
         host(CommitOrder::FinalFirst, None, true),
+        host(CommitOrder::PlainFinalFirst, None, true),
         host(
             CommitOrder::CancelFirst,
             Some(lash_core::CancelHint::CancelExternalWork),
@@ -256,14 +307,17 @@ pub(super) async fn run_law() {
             report.cells.len(),
             report.labels()
         );
-        for label in [
-            CommitLabel::CALL_FINAL,
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-        ] {
+        for label in [CommitLabel::CELL_SNAPSHOT_ADMIT, CommitLabel::ROUND_OUTCOME] {
             assert!(
                 report.labels().contains(&label),
                 "the law cut no {label} commit for {case:?}"
+            );
+        }
+        if case.order == CommitOrder::FinalFirst {
+            assert!(
+                report.labels().contains(&CommitLabel::CALL_FINAL),
+                "the law cut no {} commit for {case:?}",
+                CommitLabel::CALL_FINAL
             );
         }
         if case.hint.is_some() {
@@ -287,6 +341,35 @@ pub(super) fn increment_reducer() -> lash::plugins::StateReducer {
                 + reduction.input.as_u64().unwrap_or(0)
         )))
     })
+}
+
+pub(super) async fn wait_plain_final(world: &ExternalWorld) {
+    let nodes = world.nodes.lock_recover().upgrade().unwrap();
+    loop {
+        let selected = world.entries().into_iter().find_map(|(id, entries)| {
+            entries
+                .iter()
+                .any(|(tool, args)| tool == SLOW && written_x(args) == Some(1))
+                .then_some(id)
+        });
+        let trace = nodes.script().trace();
+        if selected.is_some()
+            && trace.iter().any(|write| {
+                write.committed()
+                    && write.facts.rows.iter().any(|row| {
+                        row.call == selected
+                            && row.kind == lash_durable::domain::RunFactKind::XFinalOutcome
+                    })
+            })
+        {
+            return;
+        }
+        let settled = trace
+            .iter()
+            .filter(|write| write.stored != Stored::Pending)
+            .count();
+        nodes.script().settled(settled + 1).await;
+    }
 }
 
 /// Exercise the public host target, including foreign/unknown and retry
@@ -403,7 +486,7 @@ pub(super) async fn host_request(world: &ExternalWorld) {
         .await
         .unwrap();
     let case = world.cancel_case.lock_recover().unwrap();
-    let expected_final = case.order == CommitOrder::FinalFirst;
+    let expected_final = case.order.final_wins();
     for receipt in [&receipt, &repeated] {
         match receipt {
             lash::CancelReceipt::ToolCall {
@@ -428,6 +511,22 @@ pub(super) async fn host_request(world: &ExternalWorld) {
                 assert_eq!(reason.as_deref(), Some("cancel the selected call"));
             }
             other => panic!("the host receipt disagrees with the committed order: {other:?}"),
+        }
+    }
+    if case.source == CancelSource::Host && case.explicit && !expected_final {
+        loop {
+            let trace = nodes.script().trace();
+            if trace
+                .iter()
+                .any(|write| write.point.label == CommitLabel::CALL_CANCEL && write.committed())
+            {
+                break;
+            }
+            let settled = trace
+                .iter()
+                .filter(|write| write.stored != Stored::Pending)
+                .count();
+            nodes.script().settled(settled + 1).await;
         }
     }
 }

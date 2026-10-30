@@ -37,7 +37,7 @@
 //! |---|---|---|
 //! | 0 | `admit` | every member's call, tool, request, policy, limit and wait |
 //! | 1 + i | `x_start` | member i's first attempt, committed with the admission |
-//! | next | `x_outcome` | an attempt's final outcome, the material it names and its plugin-state resolutions |
+//! | next | `x_outcome` or `x_final_outcome` | an attempt's final outcome, the material it names and its plugin-state resolutions |
 //! | next | `x_wait` | an attempt that parked: the waits it races and its pending completion |
 //! | next | `retry` | a `Repeatable` attempt's failure and the due time of the next |
 //! | next | `x_start` | the next attempt of a retried member, once its retry is due |
@@ -49,9 +49,9 @@
 //! whose acknowledgement is lost, leaves the cursor ahead of the rows: the
 //! owner folds again before it writes that run again.
 //!
-//! A call has at most one `x_outcome`: a `retry` settles a failed attempt
+//! A call has at most one outcome: a `retry` settles a failed attempt
 //! without ending the call, and an `x_wait` parks it on the completion wait
-//! its admission pinned until its `x_outcome`, at the same start, settles
+//! its admission pinned until its outcome, at the same start, settles
 //! it. An outcome's material payload rides in its row as one
 //! [`SettledOutput`]: the record is the payload's journal-local home, and a
 //! record whose payload is missing or does not hash to its outcome's digest
@@ -59,7 +59,7 @@
 //! carries the retry's payload again: no record leans on another's bytes.
 //!
 //! A completion's plugin-state resolutions ([`StoreLocalEffect::PluginState`])
-//! ride its `x_outcome`, so they commit exactly when the outcome does. The
+//! ride its outcome, so they commit exactly when the outcome does. The
 //! lifecycle publishes them into the resident namespace from that committed
 //! record only, once the commit is acknowledged or a resume folds it.
 //!
@@ -981,7 +981,7 @@ pub(crate) fn settled_output_of(
     row: &lash_durable::domain::RunFactRow,
 ) -> Result<SettledOutput, String> {
     match records::read(facts, row)? {
-        Record::Outcome(body) => Ok(body.output),
+        Record::Outcome(body) | Record::FinalOutcome(body) => Ok(body.output),
         _ => Err("the row is not a final outcome".to_owned()),
     }
 }
@@ -997,19 +997,28 @@ pub fn tool_outcome_of(
     call: &ToolCallId,
 ) -> Result<Option<crate::ToolCallOutput>, lash_core_store::checkpoint_graph::GraphRefusal> {
     use lash_core_store::checkpoint_graph::{GraphDecoder, GraphRefusal, NodeKind};
-    if row.kind != lash_durable::domain::RunFactKind::XOutcome
-        || row.call.as_ref().is_some_and(|recorded| recorded != call)
+    if !matches!(
+        row.kind,
+        lash_durable::domain::RunFactKind::XOutcome
+            | lash_durable::domain::RunFactKind::XFinalOutcome
+    ) || row.call.as_ref().is_some_and(|recorded| recorded != call)
     {
         return Ok(None);
     }
     let mut decoder = GraphDecoder::new(facts, facts.read_limits);
-    let graph::RoundFact::Outcome { output, .. } =
-        graph::RoundFact::load(&mut decoder, row.record)?
-    else {
-        return Err(GraphRefusal::InvalidBody {
-            kind: NodeKind::ROUND_FACT.0,
-            reason: "an outcome row holds another fact kind".into(),
-        });
+    let fact = graph::RoundFact::load(&mut decoder, row.record)?;
+    let output = match (row.kind, fact) {
+        (lash_durable::domain::RunFactKind::XOutcome, graph::RoundFact::Outcome { output, .. })
+        | (
+            lash_durable::domain::RunFactKind::XFinalOutcome,
+            graph::RoundFact::FinalOutcome { output, .. },
+        ) => output,
+        _ => {
+            return Err(GraphRefusal::InvalidBody {
+                kind: NodeKind::ROUND_FACT.0,
+                reason: "an outcome row holds another fact kind".into(),
+            });
+        }
     };
     output.check(&mut decoder)?;
     let Some(graph::MaterialNode::Outcome(node)) = output.material else {
@@ -1151,7 +1160,7 @@ pub fn settle(
     store_local: Vec<StoreLocalEffect>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 ) -> Result<(), SettleRefusal> {
-    settle_staged(tx, admitted, output, store_local, pages).map(drop)
+    settle_staged(tx, admitted, output, store_local, pages, false).map(drop)
 }
 
 /// [`settle`], handing back the record it staged for its owner's fold.
@@ -1161,6 +1170,7 @@ fn settle_staged(
     output: SettledOutput,
     store_local: Vec<StoreLocalEffect>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+    final_at_outcome: bool,
 ) -> Result<StagedRecord, SettleRefusal> {
     if pages.is_some() && !matches!(output, SettledOutput::Completed(_)) {
         return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
@@ -1187,7 +1197,14 @@ fn settle_staged(
             }
         }
     }
-    Ok(record_outcome(tx, admitted, output, state, pages))
+    Ok(record_outcome(
+        tx,
+        admitted,
+        output,
+        state,
+        pages,
+        final_at_outcome,
+    ))
 }
 
 /// Record `Interrupted` for `id`, a started `Once` the fold found without
@@ -1207,7 +1224,14 @@ pub fn settle_interrupted(
         run: id.run,
         ordinal: id.ordinal,
     })?;
-    record_outcome(tx, &admitted, SettledOutput::Interrupted, Vec::new(), None);
+    record_outcome(
+        tx,
+        &admitted,
+        SettledOutput::Interrupted,
+        Vec::new(),
+        None,
+        false,
+    );
     Ok(())
 }
 
@@ -1217,6 +1241,7 @@ fn record_outcome(
     output: SettledOutput,
     state: Vec<crate::plugin::StateResolution>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+    final_at_outcome: bool,
 ) -> StagedRecord {
     if !matches!(output, SettledOutput::Waiting(_)) {
         tx.publish_process_state(&state);
@@ -1232,6 +1257,8 @@ fn record_outcome(
     // A park is no outcome: the call's one `x_outcome` follows it.
     let record = if matches!(body.output, SettledOutput::Waiting(_)) {
         Record::Wait(body)
+    } else if final_at_outcome {
+        Record::FinalOutcome(body)
     } else {
         Record::Outcome(body)
     };

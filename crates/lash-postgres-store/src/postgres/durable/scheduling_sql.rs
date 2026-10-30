@@ -149,7 +149,10 @@ lash_store_sql::statements! {
              SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
-                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+                    COALESCE((SELECT jsonb_agg(jsonb_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason)
+                                               ORDER BY q.run, q.call_id)
+                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text
              FROM actors a
              LEFT JOIN page p ON p.total - p.bytes <= ?3
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
@@ -166,7 +169,10 @@ lash_store_sql::statements! {
                     h.head_revision, v.leaf_node_id, leaf.generation, leaf.frame_node_id,
                     NOT leaf.tombstoned,
                     (SELECT jsonb_agg(jsonb_build_array(plugin_id, min_format, max_format))
-                       FROM fleet_plugin_writers), v.config_ref
+                       FROM fleet_plugin_writers), v.config_ref,
+                    COALESCE((SELECT jsonb_agg(jsonb_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason)
+                                               ORDER BY q.run, q.call_id)
+                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text
              FROM actors a
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN session_runs r ON r.session_id = ?2 AND r.admission_json IS NOT NULL

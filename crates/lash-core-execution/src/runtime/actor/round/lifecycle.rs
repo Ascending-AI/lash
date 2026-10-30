@@ -77,10 +77,12 @@
 //! [`GroupCommit`]: lash_durable::GroupCommit
 //! [`RoundRunner`]: super::RoundRunner
 
+mod attempt;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lash_core_store::tool_run::AvailableEvidence;
@@ -90,7 +92,6 @@ use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use lash_vocabulary::tool_contract::LimitCause;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::Instrument as _;
 
 use super::super::ActorContext;
 use super::super::waits;
@@ -98,7 +99,7 @@ use super::super::waits::Resolution;
 use super::super::waits::WaitId;
 use super::{
     AdmittedExecution, PolicyView, Recovery, RoundError, RoundView, RunFold, StagedRecord, Stop,
-    StoreLocalEffect, ToolBody, run_bounded, settle_retry, settle_staged, start_retry,
+    StoreLocalEffect, settle_retry, settle_staged, start_retry,
 };
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
@@ -370,7 +371,12 @@ impl Idle {
 /// A finished attempt the lifecycle holds until its outcome commits.
 struct Finished {
     id: AdmittedId,
+    held: HeldOutcome,
+}
+
+struct HeldOutcome {
     result: Result<MemberOutcome, Stop>,
+    final_at_outcome: bool,
 }
 
 /// One owner's admitted members on one activation: the bodies it runs and
@@ -388,6 +394,7 @@ pub struct Lifecycle {
     final_receiver: tokio::sync::mpsc::UnboundedReceiver<super::decision::FinalRequest>,
     final_requests: BTreeMap<AdmittedId, super::decision::FinalRequest>,
     cancel_requests: BTreeMap<crate::ToolCallId, crate::ToolCancellation>,
+    refresh_controls: bool,
     /// The owner's stop, read in the transaction that commits finished
     /// answers.
     fence: Option<Fence>,
@@ -398,7 +405,7 @@ pub struct Lifecycle {
     /// aborts every one still running.
     running: JoinSet<Finished>,
     in_flight: BTreeSet<AdmittedId>,
-    finished: BTreeMap<AdmittedId, Result<MemberOutcome, Stop>>,
+    finished: BTreeMap<AdmittedId, HeldOutcome>,
     /// Members whose attempt met a capacity verdict this lifecycle
     /// honoured: no outcome, and never started again on this activation.
     capacity: BTreeMap<AdmittedId, CapacityVerdict>,
@@ -448,6 +455,7 @@ impl Lifecycle {
             final_receiver,
             final_requests: BTreeMap::new(),
             cancel_requests: BTreeMap::new(),
+            refresh_controls: false,
             fence: None,
             tokens: BTreeMap::new(),
             fresh: BTreeSet::new(),
@@ -572,10 +580,14 @@ impl Lifecycle {
         folded: &RunFold,
         attempt: Option<&lash_durable::ActorTx>,
     ) -> Result<Option<Act>, RoundError> {
+        if self.cancel_requests.is_empty() && attempt.is_none() && !self.refresh_controls {
+            return Ok(None);
+        }
         let mut tx = match attempt {
-            Some(tx) => tx.clone(),
-            None => self.cx.begin().await?,
+            Some(tx) => std::borrow::Cow::Borrowed(tx),
+            None => std::borrow::Cow::Owned(self.cx.begin().await?),
         };
+        self.refresh_controls = false;
         self.read_host_cancels(&tx, folded);
         if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
             self.request_cancels_before(
@@ -597,7 +609,7 @@ impl Lifecycle {
                 {
                     let execution = view.execution(member);
                     staged.extend(super::rounds::cancel_call(
-                        &mut tx,
+                        tx.to_mut(),
                         &execution,
                         cancellation.clone(),
                     ));
@@ -608,7 +620,7 @@ impl Lifecycle {
             self.cancel_requests.clear();
             return Ok(None);
         }
-        self.commit(tx, CommitLabel::CALL_CANCEL, staged)
+        self.commit(tx.into_owned(), CommitLabel::CALL_CANCEL, staged)
             .await
             .map(Some)
     }
@@ -817,8 +829,8 @@ impl Lifecycle {
         self.observe(folded);
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.
-        self.finished.retain(|id, result| {
-            if result.is_err()
+        self.finished.retain(|id, held| {
+            if held.result.is_err()
                 && folded
                     .round(id.run)
                     .and_then(|view| view.member_started_at(id.ordinal))
@@ -828,7 +840,7 @@ impl Lifecycle {
             }
             folded
                 .round(id.run)
-                .is_some_and(|view| unsettled(view, id, parks(result)))
+                .is_some_and(|view| unsettled(view, id, parks(&held.result)))
         });
         // With no outcome held, no batch is open: a window left from a
         // batch whose acknowledgement was lost would wake the owner at
@@ -852,7 +864,9 @@ impl Lifecycle {
                         token.cancel();
                     }
                     let id = view.id_of(member);
-                    if let Some(result) = self.finished.get_mut(&id) {
+                    if let Some(held) = self.finished.get_mut(&id) {
+                        held.final_at_outcome = false;
+                        let result = &mut held.result;
                         if let Ok(outcome) = result {
                             abandoned.extend(outcome.candidate.take());
                         }
@@ -1031,6 +1045,7 @@ impl Lifecycle {
                 None => self.cx.begin().await?,
             };
             let now = tx.opened_at();
+            self.read_host_cancels(&tx, folded);
             let fenced = self.fence.as_ref().is_some_and(|fence| fence(&tx));
             if fenced
                 && folded.rounds().any(|view| {
@@ -1054,17 +1069,27 @@ impl Lifecycle {
             let deferred: BTreeSet<AdmittedId> = self
                 .finished
                 .iter()
-                .filter(|(_, result)| matches!(result, Ok(outcome) if outcome.candidate.is_some()))
+                .filter(
+                    |(_, held)| matches!(&held.result, Ok(outcome) if outcome.candidate.is_some()),
+                )
                 .skip(1)
                 .map(|(id, _)| id.clone())
                 .collect();
+            if self
+                .finished
+                .keys()
+                .filter(|id| !deferred.contains(*id))
+                .any(|id| self.cancel_precedes(folded, id))
+            {
+                return Ok(Some(Act::Refused));
+            }
             let mut retried = false;
             let mut outcomes = BTreeSet::new();
             let mut unanswered = Vec::new();
             let mut publication = None;
             let mut unused = Vec::new();
             let mut staged = Vec::new();
-            for (id, result) in self
+            for (id, held) in self
                 .finished
                 .iter()
                 .filter(|(id, _)| !deferred.contains(*id))
@@ -1072,23 +1097,28 @@ impl Lifecycle {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
                 };
-                let dropped = result.is_err();
+                let dropped = held.result.is_err();
                 // The ordinal the outcome's record takes.
                 let place = (
                     execution.id().owner.clone(),
                     execution.id().run,
                     execution.cursor().peek(),
                 );
-                let result = folded
+                let member = folded
                     .round(id.run)
-                    .and_then(|view| view.member_started_at(id.ordinal))
+                    .and_then(|view| view.member_started_at(id.ordinal));
+                let result = member
                     .and_then(super::RoundMember::cancellation)
                     .map_or_else(
-                        || result.clone(),
+                        || held.result.clone(),
                         |cancellation| Ok(cancelled_with(cancellation.clone()).into()),
                     );
+                let final_at_outcome = held.final_at_outcome
+                    && member.is_some_and(|member| {
+                        member.cancellation().is_none() && member.final_payload().is_none()
+                    });
                 let (recorded, candidate, record) =
-                    self.record_finished(&mut tx, &execution, result, now)?;
+                    self.record_finished(&mut tx, &execution, result, now, final_at_outcome)?;
                 staged.push(record);
                 match recorded {
                     Recorded::Retry => retried = true,
@@ -1121,8 +1151,8 @@ impl Lifecycle {
                 && !retried
                 && unanswered.is_empty()
                 && self.running.is_empty()
-                && self.finished.values().all(|result| {
-                    matches!(result,
+                && self.finished.values().all(|held| {
+                    matches!(&held.result,
                     Ok(MemberOutcome { store_local, terminal: None, timer: None, output, capacity: None, candidate: None })
                         if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
                 })
@@ -1153,12 +1183,12 @@ impl Lifecycle {
                 self.settled.extend(outcomes.iter().cloned());
                 // The outcomes are durable: their plugin state publishes now,
                 // before the reservations they hold are released.
-                for (id, result) in std::mem::take(&mut self.finished) {
+                for (id, held) in std::mem::take(&mut self.finished) {
                     if deferred.contains(&id) {
-                        self.finished.insert(id, result);
+                        self.finished.insert(id, held);
                         continue;
                     }
-                    if let (true, Ok(result)) = (outcomes.contains(&id), &result) {
+                    if let (true, Ok(result)) = (outcomes.contains(&id), &held.result) {
                         self.publish(id, &staged_state(&result.store_local))?;
                     }
                 }
@@ -1178,6 +1208,13 @@ impl Lifecycle {
                 Some(tx) => tx.clone(),
                 None => self.cx.begin().await?,
             };
+            self.read_host_cancels(&tx, folded);
+            if settlements
+                .iter()
+                .any(|(execution, _)| self.cancel_precedes(folded, execution.id()))
+            {
+                return Ok(Some(Act::Refused));
+            }
             let mut staged = Vec::with_capacity(settlements.len());
             for (execution, outcome) in &settlements {
                 staged.push(settle_staged(
@@ -1186,6 +1223,7 @@ impl Lifecycle {
                     outcome.clone(),
                     Vec::new(),
                     None,
+                    false,
                 )?);
             }
             let act = self.commit(tx, self.settlement_label, staged).await?;
@@ -1206,6 +1244,13 @@ impl Lifecycle {
                 Some(tx) => tx.clone(),
                 None => self.cx.begin().await?,
             };
+            self.read_host_cancels(&tx, folded);
+            if due_starts
+                .iter()
+                .any(|execution| self.cancel_precedes(folded, execution.id()))
+            {
+                return Ok(Some(Act::Refused));
+            }
             let started: Vec<AdmittedExecution> = due_starts
                 .iter()
                 .map(|failed| start_retry(&mut tx, failed))
@@ -1219,6 +1264,18 @@ impl Lifecycle {
             return Ok(Some(act));
         }
         Ok(None)
+    }
+
+    fn cancel_precedes(&self, folded: &RunFold, id: &AdmittedId) -> bool {
+        folded
+            .round(id.run)
+            .and_then(|view| view.member_started_at(id.ordinal))
+            .is_some_and(|member| {
+                self.cancel_requests.contains_key(member.call())
+                    && member.outcome().is_none()
+                    && member.cancellation().is_none()
+                    && member.final_payload().is_none()
+            })
     }
 
     /// Publish `state`, what `id`'s committed outcome carries, unless this
@@ -1275,6 +1332,9 @@ impl Lifecycle {
             Some(joined) = self.running.join_next(), if !self.running.is_empty() => {
                 self.collect(joined, group.max_members)?;
             }
+            () = self.cx.wait_for_mail(), if self.fence.is_some() => {
+                self.refresh_controls = true;
+            }
             () = sleep_for(&clock, window), if window.is_some() => {}
             () = sleep_for(&clock, until_due), if until_due.is_some() => {}
             () = self.cx.cancel().cancelled() => return Err(RoundError::Stopped),
@@ -1318,7 +1378,7 @@ impl Lifecycle {
             Err(_) => return Err(RoundError::Stopped),
         };
         self.in_flight.remove(&done.id);
-        match done.result {
+        match done.held.result {
             Err(Stop::Activation | Stop::Lapsed) => Err(RoundError::Stopped),
             // The durable clock could not be read: no outcome, and the
             // owner retries from its rows.
@@ -1330,7 +1390,13 @@ impl Lifecycle {
                 Ok(())
             }
             result => {
-                self.finished.insert(done.id, result);
+                self.finished.insert(
+                    done.id,
+                    HeldOutcome {
+                        result,
+                        final_at_outcome: done.held.final_at_outcome,
+                    },
+                );
                 let clock = self.cx.clock();
                 self.batch_opened.get_or_insert_with(|| clock.now());
                 Ok(())
@@ -1426,8 +1492,13 @@ impl Lifecycle {
                 .discharge(execution, source, false)
                 .await
                 .map_err(|error| RoundError::Discharge(Box::new(error)))?;
-            self.finished
-                .insert(execution.id().clone(), Ok(output.into()));
+            self.finished.insert(
+                execution.id().clone(),
+                HeldOutcome {
+                    result: Ok(output.into()),
+                    final_at_outcome: false,
+                },
+            );
             self.batch_opened.get_or_insert(opened);
         }
         Ok(())
@@ -1567,86 +1638,6 @@ impl Lifecycle {
         }
     }
 
-    fn spawn(&mut self, execution: AdmittedExecution, retained: Option<serde_json::Value>) {
-        let body = self.bodies.body(&execution);
-        let stop_grace = self.bodies.stop_grace();
-        let cx = self.cx.clone();
-        let cancel = self.token(execution.call());
-        // Only a step that may run again from its committed start can drop
-        // an attempt: a capacity verdict from any other records the
-        // attempt's `Interrupted`.
-        let pinned = execution.policy();
-        let honours_capacity = matches!(
-            pinned,
-            lash_kernel_value::tool_contract::ExecutionPolicy::Repeatable { .. }
-        ) && self
-            .policies
-            .permits_repeat(execution.draft().tool(), pinned);
-        self.in_flight.insert(execution.id().clone());
-        let protected = CancellationToken::new();
-        if retained.is_some() {
-            protected.cancel();
-        }
-        let scope = Arc::new(super::decision::FinalScope {
-            execution: execution.clone(),
-            sender: self.final_sender.clone(),
-            retained: std::sync::Mutex::new(retained),
-            protected,
-        });
-        let attempt = async move {
-            type Carried = (
-                Vec<StoreLocalEffect>,
-                Option<crate::ProcessId>,
-                Option<DurableInstant>,
-                Option<CapacityVerdict>,
-                Option<StepCandidate>,
-            );
-            let carried: Arc<Mutex<Carried>> = Arc::default();
-            let slot = Arc::clone(&carried);
-            let tool_body: ToolBody = Box::new(move |token| {
-                Box::pin(async move {
-                    let result = body(token).await;
-                    *slot.lock().unwrap_or_else(PoisonError::into_inner) = (
-                        result.store_local,
-                        result.terminal,
-                        result.timer,
-                        result.capacity,
-                        result.candidate,
-                    );
-                    result.output
-                })
-            });
-            let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
-                .await
-                .and_then(|output| {
-                    let (store_local, terminal, timer, capacity, candidate) = std::mem::take(
-                        &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
-                    );
-                    match capacity {
-                        Some(verdict) if honours_capacity => Err(Stop::Capacity(verdict)),
-                        _ => Ok(MemberOutcome {
-                            output,
-                            store_local,
-                            terminal,
-                            timer,
-                            capacity: None,
-                            candidate,
-                        }),
-                    }
-                });
-            Finished {
-                id: execution.id().clone(),
-                result,
-            }
-        };
-        self.running.spawn(
-            lash_core_ids::operational_metrics::turn::carry(
-                super::decision::FINAL_SCOPE.scope(scope, attempt),
-            )
-            .instrument(tracing::Span::current()),
-        );
-    }
-
     /// Record one finished attempt on `tx`: its final outcome with its
     /// store-local effect, or a retry when its pinned contract repeats it.
     /// A completion's heap pages are recorded with its outcome, which owns
@@ -1658,6 +1649,7 @@ impl Lifecycle {
         execution: &AdmittedExecution,
         result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
+        final_at_outcome: bool,
     ) -> Result<(Recorded, Option<StepCandidate>, StagedRecord), RoundError> {
         let (mut output, store_local, terminal, timer, candidate) = match result {
             Ok(result) => (
@@ -1725,7 +1717,19 @@ impl Lifecycle {
             .as_ref()
             .filter(|_| matches!(output, SettledOutput::Completed(_)))
             .map(StepCandidate::root);
-        let record = settle_staged(tx, execution, output.clone(), store_local, pages)?;
+        let final_at_outcome = final_at_outcome
+            && matches!(
+                output,
+                SettledOutput::Completed(_) | SettledOutput::Failed(_)
+            );
+        let record = settle_staged(
+            tx,
+            execution,
+            output.clone(),
+            store_local,
+            pages,
+            final_at_outcome,
+        )?;
         Ok((
             Recorded::Outcome {
                 output: Box::new(output),

@@ -487,7 +487,7 @@ table lash_run_records
   column record_ref bytea not-null
   column run_seq bigint not-null
   column written_epoch bigint not-null
-  unique (owner_key, run_seq, call_id) where (kind = 'x_outcome'::text) and (call_id is not null)
+  unique (owner_key, run_seq, call_id) where (kind = any (array['x_outcome'::text, 'x_final_outcome'::text])) and (call_id is not null)
   primary-key (owner_key, run_seq, ordinal)
   foreign-key (record_ref) references lash_blobs (hash) on delete restrict
 table lash_runtime_turn_commits

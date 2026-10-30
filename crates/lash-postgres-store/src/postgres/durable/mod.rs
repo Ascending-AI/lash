@@ -688,7 +688,8 @@ fn group_members(tx: &ActorTx) -> u64 {
             matches!(
                 write,
                 DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append {
-                    kind: lash_durable::domain::RunFactKind::XOutcome,
+                    kind: lash_durable::domain::RunFactKind::XOutcome
+                        | lash_durable::domain::RunFactKind::XFinalOutcome,
                     ..
                 })
             )
@@ -1365,12 +1366,7 @@ impl DurableStore for PostgresDurableStore {
                 });
             }
         }
-        let requests = self
-            .read(|tx| {
-                let actor = actor.clone();
-                Box::pin(async move { run_records::call_cancels(tx, &actor).await })
-            })
-            .await?;
+        let requests = run_records::call_cancels(actor, &get::<String>(first, 23)?)?;
         Ok(ActorTx::opened(opened).with_call_cancels(requests))
     }
 

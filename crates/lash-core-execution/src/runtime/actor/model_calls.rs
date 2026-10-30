@@ -31,7 +31,7 @@ impl ActorContext {
                     owner,
                     run,
                     call: Some(call),
-                    kind: RunFactKind::XOutcome,
+                    kind: RunFactKind::XOutcome | RunFactKind::XFinalOutcome,
                     ..
                 }) => Some(ModelCallOwner {
                     owner: owner.clone(),

@@ -149,8 +149,9 @@ worker handles grant no authority.
 
 The first host request is immutable and wakes the owning actor. Its wake may
 be acknowledged without deleting the request. The actor arbitrates against
-`x_final`, commits `x_cancel` before signalling only that call, and retains
-CancelHint discharge debt through recovery. Request retries preserve the
+`x_final` or a declaration-free `x_final_outcome`, commits `x_cancel` before
+signalling only that call, and retains CancelHint discharge debt through recovery.
+Request retries preserve the
 accepted request id, origin and reason. Receipts distinguish pending request
 acceptance, an already decided call, and a winning committed final. None
 proves physical termination or rollback of external work.

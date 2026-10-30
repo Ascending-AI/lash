@@ -1022,7 +1022,7 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
     run_seq BIGINT NOT NULL,
     ordinal BIGINT NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'x_final', 'present', 'retry',
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'x_final', 'x_final_outcome', 'present', 'retry',
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).
@@ -1033,7 +1033,7 @@ CREATE TABLE IF NOT EXISTS lash_run_records (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
     ON lash_run_records (owner_key, run_seq, call_id)
-    WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+    WHERE kind IN ('x_outcome', 'x_final_outcome') AND call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_run_records_record_ref ON lash_run_records (record_ref);
 
 -- Session close (L6b, FIG-5176): a closing session's last step done, each
@@ -1434,9 +1434,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 2997f22d9407e851); a call
+    -- Generated from this build's statements (registry a89694c3ef9a8fa4); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '2997f22d9407e851'
+    IF p_registry IS DISTINCT FROM 'a89694c3ef9a8fa4'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1627,12 +1627,12 @@ BEGIN
                      AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.ordinal = item.ordinal - 1))
-                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                   OR (item.kind IN ('x_outcome', 'x_final_outcome') AND item.call_id IS NOT NULL AND (
                      EXISTS (SELECT 1 FROM lash_run_records AS held WHERE held.owner_key = item.owner_key
-                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                       AND held.run_seq = item.run_seq AND held.kind IN ('x_outcome', 'x_final_outcome') AND held.call_id = item.call_id)
                      OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
-                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+                       AND earlier.kind IN ('x_outcome', 'x_final_outcome') AND earlier.call_id = item.call_id)))
              ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
@@ -2019,6 +2019,8 @@ BEGIN
                  RETURNING graph_root_ref
              ), cancel AS (
                  DELETE FROM lash_turn_cancel_requests WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1)
+             ), call_cancels AS (
+                 DELETE FROM lash_tool_call_cancel_requests WHERE session_id = (v_p->>0) AND run = (v_p->>1)
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,

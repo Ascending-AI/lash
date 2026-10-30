@@ -14,8 +14,26 @@ pub(super) struct FinalRequest {
 pub(super) struct FinalScope {
     pub execution: AdmittedExecution,
     pub sender: mpsc::UnboundedSender<FinalRequest>,
-    pub retained: std::sync::Mutex<Option<serde_json::Value>>,
+    pub state: std::sync::Mutex<FinalState>,
     pub protected: CancellationToken,
+}
+
+pub(super) enum FinalState {
+    Open,
+    AtOutcome,
+    Protected(serde_json::Value),
+}
+
+impl FinalScope {
+    pub(super) fn at_outcome(&self) -> bool {
+        matches!(
+            *self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            FinalState::AtOutcome
+        )
+    }
 }
 
 tokio::task_local! {
@@ -28,14 +46,34 @@ pub(crate) fn retained_final(call: &crate::ToolCallId) -> Option<serde_json::Val
             if scope.execution.call() != call {
                 return None;
             }
-            scope
-                .retained
+            match &*scope
+                .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone()
+            {
+                FinalState::Protected(payload) => Some(payload.clone()),
+                FinalState::Open | FinalState::AtOutcome => None,
+            }
         })
         .ok()
         .flatten()
+}
+
+pub(crate) fn final_at_outcome(call: &crate::ToolCallId) -> Result<(), String> {
+    let Ok(scope) = FINAL_SCOPE.try_with(Arc::clone) else {
+        return Ok(());
+    };
+    if scope.execution.call() != call {
+        return Err("a nested call needs its own admitted decision owner".to_owned());
+    }
+    let mut state = scope
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if matches!(*state, FinalState::Open) {
+        *state = FinalState::AtOutcome;
+    }
+    Ok(())
 }
 
 pub(super) fn protection() -> Option<CancellationToken> {
@@ -53,12 +91,13 @@ pub(crate) async fn commit_final(
     if scope.execution.call() != call {
         return Err("a nested call needs its own admitted decision owner".to_owned());
     }
-    if scope
-        .retained
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .is_some()
-    {
+    if matches!(
+        *scope
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        FinalState::Protected(_)
+    ) {
         return Ok(true);
     }
     let (reply, receive) = oneshot::channel();
@@ -76,9 +115,9 @@ pub(crate) async fn commit_final(
         .map_err(|_| "the call's owner stopped before acknowledging its final".to_owned())?;
     if won {
         *scope
-            .retained
+            .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(payload);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = FinalState::Protected(payload);
     }
     Ok(won)
 }

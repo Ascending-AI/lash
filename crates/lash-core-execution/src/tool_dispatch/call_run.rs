@@ -3,7 +3,8 @@
 //! The owning actor commits the captured final before this runner realizes
 //! declarations. Recovery drains that capture without executing another body.
 //! A cancel committed first refuses the final and its declarations. The later
-//! `x_outcome` commits presentation and store-local effects of the winning final.
+//! outcome commits presentation and store-local effects. A declaration-free
+//! final is decided and settled together.
 
 use std::sync::Arc;
 use {
@@ -630,28 +631,33 @@ impl<'a> AdmittedToolCall<'a> {
                 });
             return self.withheld(decision, cause, Some(&capture));
         }
-        let payload = serde_json::to_value(ProtectedFinal {
-            decision: decision.clone(),
-            capture: capture.clone(),
-            prepared: self.request.prepared.clone(),
-            state: staged
-                .as_ref()
-                .map_or_else(Vec::new, |state: &crate::plugin::StagedPluginState| {
-                    state.resolutions().to_vec()
-                }),
-        })
-        .map_err(fault)?;
-        if !crate::runtime::actor::round::decision::commit_final(&self.call.call_id, payload)
-            .await
-            .map_err(fault)?
-        {
-            if let Some(staged) = staged {
-                staged.discard();
+        if capture.declares() {
+            let payload = serde_json::to_value(ProtectedFinal {
+                decision: decision.clone(),
+                capture: capture.clone(),
+                prepared: self.request.prepared.clone(),
+                state: staged
+                    .as_ref()
+                    .map_or_else(Vec::new, |state: &crate::plugin::StagedPluginState| {
+                        state.resolutions().to_vec()
+                    }),
+            })
+            .map_err(fault)?;
+            if !crate::runtime::actor::round::decision::commit_final(&self.call.call_id, payload)
+                .await
+                .map_err(fault)?
+            {
+                if let Some(staged) = staged {
+                    staged.discard();
+                }
+                return self.withheld(CallDecision::Cancelled, None, Some(&capture));
             }
-            return self.withheld(CallDecision::Cancelled, None, Some(&capture));
-        }
-        if let Some(staged) = &staged {
-            staged.protect();
+            if let Some(staged) = &staged {
+                staged.protect();
+            }
+        } else {
+            crate::runtime::actor::round::decision::final_at_outcome(&self.call.call_id)
+                .map_err(fault)?;
         }
         let end = self.present(decision, capture, cancel).await;
         match (end, staged) {

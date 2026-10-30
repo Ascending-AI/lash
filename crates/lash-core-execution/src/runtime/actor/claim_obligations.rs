@@ -506,7 +506,7 @@ impl RecordedWork {
             _ => matches!(
                 write,
                 DomainWrite::RunFact(RunFactWrite::Append {
-                    kind: RunFactKind::Admit | RunFactKind::XOutcome,
+                    kind: RunFactKind::Admit | RunFactKind::XOutcome | RunFactKind::XFinalOutcome,
                     ..
                 }) | DomainWrite::ExecRoot(_)
                     | DomainWrite::Turn(
@@ -580,7 +580,7 @@ impl RecordedWork {
                         self.settle(&row.owner, &call);
                     }
                 }
-                RunFactKind::XOutcome => {
+                RunFactKind::XOutcome | RunFactKind::XFinalOutcome => {
                     if let Some(call) = &row.call {
                         self.settle(&row.owner, call);
                     }

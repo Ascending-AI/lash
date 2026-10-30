@@ -1156,6 +1156,14 @@ pub enum RoundFact {
         ended_at_ms: Option<u64>,
         pages: Option<NodeId>,
     },
+    /// 10: a declaration-free final and its settled outcome.
+    FinalOutcome {
+        start: u64,
+        output: SettledFact,
+        state: Vec<lash_core_store::tool_run::StateResolution>,
+        ended_at_ms: Option<u64>,
+        pages: Option<NodeId>,
+    },
     /// 8: the immutable cancel winner, before its body is signalled or its
     /// parked work is discharged. The final outcome completes this obligation.
     Cancel {
@@ -1181,6 +1189,7 @@ impl RoundFact {
             Self::CellReport { .. } => RunFactKind::CellReport,
             Self::Cancel { .. } => RunFactKind::XCancel,
             Self::Final { .. } => RunFactKind::XFinal,
+            Self::FinalOutcome { .. } => RunFactKind::XFinalOutcome,
         }
     }
 
@@ -1240,7 +1249,8 @@ impl RoundFact {
         let output = match &fact {
             Self::Wait { output, .. }
             | Self::Retry { output, .. }
-            | Self::Outcome { output, .. } => Some(output.output(decoder)?),
+            | Self::Outcome { output, .. }
+            | Self::FinalOutcome { output, .. } => Some(output.output(decoder)?),
             _ => None,
         };
         fact.children(decoder, id)?;
@@ -1261,11 +1271,15 @@ impl RoundFact {
             }
             Self::Wait { output, .. }
             | Self::Retry { output, .. }
-            | Self::Outcome { output, .. } => {
+            | Self::Outcome { output, .. }
+            | Self::FinalOutcome { output, .. } => {
                 if let Some(material) = &output.material {
                     decoder.child_kind(id, material.node(), &[material.kind()])?;
                 }
                 if let Self::Outcome {
+                    pages: Some(pages), ..
+                }
+                | Self::FinalOutcome {
                     pages: Some(pages), ..
                 } = &fact
                 {
@@ -1289,7 +1303,8 @@ impl RoundFact {
         match self {
             Self::Wait { output, .. }
             | Self::Retry { output, .. }
-            | Self::Outcome { output, .. } => output.check(decoder),
+            | Self::Outcome { output, .. }
+            | Self::FinalOutcome { output, .. } => output.check(decoder),
             _ => Ok(()),
         }
     }
@@ -1329,6 +1344,13 @@ impl TokenCodec for RoundFact {
                 reads.encode(out);
             }
             Self::Outcome {
+                start,
+                output,
+                state,
+                ended_at_ms,
+                pages,
+            }
+            | Self::FinalOutcome {
                 start,
                 output,
                 state,
@@ -1410,19 +1432,34 @@ impl TokenCodec for RoundFact {
                     reads: Vec::decode(input)?,
                 }
             }
-            RunFactKind::XOutcome => {
+            RunFactKind::XOutcome | RunFactKind::XFinalOutcome => {
                 // An outcome retained before members kept their end has
                 // four fields.
                 let ended = fields == 5;
                 if !ended {
                     expect(4)?;
                 }
-                Self::Outcome {
-                    start: input.unsigned()?,
-                    output: SettledFact::decode(input)?,
-                    state: decode_tree(input)?,
-                    pages: Option::decode(input)?,
-                    ended_at_ms: if ended { Some(input.unsigned()?) } else { None },
+                let start = input.unsigned()?;
+                let output = SettledFact::decode(input)?;
+                let state = decode_tree(input)?;
+                let pages = Option::decode(input)?;
+                let ended_at_ms = if ended { Some(input.unsigned()?) } else { None };
+                if kind == RunFactKind::XFinalOutcome {
+                    Self::FinalOutcome {
+                        start,
+                        output,
+                        state,
+                        ended_at_ms,
+                        pages,
+                    }
+                } else {
+                    Self::Outcome {
+                        start,
+                        output,
+                        state,
+                        ended_at_ms,
+                        pages,
+                    }
                 }
             }
             RunFactKind::XFinal => {

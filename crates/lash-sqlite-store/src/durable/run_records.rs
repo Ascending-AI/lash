@@ -40,12 +40,12 @@ lash_store_sql::statements! {
                      AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.ordinal = item.ordinal - 1))
-                   OR (item.kind = 'x_outcome' AND item.call_id IS NOT NULL AND (
+                   OR (item.kind IN ('x_outcome', 'x_final_outcome') AND item.call_id IS NOT NULL AND (
                      EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
-                       AND held.run_seq = item.run_seq AND held.kind = 'x_outcome' AND held.call_id = item.call_id)
+                       AND held.run_seq = item.run_seq AND held.kind IN ('x_outcome', 'x_final_outcome') AND held.call_id = item.call_id)
                      OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
-                       AND earlier.kind = 'x_outcome' AND earlier.call_id = item.call_id)))
+                       AND earlier.kind IN ('x_outcome', 'x_final_outcome') AND earlier.call_id = item.call_id)))
              ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal";
     }
 }
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS run_records (
     run_seq INTEGER NOT NULL,
     ordinal INTEGER NOT NULL,
     kind TEXT NOT NULL CONSTRAINT ck_run_records_kind
-        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'x_final', 'present', 'retry',
+        CHECK (kind IN ('admit', 'x_start', 'x_outcome', 'x_wait', 'x_cancel', 'x_final', 'x_final_outcome', 'present', 'retry',
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS run_records (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_run_records_outcome
     ON run_records (owner_key, run_seq, call_id)
-    WHERE kind = 'x_outcome' AND call_id IS NOT NULL;
+    WHERE kind IN ('x_outcome', 'x_final_outcome') AND call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_run_records_record_ref ON run_records (record_ref);
 ";
 
@@ -117,7 +117,9 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             if append_batch(tx, &rows)? == 1 {
                 return Ok(Ok(()));
             }
-            let call = call.as_ref().filter(|_| *kind == RunFactKind::XOutcome);
+            let call = call
+                .as_ref()
+                .filter(|_| matches!(kind, RunFactKind::XOutcome | RunFactKind::XFinalOutcome));
             refused(tx, owner, *run, *ordinal, call)
         }
         RunFactWrite::Prune { owner, before } => {
@@ -887,29 +889,21 @@ mod tests {
 /// Read host requests independently of mailbox acknowledgements: a phase's
 /// wake acknowledgement cannot erase an unarbitrated call request.
 pub(super) fn call_cancels(
-    tx: &Connection,
     actor: &lash_durable::ActorKey,
-) -> rusqlite::Result<Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError>> {
+    json: &str,
+) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
     use lash_durable::domain::ToolCallCancelRequest;
+    let rows: Vec<(String, String, String, Option<String>, Option<String>)> =
+        serde_json::from_str(json).map_err(|_| corrupt("call cancel rows", json))?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
     if actor.kind() != lash_durable::ActorKind::Session {
-        return Ok(Ok(Vec::new()));
+        return Err(corrupt("call cancel actor", actor.as_str()));
     }
     let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-    let rows = tx
-        .prepare_cached(SQL.call_cancels.sql())?
-        .query_map([actor.id()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows
-        .into_iter()
+        .map_err(|_| corrupt("call cancel session", actor.id()))?;
+    rows.into_iter()
         .map(|(run, call, request_id, origin, reason)| {
             Ok(ToolCallCancelRequest {
                 session: session.clone(),
@@ -922,7 +916,7 @@ pub(super) fn call_cancels(
                 reason,
             })
         })
-        .collect())
+        .collect()
 }
 
 pub(super) fn request_call_cancel(
@@ -944,7 +938,7 @@ pub(super) fn request_call_cancel(
         )
         .optional()?;
     match decision.as_deref() {
-        Some("x_final") => return Ok(Ok((A::FinalWon, None))),
+        Some("x_final" | "x_final_outcome") => return Ok(Ok((A::FinalWon, None))),
         Some("x_cancel") => return Ok(Ok((A::Cancelled, None))),
         Some("x_outcome") => return Ok(Ok((A::AlreadyDecided, None))),
         None => return Ok(Ok((A::UnknownOrRevoked, None))),

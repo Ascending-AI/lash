@@ -995,7 +995,11 @@ pub async fn read_process_steps(
                         .rev()
                         .find(|row| {
                             row.run == round.run()
-                                && row.kind == lash_durable::domain::RunFactKind::XOutcome
+                                && matches!(
+                                    row.kind,
+                                    lash_durable::domain::RunFactKind::XOutcome
+                                        | lash_durable::domain::RunFactKind::XFinalOutcome
+                                )
                                 && row.call.as_ref() == Some(member.call())
                         })
                         .map(|row| StepFact {

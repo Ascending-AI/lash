@@ -618,45 +618,114 @@ pub async fn an_owner_refuses_a_second_outcome_for_one_call(tier: &dyn GraphTier
     let outcome = value(&mut nodes, &[&big("retry-outcome")], &[]);
     let call = ToolCallId::parse(&format!("tc_{}", "ab".repeat(32)))
         .map_err(|e| LawBroken(e.to_string()))?;
-    let append = |ordinal, record| {
+    let append = |run, ordinal, kind, record| {
         DomainWrite::RunFact(RunFactWrite::Append {
             owner: facts.clone(),
-            run: RunSeq(0),
+            run: RunSeq(run),
             ordinal: Ordinal(ordinal),
-            kind: RunFactKind::XOutcome,
+            kind,
             call: Some(call.clone()),
             record,
         })
     };
     let nodes = nodes.into_nodes();
-    owner_commit(tier, &owner, nodes.clone(), vec![append(0, outcome)])
+    for (run, first, second) in [
+        (0, RunFactKind::XOutcome, RunFactKind::XOutcome),
+        (1, RunFactKind::XFinalOutcome, RunFactKind::XOutcome),
+        (2, RunFactKind::XOutcome, RunFactKind::XFinalOutcome),
+    ] {
+        owner_commit(
+            tier,
+            &owner,
+            nodes.clone(),
+            vec![append(run, 0, first, outcome)],
+        )
         .await
         .map_err(|error| refused("the first outcome", error))?;
-    let answer = owner_commit(tier, &owner, nodes, vec![append(1, outcome)]).await;
-    ensure!(
-        answer
-            == Err(DurableError::Domain(DomainRefusal::OutcomeExists {
+        let answer = owner_commit(
+            tier,
+            &owner,
+            nodes.clone(),
+            vec![append(run, 1, second, outcome)],
+        )
+        .await;
+        ensure!(
+            answer
+                == Err(DurableError::Domain(DomainRefusal::OutcomeExists {
+                    owner: facts.clone(),
+                    run: RunSeq(run),
+                    call: call.clone()
+                })),
+            "a second outcome for one call answered {answer:?}"
+        );
+        let hydrated = hydrate(
+            tier,
+            RootOwner::RunFact {
                 owner: facts.clone(),
-                run: RunSeq(0),
-                call: call.clone()
-            })),
-        "a second outcome for one call answered {answer:?}"
-    );
-    let hydrated = hydrate(
+                run: RunSeq(run),
+                ordinal: Ordinal(1),
+            },
+            None,
+            DecodeLimits::within_total(1 << 30),
+        )
+        .await;
+        ensure!(
+            hydrated == Err(GraphRefusal::RootRetired),
+            "a refused or retried commit appended a second fact: {hydrated:?}"
+        );
+    }
+    for (run, first, second) in [
+        (3, RunFactKind::XFinalOutcome, RunFactKind::XOutcome),
+        (4, RunFactKind::XOutcome, RunFactKind::XFinalOutcome),
+    ] {
+        let answer = owner_commit(
+            tier,
+            &owner,
+            nodes.clone(),
+            vec![
+                append(run, 0, first, outcome),
+                append(run, 1, second, outcome),
+            ],
+        )
+        .await;
+        ensure!(
+            answer
+                == Err(DurableError::Domain(DomainRefusal::OutcomeExists {
+                    owner: facts.clone(),
+                    run: RunSeq(run),
+                    call: call.clone()
+                })),
+            "a batch with two outcomes answered {answer:?}"
+        );
+        for ordinal in [0, 1] {
+            let hydrated = hydrate(
+                tier,
+                RootOwner::RunFact {
+                    owner: facts.clone(),
+                    run: RunSeq(run),
+                    ordinal: Ordinal(ordinal),
+                },
+                None,
+                DecodeLimits::within_total(1 << 30),
+            )
+            .await;
+            ensure!(
+                hydrated == Err(GraphRefusal::RootRetired),
+                "a refused batch appended a fact: {hydrated:?}"
+            );
+        }
+    }
+    owner_commit(
         tier,
-        RootOwner::RunFact {
-            owner: facts.clone(),
-            run: RunSeq(0),
-            ordinal: Ordinal(1),
-        },
-        None,
-        DecodeLimits::within_total(1 << 30),
+        &owner,
+        nodes,
+        vec![
+            append(5, 0, RunFactKind::XFinal, outcome),
+            append(5, 1, RunFactKind::XOutcome, outcome),
+        ],
     )
-    .await;
-    ensure!(
-        hydrated == Err(GraphRefusal::RootRetired),
-        "a refused or retried commit appended a second fact: {hydrated:?}"
-    );
+    .await
+    .map_err(|error| refused("a protected final and its outcome", error))?;
     Ok(())
 }
 

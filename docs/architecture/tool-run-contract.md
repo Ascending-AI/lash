@@ -24,8 +24,9 @@ A call has one durable home: the admitted execution that runs it.
   stream that never committed launches nothing. Each member's attempt runs
   the call's A and X after `x_start`. The actor commits `x_final` with the
   preparation, capture and reduced state before declarations run, or `x_cancel`
-  with its discharge debt before signalling. `x_outcome` records the winning
-  decision's presentation and effects; its material answers the machine.
+  with its discharge debt before signalling. `x_outcome` records that decision's
+  presentation and effects. A final without declarations instead commits its
+  decision and outcome together as `x_final_outcome`; its material answers the machine.
   A resume folds the round's run records: a started `Once` without an
   decision is `Interrupted` and never starts again, and a started `Repeatable`
   reruns at its ordinal. A retryable failure is a known failure, and its
@@ -260,7 +261,8 @@ A change that moves one of these is an identity change, never a shape change.
 Explicit Python task cancellation saves its owned call-cancel intent with the
 kernel checkpoint before admitting cleanup effects. Each admitted call has one
 actor-fenced decision: `x_final` retains its capture and reduced state before
-declarations, or `x_cancel` retains cancellation and discharge debt before
+declarations, `x_final_outcome` decides and settles a declaration-free final,
+or `x_cancel` retains cancellation and discharge debt before
 signalling. A successor drains a protected final without rerunning its body;
 a cancel winner fences retries, late results and new declarations. Run stops
 and cell closing select eligible calls through the same decision.

@@ -129,11 +129,15 @@ impl TurnTranscript {
                 }
             };
             let mut finals = BTreeMap::new();
-            for row in rows.iter().filter(|row| row.kind == RunFactKind::XOutcome) {
-                let RoundFact::Outcome { output, .. } =
-                    decoder.decode(row.record, NodeKind::ROUND_FACT)?
-                else {
-                    return Err(corrupt("an outcome row holds another fact"));
+            for row in rows.iter().filter(|row| {
+                matches!(row.kind, RunFactKind::XOutcome | RunFactKind::XFinalOutcome)
+            }) {
+                let output = match (row.kind, decoder.decode(row.record, NodeKind::ROUND_FACT)?) {
+                    (RunFactKind::XOutcome, RoundFact::Outcome { output, .. })
+                    | (RunFactKind::XFinalOutcome, RoundFact::FinalOutcome { output, .. }) => {
+                        output
+                    }
+                    _ => return Err(corrupt("an outcome row holds another fact")),
                 };
                 if let Some(call) = &row.call {
                     finals.insert(call.clone(), output.material);

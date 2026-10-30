@@ -396,7 +396,9 @@ fn an_acknowledged_commits_staged_records_are_the_records_its_rows_read_as() {
     let mut staged: Vec<StagedRecord> = members
         .iter()
         .zip(outputs)
-        .map(|(member, output)| settle_staged(&mut tx, member, output, Vec::new(), None).unwrap())
+        .map(|(member, output)| {
+            settle_staged(&mut tx, member, output, Vec::new(), None, false).unwrap()
+        })
         .collect();
     staged.push(settle_retry(&mut tx, &members[3], failed(), DurableInstant(50)).unwrap());
     let appended = rows(&tx);

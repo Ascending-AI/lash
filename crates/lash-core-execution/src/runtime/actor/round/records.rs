@@ -71,6 +71,7 @@ pub(super) enum Record {
     Start(StartBody),
     Wait(OutcomeBody),
     Outcome(OutcomeBody),
+    FinalOutcome(OutcomeBody),
     Retry(RetryBody),
     Cancel {
         start: u64,
@@ -94,6 +95,7 @@ impl Record {
             Self::Retry(_) => RunFactKind::Retry,
             Self::Cancel { .. } => RunFactKind::XCancel,
             Self::Final { .. } => RunFactKind::XFinal,
+            Self::FinalOutcome(_) => RunFactKind::XFinalOutcome,
             Self::Present(_) => RunFactKind::Present,
             Self::CellReport(_) => RunFactKind::CellReport,
         }
@@ -190,16 +192,27 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
                 held,
             )
         }
-        Record::Outcome(body) => {
+        Record::Outcome(body) | Record::FinalOutcome(body) => {
             let (output, held) = settled_fact(staging, &body.output)?;
-            (
+            let fact = if matches!(record, Record::FinalOutcome(_)) {
+                RoundFact::FinalOutcome {
+                    start: body.start,
+                    output,
+                    state: body.state.clone(),
+                    ended_at_ms: body.ended_at_ms,
+                    pages: body.pages,
+                }
+            } else {
                 RoundFact::Outcome {
                     start: body.start,
                     output,
                     state: body.state.clone(),
                     ended_at_ms: body.ended_at_ms,
                     pages: body.pages,
-                },
+                }
+            };
+            (
+                fact,
                 // The heap pages an outcome owns are its candidate's nodes:
                 // a fold reads its record, checking them.
                 held && body.pages.is_none(),
@@ -271,6 +284,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             fact.kind().as_str()
         ));
     }
+    let final_outcome = matches!(&fact, RoundFact::FinalOutcome { .. });
     Ok(match fact {
         RoundFact::Admit { members, reads } => {
             let mut pins = Vec::with_capacity(members.len());
@@ -318,13 +332,27 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             ended_at_ms,
             pages,
             ..
-        } => Record::Outcome(OutcomeBody {
+        }
+        | RoundFact::FinalOutcome {
             start,
-            output: output?,
             state,
             ended_at_ms,
             pages,
-        }),
+            ..
+        } => {
+            let body = OutcomeBody {
+                start,
+                output: output?,
+                state,
+                ended_at_ms,
+                pages,
+            };
+            if final_outcome {
+                Record::FinalOutcome(body)
+            } else {
+                Record::Outcome(body)
+            }
+        }
         RoundFact::Retry {
             start, due_at_ms, ..
         } => Record::Retry(RetryBody {

@@ -623,11 +623,16 @@ fn fold_run(
                     source: source.clone(),
                 };
             }
-            Record::Outcome(settled) => {
+            Record::Outcome(settled) | Record::FinalOutcome(settled) => {
                 if matches!(settled.output, SettledOutput::Waiting(_)) {
                     return Err(out_of_order(row));
                 }
                 let member = open_attempt(&mut members, row, settled.start)?;
+                if matches!(record.as_ref(), Record::FinalOutcome(_))
+                    && (member.cancellation.is_some() || member.final_payload.is_some())
+                {
+                    return Err(out_of_order(row));
+                }
                 if let Some(cancellation) = &member.cancellation
                     && !matches!(&settled.output, SettledOutput::Cancelled { cancellation: actual, .. } if actual == cancellation)
                 {
@@ -768,7 +773,10 @@ fn open_attempt<'m>(
         MemberState::Final { .. }
             if matches!(
                 row.kind,
-                RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+                RunFactKind::XOutcome
+                    | RunFactKind::XCancel
+                    | RunFactKind::XFinal
+                    | RunFactKind::XFinalOutcome
             ) =>
         {
             Err(FoldRefusal::SecondFinal(call.clone()))
@@ -780,7 +788,10 @@ fn open_attempt<'m>(
             if failed.0 == start
                 && matches!(
                     row.kind,
-                    RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+                    RunFactKind::XOutcome
+                        | RunFactKind::XCancel
+                        | RunFactKind::XFinal
+                        | RunFactKind::XFinalOutcome
                 ) =>
         {
             Ok(member)
@@ -790,7 +801,10 @@ fn open_attempt<'m>(
             if parked.0 == start
                 && matches!(
                     row.kind,
-                    RunFactKind::XOutcome | RunFactKind::XCancel | RunFactKind::XFinal
+                    RunFactKind::XOutcome
+                        | RunFactKind::XCancel
+                        | RunFactKind::XFinal
+                        | RunFactKind::XFinalOutcome
                 ) =>
         {
             Ok(member)

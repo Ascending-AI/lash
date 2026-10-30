@@ -196,7 +196,10 @@ lash_store_sql::statements! {
                 WHERE a.actor_key = ?1 AND m.seq > a.acked_seq)
              SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
-                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
+                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason))
+                     FROM (SELECT run, call_id, request_id, origin, reason
+                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q)
              FROM actors a
              LEFT JOIN page p ON p.total - p.bytes <= ?3
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
@@ -219,7 +222,10 @@ lash_store_sql::statements! {
                  WHERE r.session_id = ?2 AND r.admission_json IS NOT NULL
                    AND r.terminal_kind IS NULL)
              SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms, t.*
+                    m.seq, m.kind, m.body, m.appended_at_ms, t.*,
+                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason))
+                     FROM (SELECT run, call_id, request_id, origin, reason
+                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q)
              FROM actors a
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN t ON TRUE

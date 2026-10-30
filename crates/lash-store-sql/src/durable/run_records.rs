@@ -19,8 +19,8 @@ crate::statements! {
         /// Resolve an admitted call in a turn or any of its cells.
         call_decision = "SELECT kind FROM run_records WHERE call_id = ?3
              AND (owner_key = ?1 OR substr(owner_key, 1, length(CAST(?2 AS TEXT))) = ?2)
-             AND kind IN ('x_start', 'x_cancel', 'x_final', 'x_outcome')
-             ORDER BY CASE kind WHEN 'x_final' THEN 0 WHEN 'x_cancel' THEN 1
+             AND kind IN ('x_start', 'x_cancel', 'x_final', 'x_final_outcome', 'x_outcome')
+             ORDER BY CASE kind WHEN 'x_final' THEN 0 WHEN 'x_final_outcome' THEN 0 WHEN 'x_cancel' THEN 1
                  WHEN 'x_outcome' THEN 2 ELSE 3 END LIMIT 1";
 
         /// First request wins; receipt retries never replace provenance.
@@ -30,10 +30,6 @@ crate::statements! {
 
         call_cancel = "SELECT request_id, origin, reason FROM tool_call_cancel_requests
              WHERE session_id = ?1 AND run = ?2 AND call_id = ?3";
-
-        call_cancels = "SELECT run, call_id, request_id, origin, reason
-             FROM tool_call_cancel_requests WHERE session_id = ?1 ORDER BY run, call_id";
-
 
         /// Whether owner `?1`'s run `?2` has a fact at ordinal `?3`.
         ordinal_taken = "SELECT 1 FROM run_records
