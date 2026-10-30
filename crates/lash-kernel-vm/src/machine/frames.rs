@@ -64,7 +64,9 @@ pub(super) fn code_of(
         .ok_or_else(|| malformed("a frame has no compilation origin"))?
         .resolve(access)?;
     let code = match &site.unit {
-        Unit::Library(function) => exe.closure_at(function, &origin, &record.capture_names),
+        Unit::Library(function) => {
+            exe.closure_at(function, record.link, &origin, &record.capture_names)
+        }
         Unit::Main | Unit::Function(_) => exe.code_at(&origin, &record.capture_names),
     };
     code.filter(|code| {

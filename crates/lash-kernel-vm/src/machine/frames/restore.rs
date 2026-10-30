@@ -374,6 +374,105 @@ mod laws {
             original.created.is_some(),
             "a lexical frame retains its creation site"
         );
+        let statement = original.statement.resolve(&access).unwrap();
+        let Unit::Library(function) = statement.unit else {
+            panic!("the captured body is a lifted function")
+        };
+        let program = &machine.program;
+        let selection = lash_kernel_doc::Selection::Restored(lash_kernel_doc::RestoreSelection {
+            live: [lash_kernel_value::CallableId {
+                link: original.link,
+                function,
+            }]
+            .into(),
+            pins: program
+                .helpers()
+                .contains(&function)
+                .then_some(function)
+                .into_iter()
+                .collect(),
+        });
+        let admission = program
+            .library
+            .admit(
+                &program.document,
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
+                &selection,
+            )
+            .unwrap_or_else(|_| panic!("the retained child is admitted"));
+        let narrowed = admission
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &[function].into(),
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("the retained child is compiled"));
+        assert!(
+            frame(
+                &original,
+                Arrival::Requested,
+                &access,
+                &narrowed,
+                &mut Arena::new(),
+            )
+            .is_ok(),
+            "the live child keeps its exact lexical source after selection narrows"
+        );
+        let created = original.created.as_ref().unwrap().resolve(&access).unwrap();
+        let creator = Site::new(created.unit.clone(), Vec::new());
+        let Unit::Library(creator_function) = creator.unit else {
+            panic!("the lexical creator is an ordinary function")
+        };
+        assert!(
+            !narrowed.declared.contains_key(&creator_function)
+                && narrowed.code_at(&creator, &[]).is_none()
+                && narrowed
+                    .closure_at(&creator_function, original.link, &creator, &[])
+                    .is_none(),
+            "retaining the lexical source admitted its unselected creator"
+        );
+        let mut foreign = program.document.as_ref().clone();
+        foreign.main = None;
+        foreign.functions.remove(&creator_function);
+        foreign.exports.clear();
+        let foreign_id = foreign.identity();
+        let foreign_link = lash_kernel_value::Link {
+            document: foreign_id,
+            fills: Default::default(),
+            helper_fills: Default::default(),
+        }
+        .identity();
+        let mut documents = program.documents.clone();
+        documents.insert(foreign_id, Arc::new(foreign));
+        let mut instances = program.instances.clone();
+        let mut instance = instances[&original.link].clone();
+        instance.link = foreign_link;
+        instance.document = foreign_id;
+        instances.insert(foreign_link, instance);
+        let linked = admission
+            .executable(
+                &program.document,
+                &program.library,
+                &documents,
+                &[function].into(),
+                &instances,
+            )
+            .unwrap_or_else(|_| panic!("the retained body has two admitted Links"));
+        let mut forged = original.clone();
+        forged.link = foreign_link;
+        assert!(
+            frame(
+                &forged,
+                Arrival::Requested,
+                &access,
+                &linked,
+                &mut Arena::new(),
+            )
+            .is_err(),
+            "a lexical frame borrowed its creation site from another Link"
+        );
         for created in [
             None,
             Some(SiteRef::new(&Site::new(Unit::Main, vec![999]), &access).unwrap()),

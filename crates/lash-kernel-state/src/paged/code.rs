@@ -84,10 +84,14 @@ pub(super) fn scan_checkpoint(
                 scan.code.sites.insert((frame.link, site.as_ref().clone()));
                 if let Some(created) = &frame.created {
                     let created = created.resolve(heap.pages())?;
-                    scan.code.frames.insert((frame.link, created.unit.clone()));
-                    scan.code
-                        .sites
-                        .insert((frame.link, created.as_ref().clone()));
+                    // A standalone body origin is already named by the frame;
+                    // it is not another continuation through the whole body.
+                    if created.unit != site.unit || !created.path.is_empty() {
+                        scan.code.frames.insert((frame.link, created.unit.clone()));
+                        scan.code
+                            .sites
+                            .insert((frame.link, created.as_ref().clone()));
+                    }
                 }
                 if let Some(convention) = &frame.convention {
                     for target in convention.targets() {

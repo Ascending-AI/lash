@@ -375,7 +375,7 @@ pub(crate) fn closure_code(
     if !exe.admits_callable(callable) {
         return Err(malformed("a closure has no admitted defining origin"));
     }
-    exe.closure_at(&callable.function, site, captures)
+    exe.closure_at(&callable.function, callable.link, site, captures)
         .or_else(|| {
             // Saving freezes free Main bindings into the closure. A carry
             // can leave its body in the admitted library, outside the

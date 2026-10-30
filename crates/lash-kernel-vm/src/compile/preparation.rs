@@ -607,7 +607,57 @@ impl Admission {
             None
         };
         let library = loaded.as_ref().unwrap_or(library);
-        let mut own = compile_document(document, identity, &reached, library, &authored, imports)?;
+        let mut ancestors = BTreeMap::new();
+        if matches!(selection, doc::Selection::Restored(_)) {
+            let mut needed = functions.clone();
+            loop {
+                let before = ancestors.len();
+                for source in std::iter::once(document).chain(documents.values().map(Arc::as_ref)) {
+                    for (id, definition) in &source.functions {
+                        if reached.contains_key(id)
+                            || ancestors.contains_key(id)
+                            || !authored.contains(id)
+                        {
+                            continue;
+                        }
+                        let Some(body) = definition.body() else {
+                            continue;
+                        };
+                        let mut nodes = vec![doc::Node::Block(&body.block)];
+                        let mut creates = false;
+                        while let Some(node) = nodes.pop() {
+                            if let doc::Node::Expr(doc::Expr::Closure(closure)) = node
+                                && needed.contains(&closure.function)
+                            {
+                                creates = true;
+                                break;
+                            }
+                            node.children_into(&mut nodes);
+                        }
+                        if creates && definition.identity() == *id {
+                            ancestors.insert(*id, definition);
+                            needed.insert(*id);
+                        }
+                    }
+                }
+                if ancestors.len() == before {
+                    break;
+                }
+            }
+        }
+        let origins = (!ancestors.is_empty()).then_some(document_code::LexicalOrigins {
+            definitions: ancestors,
+            admitted: functions,
+        });
+        let mut own = compile_document(
+            document,
+            identity,
+            &reached,
+            library,
+            &authored,
+            imports,
+            origins.as_ref(),
+        )?;
         if matches!(selection, doc::Selection::Restored(_)) {
             // These are the original, already decoded ordinary definitions.
             // Census does not admit/register them or consult helper bodies.
@@ -790,6 +840,7 @@ mod tests {
             &library,
             &BTreeSet::new(),
             &BTreeMap::new(),
+            None,
         );
         assert!(
             code.is_ok(),
@@ -1199,6 +1250,7 @@ mod tests {
                 &library,
                 &BTreeSet::new(),
                 &BTreeMap::new(),
+                None,
             )
             .unwrap_or_else(|_| panic!("compiled document"));
             let pool = &code.tables.constant_pools[&Unit::Main];

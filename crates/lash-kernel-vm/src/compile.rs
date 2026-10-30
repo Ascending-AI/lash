@@ -768,13 +768,37 @@ impl Executable {
     pub(crate) fn closure_at(
         &self,
         function: &FunctionId,
+        link: lash_kernel_value::LinkId,
         site: &Site,
         captures: &[Name],
     ) -> Option<CodeId> {
-        self.tables_of(&site.unit)?
+        if !self.admits_callable(&lash_kernel_value::CallableId {
+            link,
+            function: *function,
+        }) {
+            return None;
+        }
+        let key = (*function, site.clone(), captures.to_vec());
+        let code = self
+            .own
+            .tables
             .closure_at
-            .get(&(*function, site.clone(), captures.to_vec()))
+            .get(&key)
             .copied()
+            .or_else(|| self.tables_of(&site.unit)?.closure_at.get(&key).copied())?;
+        if self.code(code).created.is_some() {
+            let origin = doc::snapshot::closure_at(
+                self.instances.get(&link)?,
+                site,
+                link,
+                self.helpers(),
+                self.selection(),
+            )?;
+            if origin.function != *function {
+                return None;
+            }
+        }
+        Some(code)
     }
 
     /// How many codes, library functions and statements the executable

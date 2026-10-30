@@ -5,6 +5,13 @@ enum UnitSource<'a> {
     Main,
     Function(&'a FunctionId),
     NativeStart(&'a FunctionId),
+    Origin(&'a FunctionId, &'a FunctionDefinition),
+}
+
+/// Source ancestors reconstruct lexical scopes without becoming callable.
+pub(super) struct LexicalOrigins<'a> {
+    pub(super) definitions: BTreeMap<FunctionId, &'a FunctionDefinition>,
+    pub(super) admitted: &'a BTreeSet<FunctionId>,
 }
 
 /// Compiles `document`'s own code over `library`, which holds every
@@ -19,6 +26,7 @@ pub(super) fn compile_document(
         (Unit, lash_kernel_value::ImportSlot),
         (lash_kernel_value::DocumentId, FunctionId),
     >,
+    origins: Option<&LexicalOrigins<'_>>,
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
     if !prepared.missing.is_empty() {
@@ -61,6 +69,14 @@ pub(super) fn compile_document(
             })
             .map(|(id, _)| UnitSource::NativeStart(id)),
     );
+    if let Some(origins) = origins {
+        units.extend(
+            origins
+                .definitions
+                .iter()
+                .map(|(id, definition)| UnitSource::Origin(id, definition)),
+        );
+    }
     shuffler.shuffle(layout, &mut units);
     let mut compiler = Compiler::new(
         layout,
@@ -100,6 +116,7 @@ pub(super) fn compile_document(
     let mut native_starts = BTreeMap::new();
     for (unit, code) in units.iter().zip(&codes) {
         match unit {
+            UnitSource::Origin(..) => {}
             UnitSource::Main => main = Some(*code),
             UnitSource::Function(name) => {
                 compiler.declared.insert(**name, *code);
@@ -148,10 +165,31 @@ pub(super) fn compile_document(
                     }
                 }
             }
+            UnitSource::Origin(name, definition) => {
+                let params: Vec<_> = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                if let Some(body) = definition.body() {
+                    compiler.unit_code(code, Unit::Library(**name), &params, &body.block, true);
+                }
+            }
         }
     }
     let declared = std::mem::take(&mut compiler.declared);
     let mut tables = compiler.finish();
+    if let Some(origins) = origins {
+        // Compiling an ancestor supplies scopes, never execution admission.
+        tables.code_at.retain(|(site, _), _| match &site.unit {
+            Unit::Library(function) => origins.admitted.contains(function),
+            Unit::Main | Unit::Function(_) => true,
+        });
+        tables
+            .closure_at
+            .retain(|(function, _, _), _| origins.admitted.contains(function));
+    }
     let lash_kernel_doc::Ordinals {
         sites: ordinals,
         actions: action_ordinals,
