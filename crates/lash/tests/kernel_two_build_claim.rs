@@ -588,7 +588,10 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
     let (backend, new) = idling(&stores, Build::NPlus1, "cell-new", &[]);
     let idle = in_state(&backend, &actor, ActorState::Idle).await;
     assert!(
-        idle.formats.as_str().contains("kernel-parked-state@2"),
+        idle.formats.as_str().contains(&format!(
+            "kernel-parked-state@{}",
+            lash_vm_runtime::KERNEL_PARKED_STATE_VERSION
+        )),
         "{:?}",
         idle.formats
     );

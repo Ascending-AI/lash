@@ -1,6 +1,7 @@
 //! Executable kernel laws for the built-ins' dialect adaptations (§2.4/§4).
 use super::machine::{self, Ended};
 use super::pages::Session;
+use lash_kernel_dialect::Library as _;
 use lash_kernel_doc::Datum;
 use lash_kernel_value::Name;
 
@@ -98,9 +99,8 @@ fn brand_one_package_constructors_use_canonical_brands_and_their_own_identities(
             Datum::Tuple(vec![Datum::Text(package.into()), Datum::Text(ty.into())]),
             "{constructor}"
         );
-        let own = registry
-            .named(stamping)
-            .next()
+        let own = super::library()
+            .resolve(stamping)
             .unwrap_or_else(|| panic!("{stamping} is registered"));
         assert_eq!(
             parts[1],

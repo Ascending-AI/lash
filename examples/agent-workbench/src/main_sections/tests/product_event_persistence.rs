@@ -3,10 +3,16 @@ use lash_kernel_value::identity::SessionId;
 
 #[test]
 fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
+    let expected = PRODUCT_EVENT_LOG_FORMAT_VERSION;
+    let found = expected + 1;
     let data_dir = tempfile::tempdir().expect("future product event tempdir");
     let path = data_dir.path().join("product-events.json");
-    std::fs::write(&path, r#"{"format_version":3,"histories":{}}"#)
-        .expect("write future product event log");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({"format_version": found, "histories": {}}))
+            .expect("encode future product event log"),
+    )
+    .expect("write future product event log");
 
     let error = match SessionEventRegistry::persistent(path, 4) {
         Ok(_) => panic!("a future product event format must be rejected"),
@@ -18,13 +24,19 @@ fn product_event_log_rejects_future_format_with_expected_and_found_versions() {
     assert!(matches!(
         typed.source,
         ProductEventLogDecodeError::FormatVersionMismatch {
-            expected: 2,
-            found: 3
-        }
+            expected: actual_expected,
+            found: actual_found,
+        } if actual_expected == expected && actual_found == found
     ));
     let rendered = error.to_string();
-    assert!(rendered.contains("expected 2"), "actual error: {rendered}");
-    assert!(rendered.contains("found 3"), "actual error: {rendered}");
+    assert!(
+        rendered.contains(&format!("expected {expected}")),
+        "actual error: {rendered}"
+    );
+    assert!(
+        rendered.contains(&format!("found {found}")),
+        "actual error: {rendered}"
+    );
 }
 
 #[test]
@@ -33,8 +45,8 @@ fn product_event_log_decode_error_names_histories_and_the_nested_cause() {
     let path = data_dir.path().join("product-events.json");
     std::fs::write(
         &path,
-        r#"{
-            "format_version": 2,
+        serde_json::to_vec(&serde_json::json!({
+            "format_version": PRODUCT_EVENT_LOG_FORMAT_VERSION,
             "histories": {
                 "session": {
                     "cursor": 1,
@@ -46,7 +58,8 @@ fn product_event_log_decode_error_names_histories_and_the_nested_cause() {
                     }]
                 }
             }
-        }"#,
+        }))
+        .expect("encode malformed product event log"),
     )
     .expect("write malformed product event log");
 

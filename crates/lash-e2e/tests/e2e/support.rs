@@ -193,7 +193,7 @@ fn settled_reads_the_host_native_turn_outcome() {
     ];
     for (turn_outcome, kind, reply) in cases {
         // This is the same serialization used by both host attach routes.
-        let envelope = json!({"type": "settled", "output": {"result": {"outcome": turn_outcome}}});
+        let envelope = json!({"type": "settled", "output": {"outcome": turn_outcome}});
         assert_eq!(
             settled(&envelope),
             (kind.to_owned(), reply.map(ToOwned::to_owned)),

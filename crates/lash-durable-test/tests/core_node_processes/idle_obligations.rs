@@ -532,7 +532,7 @@ async fn component_state_converts_at_a_cut_on_sqlite_memory() {
             if facts
                 .rows
                 .iter()
-                .any(|row| row.kind == lash_core::durable_port::domain::RunFactKind::XOutcome)
+                .any(|row| row.kind == lash_core::durable_port::domain::RunFactKind::XFinalOutcome)
             {
                 break;
             }
