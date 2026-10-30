@@ -134,13 +134,16 @@ impl Holding {
     pub fn with_edges(
         bytes: u64,
         edges: impl IntoIterator<Item = Identity>,
-        access: &Access<'_>,
+        _access: &Access<'_>,
     ) -> Result<Self, HeapFault> {
-        let mut holding = Self::scalar(bytes);
+        let mut batch = links::EdgeBatch::default();
         for target in edges {
-            holding.add_edge(target, 1, access)?;
+            batch.push(target, 1)?;
         }
-        Ok(holding)
+        Ok(Self {
+            bytes,
+            links: batch.finish()?,
+        })
     }
     fn add_edge(
         &mut self,

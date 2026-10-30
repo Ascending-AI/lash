@@ -684,6 +684,117 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             0
         );
     }
+
+    // Distinct object and task identities preserve multiplicity through a
+    // speculative member edit, a retained snapshot and a cold restore.
+    for restore in [false, true] {
+        use lash_kernel_doc::Value;
+        let (heap, pages) = fresh();
+        let mut access = heap.pages().clone();
+        let mut arena = crate::arena::Arena::new();
+        let mut ledger = Ledger::fresh();
+        let first = arena.create_list(&[Value::Int(7)]);
+        let second = arena.create_list(&[Value::Int(0)]);
+        let nested = arena.tuple(vec![first, second], 256).unwrap();
+        let parent = arena.create_list(&[nested, first, Value::Task(TaskId(7))]);
+        let parent_id = arena.identify(parent.handle().unwrap()).unwrap();
+        let first_id = arena.identify(first.handle().unwrap()).unwrap();
+        let second_id = arena.identify(second.handle().unwrap()).unwrap();
+        let prepared = ledger
+            .prepare_ownership(
+                &mut arena,
+                &access,
+                &[],
+                &[
+                    (owner(0), RootValue::Value(&parent)),
+                    (owner(1), RootValue::Value(&second)),
+                ],
+            )
+            .unwrap();
+        // Parent: 32 + tuple(16 + 16 + 16) + alias 16 + task 16.
+        // Child bodies: 49 and 48; two root occurrences: 32.
+        assert_eq!(prepared.peak(), 241);
+        ledger
+            .commit(
+                prepared
+                    .admit(241)
+                    .unwrap_or_else(|_| panic!("exact mixed body fits")),
+            )
+            .unwrap();
+        let snapshot = ledger.entity_holding(parent_id, &access).unwrap().unwrap();
+        if restore {
+            let root = ledger.seal(&access, budget()).unwrap().unwrap();
+            ledger = Ledger::open(root).unwrap();
+            access = Access::new(Box::new(Source(pages)));
+        }
+        let prepared = ledger
+            .prepare_member_publication(
+                arena.registration().unwrap(),
+                &access,
+                parent.handle().unwrap(),
+                Member::List(0),
+                Some(Value::Int(0)),
+                &[],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(prepared.balance().unwrap().total().unwrap(), 209);
+        assert_eq!(
+            ledger.release_cost(&[owner(0)], &access).unwrap(),
+            177,
+            "speculation preserves every old edge and the retained child control"
+        );
+        prepared
+            .admit(241)
+            .unwrap_or_else(|_| panic!("member shrink fits"))
+            .publish(&mut ledger, |arena, edit| {
+                for edit in edit {
+                    let Member::List(index) = edit.member else {
+                        panic!("list member")
+                    };
+                    arena
+                        .list_set(edit.handle, index, edit.next.unwrap())
+                        .unwrap();
+                }
+            })
+            .unwrap();
+        let mut edges = Vec::new();
+        snapshot
+            .visit_edges(&access, &mut |target, count| {
+                edges.push((target, count));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            edges,
+            [
+                (Identity::Object(first_id), 2),
+                (Identity::Object(second_id), 1),
+                (Identity::Task(TaskId(7)), 1),
+            ],
+            "a retained version keeps the original identity multiplicities"
+        );
+        let root = ledger.seal(&access, budget()).unwrap().unwrap();
+        let mut cold = Ledger::open(root).unwrap();
+        admit(
+            &mut cold,
+            vec![Change::Roots(vec![(owner(0), None)])],
+            209,
+            &access,
+        );
+        assert_eq!(
+            cold.balance().unwrap().total().unwrap(),
+            64,
+            "the parent's last owner reclaims its first child while the second stays rooted"
+        );
+        admit(
+            &mut cold,
+            vec![Change::Roots(vec![(owner(1), None)])],
+            64,
+            &access,
+        );
+        assert_eq!(cold.balance().unwrap(), Balance::default());
+    }
 }
 
 /// K-BND-003 / K-MACH-008: source-retained cycles and unreferenced ended

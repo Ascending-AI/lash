@@ -191,6 +191,14 @@ pub(super) struct Index<T: Cell> {
 }
 
 impl<T: Cell> Index<T> {
+    pub(super) fn from_rows(
+        rows: Vec<(crate::paged::tree::Key, T)>,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        let mut index = Self::of_tree(Tree::nested_from_rows(rows, false, access)?, false);
+        index.ready(access)?;
+        Ok(index)
+    }
     pub(super) fn single(key: &[u8], value: T, access: &Access<'_>) -> Result<Self, HeapFault> {
         let base = Tree::nested_from_rows(vec![(key.to_vec(), value)], false, access)?;
         let mut index = Self::of_tree(base, false);

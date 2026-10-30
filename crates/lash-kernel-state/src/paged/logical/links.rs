@@ -1,6 +1,6 @@
 //! Empty and single-identity occurrences need no index allocation. Sealing
 //! uses the existing canonical nested tree, including its grant handling.
-use super::{Edge, Tree, identity_key};
+use super::{Edge, Tree, identity_key, invalid};
 use crate::paged::tree::{Access, SealWork, Tree as PagedTree};
 use lash_kernel_doc::heap::{HeapFault, Identity, PageRef};
 use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
@@ -13,13 +13,93 @@ pub(super) enum Links {
         edge: Edge,
         sealed: Option<Rc<Tree<Edge>>>,
     },
+    Packed {
+        edges: Rc<[Edge]>,
+        tasks: u64,
+    },
     Many(Rc<Tree<Edge>>),
 }
+
+#[derive(Default)]
+pub(super) struct EdgeBatch {
+    first: Option<Edge>,
+    rest: Vec<Edge>,
+}
+impl EdgeBatch {
+    pub fn push(&mut self, target: Identity, count: u64) -> Result<(), HeapFault> {
+        match &mut self.first {
+            None => self.first = Some(Edge { target, count }),
+            Some(first) if first.target == target => {
+                first.count = first
+                    .count
+                    .checked_add(count)
+                    .ok_or_else(|| invalid("edge count overflow"))?;
+            }
+            Some(_) => self.rest.push(Edge { target, count }),
+        }
+        Ok(())
+    }
+    pub fn finish(mut self) -> Result<Links, HeapFault> {
+        let Some(first) = self.first else {
+            return Ok(Links::Empty);
+        };
+        if self.rest.is_empty() {
+            return Ok(Links::One {
+                edge: first,
+                sealed: None,
+            });
+        }
+        self.rest.push(first);
+        // Identity ordering matches its canonical tagged, big-endian key.
+        self.rest.sort_unstable_by_key(|edge| edge.target);
+        let mut last = 0;
+        for next in 1..self.rest.len() {
+            if self.rest[last].target == self.rest[next].target {
+                self.rest[last].count = self.rest[last]
+                    .count
+                    .checked_add(self.rest[next].count)
+                    .ok_or_else(|| invalid("edge count overflow"))?;
+            } else {
+                last += 1;
+                self.rest[last] = self.rest[next].clone();
+            }
+        }
+        self.rest.truncate(last + 1);
+        let tasks = self.rest.iter().try_fold(0_u64, |sum, edge| {
+            sum.checked_add(if matches!(edge.target, Identity::Task(_)) {
+                edge.count
+            } else {
+                0
+            })
+            .ok_or_else(|| invalid("source index aggregate overflow"))
+        })?;
+        Ok(Links::Packed {
+            edges: Rc::from(self.rest),
+            tasks,
+        })
+    }
+}
 impl Links {
+    fn unpack(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
+        if let Self::Packed { edges, .. } = self {
+            let rows = edges
+                .iter()
+                .map(|edge| {
+                    (
+                        crate::paged::tree::Key::from(identity_key(edge.target).as_slice()),
+                        edge.clone(),
+                    )
+                })
+                .collect();
+            *self = Self::Many(Rc::new(Tree::from_rows(rows, access)?));
+        }
+        Ok(())
+    }
     pub fn len(&self) -> u64 {
         match self {
             Self::Empty => 0,
             Self::One { .. } => 1,
+            Self::Packed { edges, .. } => edges.len() as u64,
             Self::Many(index) => index.len(),
         }
     }
@@ -37,6 +117,7 @@ impl Links {
                 }
             }
             Self::Many(index) => index.task_edges(),
+            Self::Packed { tasks, .. } => *tasks,
         }
     }
     pub fn get(&self, key: &[u8], access: &Access<'_>) -> Result<Option<Edge>, HeapFault> {
@@ -46,6 +127,10 @@ impl Links {
                 Ok((identity_key(edge.target).as_slice() == key).then(|| edge.clone()))
             }
             Self::Many(index) => index.get(key, access),
+            Self::Packed { edges, .. } => Ok(edges
+                .binary_search_by(|edge| identity_key(edge.target).as_slice().cmp(key))
+                .ok()
+                .map(|at| edges[at].clone())),
         }
     }
     pub fn write(
@@ -67,6 +152,10 @@ impl Links {
                 *self = Self::Many(Rc::new(index));
             }
             Self::Many(index) => Rc::make_mut(index).write(key, edge, access)?,
+            Self::Packed { .. } => {
+                self.unpack(access)?;
+                self.write(key, edge, access)?;
+            }
         }
         Ok(())
     }
@@ -93,6 +182,10 @@ impl Links {
             Self::Many(index) => {
                 Rc::make_mut(index).remove(key, access)?;
             }
+            Self::Packed { .. } => {
+                self.unpack(access)?;
+                self.remove(key, access)?;
+            }
         }
         Ok(())
     }
@@ -105,6 +198,7 @@ impl Links {
             Self::Empty => Ok(()),
             Self::One { edge, .. } => visit(edge),
             Self::Many(index) => super::visit_tree(index.as_ref(), access, visit),
+            Self::Packed { edges, .. } => edges.iter().try_for_each(visit),
         }
     }
     pub fn same_version(&self, other: &Self) -> bool {
@@ -114,6 +208,7 @@ impl Links {
                 a.target == b.target && a.count == b.count
             }
             (Self::Many(a), Self::Many(b)) => a.same_version(b),
+            (Self::Packed { edges: a, .. }, Self::Packed { edges: b, .. }) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -135,11 +230,15 @@ impl Links {
                 Ok(true)
             }
             Self::Many(index) => Rc::make_mut(index).seal_nested(access, work),
+            Self::Packed { .. } => {
+                self.unpack(access)?;
+                self.seal_nested(access, work)
+            }
         }
     }
     pub fn children(&self, out: &mut Vec<PageRef>) {
         match self {
-            Self::Empty => (),
+            Self::Empty | Self::Packed { .. } => (),
             Self::One {
                 sealed: Some(index),
                 ..
@@ -150,7 +249,7 @@ impl Links {
     }
     pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         match self {
-            Self::Empty | Self::One { sealed: None, .. } => Ok(()),
+            Self::Empty | Self::Packed { .. } | Self::One { sealed: None, .. } => Ok(()),
             Self::One {
                 sealed: Some(index),
                 ..
@@ -170,6 +269,9 @@ impl TokenCodec for Links {
             | Self::Many(index) => index.encode(out),
             Self::One { sealed: None, .. } => {
                 PagedTree::<Edge>::new(false).encode_pending(1, 0, self.task_edges(), 0, out)
+            }
+            Self::Packed { edges, tasks } => {
+                PagedTree::<Edge>::new(false).encode_pending(edges.len() as u64, 0, *tasks, 0, out)
             }
         }
     }

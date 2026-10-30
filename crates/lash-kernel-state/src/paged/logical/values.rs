@@ -92,43 +92,11 @@ impl Holding {
             Value::Tuple(_) | Value::Error(_) => (),
             _ => return Ok(holding),
         }
-        let mut pending = vec![*value];
-        while let Some(value) = pending.pop() {
-            match value {
-                Value::List(handle)
-                | Value::Map(handle)
-                | Value::Set(handle)
-                | Value::Record(handle)
-                | Value::Closure(handle)
-                | Value::ObjectRef(handle) => {
-                    let entity = arena.identify(handle).map_err(arena_fault)?;
-                    holding.add_edge(Identity::Object(entity), 1, access)?;
-                }
-                Value::Task(task) | Value::TaskRef(task) => {
-                    holding.add_edge(Identity::Task(task), 1, access)?;
-                }
-                Value::Tuple(handle) | Value::Error(handle) => {
-                    if !arena.summary_of(&value).has_edges {
-                        continue;
-                    }
-                    let facts = arena.facts(handle).map_err(arena_fault)?;
-                    if let Some(cached) = facts.logical_holding.get() {
-                        cached.each_edge(access, &mut |edge| {
-                            holding.add_edge(edge.target, edge.count, access)
-                        })?;
-                    } else if let Some(page) = facts.page.get() {
-                        stream_value_edges(access, page, &mut |target| {
-                            holding.add_edge(target, 1, access)
-                        })?;
-                    } else {
-                        each_member(arena.body(handle).map_err(arena_fault)?, &mut |value| {
-                            pending.push(*value)
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
+        let mut batch = links::EdgeBatch::default();
+        stream_native_edges(arena, access, value, &mut |target, count| {
+            batch.push(target, count)
+        })?;
+        holding.links = batch.finish()?;
         if let Some(handle) = cache
             && !arena.registration_active()
         {
@@ -169,18 +137,83 @@ impl Holding {
         let mut holding = Self::scalar(arena.logical_body_bytes(handle)?);
         let mut members = Vec::new();
         each_member(arena.body(handle).map_err(arena_fault)?, &mut |value| {
-            members.push(*value)
+            if arena.summary_of(value).has_edges {
+                members.push(*value);
+            }
         });
         if let Body::Closure { captures, .. } = arena.body(handle).map_err(arena_fault)? {
             members.extend(captures.iter().map(|cell| Value::ObjectRef(*cell)));
         }
+        let mut batch = links::EdgeBatch::default();
         for member in members {
-            Self::from_native(arena, access, &member)?.each_edge(access, &mut |edge| {
-                holding.add_edge(edge.target, edge.count, access)
+            stream_native_edges(arena, access, &member, &mut |target, count| {
+                batch.push(target, count)
             })?;
         }
+        holding.links = batch.finish()?;
         Ok(holding)
     }
+}
+
+// Price the occurrence separately; edge acquisition never reprices members.
+fn stream_native_edges(
+    arena: &mut Arena,
+    access: &Access<'_>,
+    value: &Value,
+    visit: &mut dyn FnMut(Identity, u64) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    match value {
+        Value::List(handle)
+        | Value::Map(handle)
+        | Value::Set(handle)
+        | Value::Record(handle)
+        | Value::Closure(handle)
+        | Value::ObjectRef(handle) => {
+            let entity = arena.identify(*handle).map_err(arena_fault)?;
+            visit(Identity::Object(entity), 1)?;
+            return Ok(());
+        }
+        Value::Task(task) | Value::TaskRef(task) => {
+            visit(Identity::Task(*task), 1)?;
+            return Ok(());
+        }
+        Value::Tuple(_) | Value::Error(_) => (),
+        _ => return Ok(()),
+    }
+    let mut pending = vec![*value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::List(handle)
+            | Value::Map(handle)
+            | Value::Set(handle)
+            | Value::Record(handle)
+            | Value::Closure(handle)
+            | Value::ObjectRef(handle) => {
+                let entity = arena.identify(handle).map_err(arena_fault)?;
+                visit(Identity::Object(entity), 1)?;
+            }
+            Value::Task(task) | Value::TaskRef(task) => {
+                visit(Identity::Task(task), 1)?;
+            }
+            Value::Tuple(handle) | Value::Error(handle) => {
+                if !arena.summary_of(&value).has_edges {
+                    continue;
+                }
+                let facts = arena.facts(handle).map_err(arena_fault)?;
+                if let Some(cached) = facts.logical_holding.get() {
+                    cached.each_edge(access, &mut |edge| visit(edge.target, edge.count))?;
+                } else if let Some(page) = facts.page.get() {
+                    stream_value_edges(access, page, &mut |target| visit(target, 1))?;
+                } else {
+                    each_member(arena.body(handle).map_err(arena_fault)?, &mut |value| {
+                        pending.push(*value)
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// The shared immutable edge reader. Physical census and logical holding
