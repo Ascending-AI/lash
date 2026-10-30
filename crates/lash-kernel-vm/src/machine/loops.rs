@@ -456,6 +456,8 @@ impl KernelMachine {
         } else if self.paced {
             self.charged += cost;
         }
+        self.logical_flush_controls(task, exe)?;
+        self.logical_flush()?;
         self.warm_cursor(task)?;
         // Borrowed by field, so that the loop's position can be read
         // against the arena.

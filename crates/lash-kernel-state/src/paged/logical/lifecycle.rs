@@ -141,10 +141,12 @@ impl Lifecycle {
         )?;
         // Snapshot pages and retained code mirror the saved source environment.
         // The environment owns its occurrences and identity graph exactly once.
+        let mut environments = Vec::new();
         visit_tree(
             &Tree::<FunctionRecord>::of_keyed(&functions),
             access,
             &mut |record| {
+                environments.push(record.environment);
                 roots.push((
                     Owner::saved(&record.name.resolve(access)?),
                     PageValue::Closure(record.environment),
@@ -170,16 +172,13 @@ impl Lifecycle {
         if ledger.holding(result, access)?.is_some() {
             outputs.push((result, RootValue::Existing(result)));
         }
-        let mut registration = arena
-            .registration()
-            .map_err(|error| invalid(&error.to_string()))?;
         let prepared = ledger
-            .prepare_source_ownership(registration.arena(), heap, &inputs, &outputs)?
+            .prepare_saved_ownership(heap, &inputs, &outputs, &environments)?
             .normalize(access, crate::paged::census_impl::TraceLimits::default())?;
         let accepted = prepared
             .admit(u64::MAX)
             .map_err(|_| invalid("carry root cost overflow"))?;
-        ledger.publish(accepted, || registration.commit())
+        ledger.publish(accepted, || ())
     }
     pub fn handoff(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
         self.flush(arena, heap)?;

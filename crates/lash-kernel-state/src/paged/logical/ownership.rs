@@ -1,6 +1,7 @@
 //! Source root publication from values or existing authenticated holdings.
 use super::*;
 use crate::arena::Arena;
+use crate::paged::heap_impl::PagedHeap;
 use lash_kernel_doc::{Value, arena::ArenaHandle};
 use std::collections::{BTreeSet, HashMap};
 
@@ -27,6 +28,35 @@ impl Ledger {
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<Prepared, HeapFault> {
         self.prepare_source_event(arena, heap, inputs, outputs, &[])
+    }
+    pub(super) fn prepare_saved_ownership(
+        &self,
+        heap: &PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+        environments: &[EntityId],
+    ) -> Result<Prepared, HeapFault> {
+        let access = heap.pages();
+        let mut arena = Arena::new();
+        let mut pending = Vec::new();
+        let roots = self.ownership_changes(&mut arena, access, inputs, outputs, &mut pending)?;
+        let mut mutations = Vec::new();
+        for entity in environments.iter().copied().collect::<BTreeSet<_>>() {
+            if self.entity_holding(entity, access)?.is_some() {
+                let body = Holding::heap_body(heap, entity)?;
+                body.each_edge(access, &mut |edge| {
+                    if let Identity::Object(child) = edge.target {
+                        pending.push(child);
+                    }
+                    Ok(())
+                })?;
+                mutations.push(Change::Mutate { entity, body });
+            }
+        }
+        let mut changes = self.allocate_membership_from(&mut arena, access, pending, Some(heap))?;
+        changes.extend(mutations);
+        changes.push(Change::Roots(roots));
+        self.prepare_event(changes, access)
     }
     pub(super) fn prepare_source_event(
         &self,

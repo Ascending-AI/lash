@@ -13,9 +13,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::heap::PageValue;
+use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, SourceValue};
 use lash_kernel_state::kernel_internals::metadata::metadata_key;
 use lash_kernel_state::kernel_internals::tree::Tree;
 use lash_kernel_state::paged::{
@@ -45,6 +47,7 @@ pub enum SessionValue {
 /// A carried session opened for its host.
 pub struct SessionEditor {
     heap: PagedHeap,
+    logical: Lifecycle,
     bindings: Tree<BindingRecord>,
     functions: KeyedRoot,
     changed: bool,
@@ -80,8 +83,10 @@ impl SessionEditor {
             ),
             None => (Tree::new(false), KeyedRoot::Empty),
         };
+        let logical = Lifecycle::new(heap.logical_ledger());
         Ok(Self {
             heap,
+            logical,
             bindings,
             functions,
             changed: false,
@@ -300,10 +305,12 @@ impl SessionEditor {
                 ),
                 self.heap.pages(),
             )?,
-            value: BoundRecord::Value(value),
+            value: BoundRecord::Value(value.clone()),
         };
         self.bindings
             .write(metadata_key(name), record, self.heap.pages())?;
+        self.logical
+            .replace(Owner::session(name), Some(SourceValue::Page(value)));
         self.changed = true;
         Ok(())
     }
@@ -318,6 +325,9 @@ impl SessionEditor {
             .bindings
             .remove(&metadata_key(name), self.heap.pages())?
             .is_some();
+        if removed {
+            self.logical.replace(Owner::session(name), None);
+        }
         self.changed |= removed;
         Ok(removed)
     }
@@ -433,6 +443,7 @@ impl SessionEditor {
             return Ok(false);
         }
         self.functions = sealed(functions, &mut self.heap)?;
+        self.logical.replace(Owner::saved(name), None);
         self.remove(name)?;
         self.changed = true;
         Ok(true)
@@ -458,6 +469,7 @@ impl SessionEditor {
         );
         self.bindings.seal(self.heap.pages(), &mut work)?;
         let bindings = self.bindings.keyed_root()?;
+        self.logical.flush(&mut Arena::new(), &self.heap)?;
         self.heap.carry(CarryRoots {
             bindings,
             functions: self.functions,

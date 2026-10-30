@@ -1191,7 +1191,6 @@ impl KernelMachine {
     }
 
     fn finish_with(&mut self, end: End) -> Step {
-        self.release_garbage();
         self.ended = true;
         Step::Ended(end)
     }
