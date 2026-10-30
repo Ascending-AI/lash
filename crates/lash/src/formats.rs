@@ -125,7 +125,7 @@ pub use lash_vm_runtime::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "HostStoredShapes"
-pub const HOST_STORED_SCHEMA_VERSION: u32 = 13;
+pub const HOST_STORED_SCHEMA_VERSION: u32 = 14;
 
 /// One durable format whose version decides whether stored bytes open under
 /// this build.
