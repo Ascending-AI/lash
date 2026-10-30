@@ -128,13 +128,20 @@ impl KernelMachine {
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
         self.logical_flush()?;
-        let roots = self.frame(task)?.logical.as_ref().map(FrameRoots::bank);
+        let roots = if let Some(roots) = &self.frame(task)?.logical {
+            roots.clear_operands()?;
+            Some(roots.bank())
+        } else {
+            None
+        };
         self.regs.source_context(roots);
         let projection = Projection {
             arena: &self.arena,
             heap: &self.heap,
         };
-        Ok(self.regs.source_begin(stream, stmt, pc, &projection)?)
+        self.regs.source_begin(stream, stmt, pc, &projection)?;
+        self.logical_flush()?;
+        Ok(())
     }
     pub(super) fn source_complete(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
         let projection = Projection {

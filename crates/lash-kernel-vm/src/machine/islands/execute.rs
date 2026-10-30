@@ -773,6 +773,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         leaves: u32,
         empty: Option<crate::compile::BlockId>,
     ) -> Result<Next, Stop> {
+        self.source_clear_operands(frame)
+            .and_then(|()| self.source_bindings(frame))
+            .and_then(|()| self.logical.flush(self.arena, self.heap))
+            .map_err(|error| self.halt(error.into()))?;
         if let Some(block) = empty
             && OBSERVING
             && let Some(watching) = &self.projection()

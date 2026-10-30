@@ -176,6 +176,9 @@ impl Carry<'_, '_> {
         if frame.link != self.predecessor {
             return Ok(());
         }
+        if let Some(origin) = &frame.created {
+            self.check_reference(origin, "frame compilation origin")?;
+        }
         let old = frame.statement.resolve(&self.access)?;
         if matches!(&old.unit, lash_kernel_value::sites::Unit::Library(function) if self.helpers.contains(function))
         {
@@ -229,6 +232,11 @@ impl Carry<'_, '_> {
         if frame.link != self.predecessor {
             return Ok(());
         }
+        frame.created = frame
+            .created
+            .as_ref()
+            .map(|origin| self.reference(origin, "frame compilation origin"))
+            .transpose()?;
         let old = frame.statement.resolve(&self.access)?;
         if matches!(&old.unit, lash_kernel_value::sites::Unit::Library(function) if self.helpers.contains(function))
         {

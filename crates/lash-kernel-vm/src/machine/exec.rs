@@ -674,6 +674,7 @@ impl KernelMachine {
 
     /// Drop all guest holdings before retaining the activation's storage.
     pub(super) fn recycle(&mut self, mut frame: Box<Frame>) {
+        frame.source_frontier = None;
         frame.invocation = 0;
         frame.logical = None;
         frame.control.reset();

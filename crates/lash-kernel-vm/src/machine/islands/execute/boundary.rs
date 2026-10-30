@@ -237,6 +237,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         for (reg, value) in &self.scratch.exit.regs {
             values.put(*reg as usize, *value);
         }
+        let Some(activation) = active.state.source.take() else {
+            self.halt(fault("scheduler handoff lost its source activation"));
+            return None;
+        };
+        if activation.invocation.id() != state.invocation {
+            self.halt(fault("scheduler handoff changed its source invocation"));
+            return None;
+        }
+        state.source_frontier = activation.frontier;
+        state.cleaning = activation.cleaning;
         self.scratch.exit = Exit::default();
         self.recycle(active);
         Some(RunsOn::Scheduling(stmt, pc, Vec::new()))
