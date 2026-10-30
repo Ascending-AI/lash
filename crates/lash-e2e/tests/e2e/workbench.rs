@@ -203,7 +203,7 @@ case!(
     s01
 );
 
-/// One echo call on a Standard workbench. Its admission, start, outcome
+/// One state-publishing echo call on a Standard workbench. Its admission, start, outcome
 /// and presentation are rows of the run that owns it, decoded by the
 /// controller from the store; the reply is the provider's one answer. On
 /// the resume leg the node dies once the echo's outcome is committed and

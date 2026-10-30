@@ -109,6 +109,7 @@ impl CommitLedger {
         epoch: Option<Epoch>,
         error: Option<&DurableError>,
         turn_admissions: &[lash::TurnId],
+        retired_turn_facts: &[serde_json::Value],
     ) {
         self.append(serde_json::json!({
             "node": self.node,
@@ -117,6 +118,7 @@ impl CommitLedger {
             "epoch": epoch.map(|epoch| epoch.0),
             "applied": error.is_none(),
             "turn_admissions": turn_admissions,
+            "retired_turn_facts": if error.is_none() { retired_turn_facts } else { &[] },
             "error": error.map(|error| format!("{error:?}")),
         }));
     }
@@ -479,6 +481,42 @@ impl DurableReads for LedgerStore {
     }
 }
 
+impl LedgerStore {
+    // Terminal commits retire the turn's recovery ledger. Read actual durable
+    // rows before that fenced deletion; record them only if the commit applies.
+    async fn terminal_snapshots(
+        &self,
+        tx: &ActorTx,
+    ) -> Result<Vec<serde_json::Value>, DurableError> {
+        let mut snapshots = Vec::new();
+        for write in tx.domain() {
+            if let DomainWrite::Turn(TurnWrite::Terminal { session, run, .. }) = write {
+                let facts = self
+                    .inner
+                    .run_facts(&OwnerKey::Turn(session.clone(), run.clone()))
+                    .await?;
+                let records: Vec<_> = facts
+                    .rows
+                    .into_iter()
+                    .map(|row| {
+                        serde_json::json!({
+                            "run": row.run.0,
+                            "ordinal": row.ordinal.0,
+                            "kind": row.kind.as_str(),
+                            "call": row.call.map(|call| call.to_string()),
+                            "epoch": row.written_epoch.0,
+                            "record": row.record.to_hex(),
+                        })
+                    })
+                    .collect();
+                snapshots
+                    .push(serde_json::json!({"session": session, "run": run, "records": records}));
+            }
+        }
+        Ok(snapshots)
+    }
+}
+
 #[lash::async_trait]
 impl DurableStore for LedgerStore {
     fn environments(&self) -> std::sync::Arc<dyn lash::durable::environment::EnvironmentStore> {
@@ -501,6 +539,7 @@ impl DurableStore for LedgerStore {
             None,
             answer.as_ref().err(),
             &[],
+            &[],
         );
         answer
     }
@@ -522,6 +561,7 @@ impl DurableStore for LedgerStore {
             None,
             None,
             answer.as_ref().err(),
+            &[],
             &[],
         );
         answer
@@ -552,6 +592,7 @@ impl DurableStore for LedgerStore {
                     Some(claimed.epoch),
                     None,
                     &[],
+                    &[],
                 );
             }
         }
@@ -565,6 +606,7 @@ impl DurableStore for LedgerStore {
             None,
             None,
             answer.as_ref().err(),
+            &[],
             &[],
         );
         answer
@@ -625,6 +667,7 @@ impl DurableStore for LedgerStore {
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
         let epoch = tx.epoch();
+        let retired_turn_facts = self.terminal_snapshots(&tx).await?;
         let turn_admissions: Vec<_> = tx
             .domain()
             .iter()
@@ -652,6 +695,7 @@ impl DurableStore for LedgerStore {
                     Some(epoch),
                     answer.as_ref().err(),
                     &turn_admissions,
+                    &retired_turn_facts,
                 );
                 answer
             })
@@ -665,6 +709,7 @@ impl DurableStore for LedgerStore {
             Some(epoch),
             answer.as_ref().err(),
             &turn_admissions,
+            &retired_turn_facts,
         );
         if let Some(index) = cut.filter(|index| !self.ledger.cuts[*index].before) {
             self.ledger.hold(index, &actor).await;
@@ -679,7 +724,7 @@ impl DurableStore for LedgerStore {
     ) -> Result<MailCommit, DurableError> {
         let answer = self.inner.commit_mail(tx, label).await;
         self.ledger
-            .record(label, None, None, answer.as_ref().err(), &[]);
+            .record(label, None, None, answer.as_ref().err(), &[], &[]);
         answer
     }
 

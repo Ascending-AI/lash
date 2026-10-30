@@ -131,7 +131,7 @@ fn response(
             if config.scenario == "S05" {
                 vec![LlmOutputPart::ToolCall {
                     call_id: "h2-batch".to_owned(), tool_name: "batch".to_owned(),
-                    input_json: serde_json::json!({"tool_calls":labels.iter().map(|label| serde_json::json!({"tool":label,"parameters":{}})).collect::<Vec<_>>()} ).to_string(),
+                    input_json: serde_json::json!({"tool_calls":labels.iter().map(|label| serde_json::json!({"tool":format!("h2__{label}"),"parameters":{}})).collect::<Vec<_>>()} ).to_string(),
                     replay: None,
                 }]
             } else {
@@ -139,7 +139,7 @@ fn response(
                     .iter()
                     .map(|label| LlmOutputPart::ToolCall {
                         call_id: format!("h2-{label}"),
-                        tool_name: label.clone(),
+                        tool_name: format!("h2__{label}"),
                         input_json: "{}".to_owned(),
                         replay: None,
                     })
@@ -194,9 +194,9 @@ fn response(
                 ensure!(
                     results["h2-batch"]
                         == serde_json::json!({"results":[
-                            {"index":0,"tool":"a","success":true,"result":"A"},
-                            {"index":1,"tool":"b","success":true,"result":"B"},
-                            {"index":2,"tool":"c","success":true,"result":"C"}
+                            {"index":0,"tool":"h2__a","success":true,"result":"A"},
+                            {"index":1,"tool":"h2__b","success":true,"result":"B"},
+                            {"index":2,"tool":"h2__c","success":true,"result":"C"}
                         ]}),
                     "batch presentation differs from source-order A/B/C results"
                 );
@@ -232,22 +232,22 @@ fn response(
             );
             let code = match config.scenario.as_str() {
                 "S11" => {
-                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); await control.finish(value);"
+                    "const winner = h2.winner({}); const loser = h2.loser({}); const value = await Promise.race([winner,loser]); await h2.after({}); await control.finish(value);"
                 }
                 "S12" => {
-                    "const gate = await tools.gate({}); const value = await tools.source({}); await control.finish(gate + '|' + value);"
+                    "const gate = await h2.gate({}); const value = await h2.source({}); await control.finish(gate + '|' + value);"
                 }
                 "S18" => {
-                    "const h = await tools.handle({}); const r = await processes.await({ handle: h }); await control.finish('awaited');"
+                    "const h = await h2.handle({}); const r = await processes.await({ handle: h }); await control.finish('awaited');"
                 }
                 "S31" => {
-                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); const gate = await tools.gate({}); await control.finish(value + '|' + gate);"
+                    "const winner = h2.winner({}); const loser = h2.loser({}); const value = await Promise.race([winner,loser]); const gate = await h2.gate({}); await control.finish(value + '|' + gate);"
                 }
                 "S23" => {
-                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); const later = await tools.later({}); await control.finish(value + '|' + gate + '|' + later);"
+                    "const winner = h2.winner({}); const source = h2.source({}); const value = await Promise.race([winner,source]); const gate = await h2.gate({}); const later = await h2.later({}); await control.finish(value + '|' + gate + '|' + later);"
                 }
                 "S32" => {
-                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); await control.finish(value + '|' + gate);"
+                    "const winner = h2.winner({}); const source = h2.source({}); const value = await Promise.race([winner,source]); const gate = await h2.gate({}); await control.finish(value + '|' + gate);"
                 }
                 _ => return Err(anyhow!("scenario needs a Standard channel")),
             };

@@ -81,12 +81,10 @@ pub fn settled(outcome: &Value) -> (String, Option<String>) {
     }
     // Both host attach routes serialize the native report (ADR 0136).
     // Decode its outcome with the same type instead of assuming DTO tags.
-    let turn =
-        match serde_json::from_value::<TurnOutcome>(outcome["output"]["result"]["outcome"].clone())
-        {
-            Ok(turn) => turn,
-            Err(error) => return (format!("unknown:{error}"), None),
-        };
+    let turn = match serde_json::from_value::<TurnOutcome>(outcome["output"]["outcome"].clone()) {
+        Ok(turn) => turn,
+        Err(error) => return (format!("unknown:{error}"), None),
+    };
     match turn {
         TurnOutcome::Finished(finish) => {
             let reply = match finish {
@@ -247,9 +245,43 @@ pub async fn turn_facts(case: &Case, run: &str) -> Result<Value> {
 /// Read the turn's store facts while no node serves the store (or, on
 /// PostgreSQL, while they do), and keep them as evidence.
 pub async fn record_facts(case: &mut Case, run: &str, at: &str) -> Result<Value> {
-    let facts = turn_facts(case, run)
+    let mut facts = turn_facts(case, run)
         .await
         .with_context(|| format!("read the store {at}"))?;
+    if !facts["end"].is_null() && facts["records"].as_array().is_some_and(Vec::is_empty) {
+        let mut snapshots = Vec::new();
+        for entry in std::fs::read_dir(&case.dir)? {
+            let path = entry?.path();
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("commits-") && name.ends_with(".jsonl"))
+            {
+                for commit in lash_e2e::read_jsonl(&path)? {
+                    if commit["applied"] != true {
+                        continue;
+                    }
+                    snapshots.extend(
+                        commit["retired_turn_facts"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|snapshot| {
+                                snapshot["session"] == session(case) && snapshot["run"] == run
+                            })
+                            .cloned(),
+                    );
+                }
+            }
+        }
+        ensure!(
+            snapshots.len() == 1,
+            "expected one committed retirement snapshot for {run}, got {}",
+            snapshots.len()
+        );
+        facts["records"] = snapshots.remove(0)["records"].clone();
+        facts["records_retired"] = json!(true);
+    }
     case.evidence.stores.push(json!({"at": at, "facts": facts}));
     Ok(facts)
 }

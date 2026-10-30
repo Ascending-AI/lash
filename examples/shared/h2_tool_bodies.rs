@@ -95,7 +95,7 @@ impl ToolBodies {
                 };
                 let definition = ToolDefinition::raw(
                     format!("tool:e2e.h2.{label}"),
-                    format!("tools.{label}"),
+                    format!("h2.{label}"),
                     "A controlled body for the named real-host scenario.",
                     serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
                     output,
@@ -124,16 +124,17 @@ impl ToolBodies {
             call.args == &serde_json::json!({}),
             "unexpected tool arguments"
         );
-        let result = self
+        let (label, result) = self
             .plan
-            .get(call.name())
+            .iter()
+            .find(|(label, _)| format!("h2.{label}") == call.name())
             .ok_or_else(|| anyhow!("unplanned tool body {}", call.name()))?;
         let completion = match result {
             BodyOutcome::Deferred => Some(call.context.completion_key()?.as_str().to_owned()),
             BodyOutcome::Inline { .. } | BodyOutcome::Handle { .. } => None,
         };
         let delivery = ToolDelivery {
-            label: call.name().to_owned(),
+            label: label.clone(),
             call_id: call.context.call_id().clone(),
             ordinal: call.context.attempt_number(),
             owner: call.context.owner().clone(),
@@ -153,7 +154,15 @@ impl ToolBodies {
         (self.barrier)(delivery).await?;
         Ok(match result {
             BodyOutcome::Inline { value, intents } => {
-                ToolAttemptOutcome::done(ToolOutcomeDone::ok(value.clone()), intents.clone())
+                let mut done = ToolOutcomeDone::ok(value.clone());
+                if label == "echo" {
+                    // S01 publishes state with the answer, retaining its recorded
+                    // outcome boundary before presentation across the node kill.
+                    done = done.with_state(
+                        lash::plugins::StateCommands::new().set("echo_result", value.clone()),
+                    );
+                }
+                ToolAttemptOutcome::done(done, intents.clone())
             }
             BodyOutcome::Deferred => {
                 let mut completion = PendingCompletion::new();

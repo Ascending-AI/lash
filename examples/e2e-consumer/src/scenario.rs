@@ -250,7 +250,7 @@ fn answer(
             .iter()
             .map(|tool| LlmOutputPart::ToolCall {
                 call_id: format!("{tool}-{step}"),
-                tool_name: tool.clone(),
+                tool_name: format!("tools__{tool}"),
                 input_json: "{}".to_owned(),
                 replay: None,
             })
@@ -258,7 +258,7 @@ fn answer(
         Step::Batch(tools) => vec![LlmOutputPart::ToolCall {
             call_id: format!("batch-{step}"),
             tool_name: "batch".to_owned(),
-            input_json: json!({"tool_calls": tools.iter().map(|tool| json!({"tool": tool, "parameters": {}})).collect::<Vec<_>>()}).to_string(),
+            input_json: json!({"tool_calls": tools.iter().map(|tool| json!({"tool": format!("tools__{tool}"), "parameters": {}})).collect::<Vec<_>>()}).to_string(),
             replay: None,
         }],
         Step::Text(text) => vec![LlmOutputPart::Text {
@@ -363,7 +363,7 @@ impl Bodies {
         let plan = self
             .plans
             .iter()
-            .find(|plan| plan.name == call.name())
+            .find(|plan| format!("tools.{}", plan.name) == call.name())
             .ok_or_else(|| anyhow!("unplanned body {}", call.name()))?;
         let completion = plan
             .deferred
@@ -507,7 +507,7 @@ impl<P: CaseId> CasePlugin<P> {
                             };
                             let definition = ToolDefinition::raw(
                                 format!("tool:e2e.{}", plan.name),
-                                &plan.name,
+                                format!("tools.{}", plan.name),
                                 "A body the real-host case controls.",
                                 json!({"type":"object","properties":{},"additionalProperties":false}),
                                 output,

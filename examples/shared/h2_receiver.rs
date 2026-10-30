@@ -27,6 +27,22 @@ fn environment() -> Result<lash::process::ProcessEnv> {
     Ok(lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024)).build()?)
 }
 
+// These host fixture engines execute no linked code or operations.
+fn empty_inspection(
+    link: lash::package::LinkId,
+    selector: lash::package::ReachSelector,
+) -> lash::package::LinkInspection {
+    lash::package::LinkInspection {
+        link,
+        document: lash::package::DocumentId::from_bytes([0; 32]),
+        selector,
+        operations: Default::default(),
+        machine: Default::default(),
+        artifacts: Vec::new(),
+        signature: None,
+    }
+}
+
 /// The receiver's engine: its process runs until it is cancelled.
 pub struct ReceiverEngine;
 
@@ -44,11 +60,26 @@ impl ProcessEngine for ReceiverEngine {
         lash::plugins::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash::package::LinkId,
+        selector: &lash::package::ReachSelector,
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(link, selector.clone()))
+    }
+
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
-        Ok(lash::process::PerformedEffects::new())
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(
+            lash::package::LinkId::from_bytes([0; 32]),
+            lash::package::ReachSelector::Start(lash::package::StartSelector::Main),
+        ))
+    }
+
+    fn capabilities(&self) -> lash::package::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -188,11 +219,26 @@ impl ProcessEngine for SourceEngine {
         lash::plugins::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash::package::LinkId,
+        selector: &lash::package::ReachSelector,
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(link, selector.clone()))
+    }
+
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
-        Ok(lash::process::PerformedEffects::new())
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(
+            lash::package::LinkId::from_bytes([0; 32]),
+            lash::package::ReachSelector::Start(lash::package::StartSelector::Main),
+        ))
+    }
+
+    fn capabilities(&self) -> lash::package::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -341,11 +387,26 @@ impl ProcessEngine for SleeperEngine {
         lash::plugins::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
+        &self,
+        link: lash::package::LinkId,
+        selector: &lash::package::ReachSelector,
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(link, selector.clone()))
+    }
+
+    async fn inspect_start(
         &self,
         _payload: &serde_json::Value,
-    ) -> Result<lash::process::PerformedEffects, lash::process::ProcessEnvRefusal> {
-        Ok(lash::process::PerformedEffects::new())
+    ) -> Result<lash::package::LinkInspection, lash::package::EnginePortError> {
+        Ok(empty_inspection(
+            lash::package::LinkId::from_bytes([0; 32]),
+            lash::package::ReachSelector::Start(lash::package::StartSelector::Main),
+        ))
+    }
+
+    fn capabilities(&self) -> lash::package::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
