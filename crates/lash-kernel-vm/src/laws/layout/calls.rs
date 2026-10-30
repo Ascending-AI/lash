@@ -15,7 +15,7 @@ const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } fin
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
-const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other if true { let alias = [other, other] } return other } return apply f(7)";
+const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
 const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
@@ -229,6 +229,7 @@ fn observe_source_or_register(
     let scopes = crate::machine::islands::witness::scope_publications();
     let members = crate::machine::islands::witness::member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
+    let native_reads = crate::machine::islands::witness::native_read_publications();
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -248,6 +249,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_CONSTRUCTION)
     {
+        assert!(
+            native_reads >= 2,
+            "length and aliased member natives must publish their real source consumers: {native_reads}"
+        );
         assert!(
             constructions >= 4,
             "nested and aliased lists must install every prepared source construction: {constructions}"
@@ -541,6 +546,18 @@ fn direct_call_entry_agrees() {
             assert_eq!(
                 reference.printed,
                 vec![Datum::Text("index_out_of_range".into()); 2]
+            );
+        }
+        if body == SOURCE_CONSTRUCTION {
+            assert_eq!(
+                reference.end,
+                format!(
+                    "finished {:?}",
+                    Datum::List(vec![
+                        Datum::List(vec![Datum::List(vec![int(7)]), int(7)]),
+                        int(7),
+                    ])
+                )
             );
         }
         assert_eq!(plain.end, reference.end, "untaped result: {body}");

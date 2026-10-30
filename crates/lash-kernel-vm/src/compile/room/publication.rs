@@ -338,12 +338,37 @@ impl<'r> SourceAccepted<'r, AcceptedInterval> {
         })
     }
 }
-impl SourceAccepted<'_, PreparedPrefix<'_>> {
+impl<'a> SourceAccepted<'_, PreparedPrefix<'a>> {
     pub(crate) fn publish(
         self,
         frontier: &mut Frontier,
         ledger: &mut Ledger,
         semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>),
+    ) -> Result<CommittedPrefix, PublicationError> {
+        self.publish_with(frontier, ledger, |accepted, ledger| {
+            accepted.publish(ledger, semantic)
+        })
+    }
+
+    pub(crate) fn publish_materialized(
+        self,
+        frontier: &mut Frontier,
+        ledger: &mut Ledger,
+        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, Vec<logical::VirtualEntity>),
+    ) -> Result<CommittedPrefix, PublicationError> {
+        self.publish_with(frontier, ledger, |accepted, ledger| {
+            accepted.publish_materialized(ledger, semantic)
+        })
+    }
+
+    fn publish_with(
+        self,
+        frontier: &mut Frontier,
+        ledger: &mut Ledger,
+        publish: impl FnOnce(
+            logical::AcceptedProgram<'a>,
+            &mut Ledger,
+        ) -> Result<Materializations, HeapFault>,
     ) -> Result<CommittedPrefix, PublicationError> {
         self.commit(|prepared| {
             if !prepared.bound.current(frontier) {
@@ -354,16 +379,18 @@ impl SourceAccepted<'_, PreparedPrefix<'_>> {
                 .checked_add(1)
                 .ok_or_else(|| fault("source frontier overflow"))?;
             let balance = prepared.journal.balance()?;
+            let position = prepared.bound.next.clone();
+            let exit = prepared.bound.source.exit();
             let accepted = prepared
                 .journal
                 .admit(prepared.memory_bound)
                 .ok_or_else(|| fault("source admission changed"))?;
-            let materializations = accepted.publish(ledger, semantic)?;
+            let materializations = publish(accepted, ledger)?;
             frontier.revision = revision;
             frontier.position = prepared.bound.next;
             Ok(CommittedPrefix {
-                position: frontier.position.clone(),
-                exit: prepared.bound.source.exit(),
+                position,
+                exit,
                 balance,
                 materializations,
             })

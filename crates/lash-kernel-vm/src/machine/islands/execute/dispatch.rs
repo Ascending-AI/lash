@@ -388,10 +388,28 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     self.inputs(frame.slots, reads, &mut values)?;
                     reads.len()
                 };
+                match self
+                    .publish_native_read(frame, site, &values[..given])
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    source::ValuePublication::Published(value) => {
+                        frame.regs[site.reg as usize] = value;
+                        return Ok(Next::Continue);
+                    }
+                    source::ValuePublication::Declined => {
+                        if let Some(close) = &site.close
+                            && !self.close(close)
+                        {
+                            return Err(self.at_operands(close.head, site.reg, &values[..given]));
+                        }
+                        return Err(self.at_operands(site.pc, site.reg, &values[..given]));
+                    }
+                    source::ValuePublication::Unavailable => {}
+                }
                 let answer = self.retaining(&mut frame.state.transient, |island| {
                     island.native(site, &values, given)
                 });
-                regs[site.reg as usize] = answer?;
+                frame.regs[site.reg as usize] = answer?;
             }
             Opcode::Update => {
                 return self.update(frame, &code.sites.update[packet.x as usize].value);

@@ -2,6 +2,12 @@
 mod binding;
 mod construction;
 mod member;
+mod native;
+pub(in crate::machine::islands::execute) enum ValuePublication {
+    Unavailable,
+    Declined,
+    Published(Value),
+}
 mod publication;
 mod scope;
 mod unit;

@@ -1390,6 +1390,9 @@ fn checked_program_and_warm_balance() {
         "refused admission installs no prepared body"
     );
     assert_eq!(arena.allocations(), 0);
+    // One publication remains. Storage installed in that publication must not
+    // need a second fallible handoff after the guest body becomes visible.
+    ledger.leave_one_publication_for_law();
     let expected = make().evaluate(&ledger, &arena).unwrap();
     let mut nursery = lash_kernel_doc::Nursery::new(
         arena.objects(),
@@ -1416,8 +1419,10 @@ fn checked_program_and_warm_balance() {
     let materializations = prepared
         .admit(98)
         .unwrap()
-        .publish(&mut ledger, |arena, edits| {
+        .publish_materialized(&mut ledger, |arena, edits, entities| {
             assert!(edits.is_empty());
+            assert_eq!(entities.len(), 1);
+            assert_eq!(entities[0].entity, entity);
             batch.publish(arena);
         })
         .unwrap();
@@ -1425,5 +1430,5 @@ fn checked_program_and_warm_balance() {
     assert_eq!(arena.logical_local(&value).unwrap(), 16);
     assert_eq!(arena.sequence(value.handle().unwrap()).unwrap().len(), 2);
     assert_eq!(ledger.balance().unwrap().entity_local_bytes, 66);
-    materializations.publish(&mut ledger, |_| {}).unwrap();
+    assert!(materializations.entities().is_empty());
 }

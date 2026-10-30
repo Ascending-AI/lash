@@ -222,23 +222,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Err(PublicationError::Heap(error)) => return Err(error),
         };
         drop(ledger);
-        let committed = prepared
-            .publish(frontier, &mut store.borrow_mut(), |arena, edits| {
+        let committed = if S::MATERIALIZES {
+            prepared.publish_materialized(
+                frontier,
+                &mut store.borrow_mut(),
+                |arena, edits, _entities| semantic(arena, edits, storage),
+            )
+        } else {
+            prepared.publish(frontier, &mut store.borrow_mut(), |arena, edits| {
                 semantic(arena, edits, storage)
             })
-            .map_err(|error| match error {
-                PublicationError::Heap(error) => error,
-                PublicationError::Miss(reason) => malformed(reason),
-            })?;
-        if S::MATERIALIZES {
-            // The exact prepared batch was installed in the same semantic
-            // closure. Consume its materialization owner before another prefix.
-            committed
-                .materializations
-                .publish(&mut store.borrow_mut(), |_| {})?;
-        } else {
-            debug_assert!(committed.materializations.entities().is_empty());
         }
+        .map_err(|error| match error {
+            PublicationError::Heap(error) => error,
+            PublicationError::Miss(reason) => malformed(reason),
+        })?;
+        debug_assert!(committed.materializations.entities().is_empty());
         self.logical_memory.set(committed.balance.total()?);
         Ok(true)
     }

@@ -781,10 +781,10 @@ impl Source {
         Ok(point)
     }
 
-    /// This complete construction prefix ends in a checked local binding.
+    /// This expression prefix transfers into a checked local binding.
     /// Other consumers need their own publication before they can retain an
     /// operand produced here, including native calls and cleanup departures.
-    pub(crate) fn local_construction(&self, at: &Site) -> bool {
+    pub(crate) fn local_binding_transfer(&self, at: &Site) -> bool {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return false;
         }

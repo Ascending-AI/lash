@@ -15,15 +15,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         &mut self,
         frame: &mut Values<'_, '_>,
         site: &sites::Make,
-    ) -> Result<bool, HeapFault> {
+    ) -> Result<ValuePublication, HeapFault> {
         if site.make != crate::compile::expr::Make::List
             || self.arena.any_cold()
             || !self.resident_room(self.arena.sequence_bound(site.members))
         {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         }
         let Some(statement) = frame.state.statement else {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         };
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
@@ -31,24 +31,24 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .get(site.pc as usize)
             .and_then(Option::as_ref)
         else {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         };
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        if !source.local_construction(at) {
-            return Ok(false);
+        if !source.local_binding_transfer(at) {
+            return Ok(ValuePublication::Unavailable);
         }
         let Ok(unpaid) = source.next_after_commit(at) else {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         };
         let Some(roles) = statement.source_roles_at(stream, site.pc) else {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         };
         let at = Point {
             site: (**at).clone(),
             phase: SourcePhase::Commit,
         };
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
-            return Ok(false);
+            return Ok(ValuePublication::Unavailable);
         };
         self.source_bindings(frame)?;
         let activation = frame
@@ -64,22 +64,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .root(selector, self.task, activation.invocation.id())
                 .ok_or_else(|| malformed("construction operand has no canonical owner"))
         };
+        let mut inputs = Vec::new();
+        let mut values = Vec::new();
+        for reg in &site.items {
+            let Some((_, operand)) = roles.iter().find(|(input, _)| input.0 == *reg) else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            inputs.push(root(&room::Owner::Operand((**operand).clone()))?);
+            values.push(frame.regs[*reg as usize]);
+        }
+        let output = root(&room::Owner::Operand(at.site.clone()))?;
         for (reg, operand) in roles.iter() {
             self.logical.replace(
                 root(&room::Owner::Operand((**operand).clone()))?,
                 Some(SourceValue::Value(frame.regs[reg.ix()])),
             );
         }
-        let mut inputs = Vec::new();
-        let mut values = Vec::new();
-        for reg in &site.items {
-            let Some((_, operand)) = roles.iter().find(|(input, _)| input.0 == *reg) else {
-                return Ok(false);
-            };
-            inputs.push(root(&room::Owner::Operand((**operand).clone()))?);
-            values.push(frame.regs[*reg as usize]);
-        }
-        let output = root(&room::Owner::Operand(at.site.clone()))?;
         self.logical.flush(self.arena, self.heap)?;
         // Canonical occurrences register all child identities before selecting
         // the next fresh identity. No body or price is inferred from capacity.
@@ -101,11 +101,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        if ledger.holding(output, self.heap.pages())?.is_some() {
+            return Ok(ValuePublication::Declined);
+        }
         // Keep inputs while introducing the new body in an unpublished graph.
         // Its release excludes children retained by the new list, including aliases.
         let preview = Program::new(vec![event.clone()]);
         let Some(preview) = preview.evaluate(&ledger, self.arena) else {
-            return Ok(false);
+            return Ok(ValuePublication::Declined);
         };
         let preview = preview
             .prepare(
@@ -210,6 +213,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if published {
             crate::machine::islands::witness::construction_published();
         }
-        Ok(published)
+        Ok(if published {
+            ValuePublication::Published(frame.regs[site.reg as usize])
+        } else {
+            ValuePublication::Declined
+        })
     }
 }

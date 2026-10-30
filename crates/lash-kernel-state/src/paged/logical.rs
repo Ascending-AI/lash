@@ -417,6 +417,10 @@ impl Prepared {
 }
 
 impl Ledger {
+    #[cfg(test)]
+    pub(crate) fn leave_one_publication_for_law(&mut self) {
+        self.revision = u64::MAX - 1;
+    }
     pub fn fresh() -> Self {
         Self {
             state: State {

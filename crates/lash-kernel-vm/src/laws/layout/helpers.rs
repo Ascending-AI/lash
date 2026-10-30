@@ -67,6 +67,18 @@ pub(in crate::laws) fn helper_probes(
                 .unwrap(),
         ));
     }
+    // Use the shipped length contract without changing the deliberately
+    // uncertified Len native shared by the older fixtures.
+    let length = lash_kernel_doc::parse_definition(
+        "function resident.len(values: List(Any)) -> Int\nkernel 1\ncharge 1\nnative\n",
+    )
+    .unwrap();
+    out.push((
+        "resident.len",
+        registry
+            .register(length, lash_kernel_lib::native("list.len"))
+            .unwrap(),
+    ));
     let add = out.iter().find(|(name, _)| *name == "flat.add").unwrap().1;
     let kind = out.iter().find(|(name, _)| *name == "kind").unwrap().1;
     let same = out.iter().find(|(name, _)| *name == "same").unwrap().1;

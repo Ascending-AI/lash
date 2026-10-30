@@ -589,6 +589,23 @@ impl<'a> PreparedProgram<'a> {
     }
 }
 impl AcceptedProgram<'_> {
+    /// Install every prepared entity in the same infallible journal callback.
+    /// Unlike deferred materialization, this needs no later handoff: no new
+    /// capability can observe the publication before its storage is installed.
+    pub fn publish_materialized(
+        self,
+        ledger: &mut Ledger,
+        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, Vec<VirtualEntity>),
+    ) -> Result<Materializations, HeapFault> {
+        self.publication.publish(ledger, |arena, edits| {
+            semantic(arena, edits, self.entities);
+        })?;
+        Ok(Materializations {
+            stamp: ledger.stamp(),
+            entities: Vec::new(),
+        })
+    }
+
     pub fn publish(
         self,
         ledger: &mut Ledger,

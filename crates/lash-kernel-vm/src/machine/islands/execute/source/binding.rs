@@ -15,17 +15,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         frame: &mut Values<'_, '_>,
         site: &WriteSite,
         value: Value,
-    ) -> Result<bool, HeapFault> {
+    ) -> Result<Option<bool>, HeapFault> {
         if site.shared
             || site.accumulates
             || self.tape.is_some()
             || self.projection().is_some()
             || (!site.bind && matches!(frame.slots[site.at], SlotState::Empty))
         {
-            return Ok(false);
+            return Ok(None);
         }
         let Some(statement) = frame.state.statement else {
-            return Ok(false);
+            return Ok(None);
         };
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
@@ -33,7 +33,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .get(site.pc as usize)
             .and_then(Option::as_ref)
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let code = self.exe.code(frame.state.callee.plan.code);
         let source = &code.source_room;
@@ -42,16 +42,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             phase: SourcePhase::Commit,
         };
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(roles) = statement.source_roles_at(stream, site.pc) else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some((_, rhs)) = roles.iter().find(|(reg, _)| reg.0 == site.reg) else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(unpaid) = self.source_next_statement(frame) else {
-            return Ok(false);
+            return Ok(None);
         };
         self.source_bindings(frame)?;
         let activation = frame
@@ -78,7 +78,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let store = self.logical.ledger();
         let ledger = store.borrow();
         if site.bind && ledger.holding(output, self.heap.pages())?.is_some() {
-            return Ok(false);
+            return Ok(Some(false));
         }
         let mut inputs = vec![input];
         let mut measures = std::collections::BTreeMap::new();
@@ -174,5 +174,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 frame.slots[site.at] = SlotState::Value(value);
             },
         )
+        .map(Some)
     }
 }

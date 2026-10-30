@@ -216,16 +216,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         } else {
             None
         };
-        if self
+        let declined = match self
             .publish_binding(frame, site, value)
             .map_err(|error| self.halt(error.into()))?
         {
-            return self.finish_statement(frame, site.leaves, None);
-        }
+            Some(true) => return self.finish_statement(frame, site.leaves, None),
+            Some(false) => true,
+            None => false,
+        };
         if let Some(close) = &site.close
             && !self.close_in(close, site.covered)
         {
             return Err(self.at_held(close.head, site.reg, value));
+        }
+        if declined {
+            return Err(self.at_held(site.pc, site.reg, value));
         }
         if !site.bind && matches!(frame.slots[site.at], SlotState::Empty) {
             return Err(self.at_held(site.pc, site.reg, value));
