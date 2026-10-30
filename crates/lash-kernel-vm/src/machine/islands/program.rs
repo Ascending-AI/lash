@@ -2,7 +2,9 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
-use crate::machine::islands::code::{KindInput, NativeInputs, OperatorInputs, ScalarInputs};
+use crate::machine::islands::code::{
+    HeapInputs, HeapKernel, KindInput, NativeInputs, OperatorInputs, ScalarInputs,
+};
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
@@ -965,18 +967,21 @@ impl<'e> Build<'e> {
                     if args.len() == 2
                         && let Some(units) = self.member_charge(*lib)
                     {
-                        self.emit(Op::MemberAccess {
+                        self.emit(Op::Heap {
                             site,
                             args: args.clone(),
-                            units,
-                            reads: None,
-                            to: Destination::Register,
+                            resident: Some(HeapKernel::Read {
+                                units,
+                                to: Destination::Register,
+                            }),
+                            inputs: HeapInputs::Registers,
                         });
                     } else {
                         self.emit(Op::Heap {
                             site,
                             args: args.clone(),
                             resident: None,
+                            inputs: HeapInputs::Registers,
                         });
                     }
                     self.result(reg, &args);
@@ -1141,7 +1146,7 @@ impl<'e> Build<'e> {
                 {
                     let depth = Depth::Template(extra);
                     self.site(depth, true);
-                    self.emit(Op::MemberAccess {
+                    self.emit(Op::Heap {
                         site: HeapSite {
                             lib,
                             close: closes.first().copied(),
@@ -1154,9 +1159,11 @@ impl<'e> Build<'e> {
                             root: self.root,
                         },
                         args: args.clone(),
-                        units,
-                        reads: None,
-                        to: Destination::Register,
+                        resident: Some(HeapKernel::Read {
+                            units,
+                            to: Destination::Register,
+                        }),
+                        inputs: HeapInputs::Registers,
                     });
                     self.result(reg, &args);
                     return Some(());

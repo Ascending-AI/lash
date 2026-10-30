@@ -37,8 +37,11 @@ impl Build<'_> {
             }
             if !protected.contains(&at) {
                 instruction.op = fixed(instruction.op, self.exe);
-                if let Op::MemberStore { finish, .. } | Op::Store { finish, .. } =
-                    &mut instruction.op
+                if let Op::Heap {
+                    resident: Some(HeapKernel::Write { finish, .. }),
+                    ..
+                }
+                | Op::Store { finish, .. } = &mut instruction.op
                     && let Some((next, following)) = old.peek()
                     && !targets.contains(next)
                     && following.begin.is_none()
@@ -60,9 +63,13 @@ impl Build<'_> {
                         to: Destination::Register,
                         ..
                     } => Some(site.reg),
-                    Op::MemberAccess {
+                    Op::Heap {
                         site,
-                        to: Destination::Register,
+                        resident:
+                            Some(HeapKernel::Read {
+                                to: Destination::Register,
+                                ..
+                            }),
                         ..
                     } => Some(site.reg),
                     _ => None,
@@ -82,9 +89,11 @@ impl Build<'_> {
                         unreachable!()
                     };
                     match &mut instruction.op {
-                        Op::Operator { to, .. } | Op::MemberAccess { to, .. } => {
-                            *to = Destination::Write(write)
-                        }
+                        Op::Operator { to, .. }
+                        | Op::Heap {
+                            resident: Some(HeapKernel::Read { to, .. }),
+                            ..
+                        } => *to = Destination::Write(write),
                         _ => unreachable!(),
                     }
                 }
@@ -103,7 +112,12 @@ impl Build<'_> {
     ) -> BTreeSet<usize> {
         let mut removed = BTreeSet::new();
         for at in 2..self.ops.len() {
-            let Op::MemberAccess { args, .. } = &self.ops[at].op else {
+            let Op::Heap {
+                args,
+                resident: Some(HeapKernel::Read { .. }),
+                ..
+            } = &self.ops[at].op
+            else {
                 continue;
             };
             if args.len() != 2 || !self.pure_group(at - 2, at, targets, protected) {
@@ -122,10 +136,15 @@ impl Build<'_> {
             };
             let begin = self.ops[at - 2].begin.take();
             let live = self.ops[at - 2].live.clone();
-            let Op::MemberAccess { reads: inputs, .. } = &mut self.ops[at].op else {
+            let Op::Heap {
+                inputs,
+                resident: Some(HeapKernel::Read { .. }),
+                ..
+            } = &mut self.ops[at].op
+            else {
                 unreachable!()
             };
-            *inputs = Some(Box::new(reads));
+            *inputs = HeapInputs::Read(Box::new(reads));
             self.ops[at].begin = begin;
             self.ops[at].live = live;
             removed.extend(at - 2..at);

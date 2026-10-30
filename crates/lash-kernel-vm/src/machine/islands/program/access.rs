@@ -191,7 +191,13 @@ impl Build<'_> {
     ) -> std::collections::BTreeSet<usize> {
         let mut removed = std::collections::BTreeSet::new();
         for at in 0..self.ops.len() {
-            let Op::Heap { site, args, .. } = &self.ops[at].op else {
+            let Op::Heap {
+                site,
+                args,
+                resident: None,
+                ..
+            } = &self.ops[at].op
+            else {
                 continue;
             };
             if args.len() == 2 {
@@ -200,12 +206,14 @@ impl Build<'_> {
                     let Op::Heap { site, args, .. } = original else {
                         unreachable!()
                     };
-                    self.ops[at].op = Op::MemberAccess {
+                    self.ops[at].op = Op::Heap {
                         site,
                         args,
-                        units,
-                        reads: None,
-                        to: Destination::Register,
+                        resident: Some(HeapKernel::Read {
+                            units,
+                            to: Destination::Register,
+                        }),
+                        inputs: HeapInputs::Registers,
                     };
                 }
                 continue;
@@ -262,12 +270,14 @@ impl Build<'_> {
             let Op::Heap { site, args, .. } = original else {
                 unreachable!()
             };
-            self.ops[at].op = Op::MemberStore {
+            self.ops[at].op = Op::Heap {
                 site,
                 args,
-                reads,
-                property,
-                finish: None,
+                resident: Some(HeapKernel::Write {
+                    property,
+                    finish: None,
+                }),
+                inputs: reads.map_or(HeapInputs::Registers, HeapInputs::Write),
             };
             if fold {
                 self.ops[at].begin = self.ops[start].begin.take();

@@ -1485,21 +1485,22 @@ pub(crate) fn verify_close(close: Option<&Close>, stream: &super::Stream) -> Res
     let refused = Refused::Region {
         region: close.region,
     };
+    if !matches!(
+        stream.ops.get(close.head as usize),
+        Some(Op::Region { region, total }) if region.0 == close.region && *total == close.total
+    ) {
+        return Err(refused);
+    }
     let stated = stream
         .regions
         .summary(close.region)
         .map_err(|_| Refused::Region {
             region: close.region,
         })?;
-    match stream.ops.get(close.head as usize) {
-        Some(Op::Region { region, total })
-            if region.0 == close.region
-                && *total == close.total
-                && stated.total() == u64::from(close.total) =>
-        {
-            Ok(())
-        }
-        _ => Err(refused),
+    if stated.total() == u64::from(close.total) {
+        Ok(())
+    } else {
+        Err(refused)
     }
 }
 

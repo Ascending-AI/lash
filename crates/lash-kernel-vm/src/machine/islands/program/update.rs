@@ -35,10 +35,13 @@ impl Build<'_> {
             relocation[at] = self.ops.len();
             let matches = match (&instruction.op, source.peek()) {
                 (
-                    Op::MemberAccess {
+                    Op::Heap {
                         site,
-                        units,
-                        to: Destination::Register,
+                        resident:
+                            Some(HeapKernel::Read {
+                                units,
+                                to: Destination::Register,
+                            }),
                         ..
                     },
                     Some((
@@ -72,15 +75,24 @@ impl Build<'_> {
                     unreachable!();
                 };
                 relocation[next] = self.ops.len();
-                let Op::MemberAccess {
+                let Op::Heap {
                     site: read,
                     args,
-                    units: charge,
-                    reads,
+                    resident:
+                        Some(HeapKernel::Read {
+                            units: charge,
+                            to: Destination::Register,
+                        }),
+                    inputs,
                     ..
                 } = instruction.op
                 else {
                     unreachable!();
+                };
+                let reads = match inputs {
+                    HeapInputs::Registers => None,
+                    HeapInputs::Read(reads) => Some(reads),
+                    HeapInputs::Write(_) => unreachable!(),
                 };
                 let Op::Operator {
                     site: scalar,

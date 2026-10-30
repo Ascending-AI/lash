@@ -44,6 +44,25 @@ close_site!(
     UnitSite
 );
 
+impl Closes for sites::Native {
+    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
+        self.site.verify(stream)
+    }
+}
+
+impl Closes for sites::Kind {
+    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
+        self.site.verify(stream)
+    }
+}
+
+impl Closes for sites::Heap {
+    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
+        self.site.verify(stream)?;
+        self.resident.verify(stream)
+    }
+}
+
 impl Closes for compiled::Format {
     fn verify(&self, stream: &Stream) -> Result<(), Refused> {
         self.join.verify(stream)?;

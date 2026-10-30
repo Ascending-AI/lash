@@ -66,7 +66,7 @@ macro_rules! operations {
         inputs { $( $input:ident { $( $input_field:ident: $input_ty:ty ),* $(,)? } )* }
         hot_structs { $( $hot:ident { $( $hot_field:ident: $hot_ty:ty ),* $(,)? } )* }
         hot_tuples { $( $hot_tuple:ident ( $hot_tuple_ty:ty ) )* }
-        structs { $( [ $( $manual:ident $manual_table:ident )? ] { $( $name:ident $table:ident { $( $field:ident: $ty:ty ),* $(,)? } )* } )* }
+        structs { $( [ $( $manual:ident $manual_table:ident )* ] { $( $name:ident $table:ident { $( $field:ident: $ty:ty ),* $(,)? } )* } )* }
         tuples { $( $tuple:ident $tuple_table:ident ( $tuple_ty:ty ) )* }
         units { $( $unit:ident )* }
     ) => {
@@ -88,7 +88,7 @@ macro_rules! operations {
             Operator,
             $( $hot, )*
             $( $hot_tuple, )*
-            $( $( $manual, )? $( $name, )* )*
+            $( $( $manual, )* $( $name, )* )*
             $( $tuple, )*
             $( $unit, )*
         }
@@ -109,6 +109,11 @@ macro_rules! operations {
                 pub(in crate::machine::islands) site: Box<KindTest>,
                 pub(in crate::machine::islands) src: u32,
             }
+            pub(in crate::machine::islands) struct Heap {
+                pub(in crate::machine::islands) site: HeapSite,
+                pub(in crate::machine::islands) args: Box<[u32]>,
+                pub(in crate::machine::islands) resident: Option<HeapKernel>,
+            }
             $( $( pub(in crate::machine::islands) struct $name {
                 $( pub(in crate::machine::islands) $field: $ty, )*
             } )* )*
@@ -122,7 +127,7 @@ macro_rules! operations {
             pub(super) begin: Vec<StatementEntry>,
             pub(super) operator: Vec<sites::Operator>,
             pub(super) collection: Vec<(std::sync::Arc<CollectionStep>, bool)>,
-            $( $( pub(super) $manual_table: Vec<sites::$manual>, )?
+            $( $( pub(super) $manual_table: Vec<sites::$manual>, )*
                $( pub(super) $table: Vec<sites::$name>, )* )*
             $( pub(super) $tuple_table: Vec<sites::$tuple>, )*
         }
@@ -130,8 +135,8 @@ macro_rules! operations {
         impl Code {
             pub(in crate::machine::islands) fn verify(&self, stream: &Stream) -> Result<(), crate::compile::islands::Refused> {
                 $( $( for record in &self.sites.$manual_table {
-                    record.site.verify(stream)?;
-                } )?
+                    record.verify(stream)?;
+                } )*
                 $( for record in &self.sites.$table {
                     $( check_field!(record, stream, $field); )*
                 } )* )*
@@ -183,19 +188,11 @@ operations! {
             to: Destination,
         }
 
-        MemberAccess {
+        Heap {
             site: HeapSite,
             args: Box<[u32]>,
-            units: compiled::MemberAccess,
-            reads: Option<Box<[Read; 2]>>,
-            to: Destination,
-        }
-        MemberStore {
-            site: HeapSite,
-            args: Box<[u32]>,
-            reads: Option<Box<[Read; 3]>>,
-            property: Box<compiled::MemberWrite>,
-            finish: Option<u32>,
+            resident: Option<HeapKernel>,
+            inputs: HeapInputs,
         }
         Native {
             site: NativeSite,
@@ -298,12 +295,7 @@ operations! {
                 reg: u32,
             }
         }
-        [Native native] {
-            Heap heap {
-                site: HeapSite,
-                args: Box<[u32]>,
-                resident: Option<HeapKernel>,
-            }
+        [Native native Heap heap] {
             Reserve reserve {
                 kind: lash_kernel_doc::ValueKind,
                 members: usize,
@@ -424,6 +416,12 @@ pub(crate) enum NativeInputs {
 pub(crate) enum KindInput {
     Register(u32),
     Source(Read),
+}
+
+pub(crate) enum HeapInputs {
+    Registers,
+    Read(Box<[Read; 2]>),
+    Write(Box<[Read; 3]>),
 }
 
 /// Source-certified resident selection at an ordinary heap call. Arguments,
@@ -552,43 +550,33 @@ impl Code {
                 });
                 (Opcode::Operator, x, None)
             }
-            Op::MemberAccess {
+            Op::Heap {
                 site,
                 args,
-                units,
-                reads,
-                to,
+                resident,
+                inputs,
             } => {
+                let reads = match inputs {
+                    HeapInputs::Registers => None,
+                    HeapInputs::Read(reads)
+                        if matches!(&resident, Some(HeapKernel::Read { .. })) =>
+                    {
+                        Some((*reads).into_iter().collect::<Box<[_]>>())
+                    }
+                    HeapInputs::Write(reads)
+                        if matches!(&resident, Some(HeapKernel::Write { .. })) =>
+                    {
+                        Some((*reads).into_iter().collect::<Box<[_]>>())
+                    }
+                    _ => return None,
+                };
                 let x = u32::try_from(self.sites.heap.len()).ok()?;
                 self.sites.heap.push(sites::Heap {
                     site,
                     args,
-                    resident: Some(HeapKernel::Read { units, to }),
+                    resident,
                 });
-                (
-                    Opcode::Heap,
-                    x,
-                    reads.map(|reads| (*reads).into_iter().collect::<Box<[_]>>()),
-                )
-            }
-            Op::MemberStore {
-                site,
-                args,
-                reads,
-                property,
-                finish,
-            } => {
-                let x = u32::try_from(self.sites.heap.len()).ok()?;
-                self.sites.heap.push(sites::Heap {
-                    site,
-                    args,
-                    resident: Some(HeapKernel::Write { property, finish }),
-                });
-                (
-                    Opcode::Heap,
-                    x,
-                    reads.map(|reads| (*reads).into_iter().collect::<Box<[_]>>()),
-                )
+                (Opcode::Heap, x, reads)
             }
             Op::Native { site, inputs } => {
                 let (args, reads) = match inputs {
@@ -643,10 +631,7 @@ impl Code {
                     Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } | Op::Access(_) => {
                         Reason::Operator
                     }
-                    Op::Native { .. }
-                    | Op::Heap { .. }
-                    | Op::MemberStore { .. }
-                    | Op::MemberAccess { .. } => Reason::Native,
+                    Op::Native { .. } | Op::Heap { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {
                         Reason::Binding
@@ -663,9 +648,7 @@ impl Code {
             library: match op {
                 Op::Native { site, .. } => Some(site.lib),
                 Op::Operator { site, .. } => Some(site.lib),
-                Op::Heap { site, .. }
-                | Op::MemberStore { site, .. }
-                | Op::MemberAccess { site, .. } => Some(site.lib),
+                Op::Heap { site, .. } => Some(site.lib),
                 Op::Call { site, .. } => site.library,
                 _ => None,
             },

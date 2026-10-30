@@ -362,6 +362,26 @@ impl Compiled {
     }
 
     #[cfg(test)]
+    pub(crate) fn corrupt_heap_result_close(&mut self) -> Option<u32> {
+        for site in &mut self.code.sites.heap {
+            if let Some(super::code::HeapKernel::Read {
+                to: Destination::Write(write),
+                ..
+            }) = &mut site.resident
+            {
+                let region = u32::MAX;
+                write.close = Some(Close {
+                    region,
+                    head: 0,
+                    total: 0,
+                });
+                return Some(region);
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
     pub(crate) fn corrupt_packet_role(&mut self, stream: &Stream) -> bool {
         self.code.corrupt_call_role(stream)
     }
