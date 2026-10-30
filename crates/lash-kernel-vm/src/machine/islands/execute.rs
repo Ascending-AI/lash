@@ -494,6 +494,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         self.depth = 0;
                         return Ok(value);
                     }
+                    match self
+                        .publish_return_suffix(&mut slab.view(active), value)
+                        .map_err(|error| self.halt(error.into()))?
+                    {
+                        source::ValuePublication::Declined => {
+                            let Some(returned) = active.returned else {
+                                return Err(
+                                    self.halt(fault("a declined return lost its source operand"))
+                                );
+                            };
+                            let stop = self.at_held(returned.pc, returned.reg, value);
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
+                        source::ValuePublication::Published(_)
+                        | source::ValuePublication::Unavailable => {}
+                    }
                     if let Some(activation) = &active.source
                         && !activation
                             .frontier

@@ -34,7 +34,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Unavailable);
         };
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        if !source.local_binding_transfer(at) {
+        if !self.source_operand_transfer(frame, at) {
             return Ok(ValuePublication::Unavailable);
         }
         let Ok(unpaid) = source.next_after_commit(at) else {

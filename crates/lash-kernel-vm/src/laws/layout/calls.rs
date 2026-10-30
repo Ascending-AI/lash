@@ -231,6 +231,7 @@ fn observe_source_or_register(
     let constructions = crate::machine::islands::witness::construction_publications();
     let native_reads = crate::machine::islands::witness::native_read_publications();
     let native_texts = crate::machine::islands::witness::native_text_publications();
+    let returns = crate::machine::islands::witness::return_publications();
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -250,6 +251,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_CONSTRUCTION)
     {
+        assert!(
+            returns > 0,
+            "the closure must publish its return and defining Leave in the same Invocation"
+        );
         assert!(
             native_texts > 0,
             "the allocating native must install its detached result under source acceptance"

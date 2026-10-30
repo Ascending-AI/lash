@@ -126,6 +126,120 @@ pub(crate) struct CompiledInterval {
     whole: bool,
 }
 impl Source {
+    /// The exact runtime is at a defining block's direct Return. Its only
+    /// successor is that block's Leave; earlier children have already completed.
+    /// The canonical walker proves the suffix without replaying their history.
+    pub(crate) fn compile_return_suffix(
+        &self,
+        at: &Point,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.verify()?;
+        if at.phase != Phase::Commit
+            || at.site.unit != self.site.unit
+            || at.site.path.len() != self.site.path.len() + 1
+            || !at.site.path.starts_with(&self.site.path)
+            || !matches!(
+                self.body
+                    .get(*at.site.path.last().ok_or(Refused::Path)? as usize),
+                Some(doc::Stmt::Return { .. })
+            )
+        {
+            return Err(Refused::Path);
+        }
+        let leave = Point {
+            site: self.site.clone(),
+            phase: Phase::Leave,
+        };
+        let route: Box<[_]> = [
+            Selection::Event {
+                at: at.clone(),
+                exit: ExitKind::Return,
+            },
+            Selection::Event {
+                at: leave.clone(),
+                exit: ExitKind::Normal,
+            },
+        ]
+        .into();
+        let key = Key {
+            event: true,
+            at: at.site.clone(),
+            bounds: Some((at.clone(), leave)),
+            selected: route.clone(),
+        };
+        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
+        if let Some(interval) = cache.get(&key) {
+            return Ok(Arc::clone(interval));
+        }
+        struct Suffix<'a> {
+            source: &'a Site,
+            returning: &'a Site,
+            route: &'a [Selection],
+            cursor: usize,
+        }
+        impl evaluate::Events for Suffix<'_> {
+            fn completed(&mut self, site: &Site) -> Option<ExitKind> {
+                (site != self.source && site != self.returning).then_some(ExitKind::Normal)
+            }
+            fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
+                if site == self.source && phase == Phase::Enter {
+                    return Ok(ExitKind::Normal);
+                }
+                let Some(Selection::Event { at, exit }) = self.route.get(self.cursor) else {
+                    return Err(Refused::Path);
+                };
+                if &at.site != site || at.phase != phase {
+                    return Err(Refused::Path);
+                }
+                self.cursor += 1;
+                Ok(*exit)
+            }
+            fn choose(&mut self, _: &Site) -> Result<bool, Refused> {
+                Err(Refused::Facts)
+            }
+            fn selected_end(&self) -> bool {
+                self.cursor == self.route.len()
+            }
+        }
+        let mut suffix = Suffix {
+            source: &self.site,
+            returning: &at.site,
+            route: &route,
+            cursor: 0,
+        };
+        let exit = evaluate::walk_to(self, &self.site, &mut suffix, 3)?;
+        if exit != ExitKind::Return || suffix.cursor != route.len() {
+            return Err(Refused::Path);
+        }
+        let mut variables = 0;
+        let steps = route
+            .iter()
+            .map(|selection| {
+                let Selection::Event { at, exit } = selection else {
+                    return Err(Refused::Path);
+                };
+                Step::compile(
+                    self,
+                    self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone(),
+                    *exit,
+                    &mut variables,
+                )
+            })
+            .collect::<Result<Box<[_]>, Refused>>()?;
+        let interval = Arc::new(CompiledInterval {
+            owner: self.owner,
+            source: self.site.clone(),
+            at: at.site.clone(),
+            route,
+            steps,
+            variables,
+            exit,
+            whole: false,
+        });
+        cache.insert(key, Arc::clone(&interval));
+        Ok(interval)
+    }
+
     /// Compile the first unpaid event `from` through the included `through`
     /// exit. `selected` starts at the endpoint sites' lowest common ancestor
     /// and ends at `through`. Its evaluated prefix authenticates control only

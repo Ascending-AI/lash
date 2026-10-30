@@ -72,6 +72,44 @@ pub(super) fn successors() {
             "cached {text}"
         );
     }
+    let run = Embedder::new("main { let xs = [1] for x in xs { print x } return xs }");
+    let (program, _) = run.program(false);
+    let source = room::Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(program.document.identity()),
+        Site::new(Unit::Main, vec![]),
+        program.document.main.as_ref().unwrap(),
+        &[],
+        Default::default(),
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeSet::new(),
+    );
+    let returning = Point {
+        site: Site::new(Unit::Main, vec![2]),
+        phase: Phase::Commit,
+    };
+    let suffix = source.compile_return_suffix(&returning).unwrap();
+    assert_eq!(
+        suffix
+            .events()
+            .map(|event| event.point.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            returning,
+            Point {
+                site: source.site.clone(),
+                phase: Phase::Leave
+            }
+        ]
+    );
+    assert_eq!(suffix.exit(), room::ExitKind::Return);
+    assert!(
+        source
+            .compile_return_suffix(&Point {
+                site: Site::new(Unit::Main, vec![0]),
+                phase: Phase::Commit
+            })
+            .is_err()
+    );
     let run = Embedder::new("main { for x in [] {} return null }");
     let (program, _) = run.program(false);
     let source = room::Source::compile(

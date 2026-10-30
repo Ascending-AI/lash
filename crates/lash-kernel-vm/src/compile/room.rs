@@ -21,6 +21,12 @@ pub(crate) use interval::CompiledInterval;
 pub(crate) type Selection = interval::Selection;
 mod verify;
 
+#[derive(Clone, Copy)]
+pub(crate) enum TransferTarget {
+    Binding,
+    RootReturn,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Phase {
     Enter,
@@ -781,12 +787,11 @@ impl Source {
         Ok(point)
     }
 
-    /// This expression prefix transfers into a checked local binding.
-    /// Other consumers need their own publication before they can retain an
-    /// operand produced here, including native calls and cleanup departures.
-    pub(crate) fn local_binding_transfer(&self, at: &Site) -> bool {
+    /// The enclosing source consumer whose actual runtime journal must follow
+    /// an expression published as an operand.
+    pub(crate) fn transfer_target(&self, at: &Site) -> Option<TransferTarget> {
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
-            return false;
+            return None;
         }
         let mut node = doc::Node::Block(&self.body);
         let mut site = self.site.clone();
@@ -794,7 +799,7 @@ impl Source {
         for index in &at.path[self.site.path.len()..] {
             parents.push((node, site.clone()));
             let Some(child) = node.children().get(*index as usize).copied() else {
-                return false;
+                return None;
             };
             node = child;
             site = site.child(*index);
@@ -803,19 +808,25 @@ impl Source {
             match node {
                 doc::Node::Expr(doc::Expr::List(_)) => continue,
                 doc::Node::Stmt(doc::Stmt::Let { name, .. }) => {
-                    return !self.persistent.contains_key(&site)
-                        && self.shared.get(&(site, name.clone())) != Some(&true);
+                    return (!self.persistent.contains_key(&site)
+                        && self.shared.get(&(site, name.clone())) != Some(&true))
+                    .then_some(TransferTarget::Binding);
                 }
                 doc::Node::Stmt(doc::Stmt::Assign {
                     place: doc::Place::Variable(_),
                     ..
                 }) => {
-                    return !self.assigns_cell(&site);
+                    return (!self.assigns_cell(&site)).then_some(TransferTarget::Binding);
                 }
-                _ => return false,
+                doc::Node::Stmt(doc::Stmt::Return { .. })
+                    if site.path.len() == self.site.path.len() + 1 =>
+                {
+                    return Some(TransferTarget::RootReturn);
+                }
+                _ => return None,
             }
         }
-        false
+        None
     }
 
     /// The first unpaid event after an expression's actual normal Commit.

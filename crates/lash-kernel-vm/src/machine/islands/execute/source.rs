@@ -9,6 +9,7 @@ pub(in crate::machine::islands::execute) enum ValuePublication {
     Published(Value),
 }
 mod publication;
+mod returning;
 mod scope;
 mod unit;
 use super::*;
@@ -23,6 +24,41 @@ pub(in crate::machine::islands) struct Activation {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
+    fn source_return_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
+        if frame.state.resident
+            || !frame.state.callee.plan.charged
+            || frame.state.boundary.is_some()
+            || frame.state.callee.compiled.cleanups
+            || frame.state.control.len() != 1
+        {
+            return false;
+        }
+        let Some(Position::Block(block, _)) = frame.state.control.first() else {
+            return false;
+        };
+        self.exe
+            .block(frame.state.callee.compiled.blocks[*block].id)
+            .site
+            == self.exe.code(frame.state.callee.plan.code).source_room.site
+    }
+
+    fn source_operand_transfer(
+        &self,
+        frame: &storage::Values<'_, '_>,
+        at: &lash_kernel_value::sites::Site,
+    ) -> bool {
+        match self
+            .exe
+            .code(frame.state.callee.plan.code)
+            .source_room
+            .transfer_target(at)
+        {
+            Some(room::TransferTarget::Binding) => true,
+            Some(room::TransferTarget::RootReturn) => self.source_return_frame(frame),
+            None => false,
+        }
+    }
+
     fn source_next_statement(&self, frame: &storage::Values<'_, '_>) -> Option<room::Point> {
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
         let Position::Block(block, next) = frame.state.control.last()? else {
