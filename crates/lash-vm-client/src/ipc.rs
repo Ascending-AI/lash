@@ -602,7 +602,15 @@ fn read_some(
             Ok(0) if partial => return Err(PoolError::breach(SequenceFault::EndInPartialFrame)),
             Ok(0) => return Err(PoolError::eof()),
             Ok(n) => return Ok(n),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            // A relative socket timeout can precede the absolute deadline.
+            // Retry against that same deadline before reporting silence.
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::Interrupted
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::WouldBlock
+                ) => {}
             Err(e) => return Err(PoolError::io(e)),
         }
     }
