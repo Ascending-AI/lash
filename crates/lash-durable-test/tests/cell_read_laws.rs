@@ -19,6 +19,7 @@
 //!   under every fault, the write between two reads reaches the world at
 //!   most once, with an answer a read made, and is lost only where a `Once`
 //!   call may be interrupted.
+//!
 //! Admitted tool reads also obey the explicit cancellation law in cell_restore_laws.
 //! The declared-read workload owns their per-call commit/fact geometry.
 //!
