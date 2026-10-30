@@ -253,6 +253,7 @@ impl JournalEvent {
         }
     }
 }
+#[derive(Clone)]
 pub struct Program {
     events: Vec<JournalEvent>,
 }

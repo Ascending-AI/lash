@@ -762,43 +762,72 @@ fn measured_formula_with_growth(
     size_growth: u64,
     deep_growth: u64,
 ) -> Option<u64> {
-    let mut failed = false;
-    let units = plan.evaluate(|source, measure| {
-        if failed {
-            return 0;
-        }
+    measured_formula_by(plan, |source, measure| {
         let value = match source {
             Source::Arg(index) => args.get(index),
             Source::Result => result,
             Source::Nothing => None,
         };
-        let Some(value) = value else {
+        value.map_or(Some(0), |value| {
+            value_measure(arena, value, measure, size_growth, deep_growth)
+        })
+    })
+}
+
+pub(crate) fn measured_text_formula(
+    arena: &Arena,
+    plan: &Plan,
+    args: &[Value],
+    text: &str,
+) -> Option<u64> {
+    measured_formula_by(plan, |source, measure| match source {
+        Source::Arg(index) => args
+            .get(index)
+            .map_or(Some(0), |value| value_measure(arena, value, measure, 0, 0)),
+        Source::Result => Some(crate::data::text_measure(text, measure)),
+        Source::Nothing => Some(0),
+    })
+}
+
+fn measured_formula_by(
+    plan: &Plan,
+    mut measure: impl FnMut(Source, Measure) -> Option<u64>,
+) -> Option<u64> {
+    let mut failed = false;
+    let units = plan.evaluate(|source, kind| {
+        if failed {
             return 0;
-        };
-        // A value the arena holds nothing of carries its measurements.
-        if let Some(units) = immediate_measure(value, measure) {
-            return units;
         }
-        let measured = match measure {
-            Measure::Size => crate::data::size(arena, value),
-            Measure::DeepSize => crate::data::deep_size(arena, value),
-            Measure::NestedSize => crate::data::nested_size(arena, value),
-            Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
-        };
-        measured
-            .map(|units| {
-                units.saturating_add(match measure {
-                    Measure::Size => size_growth,
-                    Measure::DeepSize => deep_growth,
-                    Measure::NestedSize | Measure::Magnitude => 0,
-                })
-            })
-            .unwrap_or_else(|_| {
-                failed = true;
-                0
-            })
+        measure(source, kind).unwrap_or_else(|| {
+            failed = true;
+            0
+        })
     });
     (!failed).then_some(units)
+}
+
+fn value_measure(
+    arena: &Arena,
+    value: &Value,
+    measure: Measure,
+    size_growth: u64,
+    deep_growth: u64,
+) -> Option<u64> {
+    if let Some(units) = immediate_measure(value, measure) {
+        return Some(units);
+    }
+    let units = match measure {
+        Measure::Size => crate::data::size(arena, value),
+        Measure::DeepSize => crate::data::deep_size(arena, value),
+        Measure::NestedSize => crate::data::nested_size(arena, value),
+        Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
+    }
+    .ok()?;
+    Some(units.saturating_add(match measure {
+        Measure::Size => size_growth,
+        Measure::DeepSize => deep_growth,
+        Measure::NestedSize | Measure::Magnitude => 0,
+    }))
 }
 
 /// Whether `plan`, charging a call of `args` that gave `result`, measures

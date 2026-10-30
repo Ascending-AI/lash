@@ -1,8 +1,9 @@
-//! Resident read natives publish their actual input and result occurrences.
+//! Native results publish their canonical occurrences and logical scratch.
+mod text;
 use super::*;
 use crate::admission::Allowance;
 use lash_kernel_state::kernel_internals::logical::{
-    JournalEvent, Program, PublicationValue as PV, RootValue,
+    JournalEvent, Program, PublicationValue as PV, RootValue, ScratchEvent, Slot,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
@@ -11,7 +12,7 @@ use room::{
 };
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    pub(in crate::machine::islands::execute) fn publish_native_read(
+    pub(in crate::machine::islands::execute) fn publish_native_value(
         &mut self,
         frame: &mut Values<'_, '_>,
         site: &NativeSite,
@@ -19,7 +20,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<ValuePublication, HeapFault> {
         if !matches!(
             site.direct(self.exe),
-            Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_))
+            Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_) | Direct::TextJoin)
         ) || !self.resident_room(0)
             || self.arena.any_cold()
         {
@@ -60,13 +61,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let room::CallSource::Native(function_id) = function.specialization.resource else {
             return Ok(ValuePublication::Unavailable);
         };
+        let text = matches!(site.direct(self.exe), Some(Direct::TextJoin));
         let contract = match native.resource_contract(doc::Args::new(
             args,
             self.arena.objects(),
             &self.arena.semantics(),
         )) {
             Ok(Some(contract))
-                if contract.events.is_empty()
+                if (contract.events.is_empty()
+                    || (text
+                        && contract.events.iter().all(|event| {
+                            matches!(event, doc::NativeResourceEvent::Scratch { .. })
+                        })))
                     && contract.exit == doc::NativeResourceExit::Returned =>
             {
                 contract
@@ -89,9 +95,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             (Some(Direct::Member(_)), _) => self.membership(site, args),
             _ => None,
         };
-        let Some((value, units)) = answer else {
+        if answer.is_none() && !text {
             return Ok(ValuePublication::Unavailable);
-        };
+        }
+        let scratch = contract
+            .peak_scratch_bytes()
+            .ok_or_else(|| malformed("native scratch contract is invalid"))?;
         let at = Point {
             site: (**at).clone(),
             phase: SourcePhase::Commit,
@@ -143,12 +152,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
         }
-        let released = ledger.release_cost_preserving(
-            self.arena,
-            self.heap,
-            &inputs,
-            &[(output, RootValue::Value(&value))],
-        )?;
+        let released = if let Some((value, _)) = answer {
+            ledger.release_cost_preserving(
+                self.arena,
+                self.heap,
+                &inputs,
+                &[(output, RootValue::Value(&value))],
+            )?
+        } else {
+            ledger.release_cost(&inputs, self.heap.pages())?
+        };
         let event = interval
             .events()
             .next()
@@ -159,8 +172,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 LeafFacts {
                     dependencies: args
                         .iter()
-                        .chain(std::iter::once(&value))
-                        .filter_map(Value::handle)
+                        .copied()
+                        .chain(answer.map(|(value, _)| value))
+                        .filter_map(|value| value.handle())
                         .collect(),
                     values: [
                         (Measure::Release(event.inputs.clone()), i128::from(released)),
@@ -169,7 +183,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                                 at: at.site.clone(),
                                 function: function_id,
                             },
-                            0,
+                            i128::from(scratch),
                         ),
                     ]
                     .into(),
@@ -180,7 +194,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         );
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
-        encoding.text("lash.source.native-read");
+        encoding.text("lash.source.native");
         at.site.encode(&mut encoding);
         inputs.encode(&mut encoding);
         output.encode(&mut encoding);
@@ -214,39 +228,103 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let allowance = Allowance {
             occurrences: vec![],
             before: 0,
-            units: if self.accounting { units } else { 0 },
+            units: if self.accounting {
+                answer.map_or(0, |(_, units)| units)
+            } else {
+                0
+            },
             close: self.accounting.then_some(site.close).flatten(),
             strict: false,
             depth: 0,
             safe_point: self.charged,
         };
+        let scratch_events = if scratch == 0 {
+            vec![]
+        } else {
+            let Owner::Value {
+                task,
+                invocation,
+                slot: Slot::Operand(index),
+            } = output
+            else {
+                return Err(malformed("native output has no operand index"));
+            };
+            let owner = Owner::Value {
+                task,
+                invocation,
+                slot: Slot::Scratch(index),
+            };
+            vec![
+                ScratchEvent::Begin {
+                    owner,
+                    bytes: scratch,
+                },
+                ScratchEvent::End { owner },
+            ]
+        };
         let make = || {
             Program::new(vec![JournalEvent {
                 inputs: inputs.clone(),
-                outputs: vec![(output, PV::Native(value))],
+                outputs: answer
+                    .map(|(value, _)| (output, PV::Native(value)))
+                    .into_iter()
+                    .collect(),
+                scratch: scratch_events.clone(),
                 ..Default::default()
             }])
         };
         drop(ledger);
-        let published = self.publish_source(
-            frame.state.callee,
-            activation,
-            publication::Prefix {
-                interval,
-                facts,
-                start,
-                next,
-                allowance,
-            },
-            make,
-            |_, edits| debug_assert!(edits.is_empty()),
-        )?;
+        let prefix = publication::Prefix {
+            interval,
+            facts,
+            start,
+            next,
+            allowance,
+        };
+        let published = if text {
+            let room = self.memory.then(|| {
+                self.ceiling
+                    .saturating_sub(self.register_bytes)
+                    .saturating_sub(self.arena.held())
+                    .saturating_sub(self.transient)
+            });
+            let result = &mut frame.regs[site.reg as usize];
+            self.publish_source_prepared(
+                frame.state.callee,
+                activation,
+                prefix,
+                make,
+                text::TextNative {
+                    function,
+                    args: args.to_vec(),
+                    output,
+                    charging: self.charging,
+                    limits: self.limits,
+                    room,
+                },
+                |arena, edits, storage| {
+                    debug_assert!(edits.is_empty());
+                    storage.batch.publish(arena);
+                    *result = storage.value;
+                },
+            )?
+        } else {
+            self.publish_source(frame.state.callee, activation, prefix, make, |_, edits| {
+                debug_assert!(edits.is_empty())
+            })?
+        };
         #[cfg(any(test, feature = "testing"))]
         if published {
-            crate::machine::islands::witness::native_read_published();
+            if text {
+                crate::machine::islands::witness::native_text_published();
+            } else {
+                crate::machine::islands::witness::native_read_published();
+            }
         }
         Ok(if published {
-            ValuePublication::Published(value)
+            ValuePublication::Published(
+                answer.map_or(frame.regs[site.reg as usize], |(value, _)| value),
+            )
         } else {
             ValuePublication::Declined
         })

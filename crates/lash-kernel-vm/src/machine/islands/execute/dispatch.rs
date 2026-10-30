@@ -389,7 +389,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     reads.len()
                 };
                 match self
-                    .publish_native_read(frame, site, &values[..given])
+                    .publish_native_value(frame, site, &values[..given])
                     .map_err(|error| self.halt(error.into()))?
                 {
                     source::ValuePublication::Published(value) => {

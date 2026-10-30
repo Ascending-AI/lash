@@ -95,12 +95,24 @@ pub(crate) fn immediate_size(value: &Value) -> Option<u64> {
 /// 0 (`K-CHG-005`, `K-CHG-006`). `None` for a value the arena measures.
 #[inline(always)]
 pub(crate) fn immediate_measure(value: &Value, measure: Measure) -> Option<u64> {
-    let size = immediate_size(value)?;
-    Some(match measure {
+    Some(leaf_measure(
+        immediate_size(value)?,
+        word_magnitude(value),
+        measure,
+    ))
+}
+
+/// A detached native text has the same leaf measures as resident text.
+pub(crate) fn text_measure(text: &str, measure: Measure) -> u64 {
+    leaf_measure((text.len() as u64).saturating_add(1), 0, measure)
+}
+
+fn leaf_measure(size: u64, magnitude: u64, measure: Measure) -> u64 {
+    match measure {
         Measure::Size | Measure::DeepSize => size,
         Measure::NestedSize => 0,
-        Measure::Magnitude => word_magnitude(value),
-    })
+        Measure::Magnitude => magnitude,
+    }
 }
 
 /// `measure` of a construction of no members, of any kind: what
@@ -597,7 +609,9 @@ mod tests {
 
     use lash_kernel_state::arena::Bench;
 
-    use super::{deep_size, empty_measure, immediate_measure, magnitude, nested_size, size};
+    use super::{
+        deep_size, empty_measure, immediate_measure, magnitude, nested_size, size, text_measure,
+    };
 
     const MEASURES: [Measure; 4] = [
         Measure::Size,
@@ -654,11 +668,20 @@ mod tests {
             Datum::Text(String::new()),
             Datum::Text("fourteen bytes".into()),
             Datum::Text("fifteen bytes!!".into()),
+            Datum::Text("é🙂".into()),
+            Datum::Text("\0é🙂終 text that exceeds the inline representation".into()),
             Datum::Tuple(vec![Datum::Int(Integer::from(1))]),
             Datum::List(vec![Datum::Text("a".into())]),
         ] {
             let value = bench.build(&datum).unwrap();
             for measure in MEASURES {
+                if let Datum::Text(text) = &datum {
+                    assert_eq!(
+                        text_measure(text, measure),
+                        measured(&bench, &value, measure),
+                        "detached native text {datum:?} {measure:?}"
+                    );
+                }
                 if let Some(carried) = immediate_measure(&value, measure) {
                     assert_eq!(
                         carried,

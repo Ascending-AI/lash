@@ -7,14 +7,21 @@ use lash_kernel_state::{
     kernel_internals::logical::{MemberEdit, Program, VirtualBody},
 };
 
+pub(super) struct PreparedStorage<'a, S> {
+    pub(super) registration: Registration<'a>,
+    pub(super) storage: S,
+    pub(super) actual: Program,
+}
+
 pub(super) trait StoragePreparation {
     type Prepared;
     const MATERIALIZES: bool = false;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
-        actual: &Program,
-    ) -> Result<Option<(Registration<'a>, Self::Prepared)>, HeapFault>;
+        actual: Program,
+    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault>;
+    fn allowance(_: &Self::Prepared, _: &mut Allowance) {}
 }
 pub(super) struct Reserve<F>(pub(super) F);
 impl<F, S> StoragePreparation for Reserve<F>
@@ -25,13 +32,17 @@ where
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
-        _: &Program,
-    ) -> Result<Option<(Registration<'a>, S)>, HeapFault> {
+        actual: Program,
+    ) -> Result<Option<PreparedStorage<'a, S>>, HeapFault> {
         let Some(storage) = (self.0)(arena)? else {
             return Ok(None);
         };
         let registration = arena.registration().map_err(native_fault)?;
-        Ok(Some((registration, storage)))
+        Ok(Some(PreparedStorage {
+            registration,
+            storage,
+            actual,
+        }))
     }
 }
 pub(super) struct ListConstruction {
@@ -48,8 +59,8 @@ impl StoragePreparation for ListConstruction {
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
-        actual: &Program,
-    ) -> Result<Option<(Registration<'a>, Self::Prepared)>, HeapFault> {
+        actual: Program,
+    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
         let [event] = actual.events() else {
             return Ok(None);
         };
@@ -84,10 +95,11 @@ impl StoragePreparation for ListConstruction {
             )
             .map_err(native_fault)?;
         let (registration, batch) = installation.into_parts();
-        Ok(Some((
+        Ok(Some(PreparedStorage {
             registration,
-            PreparedListConstruction { batch, value },
-        )))
+            storage: PreparedListConstruction { batch, value },
+            actual,
+        }))
     }
 }
 pub(super) fn native_fault(error: doc::NativeError) -> HeapFault {
@@ -167,6 +179,17 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .frontier
             .as_mut()
             .ok_or_else(|| malformed("source frontier disappeared"))?;
+        // Detached bodies and bookkeeping are complete before acceptance.
+        // Their registration returns every reserved slot on any later miss.
+        let Some(PreparedStorage {
+            mut registration,
+            storage,
+            actual,
+        }) = prepare.prepare(self.arena, make())?
+        else {
+            return Ok(false);
+        };
+        S::allowance(&storage, &mut prefix.allowance);
         let safe_point = self.charged;
         let resources = SourceResources {
             charged: &mut self.charged,
@@ -184,9 +207,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             prefix.interval.clone(),
             &mut prefix.facts,
             &ledger,
-            self.arena,
+            registration.arena(),
             self.heap,
-            make(),
+            actual.clone(),
             prefix.next.clone(),
             prefix.allowance.clone(),
             resource_facts,
@@ -196,16 +219,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(accepted) = evaluated.admit_interval(
             frontier,
             &ledger,
-            self.arena,
+            registration.arena(),
             resources,
             &prefix.allowance,
             self.memory_bound,
         )?
         else {
-            return Ok(false);
-        };
-        let actual = make();
-        let Some((registration, storage)) = prepare.prepare(self.arena, &actual)? else {
             return Ok(false);
         };
         let prepared = match accepted.prepare_publication(
