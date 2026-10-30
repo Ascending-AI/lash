@@ -680,12 +680,13 @@ impl KernelProcessEngine {
                     ..
                 },
             ) => {
-                let replayed: Vec<lash_kernel_value::sites::WaitId> = park.cancel_requests.clone();
+                let replayed: Vec<lash_kernel_value::sites::WaitCancellation> =
+                    park.cancel_requests.clone();
                 let asked: Vec<(lash_kernel_value::sites::WaitId, Admission)> = park
                     .requests
                     .iter()
                     .map(admission_of)
-                    .filter(|(wait, _)| !replayed.contains(wait))
+                    .filter(|(wait, _)| !replayed.iter().any(|request| request.wait() == *wait))
                     .collect();
                 let recorded_asks: Vec<(lash_kernel_value::sites::WaitId, Admission)> = issued
                     .iter()

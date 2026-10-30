@@ -255,7 +255,7 @@ fn action_facts(action: &Action, own: &mut Own) {
         Action::Perform { slot, .. } => own.performs.push(format!("perform import {}", slot.0)),
         Action::Join { .. } | Action::JoinMany { .. } => own.tasks.push("join".into()),
         Action::Yield => own.tasks.push("yield".into()),
-        Action::Cancel { .. } => own.tasks.push("cancel".into()),
+        Action::Cancel { .. } | Action::CancelEffect { .. } => own.tasks.push("cancel".into()),
         Action::Await { policy, .. } => {
             target_facts(policy, own);
             own.tasks.push("await".into());
@@ -273,7 +273,7 @@ fn act_facts(kind: &ActKind, own: &mut Own) {
         ActKind::Perform { slot, .. } => own.performs.push(format!("perform import {}", slot.0)),
         ActKind::Join | ActKind::JoinMany(_) => own.tasks.push("join".into()),
         ActKind::Yield => own.tasks.push("yield".into()),
-        ActKind::Cancel => own.tasks.push("cancel".into()),
+        ActKind::Cancel | ActKind::CancelEffect => own.tasks.push("cancel".into()),
         ActKind::Await(policy) => {
             target_facts(policy, own);
             own.tasks.push("await".into());

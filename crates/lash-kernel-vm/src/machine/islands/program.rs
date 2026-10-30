@@ -1336,7 +1336,8 @@ impl<'e> Build<'e> {
                         Op::Join(pc)
                     }
                     crate::compile::NestedKind::Perform { .. } => Op::Wait(pc),
-                    crate::compile::NestedKind::Cancel => Op::Cancel(pc),
+                    crate::compile::NestedKind::Cancel
+                    | crate::compile::NestedKind::CancelEffect => Op::Cancel(pc),
                     _ => return None,
                 };
                 self.emit(op);
@@ -1365,7 +1366,9 @@ impl<'e> Build<'e> {
                 Op::Join(pc)
             }
             crate::compile::ActionKind::Perform { .. } => Op::Wait(pc),
-            crate::compile::ActionKind::Cancel(_) => Op::Cancel(pc),
+            crate::compile::ActionKind::Cancel(_) | crate::compile::ActionKind::CancelEffect(_) => {
+                Op::Cancel(pc)
+            }
             crate::compile::ActionKind::Call { .. } => return Some(None),
         }))
     }

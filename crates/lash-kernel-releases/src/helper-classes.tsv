@@ -318,6 +318,17 @@ py.unpack.star	operation
 py.value_attribute	total
 py.vars	total
 py.zip	operation
+ts.abort.abort	body
+ts.abort.aborted	total
+ts.abort.construct	total
+ts.abort.is_controller	total
+ts.abort.is_signal	total
+ts.abort.local_error	total
+ts.abort.normalize	total
+ts.abort.reason	total
+ts.abort.run	operation
+ts.abort.signal	total
+ts.abort.start	body
 ts.add	operation
 ts.arguments	total
 ts.array.argument	total
@@ -596,6 +607,8 @@ ts.math.sqrt	operation
 ts.math.tan	operation
 ts.math.tanh	operation
 ts.math.trunc	operation
+ts.member.AbortController	operation
+ts.member.AbortSignal	operation
 ts.member.AggregateError	body
 ts.member.Array	operation
 ts.member.BigInt	operation
@@ -639,6 +652,8 @@ ts.member.URIError	body
 ts.member.URL	operation
 ts.member.URLSearchParams	operation
 ts.member.UTC	operation
+ts.member.abort	body
+ts.member.aborted	operation
 ts.member.abs	operation
 ts.member.acos	operation
 ts.member.acosh	operation
@@ -798,6 +813,7 @@ ts.member.push	operation
 ts.member.race	body
 ts.member.random	body
 ts.member.raw	operation
+ts.member.reason	operation
 ts.member.reduce	operation
 ts.member.reduceRight	operation
 ts.member.reject	body
@@ -828,6 +844,7 @@ ts.member.setUTCMonth	operation
 ts.member.setUTCSeconds	operation
 ts.member.shift	operation
 ts.member.sign	operation
+ts.member.signal	operation
 ts.member.sin	operation
 ts.member.sinh	operation
 ts.member.size	operation
@@ -980,6 +997,7 @@ ts.promise.settled	body
 ts.promise.sleep	body
 ts.promise.start	body
 ts.promise.then	body
+ts.property.aborted	operation
 ts.property.dotAll	operation
 ts.property.flags	operation
 ts.property.global	operation
@@ -987,6 +1005,8 @@ ts.property.hasIndices	operation
 ts.property.ignoreCase	operation
 ts.property.length	operation
 ts.property.multiline	operation
+ts.property.reason	operation
+ts.property.signal	operation
 ts.property.size	operation
 ts.property.source	operation
 ts.property.sticky	operation

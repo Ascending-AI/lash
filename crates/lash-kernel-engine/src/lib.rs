@@ -411,10 +411,18 @@ impl Engine {
                     }
                     let mut cancel_requests = Vec::new();
                     pending.retain(|call| {
-                        if park.cancel_requests.contains(&call.id.wait) {
+                        if let Some(request) = park
+                            .cancel_requests
+                            .iter()
+                            .find(|request| request.wait() == call.id.wait)
+                        {
                             cancel_requests.push(call.id.clone());
-                            retired.insert(call.id.clone());
-                            false
+                            if request.retains_wait() {
+                                true
+                            } else {
+                                retired.insert(call.id.clone());
+                                false
+                            }
                         } else {
                             true
                         }

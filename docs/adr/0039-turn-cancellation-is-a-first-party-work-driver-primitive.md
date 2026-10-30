@@ -159,3 +159,5 @@ proves physical termination or rollback of external work.
 `mode` and `undelivered` apply only to run targets; a call target rejects those
 options. A call cancellation never closes its run or cell. Aggregate selection
 and handle loss still cancel nothing.
+
+TypeScript `tools.x(args, { signal })` binds a snapshot-backed signal to the direct call promise. `AbortController.abort()` submits the same typed per-call cancellation under the actor fence, preserving observation of a winning final. Guest state and target bindings commit before later effects. A cancelled promise raises `AbortError` with the typed cancellation; a pre-aborted signal admits no body. One signal may bind several calls. Aggregate selection and observer withdrawal still cancel nothing.

@@ -138,7 +138,9 @@ impl TokenCodec for Action {
                 args.encode(out);
                 result.encode(out);
             }
-            Self::Join { task: atom } | Self::Cancel { task: atom } => {
+            Self::Join { task: atom }
+            | Self::Cancel { task: atom }
+            | Self::CancelEffect { task: atom } => {
                 out.sum(number, 1);
                 atom.encode(out);
             }
@@ -160,7 +162,7 @@ impl TokenCodec for Action {
         let number = variant(input, |variant| match variant {
             0 | 4 | 6 | 10 => Some(2),
             1 | 8 => Some(3),
-            3 | 7 => Some(1),
+            3 | 7 | 11 => Some(1),
             5 => Some(0),
             _ => None,
         })?;
@@ -191,7 +193,10 @@ impl TokenCodec for Action {
                 callee: Callee::decode(input)?,
                 args: Vec::decode(input)?,
             },
-            _ => Self::Cancel {
+            7 => Self::Cancel {
+                task: Atom::decode(input)?,
+            },
+            _ => Self::CancelEffect {
                 task: Atom::decode(input)?,
             },
         })
@@ -293,7 +298,7 @@ impl TokenCodec for ActKind {
                 slot.encode(out);
                 result.encode(out);
             }
-            Self::Join | Self::Yield | Self::Cancel => out.sum(number, 0),
+            Self::Join | Self::Yield | Self::Cancel | Self::CancelEffect => out.sum(number, 0),
             Self::JoinMany(mode) => {
                 out.sum(number, 1);
                 mode.encode(out);
@@ -309,7 +314,7 @@ impl TokenCodec for ActKind {
         let number = variant(input, |variant| match variant {
             0 | 3 | 5 | 6 => Some(1),
             1 | 7 => Some(2),
-            4 | 9 | 10 => Some(0),
+            4 | 9 | 10 | 11 => Some(0),
             _ => None,
         })?;
         Ok(match number {
@@ -324,7 +329,8 @@ impl TokenCodec for ActKind {
             5 => Self::JoinMany(JoinMode::decode(input)?),
             6 => Self::Await(FunctionTarget::decode(input)?),
             9 => Self::Yield,
-            _ => Self::Cancel,
+            10 => Self::Cancel,
+            _ => Self::CancelEffect,
         })
     }
 }

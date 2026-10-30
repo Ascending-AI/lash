@@ -796,7 +796,7 @@ pub struct Park {
     /// Explicit requests to cancel the admitted call owned by each wait.
     /// The embedder must save these with the guest state before another
     /// slice runs, then arbitrate them against committed call finals.
-    pub cancel_requests: Vec<WaitId>,
+    pub cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation>,
     /// The tasks other than `main` that would make the run's end a
     /// `TasksOutstanding` error if it ended now (`K-TASK-018`): one that has
     /// not ended and was never a member of a list `join` that returned or

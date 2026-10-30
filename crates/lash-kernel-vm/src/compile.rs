@@ -1169,6 +1169,7 @@ pub(crate) enum ActionKind {
         args: Vec<Atom>,
     },
     Cancel(Atom),
+    CancelEffect(Atom),
 }
 
 impl ActionKind {

@@ -342,6 +342,9 @@ pub enum ActionNode {
     Cancel {
         task: AtomNode,
     },
+    CancelEffect {
+        task: AtomNode,
+    },
     /// Calls the await policy with the value (`K-TASK-026`).
     Await {
         policy: FunctionTarget,
@@ -406,6 +409,7 @@ pub enum ExprNode {
 pub enum ActNode {
     Yield,
     Cancel,
+    CancelEffect,
     Call(CalleeNode),
     Perform {
         slot: ImportSlot,

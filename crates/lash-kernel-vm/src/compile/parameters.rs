@@ -142,6 +142,7 @@ impl Capture<'_> {
                 }
                 Action::Join { task: value }
                 | Action::Cancel { task: value }
+                | Action::CancelEffect { task: value }
                 | Action::JoinMany { tasks: value, .. }
                 | Action::Await { value, .. } => self.atom(value),
                 Action::Yield => {}

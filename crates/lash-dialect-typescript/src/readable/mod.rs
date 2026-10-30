@@ -423,6 +423,7 @@ mod tests {
             "return await host.echo(value);",
             "const pending = host.echo(value); return await pending;",
             "return await host.echo({f: Math.abs});",
+            "const controller = new AbortController(); const pending = host.echo({f: Math.abs, value}, {signal: controller.signal}); controller.abort(); return await pending;",
         ] {
             let source = format!("export async function forward(value: any): any {{ {body} }}");
             let lowered =

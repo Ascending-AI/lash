@@ -189,6 +189,9 @@ pub enum Action {
     Spawn { callee: Callee, args: Vec<Atom> },
     /// Raises a cancellation in a task at its current wait.
     Cancel { task: Atom },
+    /// Request cancellation of a task's current effect, retaining its wait
+    /// until the embedder delivers the chosen final or cancellation.
+    CancelEffect { task: Atom },
     /// Awaits a value by its dialect's await policy: a library function
     /// that takes the value, waits as the dialect's `await` does, and
     /// yields what the `await` gives (`K-TASK-026`).
@@ -322,6 +325,8 @@ pub enum ActKind {
     Yield,
     /// Cancels the task handle that is its one argument.
     Cancel,
+    /// Requests cancellation of the current effect owned by a task handle.
+    CancelEffect,
     /// Awaits its one argument by the await policy (`K-TASK-026`).
     Await(FunctionTarget),
 }
@@ -362,6 +367,7 @@ impl ActExpr {
             ActKind::Yield if args.is_empty() => Action::Yield,
             ActKind::Yield => return None,
             ActKind::Cancel => Action::Cancel { task: one(args)? },
+            ActKind::CancelEffect => Action::CancelEffect { task: one(args)? },
             ActKind::Join => Action::Join { task: one(args)? },
             ActKind::JoinMany(mode) => Action::JoinMany {
                 mode: *mode,
@@ -883,6 +889,7 @@ impl From<Action> for Expr {
             Action::Await { policy, value } => (ActKind::Await(policy.clone()), vec![value]),
             Action::Yield => (ActKind::Yield, vec![]),
             Action::Cancel { task } => (ActKind::Cancel, vec![task]),
+            Action::CancelEffect { task } => (ActKind::CancelEffect, vec![task]),
         };
         Expr::Act(Box::new(ActExpr {
             kind,

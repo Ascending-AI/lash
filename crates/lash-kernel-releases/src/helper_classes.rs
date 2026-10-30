@@ -368,6 +368,7 @@ impl<'a> Graph<'a> {
                     | ActKind::Perform { .. }
                     | ActKind::Yield
                     | ActKind::Cancel
+                    | ActKind::CancelEffect
                     | ActKind::Join
                     | ActKind::JoinMany(_)
                     | ActKind::Spawn(_) => {
@@ -451,7 +452,8 @@ impl<'a> Graph<'a> {
             | Action::JoinMany { .. }
             | Action::Yield
             | Action::Spawn { .. }
-            | Action::Cancel { .. } => {
+            | Action::Cancel { .. }
+            | Action::CancelEffect { .. } => {
                 self.units[owner].class = Class::Body;
                 let result = self.slot();
                 self.values[result].unknown = true;

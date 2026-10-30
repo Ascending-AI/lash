@@ -397,7 +397,7 @@ impl KernelMachine {
             next_wait: root.meters.waits_issued,
             issued: None,
             next_join: root.meters.next_join,
-            withdrawn: queue::Queue::open(sequence(root.unreported), access),
+            cancellations: queue::Queue::open(sequence(root.unreported), access),
             withdrawn_ever: open_tree(root.withdrawn),
             modes: open_tree(root.reads),
             functions: root.functions,
@@ -493,7 +493,7 @@ impl KernelMachine {
                 .seal(&access, &mut work)
                 .map_err(SealError::Heap)?
             || !self
-                .withdrawn
+                .cancellations
                 .rows
                 .seal(&access, &mut work)
                 .map_err(SealError::Heap)?
@@ -562,7 +562,7 @@ impl KernelMachine {
             waits: keyed(&self.waits).map_err(SealError::Heap)?,
             joins: keyed(&self.joins).map_err(SealError::Heap)?,
             withdrawn: keyed(&self.withdrawn_ever).map_err(SealError::Heap)?,
-            unreported: sequence_root(&self.withdrawn.rows).map_err(SealError::Heap)?,
+            unreported: sequence_root(&self.cancellations.rows).map_err(SealError::Heap)?,
             reads: keyed(&self.modes).map_err(SealError::Heap)?,
             session: keyed(self.heap.session_root()).map_err(SealError::Heap)?,
             host: self.host.clone(),

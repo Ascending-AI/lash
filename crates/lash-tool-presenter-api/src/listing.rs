@@ -347,7 +347,7 @@ impl DefinitionPool {
 ///
 /// ```rust,ignore
 /// let doc = listing::code_mode_tool_doc(
-///     "tools.lookup({ query: string }): Promise<string>",
+///     "tools.lookup({ query: string }, options?: { signal?: AbortSignal }): Promise<string>",
 ///     tool.manifest,
 ///     &input_shape,
 ///     &output_shape,

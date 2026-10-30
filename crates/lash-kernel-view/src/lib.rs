@@ -1085,9 +1085,11 @@ impl<'a> Walk<'a> {
         };
         // The operand a builtin action names its one argument.
         let operand = match written {
-            Written::Statement(Action::Join { .. } | Action::Cancel { .. })
+            Written::Statement(
+                Action::Join { .. } | Action::Cancel { .. } | Action::CancelEffect { .. },
+            )
             | Written::Nested(ActExpr {
-                kind: ActKind::Join | ActKind::Cancel,
+                kind: ActKind::Join | ActKind::Cancel | ActKind::CancelEffect,
                 ..
             }) => Some("task"),
             Written::Statement(Action::JoinMany { .. })
@@ -1159,7 +1161,7 @@ impl<'a> Walk<'a> {
                 ActionNode::JoinMany { .. } => SiteKind::JoinMany,
                 ActionNode::Yield => SiteKind::Yield,
                 ActionNode::Spawn { .. } => SiteKind::Spawn,
-                ActionNode::Cancel { .. } => SiteKind::Cancel,
+                ActionNode::Cancel { .. } | ActionNode::CancelEffect { .. } => SiteKind::Cancel,
                 ActionNode::Await { .. } => SiteKind::Await,
             },
             Derived::Nested(kind, _) => match kind {
@@ -1167,7 +1169,7 @@ impl<'a> Walk<'a> {
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Spawn(_) => SiteKind::Spawn,
                 ActNode::Yield => SiteKind::Yield,
-                ActNode::Cancel => SiteKind::Cancel,
+                ActNode::Cancel | ActNode::CancelEffect => SiteKind::Cancel,
                 ActNode::Join => SiteKind::Join,
                 ActNode::JoinMany(_) => SiteKind::JoinMany,
                 ActNode::Await(_) => SiteKind::Await,
@@ -1448,6 +1450,7 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
                 | ActionNode::JoinMany { .. }
                 | ActionNode::Yield
                 | ActionNode::Cancel { .. }
+                | ActionNode::CancelEffect { .. }
                 | ActionNode::Await { .. } => None,
             };
             callee
@@ -1474,7 +1477,9 @@ fn atoms(action: &ActionNode) -> Vec<&AtomNode> {
         ActionNode::Call { args, .. }
         | ActionNode::Spawn { args, .. }
         | ActionNode::Perform { args, .. } => args.iter().collect(),
-        ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
+        ActionNode::Join { task }
+        | ActionNode::Cancel { task }
+        | ActionNode::CancelEffect { task } => vec![task],
         ActionNode::JoinMany { tasks, .. } => vec![tasks],
         ActionNode::Await { value, .. } => vec![value],
         ActionNode::Yield => vec![],
@@ -1486,7 +1491,9 @@ fn written_atoms(action: &Action) -> Vec<&Atom> {
         Action::Call { args, .. } | Action::Spawn { args, .. } | Action::Perform { args, .. } => {
             args.iter().collect()
         }
-        Action::Join { task } | Action::Cancel { task } => vec![task],
+        Action::Join { task } | Action::Cancel { task } | Action::CancelEffect { task } => {
+            vec![task]
+        }
         Action::JoinMany { tasks, .. } => vec![tasks],
         Action::Await { value, .. } => vec![value],
         Action::Yield => vec![],

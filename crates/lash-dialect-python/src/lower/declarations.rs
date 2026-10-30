@@ -21,7 +21,8 @@ impl Lowerer<'_> {
                 Action::Join { task: atom }
                 | Action::JoinMany { tasks: atom, .. }
                 | Action::Await { value: atom, .. }
-                | Action::Cancel { task: atom } => (None, std::slice::from_ref(atom)),
+                | Action::Cancel { task: atom }
+                | Action::CancelEffect { task: atom } => (None, std::slice::from_ref(atom)),
                 Action::Yield => (None, &[]),
             };
             matches!(callee, Some(Callee::Value(read)) if read == name)

@@ -63,7 +63,9 @@ pub fn binding_references(kind: &NodeKind) -> Vec<&Reference> {
                     args.iter().collect()
                 }
                 ActionNode::Perform { args, .. } => args.iter().collect(),
-                ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
+                ActionNode::Join { task }
+                | ActionNode::Cancel { task }
+                | ActionNode::CancelEffect { task } => vec![task],
                 ActionNode::JoinMany { tasks, .. } => vec![tasks],
                 ActionNode::Await { value, .. } => vec![value],
                 ActionNode::Yield => vec![],
@@ -107,7 +109,9 @@ fn written_references(node: NodeMut<'_>) -> Vec<&mut Name> {
                     args.iter_mut().collect()
                 }
                 Action::Perform { args, .. } => args.iter_mut().collect(),
-                Action::Join { task } | Action::Cancel { task } => vec![task],
+                Action::Join { task } | Action::Cancel { task } | Action::CancelEffect { task } => {
+                    vec![task]
+                }
                 Action::JoinMany { tasks, .. } => vec![tasks],
                 Action::Await { value, .. } => vec![value],
                 Action::Yield => vec![],

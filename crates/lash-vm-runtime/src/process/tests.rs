@@ -67,6 +67,19 @@ fn parked(
     issued: Vec<Issued>,
     cancel_requests: Vec<lash_kernel_value::sites::WaitId>,
 ) -> SettledOutput {
+    parked_with_cancellations(
+        issued,
+        cancel_requests
+            .into_iter()
+            .map(lash_kernel_value::sites::WaitCancellation::Withdraw)
+            .collect(),
+    )
+}
+
+fn parked_with_cancellations(
+    issued: Vec<Issued>,
+    cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation>,
+) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             read_facts: Vec::new(),
@@ -238,98 +251,134 @@ fn a_state_missing_the_origin_of_its_page_admission_or_outcome_is_refused() {
 /// still holds, and no other: the state holds a wait as its identity alone.
 #[test]
 fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order() {
-    let (state, run0) = started();
-    let (state, action) = settle(
-        state,
-        &run0,
-        parked(vec![effect(10, element(0)), effect(11, element(1))], vec![]),
-    );
-    let EngineAction::Steps { steps, wake: None } = &action else {
-        panic!("a park on two effects asks for two steps, found {action:?}");
-    };
-    let sites: Vec<_> = steps
-        .iter()
-        .map(|step| {
-            step.site()
-                .expect("an effect step names its identity")
-                .clone()
-        })
-        .collect();
-    assert_eq!(sites, vec![element(0), element(1)]);
-    assert_ne!(sites[0].task(), sites[1].task());
-    let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
-
-    // The second element settles first: the machine runs with it alone.
-    let (state, action) = settle(state, &second, completed("\"b\"".to_owned()));
-    let (run1, input, effects) = run_of(&action);
-    assert!(effects.is_empty());
-    assert_eq!(
-        input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_value::sites::testkit::wait_id(11)]
-    );
-    assert!(input.parked.is_some());
-    let held = |input: &KernelRunInput| {
-        input
-            .admissions
-            .values()
-            .map(|held| (held.admission.identity().clone(), held.by))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        held(&input),
-        vec![(element(0), 0), (element(1), 0)],
-        "each admission names the run that issued it"
-    );
-
-    // The first settles while that run is in flight: nothing new is asked.
-    let (state, action) = settle(state, &first, completed("\"a\"".to_owned()));
-    assert_eq!(action, EngineAction::Idle);
-
-    // The run parks having asked for nothing: the queued outcome runs it
-    // again, and it is the only one delivered.
-    let (state, action) = settle(state, &run1, parked(vec![], vec![]));
-    let (run2, input, _) = run_of(&action);
-    assert_eq!(
-        input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_value::sites::testkit::wait_id(10)]
-    );
-    assert_eq!(
-        held(&input),
-        vec![(element(0), 0)],
-        "a consumed wait's admission goes"
-    );
-    assert_eq!(
-        input.deliver[0].outcome,
-        OutcomeWire::Completed(lash_kernel_doc::Datum::Text("a".to_owned()))
-    );
-
-    let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
-        lash_core::ToolCallOutput::success(serde_json::json!(["a", "b"])),
-    );
-    let (state, action) = settle(
-        state,
-        &run2,
-        completed(
-            serde_json::to_string(&KernelRunOutput::Ended {
-                read_facts: Vec::new(),
-                outcome: Box::new(outcome.clone()),
-                ran: Default::default(),
-                caught: Vec::new(),
-                reads: None,
-                start: None,
+    for observes_cancel in [false, true] {
+        let (state, run0) = started();
+        let (state, action) = settle(
+            state,
+            &run0,
+            parked(vec![effect(10, element(0)), effect(11, element(1))], vec![]),
+        );
+        let EngineAction::Steps { steps, wake: None } = &action else {
+            panic!("a park on two effects asks for two steps, found {action:?}");
+        };
+        let sites: Vec<_> = steps
+            .iter()
+            .map(|step| {
+                step.site()
+                    .expect("an effect step names its identity")
+                    .clone()
             })
-            .expect("a run output serializes"),
-        ),
-    );
-    assert_eq!(action, EngineAction::Terminal(outcome));
-    assert_eq!(state.pages, None);
-    assert_eq!(
-        decode(KernelVersion::NEWEST, &state)
-            .expect("the state decodes")
-            .0
-            .phase,
-        Phase::Ended
-    );
+            .collect();
+        assert_eq!(sites, vec![element(0), element(1)]);
+        assert_ne!(sites[0].task(), sites[1].task());
+        let (first, second) = (steps[0].step().clone(), steps[1].step().clone());
+
+        // The second element settles first: the machine runs with it alone.
+        let (state, action) = settle(state, &second, completed("\"b\"".to_owned()));
+        let (run1, input, effects) = run_of(&action);
+        assert!(effects.is_empty());
+        assert_eq!(
+            input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
+            vec![lash_kernel_value::sites::testkit::wait_id(11)]
+        );
+        assert!(input.parked.is_some());
+        let held = |input: &KernelRunInput| {
+            input
+                .admissions
+                .values()
+                .map(|held| (held.admission.identity().clone(), held.by))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            held(&input),
+            vec![(element(0), 0), (element(1), 0)],
+            "each admission names the run that issued it"
+        );
+
+        // Signal cancellation retains the owned wait. A final that won still
+        // reaches the machine once, through the same admission and wait identity.
+        let (state, run1) = if observes_cancel {
+            let (state, action) = settle(
+                state,
+                &run1,
+                parked_with_cancellations(
+                    vec![],
+                    vec![lash_kernel_value::sites::WaitCancellation::Observe(
+                        lash_kernel_value::sites::testkit::wait_id(10),
+                    )],
+                ),
+            );
+            let EngineAction::CancelCalls {
+                steps,
+                cancellation,
+                next,
+            } = action
+            else {
+                panic!("an observed cancel requests its owned call: {action:?}");
+            };
+            assert_eq!(steps, vec![first.clone()]);
+            assert_eq!(
+                cancellation.origin,
+                Some(lash_protocol_types::CancelOrigin::ModelRequested)
+            );
+            let (running, input, effects) = run_of(&next);
+            assert!(input.deliver.is_empty());
+            assert!(effects.is_empty());
+            (state, running)
+        } else {
+            (state, run1)
+        };
+
+        // The first settles while that run is in flight: nothing new is asked.
+        let (state, action) = settle(state, &first, completed("\"a\"".to_owned()));
+        assert_eq!(action, EngineAction::Idle);
+
+        // The run parks having asked for nothing: the queued outcome runs it
+        // again, and it is the only one delivered.
+        let (state, action) = settle(state, &run1, parked(vec![], vec![]));
+        let (run2, input, _) = run_of(&action);
+        assert_eq!(
+            input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
+            vec![lash_kernel_value::sites::testkit::wait_id(10)]
+        );
+        assert_eq!(
+            held(&input),
+            vec![(element(0), 0)],
+            "a consumed wait's admission goes"
+        );
+        assert_eq!(
+            input.deliver[0].outcome,
+            OutcomeWire::Completed(lash_kernel_doc::Datum::Text("a".to_owned()))
+        );
+
+        let outcome = lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::json!(["a", "b"])),
+        );
+        let (state, action) = settle(
+            state,
+            &run2,
+            completed(
+                serde_json::to_string(&KernelRunOutput::Ended {
+                    read_facts: Vec::new(),
+                    outcome: Box::new(outcome.clone()),
+                    ran: Default::default(),
+                    caught: Vec::new(),
+                    reads: None,
+                    start: None,
+                })
+                .expect("a run output serializes"),
+            ),
+        );
+        assert_eq!(action, EngineAction::Terminal(outcome));
+        assert_eq!(state.pages, None);
+        assert_eq!(
+            decode(KernelVersion::NEWEST, &state)
+                .expect("the state decodes")
+                .0
+                .phase,
+            Phase::Ended
+        );
+    }
 }
 
 /// An effect the boundary refuses and a cancel_requests wait dispatch nothing:

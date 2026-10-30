@@ -205,3 +205,5 @@ expansion limits. Unknown or unrepresentable annotations retain typed refusals.
 Lexical and session bindings may shadow builtin names. Session shadows persist
 across cells; builtin fast paths apply only to names without a binding.
 Only offered control capabilities end a turn, never a user binding by spelling.
+
+Tool calls accept runtime cancellation metadata as a second argument, for example `tools.search(args, { signal: controller.signal })` with `const controller = new AbortController()`. Signals and their call bindings survive snapshots. `controller.abort()` requests cancellation of those calls before later guest effects. A pre-aborted signal admits no body. A winning final resolves normally; cancellation rejects with `AbortError` and retains `ToolCancellation` in `error.data`. One signal may bind several calls. `Promise.race`, `Promise.any` and `Promise.all` do not cancel calls.

@@ -173,7 +173,8 @@ impl CodeReads {
             Action::Await { value: atom, .. }
             | Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
-            | Action::Cancel { task: atom } => self.atom(atom, bound),
+            | Action::Cancel { task: atom }
+            | Action::CancelEffect { task: atom } => self.atom(atom, bound),
             Action::Yield => {}
         }
     }
@@ -269,7 +270,8 @@ impl CodeReads {
                     | ActKind::Join
                     | ActKind::JoinMany(_)
                     | ActKind::Yield
-                    | ActKind::Cancel => {}
+                    | ActKind::Cancel
+                    | ActKind::CancelEffect => {}
                 }
                 act.args
                     .iter()

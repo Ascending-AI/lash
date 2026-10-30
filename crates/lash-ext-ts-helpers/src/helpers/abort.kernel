@@ -1,0 +1,156 @@
+# Snapshot-backed signals bind only the task that owns a direct tool promise.
+use brand.built
+use kind
+use same
+use bool.not
+use error.new
+use list.len
+use list.copy
+use num.add
+use ts.get
+use ts.pad
+use ts.abort.is_signal
+use ts.abort.is_controller
+use ts.abort.local_error
+use ts.abort.normalize
+use ts.abort.run
+use ts.promise.pending
+use ts.promise.start
+use ts.promise.run
+
+function ts.abort.is_controller(value: Any) -> Bool
+kernel 1
+charge 6
+body {
+  if same(kind(value), "record") { return same(value.__lash_brand, ("typescript", "abort_controller")) }
+  return false
+}
+
+function ts.abort.is_signal(value: Any) -> Bool
+kernel 1
+charge 6
+body {
+  if same(kind(value), "record") { return same(value.__lash_brand, ("typescript", "abort_signal")) }
+  return false
+}
+
+function ts.abort.local_error() -> Any
+kernel 1
+charge 8
+body {
+  return error.new("AbortError", "The operation was aborted", {message: "The operation was aborted", source: "cancellation", origin: "model_requested"})
+}
+
+function ts.abort.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 12
+body {
+  let built = brand.built()
+  let signal = {__lash_brand: ("typescript", "abort_signal"), __lash_built: built, aborted: false, reason: absent, bindings: []}
+  return {__lash_brand: ("typescript", "abort_controller"), __lash_built: built, signal: signal}
+}
+
+function ts.abort.signal(this: Any) -> Any
+kernel 1
+charge 4
+body {
+  let valid = invoke ts.abort.is_controller(this)
+  if bool.not(valid) { throw error.new("type_error", "AbortController receiver required", null) }
+  return this.signal
+}
+
+function ts.abort.aborted(this: Any) -> Any
+kernel 1
+charge 4
+body {
+  let valid = invoke ts.abort.is_signal(this)
+  if bool.not(valid) { throw error.new("type_error", "AbortSignal receiver required", null) }
+  return this.aborted
+}
+
+function ts.abort.reason(this: Any) -> Any
+kernel 1
+charge 4
+body {
+  let valid = invoke ts.abort.is_signal(this)
+  if bool.not(valid) { throw error.new("type_error", "AbortSignal receiver required", null) }
+  return this.reason
+}
+
+function ts.abort.abort(this: Any, args: List(Any)) -> Any
+kernel 1
+charge sum(12, size(args))
+body {
+  let valid = invoke ts.abort.is_controller(this)
+  if bool.not(valid) { throw error.new("type_error", "AbortController receiver required", null) }
+  let signal = this.signal
+  if signal.aborted { return absent }
+  let args = invoke ts.pad(args, 1)
+  let reason = args[0]
+  if same(kind(reason), "absent") { set reason = invoke ts.abort.local_error() }
+  set signal.aborted = true
+  set signal.reason = reason
+  let bindings = list.copy(signal.bindings)
+  for binding in bindings metered 4 {
+    if binding.live { let target = binding.task do cancel_effect target }
+  }
+  return absent
+}
+
+# Normalize only typed effect cancellation, never a successful final winner.
+function ts.abort.normalize(reason: Any) -> Any
+kernel 1
+charge 8
+body {
+  if same(kind(reason), "error") {
+    if same(reason.kind, "effect_cancelled") { return error.new("AbortError", reason.message, reason.data) }
+    if same(reason.kind, "cancelled") { let error = invoke ts.abort.local_error() return error }
+  }
+  return reason
+}
+
+function ts.abort.run(signal: Any, binding: Any, work: Any, args: Any) -> Any
+kernel 1
+charge 12
+body {
+  try {
+    if signal.aborted { let error = invoke ts.abort.local_error() throw error }
+    let value = apply work(absent, args)
+    return value
+  } catch reason {
+    let error = invoke ts.abort.normalize(reason)
+    throw error
+  } finally {
+    set binding.live = false
+    let index = 0
+    for member in signal.bindings metered 3 {
+      if same(member, binding) { remove signal.bindings[index] break }
+      set index = num.add(index, 1)
+    }
+  }
+}
+
+# Options never cross the tool argument boundary. Binding happens before the
+# child starts and survives every checkpoint until the result is observed.
+function ts.abort.start(work: Any, args: Any, options: Any) -> Any
+kernel 1
+charge 16
+body {
+  let signal = absent
+  if same(kind(options), "absent") {} else {
+    if same(options, null) {} else {
+      if same(kind(options), "record") {} else { throw error.new("type_error", "tool options must be an object", null) }
+      set signal = invoke ts.get(options, "signal")
+    }
+  }
+  if same(kind(signal), "absent") { let promise = invoke ts.promise.start(work, absent, args) return promise }
+  let valid = invoke ts.abort.is_signal(signal)
+  if bool.not(valid) { throw error.new("type_error", "options.signal must be an AbortSignal", null) }
+  let binding = {task: absent, live: true}
+  set signal.bindings[list.len(signal.bindings)] = binding
+  let wrapped = fn(this, supplied) { let value = invoke ts.abort.run(signal, binding, work, supplied) return value }
+  let promise = invoke ts.promise.pending()
+  set promise.task = spawn invoke ts.promise.run(promise, wrapped, absent, args)
+  set binding.task = promise.task
+  return promise
+}

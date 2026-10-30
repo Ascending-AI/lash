@@ -414,7 +414,7 @@ pub(crate) enum KernelRunOutput {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        cancel_requests: Vec<lash_kernel_value::sites::WaitId>,
+        cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).
         #[serde(

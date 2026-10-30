@@ -314,7 +314,9 @@ pub(super) fn rename(node: k::NodeMut<'_>, names: &BTreeMap<Name, Name>) {
                 }
             }
             k::Action::Await { value, .. } => atom(value, names),
-            k::Action::Join { task } | k::Action::Cancel { task } => atom(task, names),
+            k::Action::Join { task }
+            | k::Action::Cancel { task }
+            | k::Action::CancelEffect { task } => atom(task, names),
             k::Action::JoinMany { tasks, .. } => atom(tasks, names),
             k::Action::Yield => {}
         },

@@ -456,6 +456,7 @@ impl Admission {
 pub enum MemberStatus {
     Pending,
     Cancelling,
+    CancellingObserved,
 }
 
 /// One effect the membership names.
@@ -494,6 +495,7 @@ impl TokenCodec for EffectMembership {
                 match entry.status {
                     MemberStatus::Pending => 0,
                     MemberStatus::Cancelling => 1,
+                    MemberStatus::CancellingObserved => 2,
                 },
                 0,
             );
@@ -519,6 +521,7 @@ impl TokenCodec for EffectMembership {
             let status = match variant {
                 0 => MemberStatus::Pending,
                 1 => MemberStatus::Cancelling,
+                2 => MemberStatus::CancellingObserved,
                 other => return Err(unsupported(other)),
             };
             entries.push(MemberEntry {
@@ -604,7 +607,7 @@ impl EffectMembership {
                 || admission.admission.effect != entry.effect
                 || admission.admission.wait != entry.wait
                 || !issued
-                || (entry.status == MemberStatus::Pending && !waits.insert(entry.wait))
+                || (entry.status != MemberStatus::Cancelling && !waits.insert(entry.wait))
             {
                 return Err(mismatch());
             }
@@ -815,10 +818,14 @@ impl AdmissionBook {
                 effect: effect.clone(),
                 wait: pending.wait,
                 admission: *node,
-                status: MemberStatus::Pending,
+                status: if pending.cancellation_requested {
+                    MemberStatus::CancellingObserved
+                } else {
+                    MemberStatus::Pending
+                },
             });
         }
-        for cancelled in ledger.cancelling() {
+        for cancelled in ledger.detached_cancellations() {
             let (effect, Admitted { node, admission, .. }) = self
                 .admitted
                 .iter()

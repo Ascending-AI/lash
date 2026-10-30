@@ -141,6 +141,7 @@ impl CodecVariant for Action {
             Self::Yield => 5,
             Self::Spawn { .. } => 6,
             Self::Cancel { .. } => 7,
+            Self::CancelEffect { .. } => 11,
             Self::Perform {
                 then_yield: true, ..
             } => 8,
@@ -236,6 +237,7 @@ impl CodecVariant for ActKind {
             } => 7,
             Self::Yield => 9,
             Self::Cancel => 10,
+            Self::CancelEffect => 11,
         }
     }
 }

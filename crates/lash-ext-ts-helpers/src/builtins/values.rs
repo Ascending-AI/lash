@@ -26,6 +26,8 @@ pub(super) const ERROR_CLASSES: &[&str] = &[
 /// The class whose instances a value of each `ts.receiver` kind are, for
 /// `value.constructor`.
 pub(super) const CONSTRUCTORS: &[(&str, &str)] = &[
+    ("brand:typescript.abort_controller", "AbortController"),
+    ("brand:typescript.abort_signal", "AbortSignal"),
     ("list", "Array"),
     ("brand:typescript.regex_match", "Array"),
     ("brand:typescript.template", "Array"),

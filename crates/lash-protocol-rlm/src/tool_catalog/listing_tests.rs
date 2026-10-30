@@ -110,16 +110,16 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
     insta::assert_snapshot!(rendered, @r"
     ### Tools
 
-    `tools.search({ query: string }): Promise<string>`
+    `tools.search({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`
     The tools search operation.
 
-    `big.a({ query: string }): Promise<string>`
+    `big.a({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`
     The big a operation.
 
-    `big.b({ query: string }): Promise<string>`
+    `big.b({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`
     The big b operation.
 
-    `small.only({ query: string }): Promise<string>`
+    `small.only({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`
     The small only operation.
 
     Catalogue: PARTIAL. 4 of 6 tools are listed above; find the other 2 with `await tools.search({ ... })`.
@@ -164,7 +164,7 @@ fn a_catalogue_that_fits_its_budget_is_labelled_complete() {
     );
     let rendered = declarations(&members, Some(&discovery(usize::MAX)));
     assert!(
-        rendered.ends_with("files.grep({ query: string }): Promise<string>`\nThe files grep operation.\n\nCatalogue: COMPLETE. All 2 tools are listed above."),
+        rendered.ends_with("files.grep({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`\nThe files grep operation.\n\nCatalogue: COMPLETE. All 2 tools are listed above."),
         "{rendered}"
     );
 }
@@ -201,7 +201,7 @@ fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
     assert!(new.starts_with(&old), "{old}\n---\n{new}");
     assert!(
         new.ends_with(
-            "`alpha.fetch({ query: string }): Promise<string>`\nThe alpha fetch operation."
+            "`alpha.fetch({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`\nThe alpha fetch operation."
         ),
         "{new}"
     );

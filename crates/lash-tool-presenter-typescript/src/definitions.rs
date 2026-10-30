@@ -52,7 +52,15 @@ impl TypescriptDefinitions {
     /// ```
     pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         let mut names = ReadableNameAllocator::new(reserved_words().iter().copied());
-        for name in ["Array", "Record", "Promise", "Process", "TypeSpec"] {
+        for name in [
+            "Array",
+            "Record",
+            "Promise",
+            "AbortController",
+            "AbortSignal",
+            "Process",
+            "TypeSpec",
+        ] {
             names.reserve(name);
         }
         for name in reserved {

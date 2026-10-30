@@ -808,7 +808,9 @@ fn atoms(action: &doc::Action) -> &[doc::Atom] {
         doc::Action::Call { args, .. }
         | doc::Action::Spawn { args, .. }
         | doc::Action::Perform { args, .. } => args,
-        doc::Action::Join { task } | doc::Action::Cancel { task } => std::slice::from_ref(task),
+        doc::Action::Join { task }
+        | doc::Action::Cancel { task }
+        | doc::Action::CancelEffect { task } => std::slice::from_ref(task),
         doc::Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
         doc::Action::Await { value, .. } => std::slice::from_ref(value),
         doc::Action::Yield => &[],

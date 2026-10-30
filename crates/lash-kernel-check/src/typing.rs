@@ -360,7 +360,7 @@ impl Typer<'_> {
                     ActNode::Await(policy) => {
                         self.nested_call(&target_callee(&policy), &args, &found)
                     }
-                    ActNode::Yield | ActNode::Cancel => Type::Null,
+                    ActNode::Yield | ActNode::Cancel | ActNode::CancelEffect => Type::Null,
                 }
             }
         }
@@ -482,7 +482,7 @@ impl Typer<'_> {
             ActionNode::Await { policy, value } => {
                 self.call(id, &target_callee(policy), std::slice::from_ref(value))
             }
-            ActionNode::Cancel { .. } => Type::Null,
+            ActionNode::Cancel { .. } | ActionNode::CancelEffect { .. } => Type::Null,
             ActionNode::Yield => Type::Any,
         }
     }

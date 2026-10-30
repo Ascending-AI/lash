@@ -57,6 +57,8 @@ pub struct PendingEffect {
     /// The effect performed; none for a sleep.
     pub effect: Option<OperationUse>,
     pub standing: Standing,
+    /// A request still owed arbitration, with observation retained.
+    pub cancellation_requested: bool,
 }
 
 impl PendingEffect {
@@ -249,18 +251,24 @@ impl EffectLedger {
         self.pending.remove(identity)
     }
 
-    /// The owning task explicitly cancelled this admitted call. Keep the
-    /// identity until its durable cancellation has been discharged.
-    pub fn cancel_call(&mut self, wait: WaitId) -> bool {
+    /// Request cancellation of the execution this wait admitted. An observing
+    /// request retains the wait so a winning final is still delivered normally.
+    pub fn cancel_wait(&mut self, request: lash_kernel_value::sites::WaitCancellation) -> bool {
         let Some(identity) = self
             .pending
             .iter()
-            .find(|(_, entry)| entry.wait == wait)
+            .find(|(_, entry)| entry.wait == request.wait())
             .map(|(identity, _)| identity.clone())
         else {
             return false;
         };
-        if let Some(PendingEffect {
+        if request.retains_wait() {
+            if let Some(entry) = self.pending.get_mut(&identity)
+                && matches!(entry.standing, Standing::Admitted(_))
+            {
+                entry.cancellation_requested = true;
+            }
+        } else if let Some(PendingEffect {
             standing: Standing::Admitted(admitted),
             ..
         }) = self.pending.remove(&identity)
@@ -270,8 +278,27 @@ impl EffectLedger {
         true
     }
 
-    pub fn cancelling(&self) -> &[AdmittedEffect] {
-        &self.cancelling
+    pub fn has_cancellations(&self) -> bool {
+        !self.cancelling.is_empty()
+            || self
+                .pending
+                .values()
+                .any(|entry| entry.cancellation_requested)
+    }
+
+    pub fn cancelling(&self) -> impl Iterator<Item = &AdmittedEffect> {
+        self.cancelling
+            .iter()
+            .chain(self.pending.values().filter_map(|entry| {
+                match (&entry.standing, entry.cancellation_requested) {
+                    (Standing::Admitted(admitted), true) => Some(admitted),
+                    _ => None,
+                }
+            }))
+    }
+
+    pub(crate) fn detached_cancellations(&self) -> impl Iterator<Item = &AdmittedEffect> {
+        self.cancelling.iter()
     }
 
     /// The run ended and every execution it admitted has settled: the
@@ -285,5 +312,13 @@ impl EffectLedger {
     /// committed, and nothing waits for it.
     pub(crate) fn drop_cancelling(&mut self, mut settled: impl FnMut(&AdmittedEffect) -> bool) {
         self.cancelling.retain(|admitted| !settled(admitted));
+        for entry in self.pending.values_mut() {
+            if entry.cancellation_requested
+                && let Standing::Admitted(admitted) = &entry.standing
+                && settled(admitted)
+            {
+                entry.cancellation_requested = false;
+            }
+        }
     }
 }

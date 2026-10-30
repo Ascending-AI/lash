@@ -1099,6 +1099,44 @@ impl KernelMachine {
         Ok(())
     }
 
+    /// Requests cancellation of this task's effect without ending its wait.
+    /// A committed final remains observable; the embedder arbitrates at the
+    /// mandatory quiet point before another guest operation runs.
+    pub(in crate::machine) fn cancel_effect(&mut self, target: TaskId) -> Result<(), Halt> {
+        use lash_kernel_value::sites::WaitCancellation;
+        let Some(Wait::Request(wait)) = self.task(target)?.wait() else {
+            return Ok(());
+        };
+        let key = ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait));
+        let Some(pending) = self.waits.get(&key, self.heap.pages())? else {
+            return Ok(());
+        };
+        match pending.phase {
+            WaitPhase::Committed(_) => return Ok(()),
+            WaitPhase::Issued { .. } => {
+                // No embedder has admitted it. Refuse the local request and
+                // keep the same checkpoint-before-cleanup rule.
+                self.waits.remove(&key, self.heap.pages())?;
+                self.uncount_issued()?;
+                self.withdrawn_ever.write(
+                    key,
+                    lash_kernel_doc::kernel_internals::wait_number(wait),
+                    self.heap.pages(),
+                )?;
+                let incoming = Incoming::Raise(cancelled());
+                self.logical_incoming(target, &incoming)?;
+                let exe = Arc::clone(&self.exe);
+                let requeue = then_yields(&exe, self.frame(target)?);
+                self.task(target)?.wake(incoming, requeue);
+                self.ready.push_back(target)?;
+            }
+            WaitPhase::Admitted => {}
+        }
+        self.cancellations
+            .push_back(WaitCancellation::Observe(wait))?;
+        Ok(())
+    }
+
     /// `cancel`: raises `cancelled` in a task at its wait (`K-TASK-017`).
     pub(in crate::machine) fn cancel(&mut self, target: TaskId) -> Result<(), Halt> {
         if matches!(self.task(target)?.state, TaskState::Ended(_)) {
@@ -1129,8 +1167,9 @@ impl KernelMachine {
                         self.uncount_issued()?;
                     }
                     Some(_) => {
-                        self.withdrawn
-                            .push_back(lash_kernel_doc::kernel_internals::wait_number(wait))?;
+                        self.cancellations.push_back(
+                            lash_kernel_value::sites::WaitCancellation::Withdraw(wait),
+                        )?;
                         self.withdrawn_ever.write(
                             ordinal_key(lash_kernel_doc::kernel_internals::wait_number(wait)),
                             lash_kernel_doc::kernel_internals::wait_number(wait),

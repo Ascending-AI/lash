@@ -1,5 +1,7 @@
 //! Built-in rows shared by the package builder and the build-time index generator.
 
+#[path = "abort.rs"]
+mod abort;
 #[path = "array.rs"]
 mod array;
 #[path = "bigint.rs"]
@@ -152,6 +154,7 @@ pub fn objects() -> Vec<Object> {
         json::object(),
         array::object(),
         promise::object(),
+        abort::object(),
         string::object(),
         regexp::object(),
         uri::object(),

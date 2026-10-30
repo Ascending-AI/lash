@@ -296,7 +296,7 @@ export type Site = {
  * An action form, as a refusal names one the body of a function with a
  * native implementation may not run (`K-LIB-004`).
  */
-export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "await");
+export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "cancel_effect" | "await");
 
 /**
  * The code a node belongs to.

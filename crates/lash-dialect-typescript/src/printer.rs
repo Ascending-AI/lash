@@ -18,6 +18,8 @@ pub(crate) fn legal_identifier(name: &str) -> bool {
                 | "cancel"
                 | "yieldTask"
                 | "Promise"
+                | "AbortController"
+                | "AbortSignal"
                 | "console"
                 | "Math"
                 | "Date"

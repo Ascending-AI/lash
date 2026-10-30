@@ -61,7 +61,7 @@ export type ActKind = ({
   "spawn": Callee;
 } | "join" | {
   "join_many": JoinMode;
-} | "yield" | "cancel" | {
+} | "yield" | "cancel" | "cancel_effect" | {
   "await": FunctionTarget;
 });
 
@@ -102,6 +102,10 @@ export type Action = ({
   };
 } | {
   "cancel": {
+    "task": Atom;
+  };
+} | {
+  "cancel_effect": {
     "task": Atom;
   };
 } | {

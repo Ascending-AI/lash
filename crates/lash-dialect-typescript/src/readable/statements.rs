@@ -621,6 +621,10 @@ pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
             kind: k::ActKind::Cancel,
             args: vec![expr_of(task)],
         },
+        k::Action::CancelEffect { task } => k::ActExpr {
+            kind: k::ActKind::CancelEffect,
+            args: vec![expr_of(task)],
+        },
         k::Action::Await { policy, value } => k::ActExpr {
             kind: k::ActKind::Await(policy.clone()),
             args: vec![expr_of(value)],

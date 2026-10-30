@@ -400,8 +400,8 @@ pub struct KernelMachine {
     /// The effects and sleeps requested since the last park, in request
     /// order.
     // Issued requests are retained in waits until reporting.
-    /// The waits withdrawn since the last park, and every one ever.
-    withdrawn: queue::Queue<u64>,
+    /// Unreported cancellation intent, and every wait withdrawn forever.
+    cancellations: queue::Queue<lash_kernel_value::sites::WaitCancellation>,
     withdrawn_ever: Tree<u64>,
     /// The mode each effect is performed in, bound at the start and saved
     /// with the run (`K-EFF-012`).
@@ -1151,7 +1151,7 @@ impl KernelMachine {
         if host.cancel_requested() {
             return Ok(self.finish_with(End::Cancelled));
         }
-        if self.waits.is_empty() && self.withdrawn.is_empty() {
+        if self.waits.is_empty() && self.cancellations.is_empty() {
             let mut waiting = Vec::new();
             self.task_table()
                 .and_then(|tasks| {
@@ -1175,8 +1175,8 @@ impl KernelMachine {
         }
         let requests = self.report_issued()?;
         let mut withdrawn = Vec::new();
-        while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
-            withdrawn.push(lash_kernel_doc::kernel_internals::wait_id(wait));
+        while let Some(wait) = self.cancellations.pop_front().map_err(MachineError::Heap)? {
+            withdrawn.push(wait);
         }
         let tasks = self.task_table().map_err(MachineError::Heap)?;
         tasks.project_occurrences().map_err(MachineError::Heap)?;
@@ -1210,7 +1210,7 @@ impl KernelMachine {
         loop {
             // Cancelling an admitted call is a host-visible operation. Stop
             // before cleanup or any other task can perform a later operation.
-            if !self.withdrawn.is_empty() {
+            if !self.cancellations.is_empty() {
                 self.publish_holdings().map_err(machine_error)?;
                 return self.park(host);
             }

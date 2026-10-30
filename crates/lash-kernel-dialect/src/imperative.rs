@@ -302,7 +302,9 @@ fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result
             }
         }
         Action::Await { value, .. } => check(value)?,
-        Action::Join { task } | Action::Cancel { task } => check(task)?,
+        Action::Join { task } | Action::Cancel { task } | Action::CancelEffect { task } => {
+            check(task)?
+        }
         Action::JoinMany { tasks, .. } => check(tasks)?,
         Action::Yield => {}
     }

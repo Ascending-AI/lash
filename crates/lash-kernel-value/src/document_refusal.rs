@@ -35,6 +35,7 @@ pub enum StatementForm {
     Yield,
     Spawn,
     Cancel,
+    CancelEffect,
     Await,
 }
 
@@ -47,6 +48,7 @@ impl StatementForm {
             Self::Yield => "yield",
             Self::Spawn => "spawn",
             Self::Cancel => "cancel",
+            Self::CancelEffect => "cancel_effect",
             Self::Await => "await",
         }
     }

@@ -295,13 +295,15 @@ pub fn tool_signature(
 ) -> Result<String, ShapeImportRefusal> {
     let input = definitions::root_expression(input, input_names)?;
     let input = match (input.as_str(), input_omittable) {
-        ("Record<string, never>", true) => String::new(),
+        ("Record<string, never>", true) => "{} = {}".to_owned(),
         ("Record<string, never>", false) => "{}".to_owned(),
         (_, true) => format!("{input} = {{}}"),
         (_, false) => input,
     };
     let output = definitions::root_expression(output, output_names)?;
-    Ok(format!("{call_path}({input}): Promise<{output}>"))
+    Ok(format!(
+        "{call_path}({input}, options?: {{ signal?: AbortSignal }}): Promise<{output}>"
+    ))
 }
 
 #[cfg(test)]

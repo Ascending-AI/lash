@@ -1628,3 +1628,9 @@ impl Cell for lash_kernel_value::names::OperationUse {
         0
     }
 }
+
+impl Cell for lash_kernel_value::sites::WaitCancellation {
+    fn cost(&self) -> u64 {
+        lash_kernel_doc::LogicalHeldV1::BOOKKEEPING
+    }
+}

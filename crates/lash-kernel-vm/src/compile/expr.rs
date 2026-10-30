@@ -59,6 +59,7 @@ pub(crate) struct Via {
 pub(crate) enum NestedKind {
     Yield,
     Cancel,
+    CancelEffect,
     /// A `call`, `apply` or `invoke`: of a declared function, a closure or
     /// function reference, or a library function, which enters a frame
     /// when it runs its body.
@@ -718,6 +719,7 @@ impl<'s> Reader<'s> {
                 | NestedKind::JoinMany(_)
                 | NestedKind::Yield
                 | NestedKind::Cancel
+                | NestedKind::CancelEffect
         ) {
             return Some(Kind::Schedule {
                 act,

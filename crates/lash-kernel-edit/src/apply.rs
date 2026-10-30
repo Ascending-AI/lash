@@ -78,6 +78,7 @@ fn arguments(action: &mut Action) -> Vec<&mut Atom> {
         Action::Join { task: atom }
         | Action::JoinMany { tasks: atom, .. }
         | Action::Cancel { task: atom }
+        | Action::CancelEffect { task: atom }
         | Action::Await { value: atom, .. } => vec![atom],
         Action::Yield => Vec::new(),
     }

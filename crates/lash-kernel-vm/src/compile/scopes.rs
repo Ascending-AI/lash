@@ -502,9 +502,10 @@ impl Placer<'_> {
                 (Some(callee), args)
             }
             ActionKind::Perform { args, .. } => (None, args),
-            ActionKind::Join(atom) | ActionKind::JoinMany(_, atom) | ActionKind::Cancel(atom) => {
-                (None, std::slice::from_mut(atom))
-            }
+            ActionKind::Join(atom)
+            | ActionKind::JoinMany(_, atom)
+            | ActionKind::Cancel(atom)
+            | ActionKind::CancelEffect(atom) => (None, std::slice::from_mut(atom)),
             ActionKind::Yield => (None, &mut []),
         };
         if let Some(Callee::Value(var)) = callee {

@@ -439,6 +439,9 @@ impl<'a> Linker<'a> {
             Action::Cancel { task } => ActionNode::Cancel {
                 task: self.atom(task, scope, &site, id),
             },
+            Action::CancelEffect { task } => ActionNode::CancelEffect {
+                task: self.atom(task, scope, &site, id),
+            },
         };
         self.set(id, NodeKind::Action(node))
     }
@@ -623,6 +626,7 @@ impl<'a> Linker<'a> {
                     },
                     ActKind::Yield => ActNode::Yield,
                     ActKind::Cancel => ActNode::Cancel,
+                    ActKind::CancelEffect => ActNode::CancelEffect,
                     ActKind::Join => ActNode::Join,
                     ActKind::JoinMany(mode) => ActNode::JoinMany(*mode),
                     ActKind::Await(policy) => ActNode::Await(policy.clone()),

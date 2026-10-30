@@ -663,14 +663,17 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let cancel_requests: Vec<lash_kernel_value::sites::WaitId> =
+            let cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation> =
                 park.cancel_requests.clone();
             let issued = park
                 .requests
                 .into_iter()
                 .filter(|request| {
-                    !cancel_requests.contains(&match request {
-                        Request::Effect(effect) => effect.wait,
+                    !cancel_requests.iter().any(|cancel| {
+                        cancel.wait()
+                            == match request {
+                                Request::Effect(effect) => effect.wait,
+                            }
                     })
                 })
                 .map(|request| {

@@ -991,7 +991,9 @@ pub(crate) fn references(kind: &NodeKind) -> Vec<&Reference> {
                     out.extend(callee(value));
                     args.iter().collect()
                 }
-                ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
+                ActionNode::Join { task }
+                | ActionNode::Cancel { task }
+                | ActionNode::CancelEffect { task } => vec![task],
                 ActionNode::JoinMany { tasks, .. } => vec![tasks],
                 ActionNode::Await { value, .. } => vec![value],
                 ActionNode::Yield => vec![],

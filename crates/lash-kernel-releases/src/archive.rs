@@ -194,14 +194,16 @@ pub fn contract(
                         ActKind::Join | ActKind::JoinMany(_) => Some("join"),
                         ActKind::Await(_) => Some("await"),
                         ActKind::Yield => Some("yield"),
-                        ActKind::Cancel => Some("cancel"),
+                        ActKind::Cancel | ActKind::CancelEffect => Some("cancel"),
                         _ => None,
                     },
                     Node::Action(Action::Spawn { .. }) => Some("spawn"),
                     Node::Action(Action::Join { .. } | Action::JoinMany { .. }) => Some("join"),
                     Node::Action(Action::Await { .. }) => Some("await"),
                     Node::Action(Action::Yield) => Some("yield"),
-                    Node::Action(Action::Cancel { .. }) => Some("cancel"),
+                    Node::Action(Action::Cancel { .. } | Action::CancelEffect { .. }) => {
+                        Some("cancel")
+                    }
                     Node::Stmt(Stmt::Assign { .. } | Stmt::Remove { .. }) => Some("mutation"),
                     _ => None,
                 };

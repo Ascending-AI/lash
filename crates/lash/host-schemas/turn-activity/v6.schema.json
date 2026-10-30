@@ -11346,6 +11346,7 @@
         "yield",
         "spawn",
         "cancel",
+        "cancel_effect",
         "await"
       ],
       "type": "string"

@@ -323,6 +323,7 @@ pub(crate) fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
         ActionNode::Join { task: atom }
         | ActionNode::JoinMany { tasks: atom, .. }
         | ActionNode::Cancel { task: atom }
+        | ActionNode::CancelEffect { task: atom }
         | ActionNode::Await { value: atom, .. } => (&[], Some(atom)),
         ActionNode::Yield => (&[], None),
     };
@@ -340,7 +341,7 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
                 ActionNode::JoinMany { .. } => SiteKind::JoinMany,
                 ActionNode::Yield => SiteKind::Yield,
                 ActionNode::Spawn { .. } => SiteKind::Spawn,
-                ActionNode::Cancel { .. } => SiteKind::Cancel,
+                ActionNode::Cancel { .. } | ActionNode::CancelEffect { .. } => SiteKind::Cancel,
                 ActionNode::Await { .. } => SiteKind::Await,
             },
             NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
@@ -348,7 +349,7 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Spawn(_) => SiteKind::Spawn,
                 ActNode::Yield => SiteKind::Yield,
-                ActNode::Cancel => SiteKind::Cancel,
+                ActNode::Cancel | ActNode::CancelEffect => SiteKind::Cancel,
                 ActNode::Join => SiteKind::Join,
                 ActNode::JoinMany(_) => SiteKind::JoinMany,
                 ActNode::Await(_) => SiteKind::Await,

@@ -107,6 +107,11 @@
           "type": "string"
         },
         {
+          "const": "cancel_effect",
+          "description": "Requests cancellation of the current effect owned by a task handle.",
+          "type": "string"
+        },
+        {
           "additionalProperties": false,
           "description": "Awaits its one argument by the await policy (`K-TASK-026`).",
           "properties": {
@@ -291,6 +296,28 @@
           },
           "required": [
             "cancel"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Request cancellation of a task's current effect, retaining its wait\nuntil the embedder delivers the chosen final or cancellation.",
+          "properties": {
+            "cancel_effect": {
+              "additionalProperties": false,
+              "properties": {
+                "task": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "task"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "cancel_effect"
           ],
           "type": "object"
         },

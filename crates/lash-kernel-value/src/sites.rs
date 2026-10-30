@@ -328,6 +328,48 @@ impl std::fmt::Display for WaitId {
 opaque_codec!(WaitId, u64);
 opaque_json!(WaitId, u64, "w:", "^w:([0-9a-f]{2})+$");
 
+/// An explicit request about the execution owned by a wait. Observation is
+/// retained for signal aborts and withdrawn when a task itself unwinds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum WaitCancellation {
+    /// Unwind the owning task and stop observing the outcome.
+    Withdraw(WaitId),
+    /// Request cancellation while observing the actor's winning outcome.
+    Observe(WaitId),
+}
+impl WaitCancellation {
+    /// The wait whose admitted execution the request targets.
+    pub fn wait(self) -> WaitId {
+        match self {
+            Self::Withdraw(wait) | Self::Observe(wait) => wait,
+        }
+    }
+    /// Whether the owning task must still receive the final outcome.
+    pub fn retains_wait(self) -> bool {
+        matches!(self, Self::Observe(_))
+    }
+}
+impl crate::tokens::TokenCodec for WaitCancellation {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        use crate::tokens::TokenCodec as _;
+        out.sum(u32::from(self.retains_wait()), 1);
+        self.wait().encode(out);
+    }
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        use crate::tokens::TokenCodec as _;
+        let (variant, fields) = input.sum()?;
+        crate::tokens::TokenReader::expect_fields(fields, 1)?;
+        match variant {
+            0 => Ok(Self::Withdraw(WaitId::decode(input)?)),
+            1 => Ok(Self::Observe(WaitId::decode(input)?)),
+            variant => Err(crate::tokens::TokenError::UnsupportedVariant { variant }),
+        }
+    }
+}
+
 /// The code a node belongs to.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,

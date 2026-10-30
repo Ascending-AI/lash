@@ -568,6 +568,21 @@ impl Lifter<'_> {
             return self.expr(value);
         }
         match (name, args) {
+            ("ts.abort.start", [work, inputs, options]) => {
+                let call = self.helper(
+                    "ts.promise.start",
+                    &[
+                        work.clone(),
+                        k::Expr::Literal(k::Literal::Absent),
+                        inputs.clone(),
+                    ],
+                )?;
+                let Expr::Call(callee, mut args) = call else {
+                    return refuse("a direct tool promise");
+                };
+                args.push(self.expr(options)?);
+                Ok(Expr::Call(callee, args))
+            }
             ("ts.pow", [left, right]) => self.binary("**", left, right),
             // A slice over constant bounds; an omitted end is the whole length.
             (crate::constructs::methods::SLICE_UNITS, [receiver, start, end]) => {
@@ -701,7 +716,13 @@ impl Lifter<'_> {
                     .iter()
                     .map(|arg| self.expr(arg))
                     .collect::<Lift<Vec<_>>>()?;
-                if let Some(class) = method.strip_prefix("new_") {
+                let constructor = lash_ext_ts_helpers::builtins::table()
+                    .constructors
+                    .iter()
+                    .find(|(_, helper)| **helper == name)
+                    .map(|(class, _)| *class)
+                    .or_else(|| method.strip_prefix("new_"));
+                if let Some(class) = constructor {
                     if !matches!(receiver, k::Expr::Literal(k::Literal::Absent)) {
                         return refuse("a constructor takes no receiver");
                     }

@@ -621,7 +621,7 @@ impl Embedder {
             self.requests.extend(park.requests.iter().cloned());
             self.pending.extend(park.requests.iter().cloned());
             self.cancel_requests
-                .extend(park.cancel_requests.iter().copied());
+                .extend(park.cancel_requests.iter().map(|request| request.wait()));
         }
         Ok(step)
     }

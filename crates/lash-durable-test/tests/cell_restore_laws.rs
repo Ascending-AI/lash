@@ -50,7 +50,7 @@
 
 #[path = "support/call_cancel.rs"]
 mod call_cancel;
-use call_cancel::{CancelCase, CancelSource, CommitOrder};
+use call_cancel::{CancelCase, CancelSource, CommitOrder, written_x};
 
 #[path = "support/dialect.rs"]
 mod dialect;
@@ -209,6 +209,14 @@ impl Cell {
                     "const a = tools.extSlow({{ x: 1 }});\nconst b = tools.extSlow({{ x: 2 }});\nawait tools.extFast({{}});\n{join}\nawait tools.extWrite({{ x: 3 }});\nawait sleep(60000);\nconsole.log('cell stayed alive');"
                 )
             }
+            Self::ExplicitCancel(case)
+                if matches!(
+                    case.source,
+                    CancelSource::TypeScript | CancelSource::TypeScriptShared
+                ) =>
+            {
+                call_cancel::typescript_source(case)
+            }
             Self::ExplicitCancel(case) => r#"import asyncio
 async def selected():
     try:
@@ -313,13 +321,6 @@ impl ExternalWorld {
     fn entries(&self) -> BTreeMap<ToolCallId, Vec<(String, Value)>> {
         self.entries.lock_recover().clone()
     }
-}
-
-/// The `x` a call was made with. A cell's numbers are its dialect's: a
-/// TypeScript `1` reaches the tool as the number it is, written `1.0`.
-fn written_x(args: &Value) -> Option<i64> {
-    let x = args["x"].as_f64()?;
-    (x.fract() == 0.0).then_some(x as i64)
 }
 
 struct ExtTools {
@@ -476,7 +477,7 @@ impl StaticToolExecute for ExtTools {
                                 .final_presenting
                                 .load(std::sync::atomic::Ordering::SeqCst)
                         } else {
-                            self.world.ready.lock_recover().len() == 2
+                            self.world.ready.lock_recover().len() == case.slow_calls()
                         };
                         if ready {
                             break;
@@ -2720,4 +2721,11 @@ async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sq
 #[tokio::test]
 async fn explicit_call_cancel_is_durable_and_selective_before_cell_end() {
     call_cancel::run_law().await;
+}
+
+/// The TypeScript source partition of the same law retains its complete
+/// matrices under the original action watchdog.
+#[tokio::test]
+async fn explicit_call_cancel_is_durable_and_selective_before_cell_end_from_typescript() {
+    call_cancel::run_typescript_law().await;
 }

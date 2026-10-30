@@ -410,7 +410,9 @@ fn ledger_of(
                 cancelling.push(execution);
                 continue;
             }
-            (MemberStatus::Pending, Some(execution), _) => Standing::Admitted(execution),
+            (MemberStatus::Pending | MemberStatus::CancellingObserved, Some(execution), _) => {
+                Standing::Admitted(execution)
+            }
             (MemberStatus::Pending, None, FrozenRequest::Refused { error, .. }) => {
                 Standing::Refused(error.clone())
             }
@@ -426,6 +428,7 @@ fn ledger_of(
                 wait: entry.wait,
                 effect: admitted.admission.effect_name,
                 standing,
+                cancellation_requested: entry.status == MemberStatus::CancellingObserved,
             },
         );
     }
@@ -567,7 +570,7 @@ impl DurableSnapshotStore {
         &self,
         ledger: &EffectLedger,
     ) -> Result<Option<HeldRoot>, QuietPointRefusal> {
-        if ledger.pending().next().is_some() || !ledger.cancelling().is_empty() {
+        if ledger.pending().next().is_some() || ledger.has_cancellations() {
             return Ok(None);
         }
         self.revision()
@@ -614,7 +617,7 @@ impl DurableSnapshotStore {
             ledger.close();
         }
         // A cancelling execution whose outcome committed is no longer open.
-        if !ledger.cancelling().is_empty() {
+        if ledger.has_cancellations() {
             let folded = members.fold().await.map_err(refused)?;
             ledger
                 .drop_cancelling(|admitted| final_output(&folded, &self.exec, admitted).is_some());
@@ -672,7 +675,7 @@ impl DurableSnapshotStore {
 
         // Guest state and target identities commit together. No cleanup body
         // can be entered until the owner observes these decisions committed.
-        if !ledger.cancelling().is_empty() {
+        if ledger.has_cancellations() {
             let folded = members.fold().await.map_err(refused)?;
             for cancelled in ledger.cancelling() {
                 for view in folded.rounds() {
@@ -792,6 +795,7 @@ impl DurableSnapshotStore {
                 wait: entry.wait,
                 effect: entry.effect,
                 standing,
+                cancellation_requested: false,
             };
             if !ledger.stand(entry.identity.clone(), pending) {
                 return Err(refused(format!(
@@ -1241,7 +1245,7 @@ impl DurableSnapshotStore {
             });
         pending
             .filter_map(|(identity, admitted)| Some((admitted, book.request(&identity)?.clone())))
-            .chain(ledger.cancelling().iter().filter_map(|admitted| {
+            .chain(ledger.detached_cancellations().filter_map(|admitted| {
                 Some((
                     admitted.clone(),
                     book.cancelling_request(admitted.operation)?.clone(),

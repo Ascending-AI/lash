@@ -189,6 +189,7 @@ impl KernelMachine {
                     | ActionKind::JoinMany(..)
                     | ActionKind::Yield
                     | ActionKind::Cancel(_)
+                    | ActionKind::CancelEffect(_)
             )
         {
             let occurrence = self.task(task)?.counters.advance(action.occurrence)?;
@@ -288,6 +289,16 @@ impl KernelMachine {
                     return Err(cancelled_here());
                 }
                 self.cancel(target)?;
+                self.put(out, Value::Null);
+                Ok(Flow::Done)
+            }
+            ActionKind::CancelEffect(handle) => {
+                let handle = self.atom(task, exe, handle)?;
+                self.source_atom(0, handle)?;
+                let Value::Task(target) = handle else {
+                    return raise("type_error", "`cancel_effect` takes a task handle");
+                };
+                self.cancel_effect(target)?;
                 self.put(out, Value::Null);
                 Ok(Flow::Done)
             }
@@ -467,6 +478,17 @@ impl KernelMachine {
                     return Err(cancelled_here());
                 }
                 self.cancel(target)?;
+                self.put(args, Value::Null);
+                Ok(Flow::Done)
+            }
+            NestedKind::CancelEffect => {
+                if !library {
+                    self.enter(task, host, site, entry.occurrence)?;
+                }
+                let Value::Task(target) = self.take(args) else {
+                    return raise("type_error", "`cancel_effect` takes a task handle");
+                };
+                self.cancel_effect(target)?;
                 self.put(args, Value::Null);
                 Ok(Flow::Done)
             }

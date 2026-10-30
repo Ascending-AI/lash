@@ -1159,7 +1159,10 @@ fn requests_something(park: &lash_kernel_vm::Park) -> bool {
             let wait = match request {
                 lash_kernel_vm::Request::Effect(effect) => effect.wait,
             };
-            !park.cancel_requests.contains(&wait)
+            !park
+                .cancel_requests
+                .iter()
+                .any(|cancel| cancel.wait() == wait)
         })
 }
 

@@ -936,7 +936,7 @@ fn loaded_tool_signature_example_matches_the_loaded_documentation() {
         if dialect.name() == "typescript" {
             assert_eq!(
                 signature,
-                "tools.lookup({ query: string }): Promise<string>"
+                "tools.lookup({ query: string }, options?: { signal?: AbortSignal }): Promise<string>"
             );
         }
         let doc = lash::rlm::discovered_tool_doc(&dialect, &presentation, &tool)

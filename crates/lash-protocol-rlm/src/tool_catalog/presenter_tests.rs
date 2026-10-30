@@ -113,7 +113,7 @@ impl ToolPresenter for HostPresenter {
 fn a_replaced_or_wrapped_presenter_changes_the_section_and_never_admission() {
     let catalog = ToolCatalog::from_tool_definitions(vec![lookup()]);
     let shipped = declarations(CellDialect::typescript(), &catalog).expect("the shipped presenter");
-    let doc = "`tools.lookup({ query: string }): Promise<string>`\nFind a record.";
+    let doc = "`tools.lookup({ query: string }, options?: { signal?: AbortSignal }): Promise<string>`\nFind a record.";
     assert_eq!(shipped, format!("### Tools\n\n{doc}"));
 
     let wrapped = declarations(

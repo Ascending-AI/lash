@@ -34,6 +34,7 @@ body {
     }
   }
   let name = value.kind
+  if same(name, "effect_cancelled") { return "AbortError" }
   if same(name, "type_error") { return "TypeError" }
   if same(name, "number_range") { return "RangeError" }
   if same(name, "index_out_of_range") { return "RangeError" }

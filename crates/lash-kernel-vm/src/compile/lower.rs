@@ -626,6 +626,7 @@ impl Compiler<'_> {
             doc::Action::JoinMany { mode, tasks } => ActionKind::JoinMany(*mode, self.atom(tasks)),
             doc::Action::Yield => ActionKind::Yield,
             doc::Action::Cancel { task } => ActionKind::Cancel(self.atom(task)),
+            doc::Action::CancelEffect { task } => ActionKind::CancelEffect(self.atom(task)),
         };
         Action {
             guest: self.scopes.last().is_some_and(|scope| scope.guest),
@@ -1014,6 +1015,7 @@ impl Compiler<'_> {
                     doc::ActKind::Spawn(callee) => NestedKind::Spawn(runs(callee)),
                     doc::ActKind::Yield => NestedKind::Yield,
                     doc::ActKind::Cancel => NestedKind::Cancel,
+                    doc::ActKind::CancelEffect => NestedKind::CancelEffect,
                     doc::ActKind::Join => NestedKind::Join,
                     doc::ActKind::JoinMany(mode) => NestedKind::JoinMany(*mode),
                     // An await is a call of its policy with the value

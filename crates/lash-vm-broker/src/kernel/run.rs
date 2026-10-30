@@ -889,14 +889,14 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
         self.machines.bounds()
     }
 
-    fn cancel_requests(&mut self, waits: &[WaitId]) {
+    fn cancel_requests(&mut self, waits: &[lash_kernel_value::sites::WaitCancellation]) {
         for wait in waits {
-            self.ledger.cancel_call(*wait);
+            self.ledger.cancel_wait(*wait);
         }
     }
 
     async fn next(&mut self) -> Result<MachineStep, KernelFailure> {
-        if !self.ledger.cancelling().is_empty() {
+        if self.ledger.has_cancellations() {
             self.broker.store.apply_cancellations().await?;
         }
         if self.machine.is_none() {

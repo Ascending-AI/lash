@@ -118,6 +118,11 @@ impl Lowerer<'_> {
             if control && !self.in_main() {
                 return Err(self.control_placement(&wait, span));
             }
+            if self.has_wait_options(&wait, args) {
+                let promise = self.lower_wait_call(wait, args, span)?;
+                let policy = self.function_target("ts.await")?;
+                return Ok(self.action(ActKind::Await(policy), vec![promise.expr()], Ty::Unknown));
+            }
             let args = self.wait_arguments(&wait, args, span)?;
             let result = self.wait_action(wait, args, true)?;
             if control {
@@ -166,7 +171,31 @@ impl Lowerer<'_> {
             Wait::Sleep => "ts.promise.sleep",
             Wait::Effect(_) => "ts.promise.start",
         };
-        let args = self.wait_arguments(&wait, args, span)?;
+        let options = if self.has_wait_options(&wait, args) {
+            // Evaluate both source arguments before copy-out or child creation.
+            let [ast::CallArg::Value(input), ast::CallArg::Value(options)] = args else {
+                unreachable!("options calls have two positional arguments")
+            };
+            let mut values = self.operands(&[input, options])?.into_iter();
+            let may_forward_builtin = self.facts.may_carry_builtin(input);
+            let (Some(input), Some(options)) = (values.next(), values.next()) else {
+                unreachable!("two positional options operands")
+            };
+            Some((
+                WaitArgument {
+                    value: input,
+                    may_forward_builtin,
+                },
+                options,
+            ))
+        } else {
+            None
+        };
+        let (args, options) = if let Some((input, options)) = options {
+            (WaitArguments::Slots(vec![input]), Some(options))
+        } else {
+            (self.wait_arguments(&wait, args, span)?, None)
+        };
         // Construct the owned invocation list before the child starts.
         // Its body reads those slots instead of capturing live bindings.
         let this = self.fresh("this");
@@ -213,12 +242,24 @@ impl Lowerer<'_> {
             unreachable!("a wait body is a fresh closure");
         };
         let body = self.inline(body, Ty::Unknown);
-        let promise = self.invoke(start, &[body, Operand::undefined(), args], Ty::Unknown)?;
+        let promise = if let Some(options) = options {
+            self.invoke("ts.abort.start", &[body, args, options], Ty::Unknown)?
+        } else {
+            self.invoke(start, &[body, Operand::undefined(), args], Ty::Unknown)?
+        };
         let promise = self.let_expr(promise.expr(), Ty::Unknown);
         if let Some(last) = self.buf.last_note_mut() {
             last.blocks = note.blocks;
         }
         Ok(promise)
+    }
+
+    /// A tool's second argument is runtime metadata, never an input slot.
+    fn has_wait_options(&self, wait: &Wait, args: &[ast::CallArg]) -> bool {
+        matches!(wait, Wait::Effect(effect) if !self.control_call(wait)
+            && self.namespaces.operation(effect).is_none_or(|(_, offered)| offered.signature.params.len() == 1))
+            && matches!(args, [ast::CallArg::Value(_), ast::CallArg::Value(options)]
+                if !matches!(options, ast::Expr::Bool(_) | ast::Expr::Number(_) | ast::Expr::BigInt(_) | ast::Expr::String(_) | ast::Expr::Array(_)))
     }
 
     /// Whether the wait is a call of an effect that ends the turn.

@@ -1303,7 +1303,7 @@ fn admit_finally(
 fn action_kind(kind: &NestedKind) -> Option<ActionKind> {
     Some(match kind {
         NestedKind::Yield => ActionKind::Yield,
-        NestedKind::Cancel => return None,
+        NestedKind::Cancel | NestedKind::CancelEffect => return None,
         NestedKind::Call(_) => ActionKind::Call,
         NestedKind::Body(_) => ActionKind::Body,
         NestedKind::Perform { then_yield, .. } => ActionKind::Perform {

@@ -221,7 +221,7 @@ impl DiagnosticCode {
             }
             Self::UsingUnsupported => "release the resource explicitly in a `finally` block",
             Self::NewUnsupported => {
-                "only the Error family, `Array`, `Map`, `Set`, `Date`, `RegExp`, `URL`, and `URLSearchParams` are constructible"
+                "only the Error family, `Array`, `Map`, `Set`, `Date`, `RegExp`, `URL`, `URLSearchParams`, and `AbortController` are constructible"
             }
             Self::ForUnsupported => {
                 "run the update in the body before a `continue` that leaves a `try` with a `finally`, and drop it from the loop head"

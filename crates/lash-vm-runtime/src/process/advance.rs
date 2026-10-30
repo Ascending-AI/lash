@@ -340,8 +340,13 @@ fn run_settled(
             state.phase = Phase::Parked;
             let explicit_cancel = !cancel_requests.is_empty();
             let mut cancelled = Vec::new();
-            for wait in cancel_requests {
-                if let Some(Wait::Step { step, .. }) = state.waits.remove(&wait) {
+            for request in cancel_requests {
+                let wait = if request.retains_wait() {
+                    state.waits.get(&request.wait()).cloned()
+                } else {
+                    state.waits.remove(&request.wait())
+                };
+                if let Some(Wait::Step { step, .. }) = wait {
                     cancelled.push(step);
                 }
             }

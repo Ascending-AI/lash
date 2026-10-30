@@ -1,12 +1,12 @@
 //! One kernel drive loop. Owners supply page lifetimes and acknowledged saves.
 
-use lash_kernel_vm::{Bound, BoundExceeded, Bounds, End, Request, RunError, WaitId};
+use lash_kernel_vm::{Bound, BoundExceeded, Bounds, End, Request, RunError};
 
 /// A quiet point, without the task table retained by the machine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MachinePark {
     pub requests: Vec<Request>,
-    pub cancel_requests: Vec<WaitId>,
+    pub cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation>,
     pub outstanding: u64,
     pub live: u64,
 }
@@ -31,7 +31,7 @@ pub trait KernelOwner: Send {
 
     fn bounds(&self) -> Bounds;
     /// Collect explicit call cancellation before a request-bound failure can end the run.
-    fn cancel_requests(&mut self, _waits: &[WaitId]) {}
+    fn cancel_requests(&mut self, _waits: &[lash_kernel_value::sites::WaitCancellation]) {}
     async fn next(&mut self) -> Result<MachineStep, Self::Error>;
     async fn sliced(&mut self) -> Result<Option<Self::Output>, Self::Error>;
     async fn park(&mut self, park: MachinePark) -> Result<Option<Self::Output>, Self::Error>;
@@ -52,7 +52,10 @@ pub async fn run<O: KernelOwner>(owner: &mut O) -> Result<O::Output, O::Error> {
                 owner.cancel_requests(&park.cancel_requests);
                 park.requests.retain(|request| {
                     let Request::Effect(effect) = request;
-                    !park.cancel_requests.contains(&effect.wait)
+                    !park
+                        .cancel_requests
+                        .iter()
+                        .any(|cancel| cancel.wait() == effect.wait)
                 });
                 if let Some(exceeded) = park_bound(&owner.bounds(), park.requests.len()) {
                     return owner.end(End::Error(RunError::Bound(exceeded))).await;

@@ -292,7 +292,7 @@ fn fallback_rules(source: &str) -> Vec<&str> {
                 Some("task-action")
             }
 
-            "Promise"
+            "AbortController" | "AbortSignal" | "Promise"
                 if next == Some(".")
                     && tokens.get(i + 2).is_some_and(|name| {
                         matches!(*name, "all" | "allSettled" | "race" | "any")
@@ -349,6 +349,7 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Action::Yield => "Yield",
             k::Action::Spawn { .. } => "Spawn",
             k::Action::Cancel { .. } => "Cancel",
+            k::Action::CancelEffect { .. } => "CancelEffect",
             k::Action::Await { .. } => "Await",
         },
         k::Node::Expr(expr) => match expr {
@@ -372,6 +373,7 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
                 k::ActKind::Spawn(_) => "Spawn",
                 k::ActKind::Yield => "Yield",
                 k::ActKind::Cancel => "Cancel",
+                k::ActKind::CancelEffect => "CancelEffect",
                 k::ActKind::Join => "Join",
                 k::ActKind::JoinMany(_) => "JoinMany",
                 k::ActKind::Await(_) => "Await",

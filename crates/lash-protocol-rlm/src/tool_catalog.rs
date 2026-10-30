@@ -351,7 +351,7 @@ pub fn discovered_tool_signature(
 /// )?
 /// .with_execution(std::time::Duration::from_secs(30));
 /// let signature = loaded_tool_signature(&CellDialect::typescript(), &json!({}), &tool)?;
-/// assert_eq!(signature, "tools.lookup({ query: string }): Promise<string>");
+/// assert_eq!(signature, "tools.lookup({ query: string }, options?: { signal?: AbortSignal }): Promise<string>");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -580,7 +580,7 @@ mod tests {
                 "`tracker.issuesSearch({ query: string; ",
                 "filter?: { labels?: Array<string>; state?: \"open\" | \"closed\" }; ",
                 "page?: number | null; ",
-                "sort?: Array<{ field: string; descending?: boolean }> }): ",
+                "sort?: Array<{ field: string; descending?: boolean }> }, options?: { signal?: AbortSignal }): ",
                 "Promise<{ issues: Array<{ id: number; title: string }> }>`\n",
                 "[MCP tracker] Search issues.\n",
                 "Parameters:\n",

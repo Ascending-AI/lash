@@ -8,6 +8,8 @@ use lash_vocabulary::identity::RunIdCoreSupport as _;
 pub(super) enum CancelSource {
     Host,
     Python,
+    TypeScript,
+    TypeScriptShared,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,7 +34,22 @@ pub(super) struct CancelCase {
     pub(super) explicit: bool,
 }
 
+/// The `x` a call was made with. A cell's numbers are its dialect's: a
+/// TypeScript `1` reaches the tool as the number it is, written `1.0`.
+pub(super) fn written_x(args: &Value) -> Option<i64> {
+    let x = args["x"].as_f64()?;
+    (x.fract() == 0.0).then_some(x as i64)
+}
+
 impl CancelCase {
+    pub(super) fn slow_calls(self) -> usize {
+        if self.source == CancelSource::TypeScriptShared {
+            3
+        } else {
+            2
+        }
+    }
+
     pub(super) fn python(
         order: CommitOrder,
         hint: Option<lash_core::CancelHint>,
@@ -45,6 +62,40 @@ impl CancelCase {
             explicit,
         }
     }
+}
+
+impl CancelCase {
+    fn typescript(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool) -> Self {
+        Self {
+            source: CancelSource::TypeScript,
+            order,
+            hint,
+            explicit,
+        }
+    }
+}
+
+pub(super) fn typescript_source(case: CancelCase) -> String {
+    let preaborted = "const pre = new AbortController(); pre.abort(); pre.abort(); let refused = false; try { await tools.extSlow({ x: 0 }, { signal: pre.signal }); } catch (e) { refused = e.name === 'AbortError' && e.data.origin === 'model_requested'; } if (!refused || !pre.signal.aborted) { throw new Error('pre-aborted call did not reject'); }";
+    let shared = case.source == CancelSource::TypeScriptShared;
+    let extra_call = if shared {
+        "const shared = tools.extSlow({ x: 5 }, { signal: controller.signal });"
+    } else {
+        ""
+    };
+    let extra_join = if shared {
+        "let sharedCancelled = false; try { await shared; } catch (e) { sharedCancelled = e.name === 'AbortError' && e.data.origin === 'model_requested'; } if (!sharedCancelled) { throw new Error('shared signal lost its second call'); }"
+    } else {
+        ""
+    };
+    let cancel_and_join = if case.explicit {
+        "controller.abort(); try { await a; } catch (e) { if (e.name === 'AbortError' && e.data && e.data.origin === 'model_requested') { await tools.extWrite({ x: 4 }); } }"
+    } else {
+        ""
+    };
+    format!(
+        "{preaborted}\nconst controller = new AbortController();\nconst a = tools.extSlow({{ x: 1 }}, {{ signal: controller.signal }});\nconst b = tools.extSlow({{ x: 2 }});\n{extra_call}\nlet observerRefused = false; try {{ AbortController.prototype.abort.call({{ signal: controller.signal }}); }} catch (e) {{ observerRefused = e.name === 'TypeError'; }} if (!observerRefused || controller.signal.aborted) {{ throw new Error('a signal observer gained cancellation authority'); }}\nawait Promise.race([tools.extFast({{}}), a, b]);\n{cancel_and_join}\n{extra_join}\nawait tools.extWrite({{ x: 3 }});\nawait sleep(60000);\nconsole.log('cell stayed alive');"
+    )
 }
 
 impl CellTurn {
@@ -82,10 +133,29 @@ impl CellTurn {
             }
         }
 
-        let signals = self.world.cleanup_signals.lock_recover().clone();
+        let mut signals = self.world.cleanup_signals.lock_recover().clone();
+        if let Some(signals) = &mut signals {
+            signals.sort_unstable();
+        }
+        if matches!(
+            case.source,
+            CancelSource::TypeScript | CancelSource::TypeScriptShared
+        ) && self
+            .world
+            .entries()
+            .values()
+            .flatten()
+            .any(|(tool, args)| tool == SLOW && written_x(args) == Some(0))
+        {
+            violations.push("a pre-aborted signal admitted a body".to_owned());
+        }
         let expected = if case.explicit && case.order == CommitOrder::Cancel && case.hint.is_none()
         {
-            vec![1]
+            if case.source == CancelSource::TypeScriptShared {
+                vec![1, 5]
+            } else {
+                vec![1]
+            }
         } else {
             Vec::new()
         };
@@ -146,6 +216,12 @@ impl CellTurn {
                 .any(|(tool, args)| tool == SLOW && written_x(args) == Some(1))
                 .then(|| id.clone())
         });
+        let shared_call = self.world.entries().iter().find_map(|(id, entries)| {
+            entries
+                .iter()
+                .any(|(tool, args)| tool == SLOW && written_x(args) == Some(5))
+                .then(|| id.clone())
+        });
         let mut decisions = BTreeMap::new();
         let mut outcomes = BTreeMap::new();
         for write in nodes
@@ -197,7 +273,7 @@ impl CellTurn {
                     if outcomes.insert(call.clone(), ()).is_some() {
                         violations.push(format!("call {call} committed two outcomes"));
                     }
-                    if Some(call) == selected.as_ref() {
+                    if Some(call) == selected.as_ref() || Some(call) == shared_call.as_ref() {
                         let fact = RoundFact::load(&mut decoder, row.record).unwrap();
                         if let RoundFact::Outcome { output, .. }
                         | RoundFact::FinalOutcome { output, .. } = fact
@@ -221,6 +297,16 @@ impl CellTurn {
                     }
                 }
             }
+        }
+        if case.source == CancelSource::TypeScriptShared
+            && shared_call.as_ref().is_none_or(|call| {
+                decisions.get(call) != Some(&Kind::XCancel) || !outcomes.contains_key(call)
+            })
+        {
+            violations.push(
+                "the shared signal's second call lacks its durable cancellation and outcome"
+                    .to_owned(),
+            );
         }
         if let Some(selected) = selected {
             let expected = match case.order {
@@ -275,7 +361,7 @@ fn host(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool)
 // watchdog, following crash_matrix.rs's service-case partition.
 macro_rules! cancellation_cases {
     ($($name:ident => $case:expr;)*) => {
-        fn cases() -> Vec<CancelCase> { vec![$($case),*] }
+        pub(super) fn cases() -> Vec<CancelCase> { vec![$($case),*] }
         mod postgres {
             use super::*;
             $(
@@ -303,6 +389,23 @@ cancellation_cases! {
     python_external_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
     python_ignore_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
     python_control_on_postgres => CancelCase::python(CommitOrder::Cancel, None, false);
+}
+
+mod typescript {
+    use super::*;
+    cancellation_cases! {
+        typescript_cancel_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, true);
+        typescript_final_on_postgres => CancelCase::typescript(CommitOrder::Final, None, true);
+        typescript_plain_final_on_postgres => CancelCase::typescript(CommitOrder::PlainFinal, None, true);
+        typescript_external_cancel_on_postgres => CancelCase::typescript(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
+        typescript_ignore_on_postgres => CancelCase::typescript(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
+        typescript_shared_on_postgres => CancelCase { source: CancelSource::TypeScriptShared, ..CancelCase::typescript(CommitOrder::Cancel, None, true) };
+        typescript_control_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, false);
+    }
+}
+
+pub(super) async fn run_typescript_law() {
+    run_cases(Dialect::SqliteMemory, None, &typescript::cases()).await;
 }
 
 pub(super) async fn run_law() {

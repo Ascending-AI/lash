@@ -496,7 +496,7 @@ pub enum RequestWire {
 #[serde(deny_unknown_fields)]
 pub struct ParkWire {
     pub requests: Vec<RequestWire>,
-    pub cancel_requests: Vec<WaitId>,
+    pub cancel_requests: Vec<lash_kernel_value::sites::WaitCancellation>,
     pub outstanding: u64,
     pub live: u64,
 }

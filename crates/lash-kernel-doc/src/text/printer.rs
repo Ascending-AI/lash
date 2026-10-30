@@ -481,6 +481,10 @@ impl<'a> Printer<'a> {
                 self.out.push_str("cancel ");
                 self.atom(task);
             }
+            Action::CancelEffect { task } => {
+                self.out.push_str("cancel_effect ");
+                self.atom(task);
+            }
         }
     }
 
@@ -705,6 +709,11 @@ impl<'a> Printer<'a> {
                 ActKind::Yield => self.out.push_str("yield"),
                 ActKind::Cancel => {
                     self.out.push_str("cancel(");
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::CancelEffect => {
+                    self.out.push_str("cancel_effect(");
                     self.exprs(act.args.iter());
                     self.out.push(')');
                 }

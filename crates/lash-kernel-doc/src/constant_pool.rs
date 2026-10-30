@@ -148,7 +148,9 @@ fn action_atoms(action: &crate::Action) -> &[Atom] {
         Action::Call { args, .. } | Action::Spawn { args, .. } | Action::Perform { args, .. } => {
             args
         }
-        Action::Join { task } | Action::Cancel { task } => std::slice::from_ref(task),
+        Action::Join { task } | Action::Cancel { task } | Action::CancelEffect { task } => {
+            std::slice::from_ref(task)
+        }
         Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
         Action::Await { value, .. } => std::slice::from_ref(value),
         Action::Yield => &[],

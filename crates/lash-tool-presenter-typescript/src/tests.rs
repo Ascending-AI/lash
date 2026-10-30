@@ -242,7 +242,10 @@ fn a_referenced_document_root_emits_its_body_and_notes_once() {
     ));
     assert_eq!(text.matches("{ and: Array<Filter> }").count(), 1, "{text}");
     assert_eq!(text.matches("Root filter.").count(), 1, "{text}");
-    assert!(text.contains("tools.select(Filter)"), "{text}");
+    assert!(
+        text.contains("tools.select(Filter, options?: { signal?: AbortSignal })"),
+        "{text}"
+    );
 }
 
 /// FIG-6495: shared definition bodies and notes are charged at first use only.

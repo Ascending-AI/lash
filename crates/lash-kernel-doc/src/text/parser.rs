@@ -859,7 +859,7 @@ impl Parser {
         if !self.at_named_call()
             && matches!(
                 self.statement_form(),
-                Some(StatementForm::Yield | StatementForm::Cancel)
+                Some(StatementForm::Yield | StatementForm::Cancel | StatementForm::CancelEffect)
             )
             && let Some(action) = self.action()?
         {
@@ -919,10 +919,14 @@ impl Parser {
                     args: vec![],
                 }));
             }
-            Some(StatementForm::Cancel) => {
+            Some(form @ (StatementForm::Cancel | StatementForm::CancelEffect)) => {
                 self.position += 1;
                 return Ok(Some(ActExpr {
-                    kind: ActKind::Cancel,
+                    kind: if form == StatementForm::Cancel {
+                        ActKind::Cancel
+                    } else {
+                        ActKind::CancelEffect
+                    },
                     args: vec![self.act_operand()?],
                 }));
             }
@@ -1010,6 +1014,7 @@ impl Parser {
             "yield" => StatementForm::Yield,
             "spawn" => StatementForm::Spawn,
             "cancel" => StatementForm::Cancel,
+            "cancel_effect" => StatementForm::CancelEffect,
             "await" => StatementForm::Await,
             _ => return None,
         })
@@ -1069,9 +1074,14 @@ impl Parser {
                 let (callee, args) = self.callee()?;
                 Action::Spawn { callee, args }
             }
-            StatementForm::Cancel => {
+            form @ (StatementForm::Cancel | StatementForm::CancelEffect) => {
                 self.position += 1;
-                Action::Cancel { task: self.atom()? }
+                let task = self.atom()?;
+                if form == StatementForm::Cancel {
+                    Action::Cancel { task }
+                } else {
+                    Action::CancelEffect { task }
+                }
             }
         }))
     }

@@ -367,3 +367,5 @@ its result, even if Python independently raises `asyncio.CancelledError`.
 Observer withdrawal and aggregate selection still release observation only.
 They never acquire authority to cancel another task's call. Cell closing and
 immediate turn cancellation select outstanding calls through the same decision.
+
+TypeScript `tools.x(args, { signal })` binds a snapshot-backed signal to the direct call promise. `AbortController.abort()` submits the same typed per-call cancellation under the actor fence, preserving observation of a winning final. Guest state and target bindings commit before later effects. A cancelled promise raises `AbortError` with the typed cancellation; a pre-aborted signal admits no body. One signal may bind several calls. Aggregate selection and observer withdrawal still cancel nothing.

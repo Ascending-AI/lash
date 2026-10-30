@@ -762,6 +762,7 @@ impl Scope<'_> {
             ActKind::Await(_) => StatementForm::Await,
             ActKind::Yield => StatementForm::Yield,
             ActKind::Cancel => StatementForm::Cancel,
+            ActKind::CancelEffect => StatementForm::CancelEffect,
         };
         // As for a statement action (`K-LIB-004`): a body beside a native
         // may call functions that state one and apply a closure it holds.
@@ -791,7 +792,7 @@ impl Scope<'_> {
                 check_arity("Import", act.args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
             }
-            ActKind::Join | ActKind::JoinMany(_) | ActKind::Cancel => {
+            ActKind::Join | ActKind::JoinMany(_) | ActKind::Cancel | ActKind::CancelEffect => {
                 if act.args.len() != 1 {
                     return Err(invalid(
                         Some(site),
@@ -843,6 +844,7 @@ impl Scope<'_> {
             Action::Yield => StatementForm::Yield,
             Action::Spawn { .. } => StatementForm::Spawn,
             Action::Cancel { .. } => StatementForm::Cancel,
+            Action::CancelEffect { .. } => StatementForm::CancelEffect,
             Action::Await { .. } => StatementForm::Await,
         };
         // A body beside a native implementation may call functions that
@@ -890,7 +892,10 @@ impl Scope<'_> {
             }
             Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
-            | Action::Cancel { task: atom } => self.check_atoms(std::slice::from_ref(atom), site),
+            | Action::Cancel { task: atom }
+            | Action::CancelEffect { task: atom } => {
+                self.check_atoms(std::slice::from_ref(atom), site)
+            }
             Action::Yield => Ok(()),
         }
     }

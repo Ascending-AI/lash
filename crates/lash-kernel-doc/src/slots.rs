@@ -42,7 +42,7 @@ macro_rules! inventory {
                     found.extend($target(policy));
                     vec![value]
                 },
-                Action::Join {task}|Action::Cancel {task} => vec![task],
+                Action::Join {task}|Action::Cancel {task}|Action::CancelEffect {task} => vec![task],
                 Action::JoinMany {tasks,..} => vec![tasks],
                 Action::Yield => vec![],
             };

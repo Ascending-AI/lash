@@ -3517,7 +3517,7 @@ export type StartKey = string;
  * An action form, as a refusal names one the body of a function with a
  * native implementation may not run (`K-LIB-004`).
  */
-export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "await");
+export type StatementForm = ("call" | "perform" | "join" | "yield" | "spawn" | "cancel" | "cancel_effect" | "await");
 
 /**
  * A native database error code, independent of diagnostic message text.
