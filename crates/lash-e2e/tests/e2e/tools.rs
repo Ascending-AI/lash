@@ -65,15 +65,7 @@ async fn s02(case: &mut Case) -> Result<()> {
     case.kill("node-a", "a's outcome committed, b's body held")
         .await?;
     let cut = support::record_facts(case, &turn.run, "after the kill").await?;
-    let outcomes = cut["records"]
-        .as_array()
-        .map(|records| {
-            records
-                .iter()
-                .filter(|record| record["kind"] == "x_outcome")
-                .count()
-        })
-        .unwrap_or_default();
+    let outcomes = support::terminal_outcomes(&cut).len();
     ensure!(
         outcomes == 1,
         "the cut holds {outcomes} committed outcomes, not a's one: {cut}"
@@ -161,8 +153,7 @@ async fn s03(case: &mut Case) -> Result<()> {
         .await?;
     let cut = support::record_facts(case, &turn.run, "after the kill").await?;
     ensure!(
-        support::records(&cut, "x_start").len() == 1
-            && support::records(&cut, "x_outcome").is_empty(),
+        support::records(&cut, "x_start").len() == 1 && support::terminal_outcomes(&cut).is_empty(),
         "the cut is not a started body without an outcome: {cut}"
     );
     case.control.release("write");

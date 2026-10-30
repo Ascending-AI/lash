@@ -17,6 +17,7 @@ mod retry;
 pub use production::{CellCall, CellMember, CellMembers};
 mod singleton_run;
 
+pub use crate::runtime::actor::round::{DecisionPermit, SettlementIntent};
 pub use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
     IsolatedToolStart,

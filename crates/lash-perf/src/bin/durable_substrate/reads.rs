@@ -232,9 +232,11 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
     }
     let mut expected_facts = BTreeMap::from([("cell_report".to_owned(), 1)]);
     if recorded > 0 {
-        expected.insert(lash_durable::CommitLabel::CALL_FINAL.as_str(), recorded);
         expected.insert("round.outcome", recorded);
-        for kind in ["admit", "x_start", "x_final", "x_outcome"] {
+        // These results declare no external obligations. Their decision, output
+        // and state share x_final_outcome in round.outcome, removing exactly
+        // one call.final transaction and one separate final fact per call.
+        for kind in ["admit", "x_start", "x_final_outcome"] {
             expected_facts.insert(kind.to_owned(), recorded);
         }
     }

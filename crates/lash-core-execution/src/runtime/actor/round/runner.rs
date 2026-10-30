@@ -142,6 +142,9 @@ pub enum RoundError {
     /// namespace from durable state.
     #[error("a committed outcome's plugin state does not publish: {0}")]
     StatePublication(crate::RuntimeEffectControllerError),
+    /// A returned settlement did not carry this actor's admitted authority.
+    #[error("stale or foreign call settlement authority")]
+    DecisionAuthority,
     /// A cancellation obligation could not be discharged. Its decision stays
     /// open in the journal for the next activation to retry.
     #[error("call discharge failed: {0}")]

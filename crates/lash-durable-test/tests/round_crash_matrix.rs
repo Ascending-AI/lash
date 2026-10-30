@@ -579,6 +579,7 @@ impl From<round::RoundError> for Pass {
             round::RoundError::Stopped => Self::Lost,
             round::RoundError::Fold(_)
             | round::RoundError::Settle(_)
+            | round::RoundError::DecisionAuthority
             | round::RoundError::StatePublication(_)
             | round::RoundError::Discharge(_)
             | round::RoundError::NotAdmitted(_) => Self::Again,

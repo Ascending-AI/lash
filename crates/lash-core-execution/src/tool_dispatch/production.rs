@@ -835,7 +835,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let capture = Captured {
                 check_phase: None,
                 original: None,
-                output: ToolCallOutput::cancelled(cancellation.with_origin(origin)),
+                output: ToolCallOutput::cancelled(cancellation.clone().with_origin(origin)),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {
                     attempt: attempt.attempt,
                 },
@@ -843,6 +843,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 start_refusal: None,
             };
             return Ok(SingletonBodyOutcome::Cancelled {
+                cancellation: cancellation.with_origin(origin),
                 evidence: Some(encode(&capture)?),
             });
         }
@@ -1092,9 +1093,12 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 ),
                         }),
                     },
-                    crate::ToolCallOutcome::Cancelled(_) => Ok(SingletonBodyOutcome::Cancelled {
-                        evidence: Some(output),
-                    }),
+                    crate::ToolCallOutcome::Cancelled(cancellation) => {
+                        Ok(SingletonBodyOutcome::Cancelled {
+                            cancellation: cancellation.clone(),
+                            evidence: Some(output),
+                        })
+                    }
                 }
             }
         }

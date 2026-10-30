@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 50] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 53] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -100,6 +100,19 @@ pub const COVERAGE: [(CommitLabel, Coverage); 50] = [
     (
         CommitLabel::ROUND_OUTCOME,
         Coverage::Cases(&[Case::Round, Case::Effects, Case::Cell]),
+    ),
+    (
+        CommitLabel::CALL_CANCEL_REQUEST,
+        Coverage::Unemitted(
+            "the host call-target dispatcher commits call.cancel.request; these cases request a run stop or close, without a host call-target request",
+        ),
+    ),
+    (CommitLabel::CALL_CANCEL, Coverage::Cases(&[Case::Cancel])),
+    (
+        CommitLabel::CALL_FINAL,
+        Coverage::Unemitted(
+            "only a production tool capture with intents or a declared start needs call.final before realization; these cells return declaration-free finals in round.outcome",
+        ),
     ),
     (CommitLabel::ROUND_RETRY, Coverage::Cases(&[Case::Round])),
     (CommitLabel::ROUND_START, Coverage::Cases(&[Case::Round])),

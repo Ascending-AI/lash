@@ -172,7 +172,12 @@ exclusive plan CPU cost. Trace admission/export uses the production OpenTelemetr
 adapter with a local in-memory exporter and omitted content.
 
 The maintained `READ-COST-MODEL` law checks exact owner labels and fact counts;
-timing has no threshold. The cacheable law runs all 24 populations on fresh
+timing has no threshold. Recorded calls return declaration-free finals, so each
+now appends `admit`, `x_start` and `x_final_outcome`, with the final decision,
+output and state in `round.outcome`. This removes one separate `call.final`
+transaction and its `x_final` fact per recorded call. All other labels, fact
+counts and numerical budgets stay fixed; this structural reduction alone
+proves no instruction or latency improvement. The cacheable law runs all 24 populations on fresh
 SQLite memory stores with one shared worker service and two runtime threads.
 Both dialects run in the law. The Python release-pin refusal discovered by
 this benchmark was fixed by FIG-6186 before its final measurement. The dated

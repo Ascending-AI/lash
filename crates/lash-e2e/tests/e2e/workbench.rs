@@ -274,7 +274,11 @@ async fn s01(case: &mut Case) -> Result<()> {
         .collect();
     ensure!(runs.len() == 1, "the turn's rows span runs {runs:?}");
     for kind in ["x_start", "x_outcome"] {
-        let rows = support::records(&facts, kind);
+        let rows = if kind == "x_outcome" {
+            support::terminal_outcomes(&facts)
+        } else {
+            support::records(&facts, kind)
+        };
         ensure!(
             rows.len() == 1 && rows[0]["call"] == call,
             "the run holds {} {kind} rows, not one of call {call}: {facts}",
@@ -290,7 +294,7 @@ async fn s01(case: &mut Case) -> Result<()> {
         );
     }
     if resume {
-        let outcome_epoch = support::records(&facts, "x_outcome")[0]["epoch"].clone();
+        let outcome_epoch = support::terminal_outcomes(&facts)[0]["epoch"].clone();
         let present_epoch = support::records(&facts, "present")[0]["epoch"].clone();
         ensure!(
             present_epoch.as_i64() > outcome_epoch.as_i64(),

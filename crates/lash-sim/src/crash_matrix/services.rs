@@ -968,6 +968,7 @@ impl RoundTools for Catalog {
                     timer: None,
                     capacity: None,
                     candidate: None,
+                    settlement: Default::default(),
                 }
             })
         })

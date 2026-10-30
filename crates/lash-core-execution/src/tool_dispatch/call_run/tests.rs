@@ -150,42 +150,46 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         });
         let call = ordinary_call("ordinary");
         assert!(!call.declaration.isolated, "the call is ordinary");
-        let admitted = AdmittedToolCall::admit(
-            handlers.clone(),
-            call,
-            &crate::ExecutionScope::session_operation("session", "tools"),
-        )
-        .await
-        .expect("the call is admitted");
-        let end = admitted
-            .attempt(
-                AttemptOrdinal::FIRST,
-                false,
-                &tokio_util::sync::CancellationToken::new(),
+        let binding = call.clone();
+        crate::runtime::actor::round::decision::with_admitted_fixture(&binding, async {
+            let admitted = AdmittedToolCall::admit(
+                handlers.clone(),
+                call,
+                &crate::ExecutionScope::session_operation("session", "tools"),
             )
             .await
-            .expect("the attempt ends");
-        assert!(
-            matches!(
-                end,
-                AttemptEnd::Ended(CallEnd::Final {
-                    capture: SingletonCapture::Failed { .. } | SingletonCapture::Done { .. },
-                    launched: None,
-                    ..
-                })
-            ),
-            "the ordinary attempt is the call's final: {end:?}"
-        );
-        assert_eq!(
-            handlers
-                .executions
-                .load(std::sync::atomic::Ordering::SeqCst),
-            1
-        );
-        assert_eq!(
-            handlers.launches.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "no process was launched"
-        );
+            .expect("the call is admitted");
+            let end = admitted
+                .attempt(
+                    AttemptOrdinal::FIRST,
+                    false,
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+                .expect("the attempt ends");
+            assert!(
+                matches!(
+                    end,
+                    AttemptEnd::Ended(CallEnd::Final {
+                        capture: SingletonCapture::Failed { .. } | SingletonCapture::Done { .. },
+                        launched: None,
+                        ..
+                    })
+                ),
+                "the ordinary attempt is the call's final: {end:?}"
+            );
+            assert_eq!(
+                handlers
+                    .executions
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                1
+            );
+            assert_eq!(
+                handlers.launches.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "no process was launched"
+            );
+        })
+        .await;
     }
 }

@@ -99,7 +99,7 @@ pub(super) fn terminal_output(
             Some(SingletonCapture::TimedOut { cause, evidence: None }) => return Ok(ToolCallOutput::failure(crate::ToolFailure::runtime(
                 crate::ToolFailureClass::Timeout, "tool_timed_out", format!("tool exceeded its {cause:?} limit; it may have partly run, and may still be running."),
             ).with_cause(crate::ToolFailureCause::ExecutionLimit { cause: *cause }))),
-            Some(SingletonCapture::Cancelled { evidence: None }) => return Ok(ToolCallOutput::cancelled(crate::ToolCancellation::runtime("tool cancelled"))),
+            Some(SingletonCapture::Cancelled { cancellation, evidence: None }) => return Ok(ToolCallOutput::cancelled(cancellation.clone())),
             _ => {}
         }
         return capture
@@ -140,9 +140,9 @@ pub(super) fn terminal_output(
         // A body that met its stop answers its own cancellation, under the
         // stop's cause, which its capture keeps (FIG-5379).
         _ if matches!(decision, CallDecision::Cancelled) => match capture {
-            Some(SingletonCapture::Cancelled {
-                evidence: Some(evidence),
-            }) => decode::<Captured>(evidence).map(|captured| captured.output),
+            Some(SingletonCapture::Cancelled { cancellation, .. }) => {
+                Ok(ToolCallOutput::cancelled(cancellation.clone()))
+            }
             _ => Ok(ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
                 "the owning Run cancelled the call",
             ))),

@@ -298,6 +298,7 @@ struct ExternalWorld {
     signalled: Mutex<Vec<i64>>,
     cleanup_signals: Mutex<Option<Vec<i64>>>,
     cancel_case: Mutex<Option<CancelCase>>,
+    authority_violations: Mutex<Vec<String>>,
     cancel_backend: Mutex<Option<Backend>>,
     cancel_host: Mutex<Option<(lash::DurableSession, lash::RunId)>>,
     cleanup_children: Mutex<Option<Vec<(i64, bool)>>>,
@@ -337,6 +338,11 @@ impl StaticToolExecute for ExtTools {
         match call.tool_id().as_str() {
             SLOW => {
                 let case = *self.world.cancel_case.lock_recover();
+                if case.is_some_and(|case| case.order == CommitOrder::TypedCancel)
+                    && written_x(call.args) == Some(1)
+                {
+                    return call_cancel::authority::typed_cancel(&self.world, call).await;
+                }
                 let declared = if case.is_some() {
                     let payload = json!({ "callcancel_x": written_x(call.args).unwrap() });
                     let launch =
@@ -449,8 +455,17 @@ impl StaticToolExecute for ExtTools {
             FAST if self.world.cancel_case.lock_recover().is_some() => {
                 let case = self.world.cancel_case.lock_recover().unwrap();
                 let backend = self.world.cancel_backend.lock_recover().clone().unwrap();
-                if case.order == CommitOrder::PlainFinal {
+                if case.order == CommitOrder::TypedCancel {
+                    call_cancel::wait_typed_cancel(&self.world).await;
+                } else if case.order == CommitOrder::PlainFinal {
                     call_cancel::wait_plain_final(&self.world).await;
+                } else if case.hint.is_some() {
+                    call_cancel::wait_pending_calls(&self.world).await;
+                    assert_eq!(
+                        cancel_children(&backend).await.len(),
+                        2,
+                        "both pending calls must have registered their children"
+                    );
                 } else {
                     loop {
                         let changed = self.world.changed.notified();
@@ -460,19 +475,13 @@ impl StaticToolExecute for ExtTools {
                             self.world
                                 .final_presenting
                                 .load(std::sync::atomic::Ordering::SeqCst)
-                        } else if case.hint.is_some() {
-                            cancel_children(&backend).await.len() == 2
                         } else {
                             self.world.ready.lock_recover().len() == 2
                         };
                         if ready {
                             break;
                         }
-                        if case.hint.is_some() {
-                            tokio::task::yield_now().await;
-                        } else {
-                            changed.await;
-                        }
+                        changed.await;
                     }
                 }
                 if case.source == CancelSource::Host && case.explicit {

@@ -110,6 +110,8 @@ pub enum SingletonCapture {
         evidence: Option<String>,
     },
     Cancelled {
+        #[serde(with = "crate::ToolCancellation")]
+        cancellation: crate::ToolCancellation,
         evidence: Option<String>,
     },
     /// An outcome the admitted declaration does not admit, refused before
@@ -137,6 +139,7 @@ impl SingletonCapture {
             }
             | Self::Cancelled {
                 evidence: Some(output),
+                ..
             } => Some(output),
             Self::Refused { .. }
             | Self::StartRefused { .. }
@@ -230,6 +233,7 @@ pub enum SingletonBodyOutcome {
         evidence: Option<String>,
     },
     Cancelled {
+        cancellation: crate::ToolCancellation,
         evidence: Option<String>,
     },
     /// The attempt ended in a retryable attempt fault of its host

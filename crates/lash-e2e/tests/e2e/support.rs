@@ -311,16 +311,36 @@ pub fn presented(case: &Case, expected: &Value) -> Result<()> {
 pub fn outcome_epochs(facts: &Value) -> std::collections::BTreeMap<String, i64> {
     let mut epochs = std::collections::BTreeMap::new();
     for record in facts["records"].as_array().into_iter().flatten() {
-        if record["kind"] == "x_outcome"
-            && let Some(call) = record["call"].as_str()
+        if matches!(
+            record["kind"].as_str(),
+            Some("x_outcome" | "x_final_outcome")
+        ) && let Some(call) = record["call"].as_str()
         {
-            epochs.insert(
-                call.to_owned(),
-                record["epoch"].as_i64().unwrap_or_default(),
+            let Some(epoch) = record["epoch"].as_i64() else {
+                panic!("an outcome has no epoch: {record}");
+            };
+            assert!(
+                epochs.insert(call.to_owned(), epoch).is_none(),
+                "call {call} has two terminal outcomes: {facts}"
             );
         }
     }
     epochs
+}
+
+/// Terminal outcomes across both durable representations, without deduplication.
+pub fn terminal_outcomes(facts: &Value) -> Vec<&Value> {
+    facts["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|record| {
+            matches!(
+                record["kind"].as_str(),
+                Some("x_outcome" | "x_final_outcome")
+            )
+        })
+        .collect()
 }
 
 /// A `Repeatable` execution policy of `attempts` attempts with a fixed

@@ -93,6 +93,7 @@ pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
 mod context;
 pub(crate) mod decision;
+pub use decision::{DecisionPermit, SettlementIntent};
 mod fold;
 #[cfg(test)]
 mod fold_tests;

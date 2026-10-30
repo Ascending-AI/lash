@@ -78,6 +78,7 @@
 //! [`RoundRunner`]: super::RoundRunner
 
 mod attempt;
+mod decisions;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::future::Future;
@@ -131,6 +132,8 @@ pub struct MemberOutcome {
     /// The heap pages a completion publishes with its outcome
     /// ([`EngineStepAnswer::Paged`]): the outcome's run fact owns them.
     pub candidate: Option<StepCandidate>,
+    /// Actor-issued decision provenance carried by the production runner.
+    pub settlement: super::SettlementIntent,
 }
 
 impl From<SettledOutput> for MemberOutcome {
@@ -142,6 +145,7 @@ impl From<SettledOutput> for MemberOutcome {
             timer: None,
             capacity: None,
             candidate: None,
+            settlement: super::SettlementIntent::Nonterminal,
         }
     }
 }
@@ -376,7 +380,6 @@ struct Finished {
 
 struct HeldOutcome {
     result: Result<MemberOutcome, Stop>,
-    final_at_outcome: bool,
 }
 
 /// One owner's admitted members on one activation: the bodies it runs and
@@ -625,79 +628,6 @@ impl Lifecycle {
             .map(Some)
     }
 
-    async fn commit_finals(
-        &mut self,
-        folded: &RunFold,
-        attempt: Option<&lash_durable::ActorTx>,
-    ) -> Result<Option<Act>, RoundError> {
-        while let Ok(request) = self.final_receiver.try_recv() {
-            self.final_requests
-                .insert(request.execution.id().clone(), request);
-        }
-        let decided: Vec<_> = self
-            .final_requests
-            .keys()
-            .filter_map(|id| {
-                let member = folded.round(id.run)?.member_started_at(id.ordinal)?;
-                (member.final_payload().is_some()
-                    || member.cancellation().is_some()
-                    || member.outcome().is_some())
-                .then(|| (id.clone(), member.final_payload().is_some()))
-            })
-            .collect();
-        for (id, won) in decided {
-            if let Some(request) = self.final_requests.remove(&id) {
-                if won {
-                    request.protected.cancel();
-                }
-                let _ = request.reply.send(won);
-            }
-        }
-        self.final_requests
-            .retain(|_, request| !request.reply.is_closed());
-        if self.final_requests.is_empty() {
-            return Ok(None);
-        }
-        let mut tx = match attempt {
-            Some(tx) => tx.clone(),
-            None => self.cx.begin().await?,
-        };
-        // The stop may have arrived since commit_cancels read its transaction.
-        self.read_host_cancels(&tx, folded);
-        if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
-            self.request_cancels_before(
-                folded,
-                RunSeq(u64::MAX),
-                crate::ToolCancellation::runtime("the owning turn stopped")
-                    .with_origin(crate::CancelOrigin::TurnStopped),
-            );
-            return Ok(Some(Act::Refused));
-        }
-        if self.final_requests.keys().any(|id| {
-            folded
-                .admitted(id)
-                .is_some_and(|execution| self.cancel_requests.contains_key(execution.call()))
-        }) {
-            return Ok(Some(Act::Refused));
-        }
-        let mut staged = Vec::new();
-        for (id, request) in &self.final_requests {
-            if let Some(execution) = folded.admitted(id) {
-                staged.push(super::rounds::final_call(
-                    &mut tx,
-                    &execution,
-                    request.payload.clone(),
-                ));
-            }
-        }
-        if staged.is_empty() {
-            return Ok(None);
-        }
-        self.commit(tx, CommitLabel::CALL_FINAL, staged)
-            .await
-            .map(Some)
-    }
-
     /// The attempt is running here, or its outcome awaits this owner's commit.
     pub(crate) fn holds_execution(&self, id: &AdmittedId) -> bool {
         self.in_flight.contains(id)
@@ -848,6 +778,25 @@ impl Lifecycle {
         if self.finished.is_empty() {
             self.batch_opened = None;
         }
+        for (id, held) in &self.finished {
+            if let Ok(outcome) = &held.result
+                && let Some(execution) = folded.admitted(id)
+            {
+                self.authenticate_settlement(&execution, &outcome.settlement)?;
+            }
+            if let Ok(outcome) = &held.result
+                && let super::SettlementIntent::Cancelled {
+                    permit,
+                    cancellation,
+                } = &outcome.settlement
+                && let Some(execution) = folded.admitted(id)
+                && permit.authorizes(&self.cx, &execution)
+            {
+                self.cancel_requests
+                    .entry(execution.call().clone())
+                    .or_insert_with(|| cancellation.as_ref().clone());
+            }
+        }
         if let Some(act) = self.commit_cancels(folded, attempt).await? {
             return Ok(act);
         }
@@ -865,7 +814,6 @@ impl Lifecycle {
                     }
                     let id = view.id_of(member);
                     if let Some(held) = self.finished.get_mut(&id) {
-                        held.final_at_outcome = false;
                         let result = &mut held.result;
                         if let Ok(outcome) = result {
                             abandoned.extend(outcome.candidate.take());
@@ -1113,12 +1061,25 @@ impl Lifecycle {
                         || held.result.clone(),
                         |cancellation| Ok(cancelled_with(cancellation.clone()).into()),
                     );
-                let final_at_outcome = held.final_at_outcome
-                    && member.is_some_and(|member| {
-                        member.cancellation().is_none() && member.final_payload().is_none()
-                    });
+                if let Ok(outcome) = &result {
+                    match &outcome.settlement {
+                        super::SettlementIntent::PlainFinal(_)
+                            if member.is_none_or(|member| {
+                                member.final_payload().is_some() || member.cancellation().is_some()
+                            }) =>
+                        {
+                            return Err(RoundError::DecisionAuthority);
+                        }
+                        super::SettlementIntent::ProtectedFinal(_)
+                            if member.is_none_or(|member| member.final_payload().is_none()) =>
+                        {
+                            return Err(RoundError::DecisionAuthority);
+                        }
+                        _ => {}
+                    }
+                }
                 let (recorded, candidate, record) =
-                    self.record_finished(&mut tx, &execution, result, now, final_at_outcome)?;
+                    self.record_finished(&mut tx, &execution, result, now)?;
                 staged.push(record);
                 match recorded {
                     Recorded::Retry => retried = true,
@@ -1153,7 +1114,7 @@ impl Lifecycle {
                 && self.running.is_empty()
                 && self.finished.values().all(|held| {
                     matches!(&held.result,
-                    Ok(MemberOutcome { store_local, terminal: None, timer: None, output, capacity: None, candidate: None })
+                    Ok(MemberOutcome { store_local, terminal: None, timer: None, output, capacity: None, candidate: None, .. })
                         if store_local.is_empty() && !matches!(output, SettledOutput::Waiting(_)))
                 })
                 && folded.rounds().all(|view| {
@@ -1327,7 +1288,7 @@ impl Lifecycle {
                 self.parked_ended(won?, &idle.parked).await?;
             }
             Some(request) = self.final_receiver.recv() => {
-                self.final_requests.insert(request.execution.id().clone(), request);
+                self.final_requests.insert(request.permit.execution().id().clone(), request);
             }
             Some(joined) = self.running.join_next(), if !self.running.is_empty() => {
                 self.collect(joined, group.max_members)?;
@@ -1390,13 +1351,7 @@ impl Lifecycle {
                 Ok(())
             }
             result => {
-                self.finished.insert(
-                    done.id,
-                    HeldOutcome {
-                        result,
-                        final_at_outcome: done.held.final_at_outcome,
-                    },
-                );
+                self.finished.insert(done.id, HeldOutcome { result });
                 let clock = self.cx.clock();
                 self.batch_opened.get_or_insert_with(|| clock.now());
                 Ok(())
@@ -1496,7 +1451,6 @@ impl Lifecycle {
                 execution.id().clone(),
                 HeldOutcome {
                     result: Ok(output.into()),
-                    final_at_outcome: false,
                 },
             );
             self.batch_opened.get_or_insert(opened);
@@ -1649,8 +1603,13 @@ impl Lifecycle {
         execution: &AdmittedExecution,
         result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
-        final_at_outcome: bool,
     ) -> Result<(Recorded, Option<StepCandidate>, StagedRecord), RoundError> {
+        let final_at_outcome = if let Ok(outcome) = &result {
+            self.authenticate_settlement(execution, &outcome.settlement)?;
+            matches!(outcome.settlement, super::SettlementIntent::PlainFinal(_))
+        } else {
+            false
+        };
         let (mut output, store_local, terminal, timer, candidate) = match result {
             Ok(result) => (
                 result.output,
@@ -1717,11 +1676,6 @@ impl Lifecycle {
             .as_ref()
             .filter(|_| matches!(output, SettledOutput::Completed(_)))
             .map(StepCandidate::root);
-        let final_at_outcome = final_at_outcome
-            && matches!(
-                output,
-                SettledOutput::Completed(_) | SettledOutput::Failed(_)
-            );
         let record = settle_staged(
             tx,
             execution,

@@ -266,3 +266,12 @@ or `x_cancel` retains cancellation and discharge debt before
 signalling. A successor drains a protected final without rerunning its body;
 a cancel winner fences retries, late results and new declarations. Run stops
 and cell closing select eligible calls through the same decision.
+
+The actor issues one private capability for the admitted owner, run, call,
+start, attempt and epoch. The production runner binds it once before preparation;
+a nested singleton cannot reuse it, even with the same call ID. Missing scope
+or an unacknowledged owner grants no protection. A plain final, an acknowledged
+protected final, cancellation and a nonterminal attempt carry distinct settlement
+intents to the actor. Presentation material and cooperative token state cannot
+establish final provenance. A typed cancelled tool result requests cancellation
+under its original provenance and never emits `x_final_outcome`.

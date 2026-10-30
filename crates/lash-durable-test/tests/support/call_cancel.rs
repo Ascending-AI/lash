@@ -1,4 +1,6 @@
 //! The explicit cancellation law's durable-record and external-world oracle.
+#[path = "call_cancel_authority.rs"]
+pub(super) mod authority;
 use super::*;
 use lash_vocabulary::identity::RunIdCoreSupport as _;
 
@@ -13,6 +15,7 @@ pub(super) enum CommitOrder {
     Cancel,
     Final,
     PlainFinal,
+    TypedCancel,
 }
 
 impl CommitOrder {
@@ -52,6 +55,7 @@ impl CellTurn {
         case: CancelCase,
     ) -> Vec<String> {
         let mut violations = turn_ended(nodes).await;
+        violations.extend(self.world.authority_violations.lock_recover().clone());
         if case.order.final_wins() {
             let view = lash_core_execution::store::SessionStore::new(
                 self.backend().stores().session_store_factory(),
@@ -95,7 +99,8 @@ impl CellTurn {
             .flatten()
             .any(|(tool, args)| tool == WRITE && written_x(args) == Some(4));
         let exception_expected = case.explicit
-            && (case.source == CancelSource::Python || case.order == CommitOrder::Cancel);
+            && (case.source == CancelSource::Python
+                || matches!(case.order, CommitOrder::Cancel | CommitOrder::TypedCancel));
         if observed_exception != exception_expected {
             violations.push(format!(
                 "the guest cancellation handler ran={observed_exception}, explicit={}",
@@ -201,7 +206,12 @@ impl CellTurn {
                                 output.outcome,
                                 lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
                             );
-                            if cancelled != (case.order == CommitOrder::Cancel) {
+                            if cancelled
+                                != matches!(
+                                    case.order,
+                                    CommitOrder::Cancel | CommitOrder::TypedCancel
+                                )
+                            {
                                 violations.push(format!(
                                     "selected call's durable final disagrees with {case:?}: {:?}",
                                     output.outcome
@@ -216,7 +226,7 @@ impl CellTurn {
             let expected = match case.order {
                 CommitOrder::Final => Kind::XFinal,
                 CommitOrder::PlainFinal => Kind::XFinalOutcome,
-                CommitOrder::Cancel => Kind::XCancel,
+                CommitOrder::Cancel | CommitOrder::TypedCancel => Kind::XCancel,
             };
             let trace = nodes.script().trace();
             let decision_at = trace.iter().position(|write| {
@@ -251,43 +261,68 @@ impl CellTurn {
     }
 }
 
-pub(super) async fn run_law() {
-    let host = |order, hint, explicit| CancelCase {
+fn host(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool) -> CancelCase {
+    CancelCase {
         source: CancelSource::Host,
         order,
         hint,
         explicit,
+    }
+}
+
+// One corpus drives the original complete SQLite selector and the PostgreSQL
+// registrations. Every PG registration retains a whole matrix under the same
+// watchdog, following crash_matrix.rs's service-case partition.
+macro_rules! cancellation_cases {
+    ($($name:ident => $case:expr;)*) => {
+        fn cases() -> Vec<CancelCase> { vec![$($case),*] }
+        mod postgres {
+            use super::*;
+            $(
+                #[tokio::test]
+                #[ignore = "requires PostgreSQL"]
+                async fn $name() {
+                    run_cases(Dialect::Postgres,
+                        Some(lash_postgres_store::testing::required_database_url()), &[$case]).await;
+                }
+            )*
+        }
     };
-    for case in [
-        host(CommitOrder::Cancel, None, true),
-        host(CommitOrder::Final, None, true),
-        host(CommitOrder::PlainFinal, None, true),
-        host(
-            CommitOrder::Cancel,
-            Some(lash_core::CancelHint::CancelExternalWork),
-            true,
-        ),
-        host(
-            CommitOrder::Cancel,
-            Some(lash_core::CancelHint::Ignore),
-            true,
-        ),
-        host(CommitOrder::Cancel, None, false),
-        CancelCase::python(CommitOrder::Cancel, None, true),
-        CancelCase::python(CommitOrder::Final, None, true),
-        CancelCase::python(
-            CommitOrder::Cancel,
-            Some(lash_core::CancelHint::CancelExternalWork),
-            true,
-        ),
-        CancelCase::python(
-            CommitOrder::Cancel,
-            Some(lash_core::CancelHint::Ignore),
-            true,
-        ),
-        CancelCase::python(CommitOrder::Cancel, None, false),
-    ] {
-        let report = Matrix::new()
+}
+
+cancellation_cases! {
+    host_typed_cancel_on_postgres => host(CommitOrder::TypedCancel, None, true);
+    host_cancel_on_postgres => host(CommitOrder::Cancel, None, true);
+    host_final_on_postgres => host(CommitOrder::Final, None, true);
+    host_plain_final_on_postgres => host(CommitOrder::PlainFinal, None, true);
+    host_external_cancel_on_postgres => host(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
+    host_ignore_on_postgres => host(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
+    host_control_on_postgres => host(CommitOrder::Cancel, None, false);
+    python_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, None, true);
+    python_final_on_postgres => CancelCase::python(CommitOrder::Final, None, true);
+    python_external_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
+    python_ignore_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
+    python_control_on_postgres => CancelCase::python(CommitOrder::Cancel, None, false);
+}
+
+pub(super) async fn run_law() {
+    run_cases(Dialect::SqliteMemory, None, &cases()).await;
+}
+
+async fn run_cases(dialect: Dialect, postgres_url: Option<String>, cases: &[CancelCase]) {
+    let missing = authority::probe(ToolCallId::fixture("missing-authority")).await;
+    eprintln!("missing authority refusals: {missing:?}");
+    for &case in cases {
+        // Each PostgreSQL cut owns a database and its pools. Keep the full
+        // cut census within the private service's connection ceiling.
+        let matrix = if matches!(dialect, Dialect::Postgres) {
+            Matrix::new().parallelism(
+                std::num::NonZeroUsize::new(4).expect("four PG cells per service slot"),
+            )
+        } else {
+            Matrix::new()
+        };
+        let report = matrix
             .labels(&[
                 CommitLabel::CELL_SNAPSHOT_ADMIT,
                 CommitLabel::CALL_CANCEL_REQUEST,
@@ -300,7 +335,7 @@ pub(super) async fn run_law() {
             ])
             .faults(&[Fault::Abort, Fault::CommitThenAbort, Fault::AckHidden])
             .horizon(Duration::from_secs(600))
-            .run_test(|| CellTurn::new(Cell::ExplicitCancel(case), Dialect::SqliteMemory, None))
+            .run_test(|| CellTurn::new(Cell::ExplicitCancel(case), dialect, postgres_url.clone()))
             .await;
         eprintln!(
             "{case:?}: {} crash cuts over {:?}",
@@ -328,6 +363,7 @@ pub(super) async fn run_law() {
         }
         report.assert_held();
     }
+    assert!(missing.is_empty(), "{missing:?}");
 }
 
 pub(super) fn increment_state() -> lash::plugins::StateCommands {
@@ -343,7 +379,46 @@ pub(super) fn increment_reducer() -> lash::plugins::StateReducer {
     })
 }
 
+/// Wait on durable park commits so readiness cannot keep the virtual clock
+/// busy with PostgreSQL polling before the park batch window can elapse.
+pub(super) async fn wait_pending_calls(world: &ExternalWorld) {
+    use lash_durable::domain::RunFactKind;
+    let nodes = world.nodes.lock_recover().upgrade().unwrap();
+    loop {
+        let slow: std::collections::BTreeSet<_> = world
+            .entries()
+            .into_iter()
+            .filter(|(_, entries)| entries.iter().any(|(tool, _)| tool == SLOW))
+            .map(|(call, _)| call)
+            .collect();
+        let trace = nodes.script().trace();
+        let parked: std::collections::BTreeSet<_> = trace
+            .iter()
+            .filter(|write| write.committed())
+            .flat_map(|write| &write.facts.rows)
+            .filter(|row| row.kind == RunFactKind::XWait)
+            .filter_map(|row| row.call.clone())
+            .collect();
+        if slow.len() == 2 && slow.is_subset(&parked) {
+            return;
+        }
+        let settled = trace
+            .iter()
+            .filter(|write| write.stored != Stored::Pending)
+            .count();
+        nodes.script().settled(settled + 1).await;
+    }
+}
+
 pub(super) async fn wait_plain_final(world: &ExternalWorld) {
+    wait_terminal(world, lash_durable::domain::RunFactKind::XFinalOutcome).await;
+}
+
+pub(super) async fn wait_typed_cancel(world: &ExternalWorld) {
+    wait_terminal(world, lash_durable::domain::RunFactKind::XOutcome).await;
+}
+
+async fn wait_terminal(world: &ExternalWorld, kind: lash_durable::domain::RunFactKind) {
     let nodes = world.nodes.lock_recover().upgrade().unwrap();
     loop {
         let selected = world.entries().into_iter().find_map(|(id, entries)| {
@@ -356,10 +431,11 @@ pub(super) async fn wait_plain_final(world: &ExternalWorld) {
         if selected.is_some()
             && trace.iter().any(|write| {
                 write.committed()
-                    && write.facts.rows.iter().any(|row| {
-                        row.call == selected
-                            && row.kind == lash_durable::domain::RunFactKind::XFinalOutcome
-                    })
+                    && write
+                        .facts
+                        .rows
+                        .iter()
+                        .any(|row| row.call == selected && row.kind == kind)
             })
         {
             return;

@@ -21,7 +21,9 @@ use super::singleton_run::{
 };
 use crate::ScopeId;
 use crate::ToolCallId;
+use crate::runtime::actor::round::SettlementIntent;
 use crate::runtime::actor::round::StoreLocalEffect;
+use crate::runtime::actor::round::decision::BoundDecision;
 use crate::runtime::effect::AttemptStreamRecorder;
 use crate::runtime::process::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, IsolatedStartRefusal,
@@ -79,8 +81,8 @@ impl RankedVerdict for BeforeCheckReply {
 /// How a call ended: what its consumer, or its round member, presents.
 #[derive(Clone, Debug)]
 pub enum CallEnd {
-    /// The result is final: its declarations realized, presented and
-    /// incorporated.
+    /// A terminal result, presented and incorporated with explicit decision
+    /// provenance. A protected final has realized its declarations.
     Final {
         /// What the result was.
         capture: SingletonCapture,
@@ -92,6 +94,8 @@ pub enum CallEnd {
         /// its plugin-state resolutions staged: they commit with the call's
         /// outcome.
         store_local: Vec<StoreLocalEffect>,
+        /// The actor-bound final or cancellation provenance.
+        settlement: SettlementIntent,
     },
     /// A check or the Run's cancel withheld the result.
     Withheld {
@@ -180,6 +184,7 @@ pub struct AdmittedToolCall<'a> {
     selection: Selection,
     policy: ExecutionPolicy,
     address: Option<crate::EffectAddress>,
+    decision: BoundDecision,
 }
 
 fn fault(message: impl std::fmt::Display) -> SingletonRunError {
@@ -263,11 +268,23 @@ impl<'a> AdmittedToolCall<'a> {
         call: SingletonToolCall,
         scope: &crate::ExecutionScope,
     ) -> Result<Self, SingletonRunError> {
+        let decision = BoundDecision::bind(&call.owner, &call.call_id).map_err(fault)?;
+        Self::admit_bound(handlers, call, scope, decision).await
+    }
+
+    pub(crate) async fn admit_bound(
+        handlers: Arc<dyn SingletonToolHandlers + 'a>,
+        call: SingletonToolCall,
+        scope: &crate::ExecutionScope,
+        decision: BoundDecision,
+    ) -> Result<Self, SingletonRunError> {
+        decision
+            .authenticate(&call.owner, &call.call_id)
+            .map_err(fault)?;
         call.declaration
             .validate()
             .map_err(|cause| AdmissionRefusal::Declaration { member: 0, cause })?;
-        if let Some(payload) = crate::runtime::actor::round::decision::retained_final(&call.call_id)
-        {
+        if let Some(payload) = decision.retained_final() {
             let retained: ProtectedFinal = serde_json::from_value(payload).map_err(fault)?;
             handlers
                 .restore_preparation(&call.call_id, &retained.prepared)
@@ -284,6 +301,7 @@ impl<'a> AdmittedToolCall<'a> {
                 },
                 selection: Selection::Execute,
                 address: None,
+                decision,
             });
         }
         let isolation = if call.declaration.isolated {
@@ -353,6 +371,7 @@ impl<'a> AdmittedToolCall<'a> {
             selection,
             policy,
             address,
+            decision,
         })
     }
 
@@ -382,9 +401,10 @@ impl<'a> AdmittedToolCall<'a> {
         may_retry: bool,
         cancel: &CancellationToken,
     ) -> Result<AttemptEnd, SingletonRunError> {
-        if let Some(payload) =
-            crate::runtime::actor::round::decision::retained_final(&self.call.call_id)
-        {
+        self.decision
+            .authenticate_attempt(&self.call.owner, &self.call.call_id, ordinal)
+            .map_err(fault)?;
+        if let Some(payload) = self.decision.retained_final() {
             let retained: ProtectedFinal = serde_json::from_value(payload).map_err(fault)?;
             let mut end = self
                 .present(retained.decision, retained.capture, cancel)
@@ -517,9 +537,13 @@ impl<'a> AdmittedToolCall<'a> {
             SingletonBodyOutcome::TimedOut { cause, evidence } => {
                 SingletonCapture::TimedOut { cause, evidence }
             }
-            SingletonBodyOutcome::Cancelled { evidence } => {
-                SingletonCapture::Cancelled { evidence }
-            }
+            SingletonBodyOutcome::Cancelled {
+                evidence,
+                cancellation,
+            } => SingletonCapture::Cancelled {
+                evidence,
+                cancellation,
+            },
             SingletonBodyOutcome::Faulted(fault) => return Ok(Executed::Faulted(fault)),
             SingletonBodyOutcome::Pending {
                 completion,
@@ -549,6 +573,9 @@ impl<'a> AdmittedToolCall<'a> {
         let call_id = &self.call.call_id;
         let plugins = handlers.execution_state();
         let decide = async {
+            if matches!(capture, SingletonCapture::Cancelled { .. }) {
+                return Ok((CallDecision::Cancelled, None));
+            }
             if cancel.is_cancelled() {
                 return Ok((CallDecision::Cancelled, None));
             }
@@ -616,6 +643,12 @@ impl<'a> AdmittedToolCall<'a> {
             }
             _ => decide.await.map_err(fault)?,
         };
+        if let SingletonCapture::Cancelled { cancellation, .. } = &capture {
+            let settlement = self.decision.cancelled(cancellation.clone());
+            return self
+                .present_with_settlement(decision, capture, cancel, settlement)
+                .await;
+        }
         if !matches!(decision, CallDecision::Final { .. }) {
             let cause = after
                 .as_ref()
@@ -643,10 +676,7 @@ impl<'a> AdmittedToolCall<'a> {
                     }),
             })
             .map_err(fault)?;
-            if !crate::runtime::actor::round::decision::commit_final(&self.call.call_id, payload)
-                .await
-                .map_err(fault)?
-            {
+            if !self.decision.commit_final(payload).await.map_err(fault)? {
                 if let Some(staged) = staged {
                     staged.discard();
                 }
@@ -655,11 +685,20 @@ impl<'a> AdmittedToolCall<'a> {
             if let Some(staged) = &staged {
                 staged.protect();
             }
-        } else {
-            crate::runtime::actor::round::decision::final_at_outcome(&self.call.call_id)
-                .map_err(fault)?;
         }
-        let end = self.present(decision, capture, cancel).await;
+        let settlement = if capture.declares() {
+            self.decision.protected_final()
+        } else if matches!(
+            capture,
+            SingletonCapture::Interrupted | SingletonCapture::TimedOut { .. }
+        ) {
+            SettlementIntent::Nonterminal
+        } else {
+            self.decision.plain_final()
+        };
+        let end = self
+            .present_with_settlement(decision, capture, cancel, settlement)
+            .await;
         match (end, staged) {
             (
                 Ok(CallEnd::Final {
@@ -667,6 +706,7 @@ impl<'a> AdmittedToolCall<'a> {
                     presentation,
                     launched,
                     mut store_local,
+                    settlement,
                 }),
                 Some(staged),
             ) => {
@@ -676,6 +716,7 @@ impl<'a> AdmittedToolCall<'a> {
                     presentation,
                     launched,
                     store_local,
+                    settlement,
                 })
             }
             // A call that ends without a final outcome carries none of what
@@ -715,6 +756,20 @@ impl<'a> AdmittedToolCall<'a> {
         capture: SingletonCapture,
         cancel: &CancellationToken,
     ) -> Result<CallEnd, SingletonRunError> {
+        self.present_with_settlement(decision, capture, cancel, self.decision.protected_final())
+            .await
+    }
+
+    async fn present_with_settlement(
+        &self,
+        decision: CallDecision,
+        capture: SingletonCapture,
+        cancel: &CancellationToken,
+        settlement: SettlementIntent,
+    ) -> Result<CallEnd, SingletonRunError> {
+        self.decision
+            .authenticate(&self.call.owner, &self.call.call_id)
+            .map_err(fault)?;
         let handlers = self.handlers.as_ref();
         let call_id = &self.call.call_id;
         let mut store_local = Vec::new();
@@ -764,6 +819,7 @@ impl<'a> AdmittedToolCall<'a> {
             presentation,
             launched,
             store_local,
+            settlement,
         })
     }
 

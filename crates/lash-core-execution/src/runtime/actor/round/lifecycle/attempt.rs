@@ -27,20 +27,12 @@ impl Lifecycle {
             .policies
             .permits_repeat(execution.draft().tool(), pinned);
         self.in_flight.insert(execution.id().clone());
-        let protected = CancellationToken::new();
-        if retained.is_some() {
-            protected.cancel();
-        }
-        let scope = Arc::new(decision::FinalScope {
-            execution: execution.clone(),
-            sender: self.final_sender.clone(),
-            state: std::sync::Mutex::new(match retained {
-                Some(payload) => decision::FinalState::Protected(payload),
-                None => decision::FinalState::Open,
-            }),
-            protected,
-        });
-        let outcome_scope = Arc::clone(&scope);
+        let scope = decision::DecisionScope::new(
+            cx.clone(),
+            execution.clone(),
+            self.final_sender.clone(),
+            retained,
+        );
         let attempt = async move {
             type Carried = (
                 Vec<StoreLocalEffect>,
@@ -48,6 +40,7 @@ impl Lifecycle {
                 Option<DurableInstant>,
                 Option<CapacityVerdict>,
                 Option<StepCandidate>,
+                super::super::SettlementIntent,
             );
             let carried: Arc<Mutex<Carried>> = Arc::default();
             let slot = Arc::clone(&carried);
@@ -60,6 +53,7 @@ impl Lifecycle {
                         result.timer,
                         result.capacity,
                         result.candidate,
+                        result.settlement,
                     );
                     result.output
                 })
@@ -67,9 +61,10 @@ impl Lifecycle {
             let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
                 .await
                 .and_then(|output| {
-                    let (store_local, terminal, timer, capacity, candidate) = std::mem::take(
-                        &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
-                    );
+                    let (store_local, terminal, timer, capacity, candidate, settlement) =
+                        std::mem::take(
+                            &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
+                        );
                     match capacity {
                         Some(verdict) if honours_capacity => Err(Stop::Capacity(verdict)),
                         _ => Ok(MemberOutcome {
@@ -79,20 +74,18 @@ impl Lifecycle {
                             timer,
                             capacity: None,
                             candidate,
+                            settlement,
                         }),
                     }
                 });
             Finished {
                 id: execution.id().clone(),
-                held: HeldOutcome {
-                    final_at_outcome: result.is_ok() && outcome_scope.at_outcome(),
-                    result,
-                },
+                held: HeldOutcome { result },
             }
         };
         self.running.spawn(
             lash_core_ids::operational_metrics::turn::carry(
-                decision::FINAL_SCOPE.scope(scope, attempt),
+                decision::DECISION_SCOPE.scope(scope, attempt),
             )
             .instrument(tracing::Span::current()),
         );

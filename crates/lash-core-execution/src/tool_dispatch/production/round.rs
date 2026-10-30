@@ -22,18 +22,29 @@ use lash_core_store::tool_run::SettledOutput;
 pub(super) enum MemberEnd {
     /// The call ended with this answer.
     Final(CompletedCall),
+    /// A runner answer with its actor-bound settlement intent.
+    Settled(
+        CompletedCall,
+        crate::runtime::actor::round::SettlementIntent,
+    ),
     /// The attempt reported a failure its policy repeats.
     Retry {
         failure: CompletedCall,
         suggested_delay_ms: Option<u64>,
     },
     /// The turn's cancel withheld the call's result.
-    Cancelled,
+    Cancelled(crate::ToolCancellation),
     /// The body parked on its completion wait.
     Parked(ParkedCall),
     /// The attempt ended in a retryable attempt fault: it took no effect,
     /// and [`member_body`] runs it again.
     Faulted(Box<crate::RuntimeEffectControllerError>),
+}
+
+struct BoundAttempt<'a> {
+    ordinal: AttemptOrdinal,
+    may_retry: bool,
+    decision: &'a crate::runtime::actor::round::decision::BoundDecision,
 }
 
 /// A parked call as its `Waiting` outcome records it: its pending
@@ -139,6 +150,7 @@ fn parked_output(
         },
         capacity: None,
         candidate: None,
+        settlement: crate::runtime::actor::round::SettlementIntent::Nonterminal,
     }
 }
 
@@ -162,18 +174,16 @@ pub fn parked_call_output(
 /// repeatable failure is a known failure, a cancel is `Cancelled`.
 pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> SettledOutput {
     let (completed, failure) = match end {
-        MemberEnd::Cancelled => {
+        MemberEnd::Cancelled(cancellation) => {
             return SettledOutput::Cancelled {
-                cancellation: lash_protocol_types::ToolCancellation::runtime(
-                    "the call was cancelled",
-                ),
+                cancellation,
                 evidence: AvailableEvidence::default(),
             };
         }
         // A park is answered by `parked_output`, and a fault is attempted
         // again by `member_body`.
         MemberEnd::Parked(_) | MemberEnd::Faulted(_) => return SettledOutput::Interrupted,
-        MemberEnd::Final(completed) => (completed, None),
+        MemberEnd::Final(completed) | MemberEnd::Settled(completed, _) => (completed, None),
         MemberEnd::Retry {
             failure,
             suggested_delay_ms,
@@ -201,12 +211,19 @@ impl ProductionToolHandlers<'_> {
         owner: &crate::EffectOpener,
         call: &crate::sansio::PendingToolCall,
         invocation: ToolInvocation,
-        attempt: AttemptOrdinal,
-        may_retry: bool,
+        bound: BoundAttempt<'_>,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(MemberEnd, Vec<StoreLocalEffect>), SingletonRunError> {
+        let BoundAttempt {
+            ordinal: attempt,
+            may_retry,
+            decision,
+        } = bound;
         let Some(mut definition) = self.leaf_definition(&invocation) else {
-            return Ok((MemberEnd::Final(self.unavailable_call(call)), Vec::new()));
+            return Ok((
+                MemberEnd::Settled(self.unavailable_call(call), decision.plain_final()),
+                Vec::new(),
+            ));
         };
         // A call whose linked tool is served under another contract than it
         // is pinned to raises `operation_contract_changed` at its perform,
@@ -234,7 +251,10 @@ impl ProductionToolHandlers<'_> {
         if let Some(failure) = failure {
             let output = ToolCallOutput::failure(failure);
             return Ok((
-                MemberEnd::Final(self.observed_unadmitted(call, output)),
+                MemberEnd::Settled(
+                    self.observed_unadmitted(call, output),
+                    decision.plain_final(),
+                ),
                 Vec::new(),
             ));
         }
@@ -244,7 +264,7 @@ impl ProductionToolHandlers<'_> {
         if let Some(admitted) = &self.admitted_declaration {
             definition = definition.with_admitted_declaration(admitted.clone());
         }
-        if crate::runtime::actor::round::decision::retained_final(&call.call_id).is_none()
+        if decision.retained_final().is_none()
             && let Some(engine) = definition.manifest.isolation_engine()
         {
             let granted = invocation
@@ -280,7 +300,10 @@ impl ProductionToolHandlers<'_> {
                 }
                 Err(crate::HoldEnvError::Refused(refusal)) => {
                     return Ok((
-                        MemberEnd::Final(self.refused_isolated_call(call, &refusal)),
+                        MemberEnd::Settled(
+                            self.refused_isolated_call(call, &refusal),
+                            decision.plain_final(),
+                        ),
                         Vec::new(),
                     ));
                 }
@@ -310,21 +333,35 @@ impl ProductionToolHandlers<'_> {
             .execution_scope()
             .clone();
         let handlers: Arc<dyn SingletonToolHandlers + '_> = Arc::clone(self) as _;
-        let admitted = AdmittedToolCall::admit(handlers, singleton, &scope).await?;
+        let admitted =
+            AdmittedToolCall::admit_bound(handlers, singleton, &scope, decision.clone()).await?;
         Ok(match admitted.attempt(attempt, may_retry, cancel).await? {
             AttemptEnd::Ended(CallEnd::Withheld {
                 decision: CallDecision::Cancelled,
                 ..
-            }) => (MemberEnd::Cancelled, Vec::new()),
+            }) => (
+                MemberEnd::Cancelled(crate::ToolCancellation::runtime("the call was cancelled")),
+                Vec::new(),
+            ),
             AttemptEnd::Ended(end) => {
                 let store_local = match &end {
                     CallEnd::Final { store_local, .. } => store_local.clone(),
                     CallEnd::Withheld { .. } => Vec::new(),
                 };
-                (
-                    MemberEnd::Final(self.completed_call(&call.call_id, &end)?),
-                    store_local,
-                )
+                let settlement = match &end {
+                    CallEnd::Final { settlement, .. } => settlement.clone(),
+                    CallEnd::Withheld { .. } => {
+                        crate::runtime::actor::round::SettlementIntent::Nonterminal
+                    }
+                };
+                let completed = self.completed_call(&call.call_id, &end)?;
+                let settlement = match &completed.output.outcome {
+                    crate::ToolCallOutcome::Cancelled(cancellation) => {
+                        decision.cancelled(cancellation.clone())
+                    }
+                    _ => settlement,
+                };
+                (MemberEnd::Settled(completed, settlement), store_local)
             }
             AttemptEnd::Retry {
                 capture,
@@ -505,6 +542,16 @@ pub(super) fn member_body(
             let Some(ordinal) = ordinal else {
                 return SettledOutput::Interrupted.into();
             };
+            let decision = match crate::runtime::actor::round::decision::BoundDecision::bind(
+                &owner,
+                &call.call_id,
+            ) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    tracing::error!(%error, "the durable tool runner lacks decision authority");
+                    return SettledOutput::Interrupted.into();
+                }
+            };
             let mut faults = 0_u32;
             let (end, store_local) = loop {
                 // Each attempt owns its handlers: an inline body stops on the
@@ -528,8 +575,11 @@ pub(super) fn member_body(
                         &owner,
                         &call,
                         invocation.clone(),
-                        ordinal,
-                        may_retry,
+                        BoundAttempt {
+                            ordinal,
+                            may_retry,
+                            decision: &decision,
+                        },
                         &token,
                     )
                     .await
@@ -554,12 +604,7 @@ pub(super) fn member_body(
                         faults = faults.saturating_add(1);
                     }
                     Ok(ended) => break ended,
-                    Err(error)
-                        if crate::runtime::actor::round::decision::retained_final(
-                            &call.call_id,
-                        )
-                        .is_some() =>
-                    {
+                    Err(error) if decision.retained_final().is_some() => {
                         tracing::debug!(call_id = %call.call_id, error = %error, "draining a protected call final");
                         context
                             .dispatch()
@@ -570,14 +615,17 @@ pub(super) fn member_body(
                     }
                     Err(error) => {
                         break (
-                            MemberEnd::Final(answered(
-                                &call,
-                                ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                    crate::ToolFailureClass::Internal,
-                                    "tool_run_fault",
-                                    error.to_string(),
-                                )),
-                            )),
+                            MemberEnd::Settled(
+                                answered(
+                                    &call,
+                                    ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                        crate::ToolFailureClass::Internal,
+                                        "tool_run_fault",
+                                        error.to_string(),
+                                    )),
+                                ),
+                                decision.plain_final(),
+                            ),
                             Vec::new(),
                         );
                     }
@@ -585,6 +633,22 @@ pub(super) fn member_body(
             };
             let mut result = match end {
                 MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
+                MemberEnd::Settled(completed, settlement) => {
+                    let output = match &settlement {
+                        crate::runtime::actor::round::SettlementIntent::Cancelled {
+                            cancellation,
+                            ..
+                        } => member_output(
+                            &owner,
+                            MemberEnd::Cancelled(cancellation.as_ref().clone()),
+                        ),
+                        _ => member_output(&owner, MemberEnd::Final(completed)),
+                    };
+                    MemberOutcome {
+                        settlement,
+                        ..output.into()
+                    }
+                }
                 end => member_output(&owner, end).into(),
             };
             // The effects commit with the completion or the park that

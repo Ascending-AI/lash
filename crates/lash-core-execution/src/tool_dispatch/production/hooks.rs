@@ -134,7 +134,7 @@ impl ProductionToolHandlers<'_> {
             SingletonCapture::Isolated { .. }
                 | SingletonCapture::Interrupted
                 | SingletonCapture::TimedOut { evidence: None, .. }
-                | SingletonCapture::Cancelled { evidence: None }
+                | SingletonCapture::Cancelled { evidence: None, .. }
         ) {
             return Ok(Vec::new());
         }

@@ -338,12 +338,12 @@ pub use lash_core::runtime::ProcessEngineRegistry;
 /// execution that makes it durable; hosts submit work through session
 /// handles.
 pub use lash_core::tool_dispatch::{
-    AdmittedToolCall, AttemptEnd, BeforeCheckReply, CallEnd, DeclaredStartObligation,
-    DeclaredStartObligationRefusal, IntentRealizationContext, IsolatedBinding,
-    IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart, Realization,
-    RealizationReceipt, RunCutRefusal, SingletonAttempt, SingletonBodyOutcome, SingletonCapture,
-    SingletonPreparedRequest, SingletonPresentationError, SingletonRunError, SingletonToolCall,
-    SingletonToolHandlers, StartLaunch,
+    AdmittedToolCall, AttemptEnd, BeforeCheckReply, CallEnd, DecisionPermit,
+    DeclaredStartObligation, DeclaredStartObligationRefusal, IntentRealizationContext,
+    IsolatedBinding, IsolatedProcessDescriptor, IsolatedStartRefusal, IsolatedToolStart,
+    Realization, RealizationReceipt, RunCutRefusal, SettlementIntent, SingletonAttempt,
+    SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,
+    SingletonRunError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
 /// One recorded Run attempt's outcome, distinct from the provider's
 /// [`crate::provider::AttemptOutcome`].
