@@ -93,7 +93,9 @@ pub fn checkpoint(
     reader.bindings(&Tree::of_keyed(&root.session))?;
     reader.functions(&Tree::of_keyed(&root.functions))?;
     reader.plain(&Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready))?;
-    reader.plain(&Tree::<u64>::of_sequence(&root.unreported))?;
+    reader.plain(
+        &Tree::<lash_kernel_value::sites::WaitCancellation>::of_sequence(&root.unreported),
+    )?;
     reader.plain(&Tree::<u64>::of_keyed(&root.withdrawn))?;
     reader.tree(
         &Tree::<lash_kernel_value::OperationUse>::of_keyed(&root.reads),
