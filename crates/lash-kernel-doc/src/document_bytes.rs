@@ -17,7 +17,7 @@ use lash_kernel_value::tokens::TokenError;
 ///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
 ///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
 /// )
-pub const DOCUMENT_GRAMMAR_VERSION: u32 = 6;
+pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
 
 /// An opaque document, its lash-issued identity and its grammar tag.
 ///
