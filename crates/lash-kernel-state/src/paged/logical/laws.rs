@@ -1431,4 +1431,61 @@ fn checked_program_and_warm_balance() {
     assert_eq!(arena.sequence(value.handle().unwrap()).unwrap().len(), 2);
     assert_eq!(ledger.balance().unwrap().entity_local_bytes, 66);
     assert!(materializations.entities().is_empty());
+
+    // A shared binding installs its cell only in the admitted journal. Its
+    // member keeps the computed occurrence price, without pooling the RHS.
+    let (heap, _) = fresh();
+    let mut arena = crate::arena::Arena::new();
+    let mut ledger = Ledger::fresh();
+    let entity = EntityId {
+        family: FamilyId::PRIMARY,
+        ordinal: arena.next_ordinal(),
+    };
+    let make = || {
+        Program::new(vec![JournalEvent {
+            entities: vec![VirtualEntity {
+                entity,
+                body: VirtualBody::NativeVariable(Value::Int(256)),
+            }],
+            outputs: vec![(
+                owner(0),
+                PublicationValue::Page(PageValue::Ref(Identity::Object(entity))),
+            )],
+            ..Default::default()
+        }])
+    };
+    let expected = make().evaluate(&ledger, &arena).unwrap();
+    let (refused, mut storage) = arena.prepare_cell(Value::Int(256)).unwrap();
+    storage.bind_entity(refused, entity).unwrap();
+    let (mut registration, _batch) = storage.into_parts();
+    assert!(registration.arena().body(refused).is_err());
+    let prepared = expected
+        .prepare(&ledger, registration, &heap, make())
+        .unwrap();
+    assert_eq!(prepared.peak(), 66);
+    assert!(prepared.admit(65).is_none());
+    assert!(arena.body(refused).is_err());
+    assert_eq!(arena.next_ordinal(), entity.ordinal);
+    assert_eq!(arena.allocations(), 0);
+    let expected = make().evaluate(&ledger, &arena).unwrap();
+    let (cell, mut storage) = arena.prepare_cell(Value::Int(256)).unwrap();
+    assert_eq!(cell, refused, "abandonment returns the fresh cell's slot");
+    storage.bind_entity(cell, entity).unwrap();
+    let (registration, batch) = storage.into_parts();
+    let prepared = expected
+        .prepare(&ledger, registration, &heap, make())
+        .unwrap();
+    prepared
+        .admit(66)
+        .unwrap()
+        .publish_materialized(&mut ledger, |arena, edits, entities| {
+            assert!(edits.is_empty());
+            assert_eq!(entities.len(), 1);
+            batch.publish(arena);
+        })
+        .unwrap();
+    assert!(arena.cell(cell).unwrap().same(&Value::Int(256)));
+    assert_eq!(arena.logical_handle(entity), Some(cell));
+    assert_eq!(ledger.balance().unwrap().entity_local_bytes, 50);
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 66);
 }

@@ -732,10 +732,10 @@ impl Objects {
         self.slots.len()
     }
 
-    /// Reserves a slot for an object a call allocates: a released one if
+    /// Reserves a slot for a detached object or construction: a released one if
     /// any, else one past the end. Nothing is written until
     /// [`Self::install`].
-    pub(crate) fn reserve(&self) -> ArenaHandle {
+    pub fn reserve(&self) -> ArenaHandle {
         if let Some(index) = self.free.borrow_mut().pop() {
             let generation = self.slots[index as usize].generation;
             return ArenaHandle::new(index, generation);

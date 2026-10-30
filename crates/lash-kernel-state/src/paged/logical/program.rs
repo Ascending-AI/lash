@@ -54,6 +54,8 @@ pub enum VirtualBody {
     /// Evaluated resident members retain their native provenance and identities.
     NativeList(Vec<Value>),
     Variable(PageValue),
+    /// A fresh shared variable retains the evaluated RHS provenance.
+    NativeVariable(Value),
     Closure(Vec<EntityId>),
     Map(Vec<(PageValue, PageValue)>),
     Set(Vec<PageValue>),
@@ -89,6 +91,7 @@ impl VirtualBody {
                 }
             }
             Self::Variable(value) => add(Holding::from_page(access, value)?, false)?,
+            Self::NativeVariable(value) => add(Holding::from_native(arena, access, value)?, false)?,
             Self::Closure(captures) => {
                 for entity in captures {
                     add(
@@ -143,6 +146,7 @@ impl VirtualBody {
                 a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.same(b))
             }
             (Self::Variable(a), Self::Variable(b)) => encode_body(a) == encode_body(b),
+            (Self::NativeVariable(a), Self::NativeVariable(b)) => a.same(b),
             (Self::Closure(a), Self::Closure(b)) => a == b,
             (Self::Map(a), Self::Map(b)) | (Self::Record(a), Self::Record(b)) => {
                 a.len() == b.len()
@@ -237,8 +241,12 @@ impl JournalEvent {
     }
     fn handles(&self, handles: &mut Vec<ArenaHandle>) {
         for entity in &self.entities {
-            if let VirtualBody::NativeList(values) = &entity.body {
-                handles.extend(values.iter().filter_map(Value::handle));
+            match &entity.body {
+                VirtualBody::NativeList(values) => {
+                    handles.extend(values.iter().filter_map(Value::handle))
+                }
+                VirtualBody::NativeVariable(value) => handles.extend(value.handle()),
+                _ => {}
             }
         }
         for (_, value) in &self.outputs {
@@ -716,6 +724,10 @@ impl VirtualBody {
             }
             Self::Variable(value) => {
                 add(PublicationValue::Page(value.clone()))?;
+                Kind::Variable
+            }
+            Self::NativeVariable(value) => {
+                add(PublicationValue::Native(*value))?;
                 Kind::Variable
             }
             Self::Closure(captures) => {

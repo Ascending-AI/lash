@@ -67,7 +67,7 @@ impl Arena {
             next,
             dirty,
             committed: false,
-            batch: Vec::new(),
+            batch: Batch::Native(Vec::new()),
         })
     }
 }
@@ -81,34 +81,73 @@ pub struct Registration<'a> {
     next: u64,
     dirty: usize,
     committed: bool,
-    batch: Vec<(ArenaHandle, NewObject)>,
+    batch: Batch,
+}
+enum Batch {
+    Native(Vec<(ArenaHandle, NewObject)>),
+    Bodies(Vec<(ArenaHandle, Body)>),
+}
+impl Batch {
+    fn len(&self) -> usize {
+        match self {
+            Self::Native(values) => values.len(),
+            Self::Bodies(values) => values.len(),
+        }
+    }
+    fn handles(&self) -> impl ExactSizeIterator<Item = ArenaHandle> + DoubleEndedIterator + '_ {
+        (0..self.len()).map(|at| match self {
+            Self::Native(values) => values[at].0,
+            Self::Bodies(values) => values[at].0,
+        })
+    }
 }
 impl Registration<'_> {
     pub(super) fn reserve_batch(
         &mut self,
         new: Vec<(ArenaHandle, NewObject)>,
     ) -> Result<(), NativeError> {
-        assert!(self.batch.is_empty());
-        self.batch = new;
-        let result = self
-            .arena
-            .objects
-            .prepare_install(self.batch.iter().map(|(handle, _)| *handle));
+        self.reserve_objects(Batch::Native(new))
+    }
+    pub(super) fn reserve_body(&mut self, body: Body) -> Result<ArenaHandle, NativeError> {
+        let mut values = Vec::new();
+        values
+            .try_reserve(1)
+            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        let handle = self.arena.objects.reserve();
+        values.push((handle, body));
+        self.reserve_objects(Batch::Bodies(values))?;
+        Ok(handle)
+    }
+    fn reserve_objects(&mut self, batch: Batch) -> Result<(), NativeError> {
+        assert_eq!(self.batch.len(), 0);
+        self.batch = batch;
+        let result = self.arena.objects.prepare_install(self.batch.handles());
         if matches!(result, Err(lash_kernel_doc::heap::HeapFault::Malformed(_))) {
             // Forged slots confer no authority to return a live or unreserved slot.
-            self.batch.clear();
+            self.batch = Batch::Native(Vec::new());
         }
         result.map_err(NativeError::from)
     }
     pub(super) fn batch_len(&self) -> usize {
         self.batch.len()
     }
-    pub(super) fn take_batch_object(&mut self, at: usize) -> (ArenaHandle, NewObject) {
-        let (handle, object) = &mut self.batch[at];
-        (
-            *handle,
-            std::mem::replace(object, NewObject::List(Vec::new())),
-        )
+    pub(super) fn take_batch_body(
+        &mut self,
+        at: usize,
+    ) -> Result<(ArenaHandle, Body), NativeError> {
+        match &mut self.batch {
+            Batch::Native(values) => {
+                let (handle, object) = &mut values[at];
+                let object = std::mem::replace(object, NewObject::List(Vec::new()));
+                Ok((*handle, super::batch::raw_body(object)?))
+            }
+            Batch::Bodies(values) => {
+                let (handle, body) = &mut values[at];
+                Ok((*handle, std::mem::replace(body, Body::Cell(Value::Absent))))
+            }
+        }
     }
 
     pub fn reserve_entity(&mut self) -> Result<EntityId, NativeError> {
@@ -133,9 +172,7 @@ impl Registration<'_> {
 impl Drop for Registration<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.arena
-                .objects
-                .discard_install(self.batch.iter().map(|(handle, _)| *handle));
+            self.arena.objects.discard_install(self.batch.handles());
             let mut kept = self.dirty;
             for at in self.dirty..self.arena.dirty.len() {
                 let handle = self.arena.dirty[at];

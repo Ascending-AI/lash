@@ -807,10 +807,9 @@ impl Source {
         for (node, site) in parents.into_iter().rev() {
             match node {
                 doc::Node::Expr(doc::Expr::List(_)) => continue,
-                doc::Node::Stmt(doc::Stmt::Let { name, .. }) => {
-                    return (!self.persistent.contains_key(&site)
-                        && self.shared.get(&(site, name.clone())) != Some(&true))
-                    .then_some(TransferTarget::Binding);
+                doc::Node::Stmt(doc::Stmt::Let { .. }) => {
+                    return (!self.persistent.contains_key(&site))
+                        .then_some(TransferTarget::Binding);
                 }
                 doc::Node::Stmt(doc::Stmt::Assign {
                     place: doc::Place::Variable(_),

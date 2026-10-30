@@ -2,7 +2,9 @@
 use super::*;
 use crate::admission::Allowance;
 use crate::machine::islands::compiled::WriteSite;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program, PublicationValue as PV};
+use lash_kernel_state::kernel_internals::logical::{
+    JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
+};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
@@ -23,7 +25,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Ok(None);
         }
-        if site.shared {
+        if site.shared && !site.bind {
             return self.publish_cell_store(frame, site, value);
         }
         let Some(statement) = frame.state.statement else {
@@ -39,6 +41,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let code = self.exe.code(frame.state.callee.plan.code);
         let source = &code.source_room;
+        if site.shared && (source.persistent.contains_key(at) || !self.cell_room(1)) {
+            return Ok(None);
+        }
         let at = Point {
             site: (**at).clone(),
             phase: SourcePhase::Commit,
@@ -77,6 +82,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
         self.logical.replace(input, Some(SourceValue::Value(value)));
         self.logical.flush(self.arena, self.heap)?;
+        let entity = site.shared.then(|| doc::heap::EntityId {
+            family: doc::heap::FamilyId::PRIMARY,
+            ordinal: self.arena.next_ordinal(),
+        });
         let store = self.logical.ledger();
         let ledger = store.borrow();
         if site.bind && ledger.holding(output, self.heap.pages())?.is_some() {
@@ -155,27 +164,55 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let make = || {
             Program::new(vec![JournalEvent {
                 inputs: inputs.clone(),
-                outputs: vec![(output, PV::Existing(input))],
+                outputs: vec![(
+                    output,
+                    entity.map_or(PV::Existing(input), |entity| {
+                        PV::Page(doc::heap::PageValue::Ref(doc::heap::Identity::Object(
+                            entity,
+                        )))
+                    }),
+                )],
+                entities: entity
+                    .into_iter()
+                    .map(|entity| VirtualEntity {
+                        entity,
+                        body: VirtualBody::NativeVariable(value),
+                    })
+                    .collect(),
                 ..Default::default()
             }])
         };
         drop(ledger);
-        self.publish_source(
-            frame.state.callee,
-            activation,
-            publication::Prefix {
-                interval,
-                facts,
-                start,
-                next,
-                allowance,
-            },
-            make,
-            |_, edits| {
+        let prefix = publication::Prefix {
+            interval,
+            facts,
+            start,
+            next,
+            allowance,
+        };
+        let published = if let Some(entity) = entity {
+            self.publish_source_prepared(
+                frame.state.callee,
+                activation,
+                prefix,
+                make,
+                publication::CellConstruction { entity, value },
+                |arena, edits, storage| {
+                    debug_assert!(edits.is_empty());
+                    storage.batch.publish(arena);
+                    frame.slots[site.at] = SlotState::Cell(storage.cell);
+                },
+            )?
+        } else {
+            self.publish_source(frame.state.callee, activation, prefix, make, |_, edits| {
                 debug_assert!(edits.is_empty());
                 frame.slots[site.at] = SlotState::Value(value);
-            },
-        )
-        .map(Some)
+            })?
+        };
+        #[cfg(any(test, feature = "testing"))]
+        if published && site.shared {
+            crate::machine::islands::witness::cell_constructed();
+        }
+        Ok(Some(published))
     }
 }

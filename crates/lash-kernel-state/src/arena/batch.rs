@@ -117,6 +117,23 @@ impl Arena {
         // Transfer the nursery's existing vector before the first fallible
         // reservation, so even host exhaustion returns every valid slot.
         registration.reserve_batch(new)?;
+        Self::prepare_registered(registration)
+    }
+
+    /// Prepare a fresh shared variable without installing a body or granting
+    /// its logical identity. Abandonment returns its reserved slot.
+    pub fn prepare_cell(
+        &mut self,
+        value: Value,
+    ) -> Result<(ArenaHandle, PreparedInstallation<'_>), NativeError> {
+        let mut registration = self.registration()?;
+        let handle = registration.reserve_body(Body::Cell(value))?;
+        Ok((handle, Self::prepare_registered(registration)?))
+    }
+
+    fn prepare_registered(
+        mut registration: Registration<'_>,
+    ) -> Result<PreparedInstallation<'_>, NativeError> {
         let len = registration.batch_len();
         let tokens = registration.arena().tokens;
         let mut entries = Vec::new();
@@ -125,12 +142,8 @@ impl Arena {
         indices.try_reserve(len).map_err(|_| exhausted())?;
         let mut allocations = 0u64;
         for at in 0..len {
-            let (handle, object) = registration.take_batch_object(at);
-            let mutable = matches!(
-                object,
-                NewObject::List(_) | NewObject::Map(_) | NewObject::Set(_) | NewObject::Record(_)
-            );
-            let body = raw_body(object)?;
+            let (handle, body) = registration.take_batch_body(at)?;
+            let mutable = is_mutable(&body);
             let token = tokens
                 .checked_add(entries.len() as u64 + 1)
                 .ok_or_else(|| malformed("object tokens overflow"))?;
@@ -350,7 +363,7 @@ impl PreparedBatch {
         }
     }
 }
-fn raw_body(object: NewObject) -> Result<Body, NativeError> {
+pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
     let pairs = |entries: Vec<(Value, Value)>| -> Result<_, NativeError> {
         let mut values = Vec::new();
         reserve(
