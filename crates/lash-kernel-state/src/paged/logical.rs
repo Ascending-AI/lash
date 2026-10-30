@@ -247,6 +247,7 @@ impl Balance {
 #[derive(Clone, Copy, Debug)]
 pub struct LedgerRoot {
     pub owners: KeyedRoot,
+    pub execution: KeyedRoot,
     pub ended: KeyedRoot,
     pub entities: KeyedRoot,
     pub refinements: u64,
@@ -263,7 +264,8 @@ impl LedgerRoot {
                 .owners
                 .cost()
                 .0
-                .checked_add(self.ended.cost().0)
+                .checked_add(self.execution.cost().0)
+                .and_then(|cost| cost.checked_add(self.ended.cost().0))
                 .ok_or_else(|| invalid("root holding cost overflow"))?,
             entities: self.entities.len(),
         };
@@ -275,6 +277,7 @@ impl LedgerRoot {
 #[derive(Clone)]
 struct State {
     owners: Tree<RootHolding>,
+    execution: Tree<RootHolding>,
     ended: Tree<RootHolding>,
     entities: Tree<EntityHolding>,
     refinements: u64,
@@ -287,7 +290,8 @@ impl State {
             root_and_control_bytes: self
                 .owners
                 .cost()
-                .checked_add(self.ended.cost())
+                .checked_add(self.execution.cost())
+                .and_then(|cost| cost.checked_add(self.ended.cost()))
                 .ok_or_else(|| invalid("root holding cost overflow"))?,
             entities: self.entities.len(),
         };
@@ -297,15 +301,19 @@ impl State {
     fn roots(&self, owner: Owner) -> &Tree<RootHolding> {
         if owner.ended() {
             &self.ended
-        } else {
+        } else if matches!(owner, Owner::Session(_) | Owner::Saved(_)) {
             &self.owners
+        } else {
+            &self.execution
         }
     }
     fn roots_mut(&mut self, owner: Owner) -> &mut Tree<RootHolding> {
         if owner.ended() {
             &mut self.ended
-        } else {
+        } else if matches!(owner, Owner::Session(_) | Owner::Saved(_)) {
             &mut self.owners
+        } else {
+            &mut self.execution
         }
     }
 }
@@ -410,6 +418,7 @@ impl Ledger {
         Self {
             state: State {
                 owners: Tree::new(false),
+                execution: Tree::new(false),
                 ended: Tree::new(false),
                 entities: Tree::new(false),
                 refinements: 0,
@@ -423,6 +432,7 @@ impl Ledger {
         let ledger = Self {
             state: State {
                 owners: Tree::of_keyed(&root.owners),
+                execution: Tree::of_keyed(&root.execution),
                 ended: Tree::of_keyed(&root.ended),
                 entities: Tree::of_keyed(&root.entities),
                 refinements: root.refinements,
@@ -654,6 +664,7 @@ impl Ledger {
     pub(super) fn sealed_root(&self) -> Result<LedgerRoot, HeapFault> {
         Ok(LedgerRoot {
             owners: keyed(&self.state.owners)?,
+            execution: keyed(&self.state.execution)?,
             ended: keyed(&self.state.ended)?,
             entities: keyed(&self.state.entities)?,
             refinements: self.state.refinements,
@@ -668,11 +679,12 @@ impl Ledger {
         // A seal ends the active borrowed execution view even if its budget
         // yields. Outstanding admissions cannot survive the handoff.
         self.handoff()?;
-        if self.state.owners.live_members(access)? != 0 {
+        if self.state.execution.live_members(access)? != 0 {
             return Err(invalid("transient source owners at seal"));
         }
         let mut state = self.state.clone();
         if !state.owners.seal(access, work)?
+            || !state.execution.seal(access, work)?
             || !state.ended.seal(access, work)?
             || !state.entities.seal(access, work)?
         {
@@ -681,6 +693,7 @@ impl Ledger {
         }
         let root = LedgerRoot {
             owners: keyed(&state.owners)?,
+            execution: keyed(&state.execution)?,
             ended: keyed(&state.ended)?,
             entities: keyed(&state.entities)?,
             refinements: state.refinements,

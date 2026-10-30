@@ -142,7 +142,7 @@ impl Ledger {
         let prefix = codec::invocation_key(invocation.task, invocation.id);
         let mut cursor = prefix.as_slice().to_vec();
         let mut owners = Vec::new();
-        while let Some((key, record)) = self.state.owners.after(Some(&cursor), access)? {
+        while let Some((key, record)) = self.state.execution.after(Some(&cursor), access)? {
             if !key.starts_with(&prefix) {
                 break;
             }

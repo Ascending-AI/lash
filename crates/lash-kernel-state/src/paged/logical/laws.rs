@@ -758,7 +758,7 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
             )];
             if keep_result {
                 roots.push((
-                    owner(1),
+                    Owner::Incoming(TaskId::MAIN),
                     Some(Holding::with_edges(16, [Identity::Task(TaskId(7))], &access).unwrap()),
                 ));
             }
@@ -818,7 +818,7 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
             if keep_result {
                 admit(
                     &mut ledger,
-                    vec![Change::Roots(vec![(owner(1), None)])],
+                    vec![Change::Roots(vec![(Owner::Incoming(TaskId::MAIN), None)])],
                     limit,
                     &access,
                 );
@@ -1045,7 +1045,7 @@ fn checked_program_and_warm_balance() {
     let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
     arena.watch_logical_members();
     let lifecycle = Lifecycle::new(heap.logical_ledger());
-    let root = Owner::session(&lash_kernel_value::Name::new("cold"));
+    let root = Owner::Incoming(TaskId::MAIN);
     lifecycle.replace(root, Some(SourceValue::Page(PageValue::List(entity))));
     lifecycle.flush(&mut arena, &heap).unwrap();
     let balance = heap.logical_balance().unwrap();

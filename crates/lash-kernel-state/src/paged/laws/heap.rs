@@ -1163,6 +1163,7 @@ fn every_seal_saves_the_counted_capacity_and_reopens_it() {
             root.directory.page(),
             root.families.page(),
             root.logical.owners.page(),
+            root.logical.execution.page(),
             root.logical.ended.page(),
             root.logical.entities.page(),
         ]

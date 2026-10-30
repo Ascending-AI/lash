@@ -348,17 +348,19 @@ impl Cell for EntityHolding {
 }
 impl TokenCodec for LedgerRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(6);
         self.owners.encode(out);
+        self.execution.encode(out);
         self.ended.encode(out);
         self.entities.encode(out);
         self.refinements.encode(out);
         self.next_invocation.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(6)?;
         Ok(Self {
             owners: KeyedRoot::decode(input)?,
+            execution: KeyedRoot::decode(input)?,
             ended: KeyedRoot::decode(input)?,
             entities: KeyedRoot::decode(input)?,
             refinements: input.unsigned()?,

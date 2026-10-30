@@ -92,7 +92,9 @@ impl Lifecycle {
         // session bindings or saved environments just to discard run owners.
         for prefix in [0_u8, 2] {
             let mut cursor = vec![prefix];
-            while let Some((key, root)) = ledger.state.owners.after(Some(&cursor), heap.pages())? {
+            while let Some((key, root)) =
+                ledger.state.execution.after(Some(&cursor), heap.pages())?
+            {
                 if key.first() != Some(&prefix) {
                     break;
                 }
@@ -157,6 +159,10 @@ impl Lifecycle {
         let mut ledger = self.ledger.borrow_mut();
         let mut inputs = Vec::new();
         visit_tree(&ledger.state.owners, access, &mut |root| {
+            inputs.push(root.owner);
+            Ok(())
+        })?;
+        visit_tree(&ledger.state.execution, access, &mut |root| {
             inputs.push(root.owner);
             Ok(())
         })?;

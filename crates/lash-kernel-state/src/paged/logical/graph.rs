@@ -8,7 +8,12 @@ struct Graph<'a, 'port> {
 }
 impl CensusGraph for Graph<'_, '_> {
     fn root_and_control_bytes(&mut self) -> Result<u64, HeapFault> {
-        Ok(self.edit.state.owners.cost())
+        self.edit
+            .state
+            .owners
+            .cost()
+            .checked_add(self.edit.state.execution.cost())
+            .ok_or_else(|| invalid("root holding cost overflow"))
     }
     fn task_result_bytes(&mut self, task: TaskId) -> Result<u64, HeapFault> {
         Ok(self
@@ -33,6 +38,11 @@ impl CensusGraph for Graph<'_, '_> {
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
         visit_tree(&self.edit.state.owners, self.edit.access, &mut |r| {
+            r.value.each_edge(self.edit.access, &mut |edge| {
+                visit(&PageValue::Ref(edge.target))
+            })
+        })?;
+        visit_tree(&self.edit.state.execution, self.edit.access, &mut |r| {
             r.value.each_edge(self.edit.access, &mut |edge| {
                 visit(&PageValue::Ref(edge.target))
             })

@@ -115,6 +115,7 @@ impl PagedHeap {
         }
         for tree in [
             &mut root.logical.owners,
+            &mut root.logical.execution,
             &mut root.logical.ended,
             &mut root.logical.entities,
         ] {
@@ -881,6 +882,7 @@ impl SemanticHeap for PagedHeap {
             root.directory.page(),
             root.families.page(),
             root.logical.owners.page(),
+            root.logical.execution.page(),
             root.logical.ended.page(),
             root.logical.entities.page(),
         ]
