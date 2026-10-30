@@ -76,24 +76,6 @@ pub(crate) enum Read {
 }
 
 impl Read {
-    fn source(op: &Op) -> Option<Self> {
-        match *op {
-            Op::Constant { dst, value } => Some(Self::Literal { reg: dst, value }),
-            Op::Local {
-                dst,
-                at,
-                shared,
-                miss,
-            } => Some(Self::Local {
-                reg: dst,
-                at,
-                shared,
-                miss,
-            }),
-            _ => None,
-        }
-    }
-
     pub(crate) fn reg(&self) -> u32 {
         match self {
             Self::Literal { reg, .. } | Self::Local { reg, .. } => *reg,
@@ -651,8 +633,13 @@ impl<'e> Build<'e> {
                 closes,
                 pc,
             } => {
-                for operand in operands {
-                    self.expr(operand)?;
+                let inputs = index
+                    .filter(|_| field.is_none() && closes.is_empty())
+                    .and_then(|index| self.store_reads(operands, [*target, index, *value]));
+                if inputs.is_none() {
+                    for operand in operands {
+                        self.expr(operand)?;
+                    }
                 }
                 for close in closes {
                     self.close(Some(*close), *value);
@@ -663,7 +650,7 @@ impl<'e> Build<'e> {
                     value: *value,
                     field: *field,
                     pc: *pc,
-                    inputs: None,
+                    inputs,
                     cache: index.is_some_and(|index| {
                         operands.iter().any(|operand| {
                             operand.reg == index

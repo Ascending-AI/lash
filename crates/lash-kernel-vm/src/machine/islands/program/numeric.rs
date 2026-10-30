@@ -22,16 +22,12 @@ impl Build<'_> {
             targets.extend(block.starts.iter().copied());
             targets.extend([block.end, block.after]);
         }
-        let removed = self.source_inputs(&targets, &protected);
         let mut relocation = vec![0; self.ops.len() + 1];
         let source = std::mem::take(&mut self.ops);
-        self.ops = Vec::with_capacity(source.len() - removed.len());
+        self.ops = Vec::with_capacity(source.len());
         let mut old = source.into_iter().enumerate().peekable();
         while let Some((at, mut instruction)) = old.next() {
             relocation[at] = self.ops.len();
-            if removed.contains(&at) {
-                continue;
-            }
             if !protected.contains(&at) {
                 instruction.op = fixed(instruction.op, self.exe);
                 if let Op::Heap {
@@ -102,84 +98,27 @@ impl Build<'_> {
         crate::machine::islands::code::relocate(&mut self.ops, &mut self.blocks, &relocation);
     }
 
-    fn source_inputs(
+    /// Source operands already carry evaluation order; runtime roles name
+    /// target, index and value without rescanning physical instructions.
+    pub(super) fn store_reads(
         &mut self,
-        targets: &BTreeSet<usize>,
-        protected: &BTreeSet<usize>,
-    ) -> BTreeSet<usize> {
-        let mut removed = BTreeSet::new();
-        for at in 0..self.ops.len() {
-            if let Some(range) = self.value_input(at, targets, protected) {
-                removed.extend(range);
-            }
-        }
-        removed
-    }
-
-    fn value_input(
-        &mut self,
-        at: usize,
-        targets: &BTreeSet<usize>,
-        protected: &BTreeSet<usize>,
-    ) -> Option<std::ops::Range<usize>> {
-        let count = match &self.ops[at].op {
-            Op::Store {
-                index: Some(_),
-                field: None,
-                ..
-            } => 3,
-            _ => return None,
+        operands: &[Expr],
+        registers: [u32; 3],
+    ) -> Option<Box<StoreInputs>> {
+        let reads = <Box<[Read; 3]>>::try_from(self.reads(operands)?).ok()?;
+        let roles = registers.map(|reg| reads.iter().position(|read| read.reg() == reg));
+        let [Some(target), Some(index), Some(value)] = roles else {
+            return None;
         };
-        let start = at.checked_sub(count)?;
-        if !self.pure_group(start, at, targets, protected) {
+        if target == index || target == value || index == value {
             return None;
         }
-        let reads = self.ops[start..at]
-            .iter()
-            .map(|instruction| Read::source(&instruction.op))
-            .collect::<Option<Vec<_>>>()?;
-        match &mut self.ops[at].op {
-            Op::Store {
-                target,
-                index: Some(index),
-                value,
-                field: None,
-                inputs,
-                ..
-            } => {
-                let reads = <[Read; 3]>::try_from(reads).ok()?;
-                let roles = [*target, *index, *value]
-                    .map(|reg| reads.iter().position(|read| read.reg() == reg));
-                let [Some(target), Some(index), Some(value)] = roles else {
-                    return None;
-                };
-                if target == index || target == value || index == value {
-                    return None;
-                }
-                *inputs = Some(Box::new(StoreInputs {
-                    reads,
-                    roles: [target, index, value],
-                }));
-            }
-            _ => unreachable!(),
-        }
-        let begin = self.ops[start].begin.take();
-        let live = self.ops[start].live.clone();
-        self.ops[at].begin = begin;
-        self.ops[at].live = live;
-        Some(start..at)
+        Some(Box::new(StoreInputs {
+            reads: *reads,
+            roles: [target, index, value],
+        }))
     }
 
-    fn pure_group(
-        &self,
-        start: usize,
-        at: usize,
-        targets: &BTreeSet<usize>,
-        protected: &BTreeSet<usize>,
-    ) -> bool {
-        !(start..=at).any(|ix| protected.contains(&ix))
-            && !(start + 1..=at).any(|ix| targets.contains(&ix) || self.ops[ix].begin.is_some())
-    }
     /// Pure call inputs retain source order. Only the call uses their
     /// values; no operator, charge or external callback moves across them.
     pub(super) fn call_reads(
