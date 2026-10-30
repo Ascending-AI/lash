@@ -92,7 +92,7 @@ pub use crate::paged::stored::CARD;
 pub use bench::{Bench, Called, Usage};
 pub use chunks::{ColdChunk, PayloadPart};
 pub use keys::{ArenaSemantics, Key, text_key};
-pub use list_write::PreparedListWrite;
+pub use list_write::{PreparedCellWrite, PreparedListWrite};
 pub use ops::invalid_key;
 pub use reach::{Reach, Reached};
 pub use sizes::Summary;

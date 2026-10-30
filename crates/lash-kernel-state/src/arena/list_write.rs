@@ -164,3 +164,62 @@ impl PreparedListWrite {
         );
     }
 }
+
+/// Prepared replacement of a resident shared variable's member. The cell's
+/// identity and every binding or borrowed capture remain unchanged.
+pub struct PreparedCellWrite {
+    version: ContentVersion,
+    handle: ArenaHandle,
+    value: Value,
+    old: Value,
+}
+impl Arena {
+    /// Reserve mutation bookkeeping without changing the cell or its edges.
+    pub fn prepare_cell_write(
+        &mut self,
+        handle: ArenaHandle,
+        value: Value,
+    ) -> Result<Option<PreparedCellWrite>, HeapFault> {
+        let Some(version) = self.content_version(handle) else {
+            return Ok(None);
+        };
+        if !self.facts(handle).is_ok_and(|facts| !facts.cold) {
+            return Ok(None);
+        }
+        let Some(Body::Cell(old)) = self.objects.get(handle) else {
+            return Ok(None);
+        };
+        let old = *old;
+        reserve(&mut self.zero, 1)?;
+        reserve(&mut self.dirty, 1)?;
+        Ok(Some(PreparedCellWrite {
+            version,
+            handle,
+            value,
+            old,
+        }))
+    }
+}
+impl PreparedCellWrite {
+    /// Install exactly the checked member edit under its accepted registration.
+    pub fn publish(self, arena: &mut Arena, edit: crate::paged::logical::MemberEdit) {
+        assert!(arena.registration_active() && arena.content_is(&self.version));
+        assert!(
+            edit.handle == self.handle
+                && matches!(edit.member, crate::paged::logical::Member::Variable)
+                && edit.next.is_some_and(|value| value.same(&self.value))
+        );
+        let Some(Body::Cell(held)) = arena.objects.get_mut(self.handle) else {
+            unreachable!("a checked variable publication changed body");
+        };
+        *held = self.value;
+        arena.hold(&self.value);
+        arena.unhold(&self.old);
+        Arena::mark_resident(
+            &mut arena.facts[self.handle.index() as usize],
+            &mut arena.dirty,
+            self.handle,
+            None,
+        );
+    }
+}

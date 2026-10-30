@@ -16,6 +16,7 @@ const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } fin
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") if true { let alias = [other, other] } return other } return apply f(7)";
+const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
 const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
@@ -232,6 +233,19 @@ fn observe_source_or_register(
     let native_reads = crate::machine::islands::witness::native_read_publications();
     let native_texts = crate::machine::islands::witness::native_text_publications();
     let returns = crate::machine::islands::witness::return_publications();
+    let cells = crate::machine::islands::witness::cell_publications();
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CELL)
+    {
+        assert!(
+            cells >= 2,
+            "both owning and borrowed captured-cell writes must publish: {cells}"
+        );
+    }
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -426,6 +440,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_BAD_MEMBER,
+        SOURCE_CELL,
         SOURCE_CONSTRUCTION,
         READ_ADD_MISS,
         READ_ADD_FAIL,
@@ -528,6 +543,7 @@ fn direct_call_entry_agrees() {
             || body == NESTED_CALL_STORAGE
             || body == READ_ADD_WRITE
             || body == SOURCE_BAD_MEMBER
+            || body == SOURCE_CELL
             || body == SOURCE_MEMBER
             || body == SOURCE_CONSTRUCTION
             || body == READ_ADD_MISS
@@ -600,6 +616,7 @@ fn direct_call_entry_agrees() {
         if [
             READ_ADD_WRITE,
             SOURCE_MEMBER,
+            SOURCE_CELL,
             SOURCE_CONSTRUCTION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
@@ -652,6 +669,7 @@ fn direct_call_entry_agrees() {
             READ_ADD_WRITE,
             SOURCE_MEMBER,
             SOURCE_BAD_MEMBER,
+            SOURCE_CELL,
             SOURCE_CONSTRUCTION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
@@ -724,6 +742,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_BAD_MEMBER,
+        SOURCE_CELL,
         SOURCE_CONSTRUCTION,
         SOURCE_UNIT,
         SOURCE_PENDING_UNIT,
@@ -763,6 +782,7 @@ fn direct_call_entry_agrees() {
                 || body == NESTED_CALL_STORAGE
                 || body == READ_ADD_WRITE
                 || body == SOURCE_BAD_MEMBER
+                || body == SOURCE_CELL
                 || body == SOURCE_MEMBER
                 || body == SOURCE_CONSTRUCTION
                 || body == SOURCE_UNIT

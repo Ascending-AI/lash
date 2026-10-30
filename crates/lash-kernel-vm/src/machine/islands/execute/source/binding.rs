@@ -16,13 +16,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &WriteSite,
         value: Value,
     ) -> Result<Option<bool>, HeapFault> {
-        if site.shared
-            || site.accumulates
+        if site.accumulates
             || self.tape.is_some()
             || self.projection().is_some()
             || (!site.bind && matches!(frame.slots[site.at], SlotState::Empty))
         {
             return Ok(None);
+        }
+        if site.shared {
+            return self.publish_cell_store(frame, site, value);
         }
         let Some(statement) = frame.state.statement else {
             return Ok(None);

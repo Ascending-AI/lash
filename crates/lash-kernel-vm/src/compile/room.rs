@@ -350,7 +350,7 @@ pub(crate) struct Description {
     pub(crate) room: SourceRoom,
 }
 impl Description {
-    fn assigns_cell(&self, at: &Site) -> bool {
+    pub(crate) fn assigns_cell(&self, at: &Site) -> bool {
         self.cell_assignments
             .as_ref()
             .is_ok_and(|assignments| assignments.contains_key(at))
@@ -816,7 +816,7 @@ impl Source {
                     place: doc::Place::Variable(_),
                     ..
                 }) => {
-                    return (!self.assigns_cell(&site)).then_some(TransferTarget::Binding);
+                    return Some(TransferTarget::Binding);
                 }
                 doc::Node::Stmt(doc::Stmt::Return { .. })
                     if site.path.len() == self.site.path.len() + 1 =>

@@ -8,6 +8,19 @@ use room::{
     publication::{Occurrence, Position as SourcePosition},
 };
 
+enum PreparedWrite {
+    List(lash_kernel_state::arena::PreparedListWrite),
+    Cell(lash_kernel_state::arena::PreparedCellWrite),
+}
+impl PreparedWrite {
+    fn publish(self, arena: &mut Arena, edit: MemberEdit) {
+        match self {
+            Self::List(write) => write.publish(arena, edit),
+            Self::Cell(write) => write.publish(arena, edit),
+        }
+    }
+}
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(in crate::machine::islands::execute) fn publish_list_store(
         &mut self,
@@ -30,6 +43,66 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if index > len {
             return Ok(false);
         }
+        self.publish_member_store(
+            frame,
+            pc,
+            &operands,
+            MemberEdit {
+                handle,
+                member: Member::List(index),
+                next: Some(value),
+            },
+            None,
+        )
+    }
+
+    pub(in crate::machine::islands::execute) fn publish_cell_store(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &crate::machine::islands::compiled::WriteSite,
+        value: Value,
+    ) -> Result<Option<bool>, HeapFault> {
+        if site.bind {
+            return Ok(None);
+        }
+        let SlotState::Cell(handle) = frame.slots[site.at] else {
+            return Ok(None);
+        };
+        let Some(statement) = frame.state.statement else {
+            return Ok(None);
+        };
+        let (_, statement, _) = self.exe.statement(statement);
+        if !self
+            .exe
+            .code(frame.state.callee.plan.code)
+            .source_room
+            .assigns_cell(&statement.site)
+        {
+            return Ok(None);
+        }
+        self.publish_member_store(
+            frame,
+            site.pc,
+            &[(site.reg, value)],
+            MemberEdit {
+                handle,
+                member: Member::Variable,
+                next: Some(value),
+            },
+            self.accounting.then_some(site.close).flatten(),
+        )
+        .map(Some)
+    }
+
+    fn publish_member_store(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        pc: u32,
+        operands: &[(u32, Value)],
+        edit: MemberEdit,
+        close: Option<crate::compile::expr::Close>,
+    ) -> Result<bool, HeapFault> {
+        let MemberEdit { handle, .. } = edit;
         // Keep the existing physical eligibility guard until its replacement
         // qualifies on every execution path in the atomic authority cutover.
         if self.arena.any_cold() || !self.resident_room(lash_kernel_state::arena::VALUE_BYTES) {
@@ -50,26 +123,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(false);
         }
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let Some(Position::Block(block, next)) = frame.state.control.last() else {
+        let Some(unpaid) = self.source_next_statement(frame) else {
             return Ok(false);
-        };
-        let block = self
-            .exe
-            .block(frame.state.callee.compiled.blocks[*block].id);
-        let unpaid = if let Some(next) = block.stmts.get(*next) {
-            let Ok(point) = source.first_event(&self.exe.stmt(*next).site) else {
-                return Ok(false);
-            };
-            point
-        } else {
-            Point {
-                site: block.site.clone(),
-                phase: if block.site == source.site {
-                    SourcePhase::Fallthrough
-                } else {
-                    SourcePhase::Leave
-                },
-            }
         };
         let at = Point {
             site: statement.site.clone(),
@@ -106,11 +161,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             values.push(value);
         }
         self.logical.flush(self.arena, self.heap)?;
-        let edit = MemberEdit {
-            handle,
-            member: Member::List(index),
-            next: Some(value),
-        };
         let store = self.logical.ledger();
         let ledger = store.borrow();
         // Ask the canonical member owner for both the graph change and the
@@ -167,7 +217,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         );
         let mut encoding = TokenWriter::new();
         encoding.seq(3);
-        encoding.text("lash.source.list-store");
+        encoding.text("lash.source.member-store");
         at.site.encode(&mut encoding);
         inputs.encode(&mut encoding);
         let start = SourcePosition {
@@ -208,7 +258,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             occurrences: vec![],
             before: 0,
             units: 0,
-            close: None,
+            close,
             strict: false,
             depth: 0,
             safe_point: self.charged,
@@ -226,7 +276,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             make,
             publication::Reserve(|arena: &mut Arena| {
-                arena.prepare_list_write(handle, index, value)
+                let Some(value) = edit.next else {
+                    return Ok(None);
+                };
+                match edit.member {
+                    Member::List(index) => arena
+                        .prepare_list_write(handle, index, value)
+                        .map(|write| write.map(PreparedWrite::List)),
+                    Member::Variable => arena
+                        .prepare_cell_write(handle, value)
+                        .map(|write| write.map(PreparedWrite::Cell)),
+                    Member::Table(_) => Ok(None),
+                }
             }),
             |arena, edits, write| {
                 let [edit] = edits.as_slice() else {
@@ -237,7 +298,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         #[cfg(any(test, feature = "testing"))]
         if published {
-            crate::machine::islands::witness::member_published();
+            match edit.member {
+                Member::Variable => crate::machine::islands::witness::cell_published(),
+                _ => crate::machine::islands::witness::member_published(),
+            }
         }
         Ok(published)
     }
