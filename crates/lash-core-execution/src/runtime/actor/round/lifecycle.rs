@@ -556,7 +556,7 @@ impl Lifecycle {
                 Some(
                     lash_durable::domain::OwnerKey::Turn(session, run)
                     | lash_durable::domain::OwnerKey::Cell(session, run, _),
-                ) => session == &request.session && run == &request.run,
+                ) => session == request.session && run == request.run,
                 _ => false,
             };
             if owns {

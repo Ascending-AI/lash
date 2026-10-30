@@ -297,7 +297,8 @@ pub(super) fn call_cancels(
     json: &str,
 ) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
     use lash_durable::domain::ToolCallCancelRequest;
-    let rows: Vec<(String, String, String, Option<String>, Option<String>)> =
+    type CallCancelRow = (String, String, String, Option<String>, Option<String>);
+    let rows: Vec<CallCancelRow> =
         serde_json::from_str(json).map_err(|_| corrupt("call cancel rows", json))?;
     if rows.is_empty() {
         return Ok(Vec::new());

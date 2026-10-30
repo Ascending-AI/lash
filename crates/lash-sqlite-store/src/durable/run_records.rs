@@ -361,6 +361,111 @@ pub(super) fn facts_limited(
         .map_err(DurableError::from))
 }
 
+/// Read host requests independently of mailbox acknowledgements: a phase's
+/// wake acknowledgement cannot erase an unarbitrated call request.
+pub(super) fn call_cancels(
+    actor: &lash_durable::ActorKey,
+    json: &str,
+) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
+    use lash_durable::domain::ToolCallCancelRequest;
+    type CallCancelRow = (String, String, String, Option<String>, Option<String>);
+    let rows: Vec<CallCancelRow> =
+        serde_json::from_str(json).map_err(|_| corrupt("call cancel rows", json))?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    if actor.kind() != lash_durable::ActorKind::Session {
+        return Err(corrupt("call cancel actor", actor.as_str()));
+    }
+    let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
+        .map_err(|_| corrupt("call cancel session", actor.id()))?;
+    rows.into_iter()
+        .map(|(run, call, request_id, origin, reason)| {
+            Ok(ToolCallCancelRequest {
+                session: session.clone(),
+                run: lash_vocabulary::identity::TurnId::try_from(run.clone())
+                    .map_err(|_| corrupt("call cancel run", &run))?,
+                call: ToolCallId::try_from(call.as_str())
+                    .map_err(|_| corrupt("call cancel id", &call))?,
+                request_id,
+                origin,
+                reason,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn request_call_cancel(
+    tx: &Connection,
+    request: &lash_durable::domain::ToolCallCancelRequest,
+    now: lash_durable::DurableInstant,
+) -> Answer<(
+    lash_durable::domain::ToolCallCancelAnswer,
+    Option<lash_durable::Woken>,
+)> {
+    use lash_durable::domain::ToolCallCancelAnswer as A;
+    let turn = OwnerKey::Turn(request.session.clone(), request.run.clone()).stored();
+    let cells = lash_durable::domain::ExecKey::turn_cells(&request.session, &request.run);
+    let decision = tx
+        .prepare_cached(SQL.call_decision.sql())?
+        .query_row(
+            rusqlite::params![turn, cells, request.call.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    match decision.as_deref() {
+        Some("x_final" | "x_final_outcome") => return Ok(Ok((A::FinalWon, None))),
+        Some("x_cancel") => return Ok(Ok((A::Cancelled, None))),
+        Some("x_outcome") => return Ok(Ok((A::AlreadyDecided, None))),
+        None => return Ok(Ok((A::UnknownOrRevoked, None))),
+        _ => {}
+    }
+    let accepted = tx
+        .prepare_cached(SQL.call_cancel.sql())?
+        .query_row(
+            rusqlite::params![
+                request.session.as_str(),
+                request.run.as_str(),
+                request.call.as_str()
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((request_id, origin, reason)) = accepted {
+        return Ok(Ok((
+            A::AlreadyRequested {
+                accepted: lash_durable::domain::ToolCallCancelRequest {
+                    request_id,
+                    origin,
+                    reason,
+                    ..request.clone()
+                },
+            },
+            None,
+        )));
+    }
+    super::cached_execute(
+        tx,
+        SQL.insert_call_cancel.sql(),
+        rusqlite::params![
+            request.session.as_str(),
+            request.run.as_str(),
+            request.call.as_str(),
+            request.request_id,
+            request.origin,
+            request.reason
+        ],
+    )?;
+    let actor = OwnerKey::Turn(request.session.clone(), request.run.clone()).actor();
+    Ok(super::wake_within(tx, &actor, true, now)?.map(|(woken, _)| (A::Requested, Some(woken))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,108 +989,4 @@ mod tests {
             "negative identities must report corruption: {answer:?}"
         );
     }
-}
-
-/// Read host requests independently of mailbox acknowledgements: a phase's
-/// wake acknowledgement cannot erase an unarbitrated call request.
-pub(super) fn call_cancels(
-    actor: &lash_durable::ActorKey,
-    json: &str,
-) -> Result<Vec<lash_durable::domain::ToolCallCancelRequest>, DurableError> {
-    use lash_durable::domain::ToolCallCancelRequest;
-    let rows: Vec<(String, String, String, Option<String>, Option<String>)> =
-        serde_json::from_str(json).map_err(|_| corrupt("call cancel rows", json))?;
-    if rows.is_empty() {
-        return Ok(Vec::new());
-    }
-    if actor.kind() != lash_durable::ActorKind::Session {
-        return Err(corrupt("call cancel actor", actor.as_str()));
-    }
-    let session = lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
-        .map_err(|_| corrupt("call cancel session", actor.id()))?;
-    rows.into_iter()
-        .map(|(run, call, request_id, origin, reason)| {
-            Ok(ToolCallCancelRequest {
-                session: session.clone(),
-                run: lash_vocabulary::identity::TurnId::try_from(run.clone())
-                    .map_err(|_| corrupt("call cancel run", &run))?,
-                call: ToolCallId::try_from(call.as_str())
-                    .map_err(|_| corrupt("call cancel id", &call))?,
-                request_id,
-                origin,
-                reason,
-            })
-        })
-        .collect()
-}
-
-pub(super) fn request_call_cancel(
-    tx: &Connection,
-    request: &lash_durable::domain::ToolCallCancelRequest,
-    now: lash_durable::DurableInstant,
-) -> Answer<(
-    lash_durable::domain::ToolCallCancelAnswer,
-    Option<lash_durable::Woken>,
-)> {
-    use lash_durable::domain::ToolCallCancelAnswer as A;
-    let turn = OwnerKey::Turn(request.session.clone(), request.run.clone()).stored();
-    let cells = lash_durable::domain::ExecKey::turn_cells(&request.session, &request.run);
-    let decision = tx
-        .prepare_cached(SQL.call_decision.sql())?
-        .query_row(
-            rusqlite::params![turn, cells, request.call.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    match decision.as_deref() {
-        Some("x_final" | "x_final_outcome") => return Ok(Ok((A::FinalWon, None))),
-        Some("x_cancel") => return Ok(Ok((A::Cancelled, None))),
-        Some("x_outcome") => return Ok(Ok((A::AlreadyDecided, None))),
-        None => return Ok(Ok((A::UnknownOrRevoked, None))),
-        _ => {}
-    }
-    let accepted = tx
-        .prepare_cached(SQL.call_cancel.sql())?
-        .query_row(
-            rusqlite::params![
-                request.session.as_str(),
-                request.run.as_str(),
-                request.call.as_str()
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    if let Some((request_id, origin, reason)) = accepted {
-        return Ok(Ok((
-            A::AlreadyRequested {
-                accepted: lash_durable::domain::ToolCallCancelRequest {
-                    request_id,
-                    origin,
-                    reason,
-                    ..request.clone()
-                },
-            },
-            None,
-        )));
-    }
-    super::cached_execute(
-        tx,
-        SQL.insert_call_cancel.sql(),
-        rusqlite::params![
-            request.session.as_str(),
-            request.run.as_str(),
-            request.call.as_str(),
-            request.request_id,
-            request.origin,
-            request.reason
-        ],
-    )?;
-    let actor = OwnerKey::Turn(request.session.clone(), request.run.clone()).actor();
-    Ok(super::wake_within(tx, &actor, true, now)?.map(|(woken, _)| (A::Requested, Some(woken))))
 }

@@ -10,14 +10,14 @@ pub(super) enum CancelSource {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CommitOrder {
-    CancelFirst,
-    FinalFirst,
-    PlainFinalFirst,
+    Cancel,
+    Final,
+    PlainFinal,
 }
 
 impl CommitOrder {
     pub(super) fn final_wins(self) -> bool {
-        matches!(self, Self::FinalFirst | Self::PlainFinalFirst)
+        matches!(self, Self::Final | Self::PlainFinal)
     }
 }
 
@@ -79,12 +79,12 @@ impl CellTurn {
         }
 
         let signals = self.world.cleanup_signals.lock_recover().clone();
-        let expected =
-            if case.explicit && case.order == CommitOrder::CancelFirst && case.hint.is_none() {
-                vec![1]
-            } else {
-                Vec::new()
-            };
+        let expected = if case.explicit && case.order == CommitOrder::Cancel && case.hint.is_none()
+        {
+            vec![1]
+        } else {
+            Vec::new()
+        };
         if cut.is_none() && signals.as_deref() != Some(expected.as_slice()) {
             violations.push(format!("the selected call must be signalled before cleanup, while its sibling stays live; observed {signals:?}; model saw {}", self.last_request()));
         }
@@ -95,7 +95,7 @@ impl CellTurn {
             .flatten()
             .any(|(tool, args)| tool == WRITE && written_x(args) == Some(4));
         let exception_expected = case.explicit
-            && (case.source == CancelSource::Python || case.order == CommitOrder::CancelFirst);
+            && (case.source == CancelSource::Python || case.order == CommitOrder::Cancel);
         if observed_exception != exception_expected {
             violations.push(format!(
                 "the guest cancellation handler ran={observed_exception}, explicit={}",
@@ -109,7 +109,7 @@ impl CellTurn {
         }
         if case.hint.is_none() {
             let children = cancel_children(&self.backend()).await;
-            let allowed = usize::from(case.order == CommitOrder::FinalFirst);
+            let allowed = usize::from(case.order == CommitOrder::Final);
             if children.len() != allowed {
                 violations.push(format!("protected declarations must drain, and cancelled declarations must never launch: {children:?}"));
             }
@@ -201,7 +201,7 @@ impl CellTurn {
                                 output.outcome,
                                 lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
                             );
-                            if cancelled != (case.order == CommitOrder::CancelFirst) {
+                            if cancelled != (case.order == CommitOrder::Cancel) {
                                 violations.push(format!(
                                     "selected call's durable final disagrees with {case:?}: {:?}",
                                     output.outcome
@@ -214,9 +214,9 @@ impl CellTurn {
         }
         if let Some(selected) = selected {
             let expected = match case.order {
-                CommitOrder::FinalFirst => Kind::XFinal,
-                CommitOrder::PlainFinalFirst => Kind::XFinalOutcome,
-                CommitOrder::CancelFirst => Kind::XCancel,
+                CommitOrder::Final => Kind::XFinal,
+                CommitOrder::PlainFinal => Kind::XFinalOutcome,
+                CommitOrder::Cancel => Kind::XCancel,
             };
             let trace = nodes.script().trace();
             let decision_at = trace.iter().position(|write| {
@@ -259,33 +259,33 @@ pub(super) async fn run_law() {
         explicit,
     };
     for case in [
-        host(CommitOrder::CancelFirst, None, true),
-        host(CommitOrder::FinalFirst, None, true),
-        host(CommitOrder::PlainFinalFirst, None, true),
+        host(CommitOrder::Cancel, None, true),
+        host(CommitOrder::Final, None, true),
+        host(CommitOrder::PlainFinal, None, true),
         host(
-            CommitOrder::CancelFirst,
+            CommitOrder::Cancel,
             Some(lash_core::CancelHint::CancelExternalWork),
             true,
         ),
         host(
-            CommitOrder::CancelFirst,
+            CommitOrder::Cancel,
             Some(lash_core::CancelHint::Ignore),
             true,
         ),
-        host(CommitOrder::CancelFirst, None, false),
-        CancelCase::python(CommitOrder::CancelFirst, None, true),
-        CancelCase::python(CommitOrder::FinalFirst, None, true),
+        host(CommitOrder::Cancel, None, false),
+        CancelCase::python(CommitOrder::Cancel, None, true),
+        CancelCase::python(CommitOrder::Final, None, true),
         CancelCase::python(
-            CommitOrder::CancelFirst,
+            CommitOrder::Cancel,
             Some(lash_core::CancelHint::CancelExternalWork),
             true,
         ),
         CancelCase::python(
-            CommitOrder::CancelFirst,
+            CommitOrder::Cancel,
             Some(lash_core::CancelHint::Ignore),
             true,
         ),
-        CancelCase::python(CommitOrder::CancelFirst, None, false),
+        CancelCase::python(CommitOrder::Cancel, None, false),
     ] {
         let report = Matrix::new()
             .labels(&[
@@ -313,7 +313,7 @@ pub(super) async fn run_law() {
                 "the law cut no {label} commit for {case:?}"
             );
         }
-        if case.order == CommitOrder::FinalFirst {
+        if case.order == CommitOrder::Final {
             assert!(
                 report.labels().contains(&CommitLabel::CALL_FINAL),
                 "the law cut no {} commit for {case:?}",

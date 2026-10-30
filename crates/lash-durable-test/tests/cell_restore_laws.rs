@@ -367,7 +367,7 @@ impl StaticToolExecute for ExtTools {
                     None
                 };
                 if written_x(call.args) == Some(1)
-                    && case.is_some_and(|case| case.order == CommitOrder::FinalFirst)
+                    && case.is_some_and(|case| case.order == CommitOrder::Final)
                 {
                     return lash_core::ToolAttemptOutcome::done(
                         lash_core::ToolOutcomeDone::ok(json!({ "final": 1 }))
@@ -380,7 +380,7 @@ impl StaticToolExecute for ExtTools {
                     );
                 }
                 if written_x(call.args) == Some(1)
-                    && case.is_some_and(|case| case.order == CommitOrder::PlainFinalFirst)
+                    && case.is_some_and(|case| case.order == CommitOrder::PlainFinal)
                 {
                     return lash_core::ToolAttemptOutcome::done_without_intents(
                         lash_core::ToolOutcomeDone::ok(json!({ "final": 1 }))
@@ -449,14 +449,14 @@ impl StaticToolExecute for ExtTools {
             FAST if self.world.cancel_case.lock_recover().is_some() => {
                 let case = self.world.cancel_case.lock_recover().unwrap();
                 let backend = self.world.cancel_backend.lock_recover().clone().unwrap();
-                if case.order == CommitOrder::PlainFinalFirst {
+                if case.order == CommitOrder::PlainFinal {
                     call_cancel::wait_plain_final(&self.world).await;
                 } else {
                     loop {
                         let changed = self.world.changed.notified();
                         tokio::pin!(changed);
                         changed.as_mut().enable();
-                        let ready = if case.order == CommitOrder::FinalFirst {
+                        let ready = if case.order == CommitOrder::Final {
                             self.world
                                 .final_presenting
                                 .load(std::sync::atomic::Ordering::SeqCst)
@@ -1244,7 +1244,7 @@ impl CellTurn {
                         .with_presentation_step(lash::hook_key!("callcancel-final"), Arc::new(move |input| {
                             let world = Arc::clone(&presentation_world);
                             Box::pin(async move {
-                                let selected = world.cancel_case.lock_recover().is_some_and(|case| case.order == CommitOrder::FinalFirst)
+                                let selected = world.cancel_case.lock_recover().is_some_and(|case| case.order == CommitOrder::Final)
                                     && world.entries.lock_recover().get(&input.context.call_id).is_some_and(|entries|
                                         entries.iter().any(|(tool, args)| tool == SLOW && written_x(args) == Some(1)));
                                 if selected {
