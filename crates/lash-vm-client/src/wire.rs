@@ -43,9 +43,11 @@ use crate::PoolError;
 ///
 /// A payload breach when the bytes cannot be framed.
 pub fn wrap(kind: PayloadKind, json: &[u8]) -> Result<EncodedPayload, PoolError> {
-    rmp_serde::to_vec(serde_bytes::Bytes::new(json))
-        .map(EncodedPayload)
-        .map_err(|error| PoolError::payload(kind, error))
+    rmp_serde::to_vec(&lash_kernel_value::json_number::Native(
+        serde_bytes::Bytes::new(json),
+    ))
+    .map(EncodedPayload)
+    .map_err(|error| PoolError::payload(kind, error))
 }
 
 /// The JSON text a payload of `kind` carries, borrowed from binary or string

@@ -209,10 +209,11 @@ impl serde::Serialize for ProtocolPayload {
         match &self.0.json {
             PayloadJson::Encoded { text, parsed } => match parsed.get() {
                 Some(value) => value.serialize(serializer),
-                None => serde_transcode::transcode(
-                    &mut serde_json::Deserializer::from_str(text),
-                    serializer,
-                ),
+                None => {
+                    let raw: &serde_json::value::RawValue =
+                        serde_json::from_str(text).map_err(serde::ser::Error::custom)?;
+                    raw.serialize(serializer)
+                }
             },
             PayloadJson::Value(value) => value.serialize(serializer),
         }
@@ -233,11 +234,12 @@ mod tests {
     /// JSON tree for every serialization, or retain one as a side effect.
     #[test]
     fn serializing_encoded_protocol_json_does_not_rebuild_a_tree() {
-        let value = serde_json::json!({
+        let mut value = serde_json::json!({
             "consumption": [{"resource":"charges", "consumed":7, "limit":40}],
             "text": "line\nwith quotes \" and Unicode λ",
             "values": [null, true, -2, 1.5]
         });
+        value["exact"] = serde_json::from_str("1.00000000000000000000000001").unwrap();
         let payload = ProtocolPayload::new(value.clone());
         let before = DECODE_CALLS.with(std::cell::Cell::get);
         assert_eq!(
@@ -257,7 +259,8 @@ mod tests {
     /// Constructed JSON beyond the text decoder's depth retains its value.
     #[test]
     fn deep_constructed_protocol_json_keeps_its_serialization() {
-        let mut value = serde_json::Value::Null;
+        let mut value: serde_json::Value =
+            serde_json::from_str("1.00000000000000000000000001").unwrap();
         for _ in 0..150 {
             value = serde_json::Value::Array(vec![value]);
         }

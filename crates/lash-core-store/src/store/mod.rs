@@ -271,9 +271,11 @@ pub(crate) fn encode_checkpoint_component<T: serde::Serialize>(
     key: &str,
     value: &T,
 ) -> Result<Vec<u8>, StoreError> {
-    rmp_serde::to_vec_named(value).map_err(|error| StoreError::RecordEncodingFailed {
-        record_kind: format!("checkpoint component `{key}`"),
-        message: error.to_string(),
+    rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(value)).map_err(|error| {
+        StoreError::RecordEncodingFailed {
+            record_kind: format!("checkpoint component `{key}`"),
+            message: error.to_string(),
+        }
     })
 }
 

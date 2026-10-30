@@ -36,10 +36,11 @@ lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive", "rc"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true }
 schemars = { workspace = true }
 serde-transcode = "=1.1.1"
 
 [dev-dependencies]
 proptest = "1"
+rmp-serde = { workspace = true }

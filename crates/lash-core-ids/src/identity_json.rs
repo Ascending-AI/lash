@@ -158,12 +158,11 @@ impl serde::Serialize for Canonical<'_> {
                 }
                 sequence.end()
             }
-            Value::Number(number)
-                if number
-                    .as_f64()
-                    .is_some_and(|n| n == 0.0 && n.is_sign_negative()) =>
-            {
+            Value::Number(number) if lash_kernel_value::json_number::is_negative_zero(number) => {
                 serializer.serialize_f64(0.0)
+            }
+            Value::Number(number) => {
+                lash_kernel_value::json_number::serialize_canonical(number, serializer)
             }
             value => value.serialize(serializer),
         }
@@ -186,6 +185,14 @@ mod tests {
             payload_leaf(&value),
             br#"{"a":{"a":1,"b":2},"z":[{"n":0.0,"title":"kept"},1,1.0,-2.5,true,null,"\n"]}"#
         );
+        for spelling in ["1.00000000000000000000000001", "1e+400", "-1e-400"] {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(spelling)
+                && value.to_string() == spelling
+            {
+                assert_eq!(payload_leaf(&value), spelling.as_bytes());
+                assert_eq!(schema_leaf(&value), spelling.as_bytes());
+            }
+        }
     }
 
     #[test]

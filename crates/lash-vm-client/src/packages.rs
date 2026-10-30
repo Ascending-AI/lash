@@ -380,7 +380,7 @@ pub fn read(frame: Arc<[u8]>) -> Result<WorkerLibrary, PoolError> {
 pub fn result(result: Result<(), WorkerLibraryRefusal>) -> Result<PoolStarted, PoolError> {
     Ok(PoolStarted {
         result: EncodedPayload(
-            rmp_serde::to_vec_named(&result)
+            rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&result))
                 .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?,
         ),
     })

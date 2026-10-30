@@ -497,6 +497,7 @@ PACKAGE_DEPS = {
             "async_trait": "//third-party/rust:p0016",
             "chrono": "//third-party/rust:p0048",
             "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
+            "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
@@ -1011,7 +1012,8 @@ PACKAGE_DEPS = {
     "lash-internal-protocol-types": {
         "build": {},
         "dev": {
-            "proptest": "//third-party/rust:p0250"
+            "proptest": "//third-party/rust:p0250",
+            "rmp_serde": "//third-party/rust:p0285"
         },
         "normal": {
             "blake3": "//third-party/rust:p0032",

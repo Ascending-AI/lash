@@ -205,8 +205,8 @@ impl FrameCodec {
             limit: self.limits.max_frame_bytes as usize,
             refused: None,
         };
-        let result =
-            frame.serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
+        let result = lash_kernel_value::json_number::Native(frame)
+            .serialize(&mut rmp_serde::Serializer::new(&mut writer).with_struct_map());
         if let Some(declared) = writer.refused {
             return Err(CodecRefusal::FrameTooLarge { limit, declared });
         }
@@ -279,7 +279,7 @@ impl FrameCodec {
     /// the message crosses inside another.
     pub fn borrowed_frame_len(&self, frame: &BorrowedParentFrame<'_>) -> Result<u64, CodecRefusal> {
         let mut counted = CountingWriter(FRAME_HEADER_BYTES as u64);
-        frame
+        lash_kernel_value::json_number::Native(frame)
             .serialize(&mut rmp_serde::Serializer::new(&mut counted).with_struct_map())
             .map_err(|error| CodecRefusal::Malformed {
                 reason: Detail::new(format_args!("frame does not encode: {error}")),

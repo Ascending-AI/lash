@@ -377,15 +377,19 @@ impl TokenCodec for OperationRequirement {
 /// Number's exact decimal spelling, including arbitrary-precision values.
 impl TokenCodec for serde_json::Number {
     fn encode(&self, out: &mut TokenWriter) {
-        if let Some(value) = self.as_u64() {
-            out.sum(0, 1);
-            out.unsigned(value);
-        } else if let Some(value) = self.as_i64() {
-            out.sum(1, 1);
-            out.signed(value);
-        } else {
-            out.sum(2, 1);
-            out.text(&self.to_string());
+        match crate::json_number::classify(self) {
+            crate::json_number::NumberKind::Unsigned(value) => {
+                out.sum(0, 1);
+                out.unsigned(value);
+            }
+            crate::json_number::NumberKind::Signed(value) => {
+                out.sum(1, 1);
+                out.signed(value);
+            }
+            crate::json_number::NumberKind::Decimal(number) => {
+                out.sum(2, 1);
+                out.text(&number.to_string());
+            }
         }
     }
 

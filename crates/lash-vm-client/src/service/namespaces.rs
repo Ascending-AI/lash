@@ -334,7 +334,7 @@ mod tests {
             packages: [(PackagePath::parse("catalogue")?, members)].into(),
             deferred: Default::default(),
         })?;
-        let bytes = rmp_serde::to_vec_named(&request)?;
+        let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&request))?;
         lash_vm_protocol::FrameCodec::new(lash_vm_protocol::DecodeLimits::standard())
             .check_payload(&bytes)?;
         let Err(error) = rmp_serde::from_slice::<Request>(&bytes) else {

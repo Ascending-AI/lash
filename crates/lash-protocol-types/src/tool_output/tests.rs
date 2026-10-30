@@ -3,6 +3,110 @@ use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType};
 use proptest::collection::{btree_map, vec};
 use proptest::prelude::*;
 
+#[derive(Clone, Debug)]
+enum JsonOracle {
+    Null,
+    Bool(bool),
+    I64(i64),
+    U64(u64),
+    F64(f64, Option<&'static str>),
+    Text(String),
+    Array(Vec<JsonOracle>),
+    Object(BTreeMap<String, JsonOracle>),
+}
+
+impl Serialize for JsonOracle {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Null => serializer.serialize_unit(),
+            Self::Bool(value) => serializer.serialize_bool(*value),
+            Self::I64(value) => serializer.serialize_i64(*value),
+            Self::U64(value) => serializer.serialize_u64(*value),
+            Self::F64(value, _) => serializer.serialize_f64(*value),
+            Self::Text(value) => serializer.serialize_str(value),
+            Self::Array(values) => values.serialize(serializer),
+            Self::Object(values) => values.serialize(serializer),
+        }
+    }
+}
+
+impl JsonOracle {
+    fn source(&self) -> String {
+        match self {
+            Self::F64(_, Some(spelling)) => (*spelling).to_owned(),
+            Self::Array(values) => format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(Self::source)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            Self::Object(values) => format!(
+                "{{{}}}",
+                values
+                    .iter()
+                    .map(|(key, value)| format!(
+                        "{}:{}",
+                        serde_json::to_string(key).unwrap(),
+                        value.source()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            _ => serde_json::to_string(self).unwrap(),
+        }
+    }
+}
+
+fn arbitrary_json_oracle() -> BoxedStrategy<JsonOracle> {
+    let finite_float = any::<f64>().prop_filter("finite JSON number", |value| value.is_finite());
+    let leaf = prop_oneof![
+        Just(JsonOracle::Null),
+        any::<bool>().prop_map(JsonOracle::Bool),
+        any::<i64>().prop_map(JsonOracle::I64),
+        any::<u64>().prop_map(JsonOracle::U64),
+        Just(JsonOracle::U64(u64::MAX)),
+        finite_float.prop_map(|value| JsonOracle::F64(value, None)),
+        Just(JsonOracle::F64(-0.0, None)),
+        Just(JsonOracle::F64(f64::from_bits(1), None)),
+        Just(JsonOracle::F64(f64::MAX, None)),
+        Just(JsonOracle::F64(1.0, Some("1e0"))),
+        Just(JsonOracle::F64(-2.5, Some("-2.5e+0"))),
+        any::<String>().prop_map(JsonOracle::Text),
+    ];
+    leaf.prop_recursive(4, 64, 8, |inner| {
+        prop_oneof![
+            vec(inner.clone(), 0..8).prop_map(JsonOracle::Array),
+            btree_map(any::<String>(), inner, 0..8).prop_map(JsonOracle::Object),
+        ]
+    })
+    .boxed()
+}
+
+#[derive(Serialize)]
+struct UntrustedOracle<'a> {
+    #[serde(rename = "$lash_tool_value")]
+    tag: &'static str,
+    value: &'a JsonOracle,
+}
+
+#[derive(Serialize)]
+enum Envelope<T> {
+    Unit,
+    New(T),
+    Tuple(T, Bytes),
+    Struct { value: T, bytes: Bytes },
+}
+
+struct Bytes;
+
+impl Serialize for Bytes {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&[0, 127, 255])
+    }
+}
+
 fn attachment_source(id: &str) -> AttachmentRef {
     AttachmentRef::new(
         AttachmentId::parse(format!("{:02x}", id.bytes().fold(0u8, u8::wrapping_add)).repeat(32))
@@ -19,6 +123,10 @@ fn arbitrary_json_value() -> BoxedStrategy<Value> {
         Just(Value::Null),
         any::<bool>().prop_map(Value::Bool),
         any::<i64>().prop_map(|value| Value::Number(Number::from(value))),
+        any::<u64>().prop_map(|value| Value::Number(Number::from(value))),
+        any::<f64>()
+            .prop_filter("finite JSON number", |value| value.is_finite())
+            .prop_map(|value| Value::Number(Number::from_f64(value).unwrap())),
         any::<String>().prop_map(Value::String),
     ];
     leaf.prop_recursive(4, 64, 8, |inner| {
@@ -36,6 +144,10 @@ fn arbitrary_tool_value() -> BoxedStrategy<ToolValue> {
         Just(ToolValue::Null),
         any::<bool>().prop_map(ToolValue::Bool),
         any::<i64>().prop_map(|value| ToolValue::Number(Number::from(value))),
+        any::<u64>().prop_map(|value| ToolValue::Number(Number::from(value))),
+        any::<f64>()
+            .prop_filter("finite JSON number", |value| value.is_finite())
+            .prop_map(|value| ToolValue::Number(Number::from_f64(value).unwrap())),
         any::<String>().prop_map(ToolValue::String),
         Just(ToolValue::Attachment(attachment_source("img"))),
         arbitrary_json_value().prop_map(ToolValue::untrusted_json),
@@ -57,10 +169,59 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn tool_value_encode_decode_round_trip_is_identity(value in arbitrary_tool_value()) {
+    fn tool_value_encode_decode_round_trip_is_identity(value in arbitrary_tool_value(), oracle in arbitrary_json_oracle()) {
         let encoded = serde_json::to_value(Durable(&value))?;
         let decoded = serde_json::from_value::<ToolValue>(encoded)?;
         prop_assert_eq!(decoded, value);
+        let json: Value = serde_json::from_str(&oracle.source())?;
+        let expected = rmp_serde::to_vec_named(&oracle).unwrap();
+        prop_assert_eq!(serde_json::to_vec(&lash_kernel_value::json_number::Native(&json)).unwrap(), serde_json::to_vec(&oracle).unwrap());
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&json)).unwrap(), expected.clone());
+        let actual_shapes = [Envelope::Unit, Envelope::New(&json), Envelope::Tuple(&json, Bytes), Envelope::Struct { value: &json, bytes: Bytes }];
+        let oracle_shapes = [Envelope::Unit, Envelope::New(&oracle), Envelope::Tuple(&oracle, Bytes), Envelope::Struct { value: &oracle, bytes: Bytes }];
+        prop_assert_eq!(serde_json::to_vec(&lash_kernel_value::json_number::Native(&actual_shapes)).unwrap(), serde_json::to_vec(&oracle_shapes).unwrap());
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&actual_shapes)).unwrap(), rmp_serde::to_vec_named(&oracle_shapes).unwrap());
+        if let Value::Number(number) = &json {
+            let number = ToolValue::Number(number.clone());
+            prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(Durable(&number))).unwrap(), expected.clone());
+        }
+        let payload = crate::ProtocolPayload::new(json.clone());
+        prop_assert_eq!(serde_json::to_vec(&payload).unwrap(), serde_json::to_vec(&json).unwrap());
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&payload)).unwrap(), expected.clone());
+        let _ = payload.value();
+        prop_assert_eq!(serde_json::to_vec(&payload).unwrap(), serde_json::to_vec(&json).unwrap());
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&payload)).unwrap(), expected);
+        let value = ToolValue::untrusted_json(json);
+        let expected = UntrustedOracle { tag: UNTRUSTED_JSON_TAG, value: &oracle };
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(Durable(&value))).unwrap(), rmp_serde::to_vec_named(&expected).unwrap());
+        let key = "$serde_json::private::Number".to_string();
+        let object = Value::Object([(key.clone(), Value::String("1".to_owned()))].into_iter().collect());
+        let oracle = JsonOracle::Object([(key, JsonOracle::Text("1".to_owned()))].into_iter().collect());
+        let expected = rmp_serde::to_vec_named(&oracle).unwrap();
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&object)).unwrap(), expected.clone());
+        let payload = crate::ProtocolPayload::new(object);
+        prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&payload)).unwrap(), expected);
+        for (spelling, retained) in [
+            ("1.00000000000000000000000001", "1.00000000000000000000000001"),
+            ("1e400", "1e+400"),
+            ("-1e-400", "-1e-400"),
+        ] {
+            if let Ok(number) = serde_json::from_str::<Number>(spelling)
+                && number.to_string() == retained
+            {
+                let expected = BTreeMap::from([("$serde_json::private::Number", retained)]);
+                let expected = rmp_serde::to_vec_named(&expected).unwrap();
+                let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&number)).unwrap();
+                prop_assert_eq!(&bytes, &expected);
+                prop_assert_eq!(rmp_serde::from_slice::<Value>(&bytes).unwrap(), Value::Number(number.clone()));
+                let payload = crate::ProtocolPayload::new(Value::Number(number));
+                prop_assert_eq!(serde_json::to_string(&payload).unwrap(), retained);
+                prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&payload)).unwrap(), expected.clone());
+                let _ = payload.value();
+                prop_assert_eq!(serde_json::to_string(&payload).unwrap(), retained);
+                prop_assert_eq!(rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(&payload)).unwrap(), expected);
+            }
+        }
     }
 }
 

@@ -371,7 +371,7 @@ impl RuntimeCommit {
             .checkpoint
             .manifest(crate::store::FleetFormat::current())?;
         let mut checkpoint_length = EncodedLength::default();
-        checkpoint_root
+        lash_kernel_value::json_number::Native(&checkpoint_root)
             .serialize(&mut rmp_serde::Serializer::new(&mut checkpoint_length).with_struct_map())
             .map_err(|err| StoreError::RecordEncodingFailed {
                 record_kind: "checkpoint root budget measurement".to_string(),

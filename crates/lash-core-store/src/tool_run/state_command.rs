@@ -461,7 +461,8 @@ impl StateResolution {
     )]
     pub fn receipt(&self) -> crate::BlobRef {
         crate::BlobRef::for_content(
-            &rmp_serde::to_vec_named(self).expect("state resolution encodes"),
+            &rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(self))
+                .expect("state resolution encodes"),
         )
     }
 }

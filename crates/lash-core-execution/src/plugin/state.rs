@@ -320,6 +320,7 @@ impl PluginStateRegistry {
 )]
 pub(super) fn state_ref(state: &PluginState) -> crate::BlobRef {
     lash_core_store::store::BlobRef::for_content(
-        &rmp_serde::to_vec_named(state).expect("plugin state encodes"),
+        &rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(state))
+            .expect("plugin state encodes"),
     )
 }

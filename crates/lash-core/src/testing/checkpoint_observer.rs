@@ -510,7 +510,7 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
 }
 
 fn checkpoint_encoded_len(value: &impl Serialize) -> Result<usize, rmp_serde::encode::Error> {
-    rmp_serde::to_vec_named(value).map(|bytes| bytes.len())
+    rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(value)).map(|bytes| bytes.len())
 }
 
 /// `logical_bytes` presence marks the component as written this commit; the

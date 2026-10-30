@@ -245,7 +245,8 @@ impl NamespaceBody {
             if previous.is_some_and(|previous| previous.snapshot.get(key) == Some(value)) {
                 continue;
             }
-            let bytes = rmp_serde::to_vec_named(value).expect("namespace value encodes");
+            let bytes = rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(value))
+                .expect("namespace value encodes");
             let (root, nodes) = encode(&Body::Value(bytes));
             tree = Trie::change(
                 tree.as_ref(),

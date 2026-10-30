@@ -372,12 +372,11 @@ pub(crate) fn encode_msgpack<T: serde::Serialize>(
     // Pre-size the buffer so the per-byte writes inside rmp_serde don't
     // walk the Vec through 0→4→8→16→32… reallocations on every call.
     let mut buf = Vec::with_capacity(1024);
-    rmp_serde::encode::write_named(&mut buf, value).map_err(|error| {
-        StoreError::RecordEncodingFailed {
+    rmp_serde::encode::write_named(&mut buf, &lash_kernel_value::json_number::Native(value))
+        .map_err(|error| StoreError::RecordEncodingFailed {
             record_kind: record_kind.to_string(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     Ok(buf)
 }
 

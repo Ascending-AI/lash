@@ -159,7 +159,7 @@ pub(crate) fn perform(
 }
 
 fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
-    rmp_serde::to_vec_named(response)
+    rmp_serde::to_vec_named(&lash_kernel_value::json_number::Native(response))
         .map(EncodedPayload)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
 }
