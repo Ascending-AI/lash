@@ -25,17 +25,21 @@ mod arc_serde_bytes {
 /// checked `LlmUsage` shape; v3 roots carrying the retired `PromptUsage`
 /// snapshot fields are refused rather than remapped.
 ///
+/// version_guard(
+///     roots(path = "crates/lash-core-store/src/store/session_manifest.rs", ManifestBody, SessionMetadata),
+///     items(path = "crates/lash-core-store/src/store/session_manifest.rs", METADATA_COMPONENTS),
+/// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionCheckpointManifest"
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionCheckpointManifest"
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
 ///

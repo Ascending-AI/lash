@@ -2284,6 +2284,8 @@ async fn a_heads_phase_content_survives_orphan_audit_and_cold_hydration() {
     let store = stores.process_env_store();
     let durable = stores.durable_store();
     let mut state = durable_state(&store, &SessionId::from("phase-preparation-owner")).await;
+    let admission: Arc<[u8]> = Arc::from(b"recorded plugin admission".as_slice());
+    state.set_plugin_admission_snapshot(Arc::clone(&admission));
     let text = "immutable schema population".repeat(2048);
     let key = lash_core_store::store::BlobRef::for_content(text.as_bytes());
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
@@ -2327,6 +2329,10 @@ async fn a_heads_phase_content_survives_orphan_audit_and_cold_hydration() {
         lash_core_store::store::FleetFormat::current(),
     )
     .expect("hydrate and authenticate the retained content");
+    assert_eq!(
+        cold.plugin_admission_snapshot().as_deref(),
+        Some(admission.as_ref())
+    );
     assert_eq!(
         cold.phase_content_preparations()
             .unwrap()

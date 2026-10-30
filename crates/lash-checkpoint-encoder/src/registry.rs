@@ -151,6 +151,7 @@ registry! {
     ENVIRONMENT_HEAD = 49, "EnvironmentHead", Enveloped, Root, Stores;
     CONTENT_CHUNK = 50, "ContentChunk", Enveloped, Node, Integrator;
     PHASE_PREPARATION = 51, "PhasePreparation", Enveloped, Node, Integrator;
+    SESSION_METADATA = 52, "SessionMetadata", Enveloped, Node, Cell;
 }
 
 registry! {

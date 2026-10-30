@@ -1,10 +1,10 @@
 //! A session checkpoint as a SessionManifest node (FIG-5887 §3, kind 34).
 //!
 //! The manifest is the root a session revision and an admission base name.
-//! Its sorted component descriptors each reference an OpaqueLeaf whose
-//! declared raw-blob arm names the component's opaque blob, so the collector
-//! retains every component through ordinary graph edges and no manifest is
-//! ever opened to find them. Component bodies stay opaque bytes their
+//! Its sorted component descriptors reference OpaqueLeaf wrappers, except for
+//! the stable preparation and plugin-admission pair, which shares one typed
+//! metadata node. Both forms retain the exact component blobs through ordinary
+//! graph edges, so no manifest is opened by the collector to find them. Component bodies stay opaque bytes their
 //! owning codecs read. The session's execution state, its SessionRoot
 //! descriptor page, is a typed child of the manifest, so its pages are
 //! retained the same way.
@@ -34,8 +34,8 @@ use super::{BlobRef, CheckpointComponentDescriptor, SessionCheckpoint};
 /// The codec identity of a session checkpoint component's opaque bytes.
 pub const SESSION_COMPONENT_CODEC: &str = "lash.session.component";
 
-/// The manifest body: the schema stamp, the turn state, each component's
-/// name, encoding and OpaqueLeaf, by name, and the execution state's SessionRoot descriptor page.
+/// The manifest's stamp, turn state, named component encodings and execution
+/// descriptor. Metadata roles share one wrapper reference.
 struct ManifestBody {
     schema_version: u32,
     turn_state: serde_json::Value,
@@ -79,6 +79,45 @@ impl TokenCodec for ManifestBody {
     }
 }
 
+// Fixed role order gives the shared node its meaning. Names and encoding
+// versions remain in the manifest for child-free build compatibility surveys.
+const METADATA_COMPONENTS: [&str; 2] = [
+    crate::phase_preparation::COMPONENT,
+    super::PLUGIN_ADMISSION_CHECKPOINT_COMPONENT,
+];
+
+struct SessionMetadata {
+    blobs: [NodeId; 2],
+}
+
+impl TokenCodec for SessionMetadata {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        for blob in self.blobs {
+            blob.encode(out);
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            blobs: [NodeId::decode(input)?, NodeId::decode(input)?],
+        })
+    }
+}
+
+fn component_blob(
+    name: &str,
+    descriptor: &CheckpointComponentDescriptor,
+) -> Result<NodeId, GraphRefusal> {
+    NodeId::from_hex(descriptor.blob_ref.as_str()).ok_or_else(|| {
+        invalid(format!(
+            "component `{name}` names `{}`, not a blob digest",
+            descriptor.blob_ref
+        ))
+    })
+}
+
 /// What a SessionManifest's body names, as [`SessionCheckpoint::named`]
 /// reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,9 +159,9 @@ fn invalid(reason: impl Into<String>) -> GraphRefusal {
 }
 
 impl SessionCheckpoint {
-    /// Stages this manifest and an OpaqueLeaf per component, and returns the
-    /// manifest's node. The component blobs themselves are not staged: a
-    /// commit installs them as opaque blobs before it installs the graph.
+    /// Stages this manifest and its component wrappers, sharing one typed
+    /// wrapper for stable metadata. The component content is installed
+    /// separately before the commit installs this wrapper graph.
     ///
     /// # Errors
     ///
@@ -131,21 +170,39 @@ impl SessionCheckpoint {
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
         let turn_state = serde_json::to_value(&self.turn_state)
             .map_err(|error| invalid(format!("the turn state does not encode: {error}")))?;
+        let metadata = self
+            .components
+            .get(METADATA_COMPONENTS[0])
+            .zip(self.components.get(METADATA_COMPONENTS[1]))
+            .map(|(preparation, admission)| {
+                staging
+                    .encode_value(
+                        NodeKind::SESSION_METADATA,
+                        &SessionMetadata {
+                            blobs: [
+                                component_blob(METADATA_COMPONENTS[0], preparation)?,
+                                component_blob(METADATA_COMPONENTS[1], admission)?,
+                            ],
+                        },
+                    )
+                    .map_err(GraphRefusal::from)
+            })
+            .transpose()?;
         let mut components = Vec::with_capacity(self.components.len());
         for (name, descriptor) in &self.components {
-            let blob = NodeId::from_hex(descriptor.blob_ref.as_str()).ok_or_else(|| {
-                invalid(format!(
-                    "component `{name}` names `{}`, not a blob digest",
-                    descriptor.blob_ref
-                ))
-            })?;
-            let leaf = staging.encode_value(
-                NodeKind::OPAQUE_LEAF,
-                &OpaqueLeaf {
-                    codec: SESSION_COMPONENT_CODEC.to_owned(),
-                    payload: OpaquePayload::RawBlob(blob),
-                },
-            )?;
+            let leaf = if let Some(metadata) = metadata
+                && METADATA_COMPONENTS.contains(&name.as_str())
+            {
+                metadata
+            } else {
+                staging.encode_value(
+                    NodeKind::OPAQUE_LEAF,
+                    &OpaqueLeaf {
+                        codec: SESSION_COMPONENT_CODEC.to_owned(),
+                        payload: OpaquePayload::RawBlob(component_blob(name, descriptor)?),
+                    },
+                )?
+            };
             components.push((name.clone(), descriptor.encoding_version, leaf));
         }
         let execution = self
@@ -212,8 +269,8 @@ impl SessionCheckpoint {
     ///
     /// # Errors
     ///
-    /// Any refusal of the node reads, components out of name order, a
-    /// component leaf of another codec or with inline bytes, or a turn
+    /// Any refusal of the node reads, components out of name order, an
+    /// inconsistent metadata pair, a leaf of another codec or with inline bytes, or a turn
     /// state that does not decode.
     pub fn load(
         source: &dyn NodeSource,
@@ -224,6 +281,23 @@ impl SessionCheckpoint {
         let body: ManifestBody = decoder.decode(root, NodeKind::SESSION_MANIFEST)?;
         let turn_state = serde_json::from_value(body.turn_state)
             .map_err(|error| invalid(format!("the turn state does not decode: {error}")))?;
+        let metadata = METADATA_COMPONENTS.map(|role| {
+            body.components
+                .iter()
+                .find(|(name, _, _)| name == role)
+                .map(|(_, _, node)| *node)
+        });
+        let metadata: Option<SessionMetadata> = match metadata {
+            [Some(preparation), Some(admission)] => {
+                if preparation != admission {
+                    return Err(invalid(
+                        "the stable metadata pair names different shared nodes",
+                    ));
+                }
+                Some(decoder.decode(preparation, NodeKind::SESSION_METADATA)?)
+            }
+            _ => None,
+        };
         let mut components = BTreeMap::new();
         for (name, encoding_version, leaf) in body.components {
             if components
@@ -233,16 +307,23 @@ impl SessionCheckpoint {
             {
                 return Err(invalid(format!("component `{name}` is out of name order")));
             }
-            let opaque: OpaqueLeaf = decoder.decode(leaf, NodeKind::OPAQUE_LEAF)?;
-            let OpaquePayload::RawBlob(blob) = opaque.payload else {
-                return Err(invalid(format!("component `{name}` holds inline bytes")));
+            let blob = if let Some(metadata) = &metadata
+                && let Some(role) = METADATA_COMPONENTS.iter().position(|role| *role == name)
+            {
+                metadata.blobs[role]
+            } else {
+                let opaque: OpaqueLeaf = decoder.decode(leaf, NodeKind::OPAQUE_LEAF)?;
+                let OpaquePayload::RawBlob(blob) = opaque.payload else {
+                    return Err(invalid(format!("component `{name}` holds inline bytes")));
+                };
+                if opaque.codec != SESSION_COMPONENT_CODEC {
+                    return Err(invalid(format!(
+                        "component `{name}` is owned by codec `{}`",
+                        opaque.codec
+                    )));
+                }
+                blob
             };
-            if opaque.codec != SESSION_COMPONENT_CODEC {
-                return Err(invalid(format!(
-                    "component `{name}` is owned by codec `{}`",
-                    opaque.codec
-                )));
-            }
             components.insert(
                 name,
                 CheckpointComponentDescriptor {
