@@ -159,6 +159,7 @@ struct Spelling {
     missing: fn(&str) -> String,
     /// The refusal of a call with two inputs.
     excess: &'static str,
+    optional_suffix: &'static str,
 }
 
 fn spellings() -> [Spelling; 2] {
@@ -173,6 +174,7 @@ fn spellings() -> [Spelling; 2] {
                 format!("`forms.{operation}` takes 1 argument(s) and is called with 0")
             },
             excess: "takes 0 to 1 argument(s) and is called with 2",
+            optional_suffix: " = {}, options?: { signal?: AbortSignal })",
         },
         Spelling {
             dialect: CellDialect::python(),
@@ -184,6 +186,7 @@ fn spellings() -> [Spelling; 2] {
                 format!("the call gives the tool `forms.{operation}` no value for `input`")
             },
             excess: "takes 1 arguments but 2 were given",
+            optional_suffix: " = {})",
         },
     ]
 }
@@ -283,7 +286,9 @@ async fn tool_input_omission_follows_canonical_schema() {
         );
 
         let tools = Arc::new(Forms::default());
-        let response = run(format!("await {optional}({{}}, {{}})"), tools.clone()).await;
+        // An object in TypeScript's second slot is signal metadata. A number
+        // remains an excess input in both dialects.
+        let response = run(format!("await {optional}({{}}, 0)"), tools.clone()).await;
         let error = response.error().expect("two inputs are refused");
         assert!(error.message.contains(spelling.excess), "{name}: {error:?}");
         assert!(
@@ -304,13 +309,13 @@ async fn tool_input_omission_follows_canonical_schema() {
                 .to_owned()
         };
         assert!(
-            signature(OPTIONAL).contains(" = {})"),
+            signature(OPTIONAL).contains(spelling.optional_suffix),
             "{name}: {}",
             signature(OPTIONAL)
         );
         for operation in REFUSING {
             assert!(
-                !signature(operation).contains(" = {})"),
+                !signature(operation).contains(spelling.optional_suffix),
                 "{name}: {}",
                 signature(operation)
             );
