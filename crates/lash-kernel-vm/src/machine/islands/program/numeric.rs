@@ -24,8 +24,7 @@ impl Build<'_> {
         }
         let mut removed = self.member_inputs(&targets);
         removed.extend(self.call_inputs(&targets));
-        removed.extend(self.member_reads(&targets, &protected));
-        removed.extend(self.store_inputs(&targets, &protected));
+        removed.extend(self.value_inputs(&targets, &protected));
         let mut relocation = vec![0; self.ops.len() + 1];
         let source = std::mem::take(&mut self.ops);
         self.ops = Vec::with_capacity(source.len() - removed.len());
@@ -105,101 +104,84 @@ impl Build<'_> {
         crate::machine::islands::code::relocate(&mut self.ops, &mut self.blocks, &relocation);
     }
 
-    fn member_reads(
+    fn value_inputs(
         &mut self,
         targets: &BTreeSet<usize>,
         protected: &BTreeSet<usize>,
     ) -> BTreeSet<usize> {
         let mut removed = BTreeSet::new();
-        for at in 2..self.ops.len() {
-            let Op::Heap {
-                args,
-                resident: Some(HeapKernel::Read { .. }),
-                ..
-            } = &self.ops[at].op
-            else {
+        for at in 0..self.ops.len() {
+            let count = match &self.ops[at].op {
+                Op::Heap {
+                    args,
+                    resident: Some(HeapKernel::Read { .. }),
+                    ..
+                } if args.len() == 2 => 2,
+                Op::Store {
+                    index: Some(_),
+                    field: None,
+                    ..
+                } => 3,
+                _ => continue,
+            };
+            let Some(start) = at.checked_sub(count) else {
                 continue;
             };
-            if args.len() != 2 || !self.pure_group(at - 2, at, targets, protected) {
+            if !self.pure_group(start, at, targets, protected) {
                 continue;
             }
-            let reads = self.ops[at - 2..at]
-                .iter()
-                .zip(args.iter())
-                .map(|(instruction, reg)| {
-                    Read::source(&instruction.op).filter(|read| read.reg() == *reg)
-                })
-                .collect::<Option<Vec<_>>>()
-                .and_then(|reads| <[Read; 2]>::try_from(reads).ok());
-            let Some(reads) = reads else {
-                continue;
-            };
-            let begin = self.ops[at - 2].begin.take();
-            let live = self.ops[at - 2].live.clone();
-            let Op::Heap {
-                inputs,
-                resident: Some(HeapKernel::Read { .. }),
-                ..
-            } = &mut self.ops[at].op
-            else {
-                unreachable!()
-            };
-            *inputs = HeapInputs::Read(Box::new(reads));
-            self.ops[at].begin = begin;
-            self.ops[at].live = live;
-            removed.extend(at - 2..at);
-        }
-        removed
-    }
-
-    fn store_inputs(
-        &mut self,
-        targets: &BTreeSet<usize>,
-        protected: &BTreeSet<usize>,
-    ) -> BTreeSet<usize> {
-        let mut removed = BTreeSet::new();
-        for at in 3..self.ops.len() {
-            let Op::Store {
-                target,
-                index: Some(index),
-                value,
-                field: None,
-                ..
-            } = self.ops[at].op
-            else {
-                continue;
-            };
-            if !self.pure_group(at - 3, at, targets, protected) {
-                continue;
-            }
-            let reads = self.ops[at - 3..at]
+            let reads = self.ops[start..at]
                 .iter()
                 .map(|instruction| Read::source(&instruction.op))
-                .collect::<Option<Vec<_>>>()
-                .and_then(|reads| <[Read; 3]>::try_from(reads).ok());
+                .collect::<Option<Vec<_>>>();
             let Some(reads) = reads else {
                 continue;
             };
-            let roles =
-                [target, index, value].map(|reg| reads.iter().position(|read| read.reg() == reg));
-            let [Some(target), Some(index), Some(value)] = roles else {
-                continue;
-            };
-            if target == index || target == value || index == value {
-                continue;
+            match &mut self.ops[at].op {
+                Op::Heap { args, inputs, .. } => {
+                    if !reads
+                        .iter()
+                        .zip(args.iter())
+                        .all(|(read, reg)| read.reg() == *reg)
+                    {
+                        continue;
+                    }
+                    let Ok(reads) = <[Read; 2]>::try_from(reads) else {
+                        continue;
+                    };
+                    *inputs = HeapInputs::Read(Box::new(reads));
+                }
+                Op::Store {
+                    target,
+                    index: Some(index),
+                    value,
+                    field: None,
+                    inputs,
+                    ..
+                } => {
+                    let Ok(reads) = <[Read; 3]>::try_from(reads) else {
+                        continue;
+                    };
+                    let roles = [*target, *index, *value]
+                        .map(|reg| reads.iter().position(|read| read.reg() == reg));
+                    let [Some(target), Some(index), Some(value)] = roles else {
+                        continue;
+                    };
+                    if target == index || target == value || index == value {
+                        continue;
+                    }
+                    *inputs = Some(Box::new(StoreInputs {
+                        reads,
+                        roles: [target, index, value],
+                    }));
+                }
+                _ => unreachable!(),
             }
-            let begin = self.ops[at - 3].begin.take();
-            let live = self.ops[at - 3].live.clone();
-            let Op::Store { inputs, .. } = &mut self.ops[at].op else {
-                unreachable!()
-            };
-            *inputs = Some(Box::new(StoreInputs {
-                reads,
-                roles: [target, index, value],
-            }));
+            let begin = self.ops[start].begin.take();
+            let live = self.ops[start].live.clone();
             self.ops[at].begin = begin;
             self.ops[at].live = live;
-            removed.extend(at - 3..at);
+            removed.extend(start..at);
         }
         removed
     }
