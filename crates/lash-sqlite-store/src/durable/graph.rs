@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS retirement_holds (
     root_ref BLOB PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_retirement_holds_queue
     ON retirement_holds (queued_at_ms, root_ref);
 
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS retirement_frontier (
     node_ref BLOB PRIMARY KEY,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_frontier_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_retirement_frontier_queue
     ON retirement_frontier (queued_at_ms, node_ref);
 
