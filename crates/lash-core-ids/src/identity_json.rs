@@ -186,9 +186,11 @@ mod tests {
             br#"{"a":{"a":1,"b":2},"z":[{"n":0.0,"title":"kept"},1,1.0,-2.5,true,null,"\n"]}"#
         );
         for spelling in ["1.00000000000000000000000001", "1e+400", "-1e-400"] {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(spelling)
-                && value.to_string() == spelling
+            if let Ok(serde_json::Value::Number(number)) =
+                serde_json::from_str::<serde_json::Value>(spelling)
+                && number.to_string() == spelling
             {
+                let value = serde_json::Value::Number(number);
                 assert_eq!(payload_leaf(&value), spelling.as_bytes());
                 assert_eq!(schema_leaf(&value), spelling.as_bytes());
             }
