@@ -911,7 +911,7 @@ async fn member_commit_control_read_race(tier: Tier, producer: Producer) {
     let held = Arc::new(AtomicBool::new(false));
     let crossed = Arc::new(AtomicBool::new(false));
     let committed = Arc::new(tokio::sync::Notify::new());
-    hook.arm_retained_begin({
+    hook.arm_control_observation({
         let scenario = Arc::clone(&scenario);
         let held = Arc::clone(&held);
         let crossed = Arc::clone(&crossed);
@@ -961,6 +961,10 @@ async fn member_commit_control_read_race(tier: Tier, producer: Producer) {
         hook.calls("retained_revision_conflict") >= 1,
         "a real store refusal of the stale revision"
     );
+    assert!(
+        hook.calls("control_observation_revision_conflict") >= 1,
+        "the stale control observation, rather than a writer open, reached the store refusal"
+    );
     assert_eq!(
         replies(producer, &output, &view),
         (0..width).collect::<Vec<_>>(),
@@ -973,6 +977,10 @@ async fn member_commit_control_read_race(tier: Tier, producer: Producer) {
             .collect::<Vec<_>>()
     );
     assert_activation_shape(&name, producer, width, &scenario, &output, &view);
+    eprintln!(
+        "{name}: {tier:?}, {width} bodies started before the held control read, {} control revision conflicts, all {width} answers preserved",
+        hook.calls("control_observation_revision_conflict")
+    );
     producers.world.shutdown().await;
 }
 

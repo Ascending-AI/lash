@@ -85,7 +85,10 @@ use lash_kernel_value::identity::SessionId;
 /// [`TurnError::Durable`] when the actor cannot be read, ownership lost
 /// among them.
 pub(super) async fn immediate(cx: &ActorContext) -> Result<bool, TurnError> {
-    Ok(immediate_in(&cx.begin().await?))
+    let read = cx.begin();
+    #[cfg(any(test, feature = "testing"))]
+    let read = lash_core_execution::testing::control_observation(read);
+    Ok(immediate_in(&read.await?))
 }
 
 /// Whether `request`, a cancel a commit read under its fence, stops the turn

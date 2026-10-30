@@ -49,6 +49,16 @@ type RootLeaseHook =
     Arc<dyn Fn(RootLeaseRequest) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 type AfterCommitHook = Arc<dyn Fn(CommitLabel) + Send + Sync>;
 
+tokio::task_local! {
+    static CONTROL_OBSERVATION: ();
+}
+
+/// Mark only this read's polls as a control observation, including when its
+/// writer is a sibling future in the same task. Storage and authority are unchanged.
+pub async fn control_observation<F: Future>(read: F) -> F::Output {
+    CONTROL_OBSERVATION.scope((), read).await
+}
+
 /// A durable store that runs its armed [`CommitHook`] before each owner
 /// commit. See the module documentation.
 #[derive(Clone)]
@@ -118,6 +128,23 @@ impl DurableCommitHook {
     {
         *self.retained_begin.lock_recover() =
             Some(Arc::new(move |revision| Box::pin(hook(revision))));
+    }
+
+    /// Hold only retained opens made by a marked control observation. Writer
+    /// opens bypass this hook even when polled by the same task.
+    pub fn arm_control_observation<F, Fut>(&self, hook: F)
+    where
+        F: Fn(lash_durable::StateRevision) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.arm_retained_begin(move |revision| {
+            let pending = CONTROL_OBSERVATION.try_with(|()| hook(revision)).ok();
+            async move {
+                if let Some(pending) = pending {
+                    pending.await;
+                }
+            }
+        });
     }
 
     /// Hold a lease acquisition after its caller sampled the root, before storage checks it.
@@ -479,6 +506,9 @@ impl DurableStore for DurableCommitHook {
             .await;
         if matches!(result, Err(DurableError::RevisionConflict { .. })) {
             self.count("retained_revision_conflict");
+            if CONTROL_OBSERVATION.try_with(|()| ()).is_ok() {
+                self.count("control_observation_revision_conflict");
+            }
         }
         result
     }
