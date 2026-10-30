@@ -264,7 +264,7 @@ fn start(source: &str) -> (KernelMachine, String) {
     start_with_bindings(source, super::pages::Session::default())
 }
 
-/// FIG-7315: Number recurrences execute typed scalar blocks, including
+/// FIG-7315: Number recurrences execute typed scalar packets, including
 /// hoisted counters; BigInt recurrences retain their exact integer domain.
 #[test]
 fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
@@ -286,8 +286,8 @@ fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
         );
         let work = lash_kernel_vm::perf_witness::register_work(&tape);
         assert!(
-            work.blocks > 0,
-            "Number loop executed no typed scalar block: {work:?}\n{text}"
+            work.typed_packets > 0,
+            "Number loop executed no typed scalar packet: {work:?}\n{text}"
         );
         assert_eq!(
             console.lines,

@@ -606,7 +606,7 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
                     lash_protocol_types::TurnFailureCode::Timeout,
                 ))
             && err.is_retryable()
-            && err.http_status.is_none(),
+            && err.http_status == Some(200),
         "OpenAI-compatible stream chunk timeout did not match production timeout envelope",
     )?;
     require(

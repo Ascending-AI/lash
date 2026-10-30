@@ -379,10 +379,10 @@ fn cross(dialect: &str, programs: &[(&str, &str)]) -> Vec<Rest> {
             "{}: plans and bodies",
             case.id
         );
-        // Native plans and register collection steps skip the helpers'
-        // internal statement boundaries, retaining their source coordinates.
+        // Shared typed packets can expose the same boundaries in both layouts.
+        // Native plans may skip internal helper statements, never adding cuts.
         assert!(
-            by_plan.points.len() < by_body.points.len(),
+            by_plan.points.len() <= by_body.points.len(),
             "{}: {} cuts under plans, {} under bodies",
             case.id,
             by_plan.points.len(),

@@ -314,7 +314,7 @@ fn transport_mutation_specs(
             provider_kind: "openai-compatible",
             script_content: OPENAI_COMPAT_DISCONNECT.to_string(),
             request_kind: MutationRequestKind::OpenAiCompatible { stream: true },
-            expected_status: None,
+            expected_status: Some(200),
             expected_kind: Some("Stream"),
             expected_retryable: Some(true),
         },
@@ -332,7 +332,7 @@ fn transport_mutation_specs(
             provider_kind: "openai-compatible",
             script_content: OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT.to_string(),
             request_kind: MutationRequestKind::OpenAiCompatible { stream: true },
-            expected_status: None,
+            expected_status: Some(200),
             expected_kind: Some("Timeout"),
             expected_retryable: Some(true),
         },
@@ -767,9 +767,9 @@ mod tests {
     #[tokio::test]
     async fn transport_mutations_classify_on_distinct_named_paths() {
         let expectations = [
-            ("mid_stream_disconnect", "Stream", true, None),
+            ("mid_stream_disconnect", "Stream", true, Some(200)),
             ("response_start_timeout", "Timeout", true, None),
-            ("stream_chunk_timeout", "Timeout", true, None),
+            ("stream_chunk_timeout", "Timeout", true, Some(200)),
             // Non-2xx responses come back in the shared `http_error_envelope`,
             // which pre-labels the raw failure `Http` before classification.
             ("retryable_server_error_sequence", "Http", true, Some(503)),

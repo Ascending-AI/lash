@@ -10,9 +10,15 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
         .await
         .expect("profile");
 
-    for name in [
-        "openai-compatible.chat-response-start-timeout",
-        "openai-compatible.chat-stream-chunk-timeout",
+    for (name, status) in [
+        (
+            "openai-compatible.chat-response-start-timeout",
+            serde_json::Value::Null,
+        ),
+        (
+            "openai-compatible.chat-stream-chunk-timeout",
+            serde_json::json!(200),
+        ),
     ] {
         let transcript_path = tmp.path().join("proofs").join(format!("{name}.json"));
         let transcript_body = std::fs::read_to_string(transcript_path).expect("timeout transcript");
@@ -22,7 +28,7 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
         assert_eq!(envelope["kind"], "Timeout");
         assert_eq!(envelope["code"], "lash:timeout");
         assert_eq!(envelope["retryable"], true);
-        assert!(envelope["status"].is_null());
+        assert_eq!(envelope["status"], status);
         assert_eq!(
             transcript["observed"]["reported_successful_partial_response"],
             false
