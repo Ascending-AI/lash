@@ -165,6 +165,29 @@ pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Na
         .collect())
 }
 impl OwnerSlots {
+    pub(crate) fn continuation(&self, site: &Site, task: TaskId, invocation: u64) -> Option<Root> {
+        let Root::Value {
+            slot: Slot::Operand(index),
+            ..
+        } = self.root(&Owner::Operand(site.clone()), task, invocation)?
+        else {
+            return None;
+        };
+        Some(Root::Value {
+            task,
+            invocation,
+            slot: Slot::Continuation(index),
+        })
+    }
+    pub(crate) fn control_roots(
+        &self,
+        task: TaskId,
+        invocation: u64,
+    ) -> impl Iterator<Item = Root> + '_ {
+        self.controls
+            .iter()
+            .filter_map(move |owner| self.root(owner, task, invocation))
+    }
     pub(crate) fn root(&self, owner: &Owner, task: TaskId, invocation: u64) -> Option<Root> {
         let owner = self.aliases.get(owner).unwrap_or(owner);
         if let Owner::SessionCell { name, .. } = owner {

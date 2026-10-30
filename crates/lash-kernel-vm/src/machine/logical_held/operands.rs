@@ -1,7 +1,7 @@
 use super::*;
 use crate::compile::room::{Owner as Selector, OwnerSlots};
 use lash_kernel_doc::TaskId;
-use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, Slot, SourceValue};
+use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, SourceValue};
 use lash_kernel_value::sites::Site;
 use std::sync::Arc;
 
@@ -31,20 +31,9 @@ impl BankRoots {
             .ok_or_else(|| HeapFault::Malformed("source atom has no canonical owner".into()))
     }
     pub(in crate::machine) fn continuation(&self, site: &Site) -> Result<Owner, HeapFault> {
-        let Owner::Value {
-            slot: Slot::Operand(index),
-            ..
-        } = self.operand(site)?
-        else {
-            return Err(HeapFault::Malformed(
-                "continuation has another source role".into(),
-            ));
-        };
-        Ok(Owner::Value {
-            task: self.task,
-            invocation: self.invocation,
-            slot: Slot::Continuation(index),
-        })
+        self.slots
+            .continuation(site, self.task, self.invocation)
+            .ok_or_else(|| HeapFault::Malformed("continuation has another source role".into()))
     }
     pub(in crate::machine) fn acquire(&self, owner: Owner, value: Value) {
         self.lifecycle

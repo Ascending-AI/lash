@@ -310,6 +310,7 @@ struct Storage {
 }
 
 struct Frame {
+    source_frontier: Option<crate::compile::room::publication::Frontier>,
     invocation: u64,
     logical: Option<logical_held::FrameRoots>,
     convention: Option<lash_kernel_doc::StartConvention>,

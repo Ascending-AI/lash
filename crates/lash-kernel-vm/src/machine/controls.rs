@@ -17,7 +17,7 @@ pub(super) enum Roles {
         pending: Option<Value>,
     },
 }
-fn roles(control: &Control) -> Option<Roles> {
+pub(super) fn roles(control: &Control) -> Option<Roles> {
     match control {
         Control::For {
             stmt,

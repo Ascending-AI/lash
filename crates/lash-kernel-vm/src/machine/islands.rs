@@ -49,6 +49,7 @@ mod entry;
 mod execute;
 mod heap;
 mod native;
+use execute::source;
 mod observing;
 mod scheduling;
 use observing::{Projection, StatementFact, Watching};
@@ -162,6 +163,7 @@ pub(super) enum Stands {
 
 /// A virtual frame as the exit converts it.
 pub(super) struct Level {
+    source: source::Activation,
     /// The original library completion owner, including its ordered arguments.
     library: Option<super::LibraryCall>,
     boundary: Option<crate::compile::LibId>,
@@ -296,6 +298,11 @@ impl Scratch {
 struct Island<'a, const OBSERVING: bool> {
     /// The already resident root returns through a host data boundary.
     public_return: bool,
+    task: lash_kernel_doc::TaskId,
+    heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
+    logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    logical_memory: &'a std::cell::Cell<u64>,
+    memory_bound: u64,
     link: lash_kernel_value::LinkId,
     exe: &'a Executable,
     stream: &'a Stream,
@@ -1360,6 +1367,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         library: Option<super::LibraryCall>,
         boundary: Option<crate::compile::LibId>,
         source: Option<(StmtId, u32)>,
+        activation: source::Activation,
     ) {
         let mut slots = slots[..plan.slots].to_vec();
         if let Some((statement, pc)) = source {
@@ -1376,6 +1384,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         let stands = exit.stands.take().unwrap_or(Stands::Boundary);
         exit.regs.clear();
         exit.levels.push(Level {
+            source: activation,
             library,
             boundary,
             link: self.link,

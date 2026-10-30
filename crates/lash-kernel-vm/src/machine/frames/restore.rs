@@ -304,6 +304,7 @@ pub(super) fn frame(
         };
     }
     Ok(Box::new(Frame {
+        source_frontier: None,
         invocation: record.invocation,
         logical: None,
         link: record.link,

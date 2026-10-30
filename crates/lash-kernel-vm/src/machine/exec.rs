@@ -871,6 +871,7 @@ impl KernelMachine {
                 #[cfg(test)]
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
+                    source_frontier: None,
                     invocation: 0,
                     logical: None,
                     link: self.program.link,

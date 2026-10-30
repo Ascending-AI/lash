@@ -35,8 +35,8 @@ pub(crate) enum Deferred {
 
 /// A literal return's value and source-derived statement/close price.
 pub(super) struct LiteralReturn {
+    pub(super) reg: u32,
     pub(super) value: Value,
-    pub(super) units: u64,
     pub(super) statement: StmtId,
     pub(super) index: usize,
     pub(super) close: Option<Close>,
@@ -266,7 +266,17 @@ impl NativeSite {
 
 /// A compiled test `same(x, ())` of a value against the empty tuple,
 /// answered without building the tuple.
+#[derive(Clone)]
+pub(crate) struct UnitSource {
+    pub(super) statement: StmtId,
+    pub(super) binding: Option<u32>,
+    pub(super) value: lash_kernel_value::sites::Site,
+    pub(super) tuple: lash_kernel_value::sites::Site,
+    pub(super) comparison: lash_kernel_value::sites::Site,
+    pub(super) test: lash_kernel_value::sites::Site,
+}
 pub(crate) struct UnitSite {
+    pub(super) source: Option<Box<UnitSource>>,
     pub(super) lib: LibId,
     pub(super) close: Option<Close>,
     /// Where an exit before it resumes: where the tuple's construction
@@ -490,10 +500,11 @@ impl Compiled {
                     close,
                     id,
                     index,
+                    reg,
                     ..
                 }) => Some(LiteralReturn {
+                    reg: *reg,
                     value: *value,
-                    units: 1 + close.map_or(0, |close| u64::from(close.total)),
                     statement: *id,
                     index: *index,
                     close: *close,

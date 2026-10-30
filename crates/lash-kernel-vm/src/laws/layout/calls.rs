@@ -14,6 +14,9 @@ const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } final
 const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = flat.add(xs[0], call pause(xs[1])) return [call pair(first, xs[2]), xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
+const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
+const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
+const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
 const READ_ADD_MISS: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"missing\")) return total } return apply run(map{\"a\": 255})";
 const READ_ADD_FAIL: &str = "let run = fn(obj) { let total = false set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 
@@ -209,6 +212,66 @@ fn observe_source_or_register(
         }
     }
     let witnesses = crate::machine::islands::witness::take();
+    let scopes = crate::machine::islands::witness::scope_publications();
+    let members = crate::machine::islands::witness::member_publications();
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_MEMBER)
+    {
+        assert!(
+            members >= 5,
+            "each aliased append and replacement must publish its source member journal: {members}"
+        );
+    }
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains("let alias = value")
+    {
+        assert!(
+            scopes > 0,
+            "the nested alias scope must publish its real Leave without consuming the invocation"
+        );
+    }
+    if mode == Mode::Specialized
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains("let f = fn(x) { return 1 } return apply f(7)")
+    {
+        use crate::machine::islands::witness::{Exit, Family};
+        assert!(
+            witnesses
+                .get(&(Family::SourcePublication, Exit::Commit))
+                .copied()
+                .unwrap_or(0)
+                > 0,
+            "the parameterized call must publish its actual entered source suffix: {layout:?}, {witnesses:?}"
+        );
+    }
+    if mode == Mode::Specialized
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains("if same(value, ())")
+    {
+        use crate::machine::islands::witness::{Exit, Family};
+        assert!(
+            witnesses
+                .get(&(Family::SourceUnit, Exit::Commit))
+                .copied()
+                .unwrap_or(0)
+                > 0,
+            "the aliased comparison must publish its source tuple operand: {witnesses:?}"
+        );
+    }
     if mode != Mode::Specialized {
         assert!(witnesses.is_empty());
     }
@@ -319,6 +382,7 @@ fn direct_call_entry_agrees() {
         ROOT_CALL_STORAGE,
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
+        SOURCE_MEMBER,
         READ_ADD_MISS,
         READ_ADD_FAIL,
         FORMATTED_APPEND,
@@ -331,6 +395,9 @@ fn direct_call_entry_agrees() {
         "return invoke helper.element({value: 7}, \"value\")",
         "return invoke helper.element([7], 2)",
         "let f = fn(x) { return 1 } return apply f(7)",
+        SOURCE_UNIT,
+        SOURCE_PENDING_UNIT,
+        "let nested = [7] let f = fn(value) { if same(kind(value), \"list\") { let alias = value } return value } return apply f(nested)",
         "let n = 0 while flat.lt(n, 3) { set n = flat.add(n, call literal(n)) } return n",
         "let n = 7 let f = fn() { return false } try { set n = flat.add(n, apply f()) } catch err { print n } return n",
         "let n = 0 let f = fn() { return 1 } while flat.lt(n, 3) { set n = flat.add(n, apply f()) } return n",
@@ -416,10 +483,13 @@ fn direct_call_entry_agrees() {
             || body == ROOT_CALL_STORAGE
             || body == NESTED_CALL_STORAGE
             || body == READ_ADD_WRITE
+            || body == SOURCE_MEMBER
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
             || body == FORMATTED_APPEND
             || body == FORMATTED_MISS
+            || body.contains("if same(value, ())")
+            || body.contains("let alias = value")
         {
             let source_only = observe_source_or_register(
                 &source,
@@ -461,6 +531,9 @@ fn direct_call_entry_agrees() {
         }
         if [
             READ_ADD_WRITE,
+            SOURCE_MEMBER,
+            SOURCE_UNIT,
+            SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
             FORMATTED_MISS,
             ROOT_CALL_STORAGE,
@@ -508,6 +581,9 @@ fn direct_call_entry_agrees() {
         }
         if [
             READ_ADD_WRITE,
+            SOURCE_MEMBER,
+            SOURCE_UNIT,
+            SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
             ROOT_CALL_STORAGE,
             NESTED_CALL_STORAGE,
@@ -575,6 +651,9 @@ fn direct_call_entry_agrees() {
         ROOT_CALL_STORAGE,
         NESTED_CALL_STORAGE,
         READ_ADD_WRITE,
+        SOURCE_MEMBER,
+        SOURCE_UNIT,
+        SOURCE_PENDING_UNIT,
         READ_ADD_MISS,
         READ_ADD_FAIL,
         FORMATTED_APPEND,
@@ -610,6 +689,9 @@ fn direct_call_entry_agrees() {
                 || body == ROOT_CALL_STORAGE
                 || body == NESTED_CALL_STORAGE
                 || body == READ_ADD_WRITE
+                || body == SOURCE_MEMBER
+                || body == SOURCE_UNIT
+                || body == SOURCE_PENDING_UNIT
                 || body == READ_ADD_MISS
                 || body == READ_ADD_FAIL
                 || body == FORMATTED_APPEND

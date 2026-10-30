@@ -550,6 +550,10 @@ impl EvaluatedProgram {
     }
 }
 impl<'a> PreparedProgram<'a> {
+    /// Price an itemized release against this unpublished source prefix.
+    pub fn release_cost(&self, owners: &[Owner], access: &Access<'_>) -> Result<u64, HeapFault> {
+        self.publication.release_cost(owners, access)
+    }
     pub fn peak(&self) -> u64 {
         self.publication.peak()
     }

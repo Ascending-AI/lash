@@ -264,6 +264,7 @@ pub(crate) struct Source {
     verified: OnceLock<Result<(), Refused>>,
     owners: OnceLock<Result<Arc<OwnerSlots>, Refused>>,
     intervals: std::sync::Mutex<BTreeMap<interval::Key, Arc<CompiledInterval>>>,
+    first_events: std::sync::Mutex<BTreeMap<Site, Point>>,
 }
 
 /// Source selectors receive stable indices within this exact immutable body.
@@ -273,6 +274,7 @@ pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
     slots: BTreeMap<Owner, u32>,
+    controls: Box<[Owner]>,
     scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
     binding_slots: BTreeMap<Owner, (u32, bool)>,
@@ -498,6 +500,7 @@ impl Source {
             verified: OnceLock::new(),
             owners: OnceLock::new(),
             intervals: Default::default(),
+            first_events: Default::default(),
             seed: Some(Seed {
                 unit,
                 params: params.into(),
@@ -533,6 +536,7 @@ impl Source {
             verified: OnceLock::new(),
             owners: OnceLock::new(),
             intervals: Default::default(),
+            first_events: Default::default(),
         }
     }
     fn form(
@@ -699,6 +703,9 @@ impl Source {
                     }
                 }
                 let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
+                let controls = owners.iter().filter(|owner| matches!(owner,
+                    Owner::LoopCursor(_) | Owner::LoopHeader(_) | Owner::Departure(_)
+                    | Owner::PendingDeparture(_) | Owner::ActiveDeparture(_))).cloned().collect();
                 let slots = owners
                     .into_iter()
                     .enumerate()
@@ -710,6 +717,7 @@ impl Source {
                     owner: self.owner,
                     source: self.site.clone(),
                     slots,
+                    controls,
                     scopes,
                     aliases,
                     binding_slots,
@@ -744,6 +752,32 @@ impl Source {
         // A changed projection is never covered by the immutable default's cache.
         verify::body(self, room)
     }
+    /// The first canonical holding event of an actual source continuation.
+    /// This uses the same walker as interval verification and stops before
+    /// choosing a branch or evaluating a fact.
+    pub(crate) fn first_event(&self, at: &Site) -> Result<Point, Refused> {
+        self.verify()?;
+        let mut cache = self.first_events.lock().map_err(|_| Refused::Source)?;
+        if let Some(point) = cache.get(at) {
+            return Ok(point.clone());
+        }
+        struct First(Option<Point>);
+        impl evaluate::Events for First {
+            fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
+                self.0 = Some(point(site, phase));
+                Err(Refused::Path)
+            }
+            fn choose(&mut self, _: &Site) -> Result<bool, Refused> {
+                Err(Refused::Facts)
+            }
+        }
+        let mut first = First(None);
+        let _ = evaluate::walk(self, at, &mut first, 4096);
+        let point = first.0.ok_or(Refused::Path)?;
+        cache.insert(at.clone(), point.clone());
+        Ok(point)
+    }
+
     /// A finite source execution, including selected branches and repeated
     /// source loop tests. Budget exhaustion is an eligibility miss.
     pub(crate) fn evaluate(

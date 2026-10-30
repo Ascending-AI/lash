@@ -243,6 +243,11 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            task,
+            heap: &self.heap,
+            logical: self.logical.clone(),
+            logical_memory: &self.logical_memory,
+            memory_bound: self.bounds.memory,
             pages: self.heap.pages().clone(),
             link: self.active_link,
             exe,
@@ -367,6 +372,10 @@ impl KernelMachine {
         match ran {
             None => Ok(None),
             Some(Ran::Returned(value)) => {
+                self.logical.replace(
+                    lash_kernel_state::kernel_internals::logical::Owner::Incoming(running.task),
+                    None,
+                );
                 self.put(out, value);
                 self.borrow_value(value);
                 Ok(Some(Flow::Done))
@@ -574,6 +583,11 @@ impl KernelMachine {
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
+            task,
+            heap: &self.heap,
+            logical: self.logical.clone(),
+            logical_memory: &self.logical_memory,
+            memory_bound: self.bounds.memory,
             pages: self.heap.pages().clone(),
             link: self.active_link,
             exe,
@@ -606,14 +620,16 @@ impl KernelMachine {
             },
         };
         self.islands.open();
+        let values = self.regs[first..first + given].to_vec();
         let ran = enter::<OBSERVING>(
             entry,
             &mut self.islands,
             &mut running.counters,
             &mut self.charged,
-            (target, &self.regs[first..first + given]),
+            (target, &values),
             occurrence,
             &[],
+            || self.regs.take_source_arguments(first, given),
         );
         drop(watching);
         Ok(ran?)
@@ -735,8 +751,8 @@ impl KernelMachine {
         }
     }
 
-    /// Pushes the machine frame of virtual frame `level`, admitted as the
-    /// reference admits a call's frame, its variables and its roles. Gives
+    /// Materializes the physical frame of an already entered source activation.
+    /// Reconstruction preserves its invocation, variables and saved roles. Gives
     /// the statement, op and registers a running frame stands at.
     fn convert_level(
         &mut self,
@@ -820,10 +836,24 @@ impl KernelMachine {
             frame.stand_at(act, pending);
             frame.awaiting = Some(stmt);
         }
-        if let Some(frame) = new {
-            let code = frame.code;
+        let activation = level.source;
+        if !fresh && frame.invocation != activation.invocation.id() {
+            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                "packet reconstruction changed its source invocation".into(),
+            )
+            .into());
+        }
+        frame.invocation = activation.invocation.id();
+        frame.source_frontier = activation.frontier;
+        if let Some(mut frame) = new {
+            frame.logical = Some(super::super::logical_held::FrameRoots::restore(
+                self.logical.clone(),
+                task,
+                &frame,
+                exe,
+                self.heap.pages(),
+            )?);
             self.task(task)?.frames.push(frame);
-            self.logical_enter_frame(task, exe, code, &[])?;
         }
         self.logical_flush_continuation(task, exe)?;
         self.logical_reconstruct_controls(task, exe)?;
@@ -991,6 +1021,11 @@ impl KernelMachine {
             .last_mut()?
             .ok_or_else(|| fault("no frame"))?;
         let ground = Ground {
+            task,
+            heap: &self.heap,
+            logical: self.logical.clone(),
+            logical_memory: &self.logical_memory,
+            memory_bound: self.bounds.memory,
             pages: self.heap.pages().clone(),
             link: frame.link,
             exe,
@@ -1118,6 +1153,11 @@ impl KernelMachine {
 /// Fields no call changes while a region batch or a callback walk runs.
 /// The bound stays at the entry: a callback's limiter can grow it.
 pub(in crate::machine) struct Ground<'a> {
+    pub(in crate::machine) task: TaskId,
+    pub(in crate::machine) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
+    pub(in crate::machine) logical: lash_kernel_state::kernel_internals::logical::Lifecycle,
+    pub(in crate::machine) memory_bound: u64,
+    pub(in crate::machine) logical_memory: &'a std::cell::Cell<u64>,
     pub(in crate::machine) pages: lash_kernel_state::kernel_internals::tree::Access<'static>,
     pub(in crate::machine) link: lash_kernel_value::LinkId,
     pub(in crate::machine) exe: &'a Executable,
@@ -1152,6 +1192,10 @@ struct Entry<'a> {
 /// to have an island that takes these arguments. `None`: the island does
 /// not run, and nothing changed.
 #[inline(always)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the admitted source call carries its argument owner transfer"
+)]
 fn enter<const OBSERVING: bool>(
     entry: Entry<'_>,
     scratch: &mut Scratch,
@@ -1160,6 +1204,7 @@ fn enter<const OBSERVING: bool>(
     (target, values): (Target<'_>, &[Value]),
     occurrence: Option<usize>,
     before: &[Weight],
+    argument_owners: impl FnOnce() -> Vec<lash_kernel_state::kernel_internals::logical::Owner>,
 ) -> Result<Option<Ran>, Halt> {
     let (base, call_depth) = (entry.ground.base, entry.ground.call_depth);
     let mut island = open::<OBSERVING>(entry, scratch, counters, *charged);
@@ -1204,7 +1249,7 @@ fn enter<const OBSERVING: bool>(
     {
         Err(stop)
     } else {
-        island.enter(target, values)
+        island.enter(target, values, &argument_owners())
     };
     *charged = island.charged;
     ended(scratch, ran)
@@ -1237,6 +1282,11 @@ fn open<'a, const OBSERVING: bool>(
     );
     Island {
         public_return: false,
+        task: ground.task,
+        heap: ground.heap,
+        logical: ground.logical.clone(),
+        logical_memory: ground.logical_memory,
+        memory_bound: ground.memory_bound,
         link: ground.link,
         exe: ground.exe,
         stream: ground.exe.document_stream(),

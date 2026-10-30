@@ -276,10 +276,14 @@ impl Operands {
         if self.remove(reg).is_some() {
             return Ok(());
         }
-        // A protocol open enters its callee before ForIn completes. Its
-        // iterable was transferred there, so completion spends that exact
-        // receipt rather than releasing the former source owner again.
-        if matches!(op, Op::ForIn { iterable } if iterable == reg)
+        // A completed packet call, like a protocol open, has already
+        // transferred these exact operands into its entered invocation.
+        // Completion spends the receipt without releasing its former owner.
+        if (matches!(op, Op::ForIn { iterable } if iterable == reg)
+            || matches!(
+                op,
+                Op::Call { .. } | Op::Nested { .. } | Op::Operator { .. }
+            ))
             && let Some(at) = self
                 .transferred
                 .iter()

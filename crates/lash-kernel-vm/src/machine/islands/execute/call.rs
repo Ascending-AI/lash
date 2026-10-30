@@ -209,13 +209,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 self.root_arguments(before);
                 // The call owns its frame transition. No resolved callee
                 // crosses the instruction result or is decoded by the loop.
-                if let Some(value) = self.returned_literal(target) {
-                    regs[site.reg as usize] = value;
-                    if site.after != 0 {
-                        self.admit(site.after);
-                    }
-                    return Ok(Next::Continue);
-                }
                 frame.state.continuation = Some(CallContinuation { site, args, live });
                 (frame.state.admitted, frame.state.swift, frame.state.covered) =
                     (self.admitted, self.swift, self.covered);

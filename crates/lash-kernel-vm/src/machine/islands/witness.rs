@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// A source-certified grouped kernel selected by packet lowering.
 pub enum Family {
+    /// An entered source suffix published through SourceAccepted.
+    SourcePublication,
+    /// A checked comparison retains its real empty-tuple source operand.
+    SourceUnit,
     /// A fixed-arity scalar packet and its shared destination.
     Scalar,
     /// A source-certified member guard, read and optional consumer.
@@ -56,9 +60,13 @@ pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
+    static SCOPE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn begin() {
+    SCOPE_PUBLICATIONS.with(|count| count.set(0));
+    MEMBER_PUBLICATIONS.with(|count| count.set(0));
     COUNTS.with(|counts| *counts.borrow_mut() = Some(Counts::new()));
 }
 
@@ -72,4 +80,19 @@ pub(super) fn record(family: Family, exit: Exit) {
             *counts.entry((family, exit)).or_default() += 1;
         }
     });
+}
+
+/// Generic and specialized packets share this source operation. It is not a
+/// grouped-kernel witness, so forced-generic checks still reject every family.
+pub(crate) fn scope_publications() -> u64 {
+    SCOPE_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine::islands) fn scope_published() {
+    SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+pub(crate) fn member_publications() -> u64 {
+    MEMBER_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine::islands) fn member_published() {
+    MEMBER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }

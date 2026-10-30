@@ -22,6 +22,7 @@ mod pending;
 use pending::{Departing, Departure, Phase};
 mod format;
 mod repeat;
+pub(super) mod source;
 mod storage;
 mod update;
 #[cfg(test)]
@@ -153,6 +154,7 @@ pub(super) struct Window {
 }
 
 pub(super) struct Frame<'e> {
+    source: Option<super::source::Activation>,
     callee: Callee<'e>,
     bindings: std::ops::Range<usize>,
     operands: std::ops::Range<usize>,
@@ -187,6 +189,7 @@ impl<'e> Frame<'e> {
     fn new(callee: Callee<'e>, ranges: storage::Ranges, window: Window) -> Self {
         Self {
             callee,
+            source: None,
             bindings: ranges.bindings,
             operands: ranges.operands,
             pending: ranges.pending,
@@ -221,33 +224,26 @@ enum Next {
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
-    pub(super) fn enter(&mut self, callee: Callee<'e>, args: &[Value]) -> Answer {
-        if let Some(value) = self.returned_literal(callee) {
-            return Ok(value);
-        }
+    pub(super) fn enter(
+        &mut self,
+        callee: Callee<'e>,
+        args: &[Value],
+        inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
+    ) -> Answer {
         self.record_entry(callee, None);
         let mut active = self.new_frame(callee, args);
+        let mut slab = std::mem::take(&mut self.scratch.slab);
+        let entered = self.source_enter(&slab.view(&mut active), inputs);
+        self.scratch.slab = slab;
+        active.source = Some(entered.map_err(|error| self.halt(error.into()))?);
         self.execute(&mut active)
     }
 
-    /// A single literal return needs no physical slot or control window.
-    /// Admission still belongs to the call site. When either event could
-    /// refuse, the ordinary instruction path preserves its exact prefix.
-    #[inline(always)]
-    fn returned_literal(&mut self, callee: Callee<'e>) -> Option<Value> {
-        let literal = callee.compiled.literal.as_ref()?;
-        let units = literal.units;
-        if self.spent() || !self.fits(units) {
-            return None;
-        }
-        crate::observe::register_entry::<true>(
-            #[cfg(any(test, feature = "perf-witness"))]
-            &self.scratch.census,
-            self.recorder,
-            self.scratch.counting,
-        );
+    fn record_literal_body(&self, callee: Callee<'e>, started: u64) {
+        let Some(literal) = &callee.compiled.literal else {
+            return;
+        };
         if OBSERVING && let Some(watching) = &self.projection() {
-            watching.push(callee.plan.code, self.charged, self.arena.allocations());
             watching.statement(
                 self.exe,
                 StatementFact {
@@ -257,21 +253,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     index: literal.index,
                     charging: self.exe.charging(),
                 },
-                (self.charged + 1, self.arena.allocations()),
+                (started + 1, self.arena.allocations()),
             );
             if let Some(close) = &literal.close {
                 watching.expressions(callee.stream, close, self.exe.charging());
             }
-            watching.pop(self.charged + units, self.arena.allocations());
         }
-        self.charged += units;
         if let Some(tape) = self.recorder.filter(|_| self.exe.charging()) {
             tape.push(Weight::Atomic(1));
             if let Some(close) = &literal.close {
                 super::record(tape, callee.stream, close.region);
             }
         }
-        Some(literal.value)
     }
 
     // One loop and instruction inventory serve both modes. The entry-fixed
@@ -347,58 +340,90 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
             // Ordinary placement and admission stay in the dispatch loop.
             // They have no operation result or continuation to route.
-            match packet.opcode {
-                Opcode::Begin => {
-                    let begin = &code.sites.begin[packet.x as usize];
-                    if let Err(stop) =
-                        self.begin(&mut slab.view(active), begin.id, begin.index, begin.ahead)
-                    {
-                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
-                    }
-                    continue;
+            let mut literal_return = None;
+            if active.pc == 1
+                && active.control.is_empty()
+                && !active.resident
+                && active.boundary.is_none()
+                && !self.spent()
+                && let Some(mut activation) = active.source.take()
+            {
+                let started = self.charged;
+                let published = self
+                    .publish_literal_body(active.callee, &mut activation)
+                    .map_err(|error| self.halt(error.into()))?;
+                active.source = Some(activation);
+                if published {
+                    let literal =
+                        active.callee.compiled.literal.as_ref().ok_or_else(|| {
+                            self.halt(fault("literal publication lost its source"))
+                        })?;
+                    active.statement = Some(literal.statement);
+                    active.returned = Some(ReturnOperand {
+                        statement: literal.statement,
+                        pc: self.exe.stmt(literal.statement).ops.end() - 1,
+                        reg: literal.reg,
+                    });
+                    self.record_literal_body(active.callee, started);
+                    literal_return = Some(literal.value);
                 }
-                Opcode::Constant => {
-                    slab.view(active).regs[packet.dst as usize] = code.constant(packet);
-                    continue;
-                }
-                Opcode::Local => {
-                    let value = match slab.view(active).slots[packet.x as usize] {
-                        SlotState::Cell(cell) if packet.mode != 0 => self.arena.cell(cell).ok(),
-                        SlotState::Value(value) if packet.mode == 0 => Some(value),
-                        _ => None,
-                    };
-                    let Some(value) = value else {
-                        let stop = self.at(packet.y);
-                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
-                    };
-                    slab.view(active).regs[packet.dst as usize] = value;
-                    continue;
-                }
-                Opcode::Session => {
-                    let Some(value) = self.session(packet.x) else {
-                        let stop = self.at(packet.y);
-                        return self.slow_exit(active, &mut callers, slab, recovery, stop);
-                    };
-                    slab.view(active).regs[packet.dst as usize] = value;
-                    continue;
-                }
-                Opcode::Bind => {
-                    let values = slab.view(active);
-                    values.slots[packet.dst as usize] =
-                        SlotState::Value(values.regs[packet.x as usize]);
-                    continue;
-                }
-                Opcode::Unbind => {
-                    slab.view(active).slots[packet.dst as usize] = SlotState::Empty;
-                    continue;
-                }
-                Opcode::Jump => {
-                    active.pc = packet.x as usize;
-                    continue;
-                }
-                _ => {}
             }
-            let next = self.packet(&mut slab.view(active), packet, recovery, slots);
+            let next = if let Some(value) = literal_return {
+                Ok(Next::Return(value))
+            } else {
+                match packet.opcode {
+                    Opcode::Begin => {
+                        let begin = &code.sites.begin[packet.x as usize];
+                        if let Err(stop) =
+                            self.begin(&mut slab.view(active), begin.id, begin.index, begin.ahead)
+                        {
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
+                        continue;
+                    }
+                    Opcode::Constant => {
+                        slab.view(active).regs[packet.dst as usize] = code.constant(packet);
+                        continue;
+                    }
+                    Opcode::Local => {
+                        let value = match slab.view(active).slots[packet.x as usize] {
+                            SlotState::Cell(cell) if packet.mode != 0 => self.arena.cell(cell).ok(),
+                            SlotState::Value(value) if packet.mode == 0 => Some(value),
+                            _ => None,
+                        };
+                        let Some(value) = value else {
+                            let stop = self.at(packet.y);
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        };
+                        slab.view(active).regs[packet.dst as usize] = value;
+                        continue;
+                    }
+                    Opcode::Session => {
+                        let Some(value) = self.session(packet.x) else {
+                            let stop = self.at(packet.y);
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        };
+                        slab.view(active).regs[packet.dst as usize] = value;
+                        continue;
+                    }
+                    Opcode::Bind => {
+                        let values = slab.view(active);
+                        values.slots[packet.dst as usize] =
+                            SlotState::Value(values.regs[packet.x as usize]);
+                        continue;
+                    }
+                    Opcode::Unbind => {
+                        slab.view(active).slots[packet.dst as usize] = SlotState::Empty;
+                        continue;
+                    }
+                    Opcode::Jump => {
+                        active.pc = packet.x as usize;
+                        continue;
+                    }
+                    _ => {}
+                }
+                self.packet(&mut slab.view(active), packet, recovery, slots)
+            };
             match next {
                 Ok(Next::Continue) => {}
                 Ok(Next::Call) => {
@@ -408,6 +433,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let Some(continuation) = active.continuation else {
                         return Err(self.halt(fault("a call has no semantic continuation")));
                     };
+                    let inputs = self
+                        .source_call_inputs(
+                            &slab.view(active),
+                            continuation.site,
+                            continuation.args,
+                        )
+                        .map_err(|error| self.halt(error.into()))?;
+                    let saved = self
+                        .source_continuation(&slab.view(active), continuation.site)
+                        .map_err(|error| self.halt(error.into()))?;
                     let ranges = slab.call(
                         active,
                         target,
@@ -417,6 +452,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let window = self.scratch.windows.pop().unwrap_or_default();
                     let mut inner = Frame::new(target, ranges, window);
                     Self::cell_parameters(self.arena, target, slab.view(&mut inner).slots);
+                    inner.source = Some(
+                        self.source_enter(&slab.view(&mut inner), &inputs)
+                            .map_err(|error| self.halt(error.into()))?,
+                    );
+                    self.source_called(&slab.view(active), &saved)
+                        .map_err(|error| self.halt(error.into()))?;
                     inner.boundary = boundary;
                     self.register_bytes += target.compiled.register_bytes();
                     slots += inner.bindings.len();
@@ -453,6 +494,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         self.depth = 0;
                         return Ok(value);
                     }
+                    if let Some(activation) = &active.source
+                        && !activation
+                            .frontier
+                            .as_ref()
+                            .is_some_and(|frontier| frontier.position().unpaid.is_none())
+                    {
+                        self.source_leave(activation, value)
+                            .map_err(|error| self.halt(error.into()))?;
+                    }
                     slots -= active.bindings.len();
                     self.recycle(&mut slab.view(active));
                     slab.release(active);
@@ -471,6 +521,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     };
                     let site = continuation.site;
                     slab.view(active).regs[site.reg as usize] = value;
+                    self.source_returned(&slab.view(active), site, value)
+                        .map_err(|error| self.halt(error.into()))?;
                     if site.after != 0 {
                         self.admit(site.after);
                     }
@@ -717,17 +769,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let due = self.arena.boundary_due();
         frame.state.statement = None;
         for _ in 0..leaves {
-            let Position::Block(block, _) = frame
-                .state
-                .control
-                .pop()
-                .ok_or_else(|| self.halt(fault("a step has no enclosing block to leave")))?
-            else {
+            let Some(Position::Block(block, _)) = frame.state.control.last() else {
                 return Err(self.halt(fault("a block edge leaves a loop")));
             };
+            let block = *block;
+            let published = self
+                .publish_nested_leave(frame, block)
+                .map_err(|error| self.halt(error.into()))?;
+            frame.state.control.pop();
             let block = &frame.state.callee.compiled.blocks[block];
-            for at in &block.declares {
-                frame.slots[*at as usize] = SlotState::Empty;
+            if !published {
+                for at in &block.declares {
+                    frame.slots[*at as usize] = SlotState::Empty;
+                }
             }
             frame.state.pc = block.after;
         }

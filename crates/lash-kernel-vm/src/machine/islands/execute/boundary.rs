@@ -9,7 +9,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     pub(in crate::machine::islands) fn resume(
         &mut self,
         callee: Callee<'e>,
-        state: &crate::machine::Frame,
+        state: &mut crate::machine::Frame,
         suffix: Option<&super::ActionSuffix>,
     ) -> Option<Frame<'e>> {
         let mut window = self.scratch.windows.pop().unwrap_or_default();
@@ -119,6 +119,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame.recovery = recovery;
         frame.pc = pc;
         frame.resident = true;
+        frame.source = Some(super::super::source::Activation {
+            invocation: self
+                .logical
+                .ledger()
+                .borrow()
+                .invocation(self.task, state.invocation, self.heap.pages())
+                .ok()?,
+            frontier: state.source_frontier.take(),
+            cleaning: state.cleaning,
+        });
         Some(frame)
     }
 
@@ -291,7 +301,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             if !mapped {
                 self.spill(&current, &recovery.live);
             }
-            self.materialize(&current, stop, library);
+            self.materialize(&mut current, stop, library);
             self.recycle(&mut current);
         } else {
             self.recycle(&mut slab.view(active));
@@ -311,9 +321,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let library = callers
                     .last_mut()
                     .and_then(|caller| self.awaited_library(&slab.view(caller)));
-                let current = slab.view(&mut caller);
+                let mut current = slab.view(&mut caller);
                 self.spill(&current, continuation.live);
-                self.materialize(&current, Stop, library);
+                self.materialize(&mut current, Stop, library);
             }
             self.recycle(&mut slab.view(&mut caller));
             slab.release(&caller);
@@ -454,7 +464,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
     pub(super) fn materialize(
         &mut self,
-        frame: &Values<'_, 'e>,
+        frame: &mut Values<'_, 'e>,
         stop: Stop,
         library: Option<LibraryCall>,
     ) {
@@ -479,6 +489,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .rev()
                 .map(|position| position.projected(frame.state.callee.compiled, &frame.pending)),
         );
+        if let Err(error) = self
+            .source_clear_operands(frame)
+            .and_then(|()| self.source_bindings(frame))
+            .and_then(|()| self.logical.flush(self.arena, self.heap))
+        {
+            self.halt(error.into());
+            return;
+        }
+        let Some(activation) = frame.state.source.take() else {
+            self.halt(fault(
+                "packet reconstruction lost its admitted source activation",
+            ));
+            return;
+        };
         self.left(
             frame.state.callee.plan,
             frame.state.callee.captured,
@@ -486,6 +510,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             library.filter(|_| !frame.state.callee.plan.charged),
             frame.state.boundary,
             source,
+            activation,
         );
     }
 }

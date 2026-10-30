@@ -898,6 +898,39 @@ impl<'e> Build<'e> {
                 self.open = None;
                 self.emit(Op::Unit {
                     site: UnitSite {
+                        source: self.statement.and_then(|id| {
+                            let stmt = self.exe.stmt(id);
+                            let comparison = self.stream.source_sites.get(pc as usize)?.as_ref()?;
+                            if !matches!(
+                                stmt.form,
+                                crate::compile::Form::If { .. }
+                                    | crate::compile::Form::While { .. }
+                            ) || **comparison != stmt.site.child(0)
+                            {
+                                return None;
+                            }
+                            Some(Box::new(super::UnitSource {
+                                statement: id,
+                                binding: match &value.kind {
+                                    Kind::Local { local, .. } => Some(local.at),
+                                    _ => None,
+                                },
+                                value: (**self
+                                    .stream
+                                    .source_sites
+                                    .get(value.pc as usize)?
+                                    .as_ref()?)
+                                .clone(),
+                                tuple: (**self
+                                    .stream
+                                    .source_sites
+                                    .get(unit.pc as usize)?
+                                    .as_ref()?)
+                                .clone(),
+                                comparison: (**comparison).clone(),
+                                test: stmt.site.clone(),
+                            }))
+                        }),
                         lib: *lib,
                         close: closes.first().copied(),
                         miss,

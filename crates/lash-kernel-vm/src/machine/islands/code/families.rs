@@ -278,12 +278,78 @@ impl Format {
     }
 }
 
+fn source_test(block: &SourceBlock, id: StmtId) -> Option<&Expr> {
+    for statement in &block.statements {
+        let found = match &statement.kind {
+            StatementKind::If { cond, .. } | StatementKind::While { cond, .. }
+                if statement.id == id =>
+            {
+                Some(cond)
+            }
+            StatementKind::Try {
+                body,
+                catch,
+                finally,
+            } => source_test(body, id)
+                .or_else(|| catch.as_ref().and_then(|block| source_test(block, id)))
+                .or_else(|| finally.as_ref().and_then(|block| source_test(block, id))),
+            StatementKind::While {
+                body, otherwise, ..
+            }
+            | StatementKind::For {
+                body, otherwise, ..
+            } => source_test(body, id)
+                .or_else(|| otherwise.as_ref().and_then(|block| source_test(block, id))),
+            StatementKind::If { then_, else_, .. } => {
+                source_test(then_, id).or_else(|| source_test(else_, id))
+            }
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+fn verified_unit(site: &sites::Unit, plan: &IslandPlan, exe: &Executable) -> Option<()> {
+    let Some(selected) = &site.site.source else {
+        return Some(());
+    };
+    let test = source_test(&plan.body, selected.statement)?;
+    let Expression::Operator { lib, args, .. } = &test.kind else {
+        return None;
+    };
+    let [value, tuple] = &args[..] else {
+        return None;
+    };
+    let stream = plan.stream(exe);
+    let at = |pc: u32| stream.source_sites.get(pc as usize)?.as_deref();
+    let binding = match &value.kind {
+        Expression::Local { local, .. } => Some(local.at),
+        _ => None,
+    };
+    (crate::compile::islands::unit_test(Some(exe.lib(*lib)), args)
+        && *lib == site.site.lib
+        && test.reg == site.site.reg
+        && value.reg == site.src
+        && selected.binding == binding
+        && selected.test == exe.stmt(selected.statement).site
+        && at(test.pc)? == &selected.comparison
+        && at(value.pc)? == &selected.value
+        && at(tuple.pc)? == &selected.tuple)
+        .then_some(())
+}
+
 impl Code {
     pub(in crate::machine::islands) fn verify_families(
         &self,
         plan: &IslandPlan,
         exe: &Executable,
     ) -> Result<(), Refused> {
+        for site in &self.sites.unit {
+            verified_unit(site, plan, exe).ok_or(Refused::Calls)?;
+        }
         for site in &self.sites.update {
             site.value.source(plan, exe).ok_or(Refused::Calls)?;
         }
