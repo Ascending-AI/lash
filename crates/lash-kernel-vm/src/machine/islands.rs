@@ -1361,14 +1361,15 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     #[cold]
     fn left(
         &mut self,
-        plan: &IslandPlan,
-        captured: u32,
+        callee: Callee<'_>,
         slots: &Slots,
         library: Option<super::LibraryCall>,
         boundary: Option<crate::compile::LibId>,
         source: Option<(StmtId, u32)>,
         activation: source::Activation,
     ) {
+        let plan = callee.plan;
+        let captured = callee.captured;
         let mut slots = slots[..plan.slots].to_vec();
         if let Some((statement, pc)) = source {
             self.restore_expression_scopes(&mut slots, statement, pc);

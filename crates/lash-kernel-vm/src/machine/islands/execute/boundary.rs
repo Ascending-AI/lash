@@ -504,8 +504,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             return;
         };
         self.left(
-            frame.state.callee.plan,
-            frame.state.callee.captured,
+            frame.state.callee,
             frame.slots,
             library.filter(|_| !frame.state.callee.plan.charged),
             frame.state.boundary,

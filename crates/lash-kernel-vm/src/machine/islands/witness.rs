@@ -84,12 +84,14 @@ pub(super) fn record(family: Family, exit: Exit) {
 
 /// Generic and specialized packets share this source operation. It is not a
 /// grouped-kernel witness, so forced-generic checks still reject every family.
+#[cfg(test)]
 pub(crate) fn scope_publications() -> u64 {
     SCOPE_PUBLICATIONS.with(|count| count.replace(0))
 }
 pub(in crate::machine::islands) fn scope_published() {
     SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
+#[cfg(test)]
 pub(crate) fn member_publications() -> u64 {
     MEMBER_PUBLICATIONS.with(|count| count.replace(0))
 }
