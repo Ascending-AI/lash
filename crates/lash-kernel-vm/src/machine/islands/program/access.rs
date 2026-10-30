@@ -185,107 +185,103 @@ impl Build<'_> {
         }))
     }
 
-    pub(super) fn member_inputs(
+    pub(super) fn member_input(
         &mut self,
+        at: usize,
         targets: &std::collections::BTreeSet<usize>,
-    ) -> std::collections::BTreeSet<usize> {
-        let mut removed = std::collections::BTreeSet::new();
-        for at in 0..self.ops.len() {
-            let Op::Heap {
-                site,
-                args,
-                resident: None,
-                ..
-            } = &self.ops[at].op
-            else {
-                continue;
-            };
-            if args.len() == 2 {
-                if let Some(units) = self.member_charge(site.lib) {
-                    let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
-                    let Op::Heap { site, args, .. } = original else {
-                        unreachable!()
-                    };
-                    self.ops[at].op = Op::Heap {
-                        site,
-                        args,
-                        resident: Some(HeapKernel::Read {
-                            units,
-                            to: Destination::Register,
-                        }),
-                        inputs: HeapInputs::Registers,
-                    };
-                }
-                continue;
+    ) -> Option<std::ops::Range<usize>> {
+        let Op::Heap {
+            site,
+            args,
+            resident: None,
+            ..
+        } = &self.ops[at].op
+        else {
+            return None;
+        };
+        if args.len() == 2 {
+            if let Some(units) = self.member_charge(site.lib) {
+                let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
+                let Op::Heap { site, args, .. } = original else {
+                    unreachable!()
+                };
+                self.ops[at].op = Op::Heap {
+                    site,
+                    args,
+                    resident: Some(HeapKernel::Read {
+                        units,
+                        to: Destination::Register,
+                    }),
+                    inputs: HeapInputs::Registers,
+                };
             }
-            if args.len() != 3 {
-                continue;
-            }
-            let start = at.saturating_sub(3);
-            let fold = at >= 3
-                && !(start + 1..=at)
-                    .any(|at| targets.contains(&at) || self.ops[at].begin.is_some());
-            let reads = if fold {
-                self.ops[start..at]
-                    .iter()
-                    .zip(args)
-                    .map(|(instruction, reg)| match instruction.op {
-                        Op::Constant { dst, value } if dst == *reg => {
-                            Some(Read::Literal { reg: dst, value })
-                        }
-                        Op::Local {
-                            dst,
-                            at,
-                            shared,
-                            miss,
-                        } if dst == *reg => Some(Read::Local {
-                            reg: dst,
-                            at,
-                            shared,
-                            miss,
-                        }),
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>()
-                    .and_then(|reads| reads.try_into().ok())
-                    .map(Box::new)
-            } else {
-                None
-            };
-            let depth = match site.depth {
-                Depth::None => 0,
-                Depth::Operation(n) | Depth::Template(n) => n,
-            };
-            let Some(property) = self.property(
-                site.lib,
-                site.root,
-                site.counted,
-                depth,
-                reads.as_deref().map(|reads: &[Read; 3]| reads.as_slice()),
-            ) else {
-                continue;
-            };
-            let fold = reads.is_some();
-            let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
-            let Op::Heap { site, args, .. } = original else {
-                unreachable!()
-            };
-            self.ops[at].op = Op::Heap {
-                site,
-                args,
-                resident: Some(HeapKernel::Write {
-                    property,
-                    finish: None,
-                }),
-                inputs: reads.map_or(HeapInputs::Registers, HeapInputs::Write),
-            };
-            if fold {
-                self.ops[at].begin = self.ops[start].begin.take();
-                self.ops[at].live = self.ops[start].live.clone();
-                removed.extend(start..at);
-            }
+            return None;
         }
-        removed
+        if args.len() != 3 {
+            return None;
+        }
+        let start = at.saturating_sub(3);
+        let fold = at >= 3
+            && !(start + 1..=at).any(|at| targets.contains(&at) || self.ops[at].begin.is_some());
+        let reads = if fold {
+            self.ops[start..at]
+                .iter()
+                .zip(args)
+                .map(|(instruction, reg)| match instruction.op {
+                    Op::Constant { dst, value } if dst == *reg => {
+                        Some(Read::Literal { reg: dst, value })
+                    }
+                    Op::Local {
+                        dst,
+                        at,
+                        shared,
+                        miss,
+                    } if dst == *reg => Some(Read::Local {
+                        reg: dst,
+                        at,
+                        shared,
+                        miss,
+                    }),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .and_then(|reads| reads.try_into().ok())
+                .map(Box::new)
+        } else {
+            None
+        };
+        let depth = match site.depth {
+            Depth::None => 0,
+            Depth::Operation(n) | Depth::Template(n) => n,
+        };
+        let property = self.property(
+            site.lib,
+            site.root,
+            site.counted,
+            depth,
+            reads.as_deref().map(|reads: &[Read; 3]| reads.as_slice()),
+        )?;
+        let fold = reads.is_some();
+        let original = std::mem::replace(&mut self.ops[at].op, Op::Jump(at + 1));
+        let Op::Heap { site, args, .. } = original else {
+            unreachable!()
+        };
+        self.ops[at].op = Op::Heap {
+            site,
+            args,
+            resident: Some(HeapKernel::Write {
+                property,
+                finish: None,
+            }),
+            inputs: reads.map_or(HeapInputs::Registers, HeapInputs::Write),
+        };
+        if fold {
+            self.ops[at].begin = self.ops[start].begin.take();
+            self.ops[at].live = self.ops[start].live.clone();
+            Some(start..at)
+        } else {
+            None
+        }
     }
 
     fn edge(&self, mut at: usize) -> usize {
