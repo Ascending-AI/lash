@@ -117,7 +117,7 @@ pub(super) fn checked_source_publication() {
     };
     let start = Position {
         at: interval.events().next().unwrap().point.clone(),
-        unpaid: interval.events().next().unwrap().point.clone(),
+        unpaid: Some(interval.events().next().unwrap().point.clone()),
         recovery: [1; 32],
         occurrence: Occurrence {
             task: TaskId::MAIN,
@@ -129,6 +129,7 @@ pub(super) fn checked_source_publication() {
     };
     let next = Position {
         at: interval.events().last().unwrap().point.clone(),
+        unpaid: None,
         recovery: [2; 32],
         ..start.clone()
     };
@@ -139,7 +140,7 @@ pub(super) fn checked_source_publication() {
             &invocation,
             program.link,
             lash_kernel_doc::KernelVersion::One,
-            start,
+            start.clone(),
         )
         .unwrap();
     let mut charged = 0;
@@ -389,4 +390,14 @@ pub(super) fn checked_source_publication() {
             assert!(entities.is_empty())
         })
         .unwrap();
+    let committed_balance = ledger_store.borrow().balance().unwrap();
+    let committed_charge = charged;
+    assert!(
+        frontier
+            .handoff(&mut ledger_store.borrow_mut(), start.clone())
+            .is_err()
+    );
+    assert_eq!(frontier.position(), &next);
+    assert_eq!(ledger_store.borrow().balance().unwrap(), committed_balance);
+    assert_eq!(charged, committed_charge);
 }

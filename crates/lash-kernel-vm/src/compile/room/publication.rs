@@ -26,7 +26,7 @@ pub(crate) struct Occurrence {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Position {
     pub(crate) at: Point,
-    pub(crate) unpaid: Point,
+    pub(crate) unpaid: Option<Point>,
     pub(crate) recovery: [u8; 32],
     pub(crate) occurrence: Occurrence,
 }
@@ -108,8 +108,7 @@ impl Source {
                 .ok()
                 == Some(invocation)
                 || ledger.prospective_invocation(position.occurrence.task) == *invocation)
-            || !self.contains(&position.at.site)
-            || !self.contains(&position.unpaid.site)
+            || !self.valid_position(&position)
             || position
                 .occurrence
                 .loops
@@ -129,6 +128,16 @@ impl Source {
     }
     fn contains(&self, site: &Site) -> bool {
         site.unit == self.site.unit && site.path.starts_with(&self.site.path)
+    }
+    fn is_source_leave(&self, point: &Point) -> bool {
+        point.site == self.site && point.phase == Phase::Leave
+    }
+    fn valid_position(&self, position: &Position) -> bool {
+        self.contains(&position.at.site)
+            && match &position.unpaid {
+                Some(head) => self.contains(&head.site),
+                None => self.is_source_leave(&position.at),
+            }
     }
 }
 impl Bound {
@@ -152,8 +161,7 @@ impl Frontier {
         ledger: &mut Ledger,
         position: Position,
     ) -> Result<(), HeapFault> {
-        if !self.source.contains(&position.at.site) || !self.source.contains(&position.unpaid.site)
-        {
+        if self.position.unpaid.is_none() || !self.source.valid_position(&position) {
             return Err(fault("source handoff left its defining body"));
         }
         let revision = self
@@ -178,7 +186,9 @@ impl Frontier {
         allowance: Allowance,
         resources: ResourceFacts,
     ) -> Result<EvaluatedInterval, Refused> {
-        if interval.owner() != self.source.owner
+        if self.position.unpaid.is_none()
+            || !self.source.valid_position(&self.position)
+            || interval.owner() != self.source.owner
             || interval.defining_source() != &self.source.site
             || interval.start() != &self.position.at.site
             || interval
@@ -186,8 +196,8 @@ impl Frontier {
                 .next()
                 .is_none_or(|event| event.point != self.position.at)
             || next.occurrence != self.position.occurrence
-            || !self.source.contains(&next.at.site)
-            || !self.source.contains(&next.unpaid.site)
+            || !self.source.valid_position(&next)
+            || next.unpaid.is_none() != self.source.is_source_leave(&next.at)
             || interval
                 .events()
                 .last()
