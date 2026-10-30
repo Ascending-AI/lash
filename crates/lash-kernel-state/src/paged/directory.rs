@@ -440,8 +440,8 @@ pub mod execution {
     pub struct FrameRecord {
         pub invocation: u64,
         pub capture_names: Vec<lash_kernel_value::names::Name>,
-        /// The lexical creation site of a lifted closure body. Its standalone
-        /// function compilation has different ownership of free variables.
+        /// The compilation origin: a lexical closure's creation site or a
+        /// standalone body's site. Absent only until a fresh row is projected.
         pub created: Option<SiteRef>,
         pub convention: Option<lash_kernel_doc::StartConvention>,
         pub public_result: Option<lash_kernel_value::types::Type>,

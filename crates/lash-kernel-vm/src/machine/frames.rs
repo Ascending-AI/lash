@@ -50,39 +50,30 @@ fn malformed(problem: impl Into<String>) -> HeapFault {
     HeapFault::Malformed(problem.into())
 }
 
-/// Resolve the exact source compilation of a saved frame. A lifted closure
-/// must use the lexical body that owns its borrowed captures.
+/// Resolve the exact source compilation of a saved frame. Every projected
+/// frame names its origin, including standalone bodies with lexical variants.
 pub(super) fn code_of(
     record: &FrameRecord,
     exe: &Executable,
     access: &Access<'_>,
 ) -> Result<crate::compile::CodeId, HeapFault> {
     let site = record.statement.resolve(access)?;
-    if let Some(created) = &record.created {
-        let Unit::Library(function) = site.unit else {
-            return Err(malformed("a closure frame has no function identity"));
-        };
-        let created = created.resolve(access)?;
-        return exe
-            .closure_at(&function, &created, &record.capture_names)
-            .filter(|code| {
-                let compiled = exe.code(*code);
-                compiled.created.as_ref() == Some(created.as_ref())
-                    && compiled.site.unit == site.unit
-                    && site.path.starts_with(&compiled.site.path)
-            })
-            .ok_or_else(|| malformed("a frame has no admitted lexical body"));
-    }
-    (0..=site.path.len())
-        .rev()
-        .find_map(|length| {
-            exe.code_at(
-                &Site::new(site.unit.clone(), &site.path[..length]),
-                &record.capture_names,
-            )
-            .filter(|code| exe.code(*code).created.is_none())
-        })
-        .ok_or_else(|| malformed("a frame has no admitted code body"))
+    let origin = record
+        .created
+        .as_ref()
+        .ok_or_else(|| malformed("a frame has no compilation origin"))?
+        .resolve(access)?;
+    let code = match &site.unit {
+        Unit::Library(function) => exe.closure_at(function, &origin, &record.capture_names),
+        Unit::Main | Unit::Function(_) => exe.code_at(&origin, &record.capture_names),
+    };
+    code.filter(|code| {
+        let compiled = exe.code(*code);
+        compiled.created.as_ref().unwrap_or(&compiled.site) == origin.as_ref()
+            && compiled.site.unit == site.unit
+            && site.path.starts_with(&compiled.site.path)
+    })
+    .ok_or_else(|| malformed("a frame has no admitted code body"))
 }
 
 /// How a task in `state` comes to its top frame.
@@ -466,11 +457,10 @@ impl Frame {
         let code = exe.code(self.code);
         let mut changed = !self.owned;
         if !self.owned {
-            stored.created = code
-                .created
-                .as_ref()
-                .map(|site| SiteRef::new(site, access))
-                .transpose()?;
+            stored.created = Some(SiteRef::new(
+                code.created.as_ref().unwrap_or(&code.site),
+                access,
+            )?);
         }
         if stored.capture_names != code.capture_names {
             stored.capture_names = code.capture_names.clone();

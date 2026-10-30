@@ -1467,9 +1467,12 @@ impl<'a> Compiler<'a> {
         let (occurrence_at, occurrence_keys, occurrence_units) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
+        // Lexical variants have their own creation-site index and must not
+        // overwrite the standalone body's entry with the same captures.
         let code_at = codes
             .iter()
             .enumerate()
+            .filter(|(_, code)| code.created.is_none())
             .map(|(index, code)| {
                 (
                     (code.site.clone(), code.capture_names.clone()),
