@@ -111,8 +111,9 @@ fn remembered(label: &str) -> String {
 /// How the turns call the tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Shape {
-    /// Native steps: the seed turn's one step of [`REMEMBER`] and [`NOTE`],
-    /// the steady turn's one step of [`NOTE`].
+    /// Native steps: separate seed rounds keep [`REMEMBER`] and [`NOTE`]
+    /// at distinct durable cuts, independent of sibling completion batching.
+    /// The steady turn has one step of [`NOTE`].
     Step,
     /// Code cells: the seed turn's cell calls [`REMEMBER`] then [`NOTE`],
     /// the steady turn's [`NOTE`] twice, each call's records pruned by the
@@ -123,18 +124,18 @@ enum Shape {
 impl Shape {
     fn seed(self) -> Vec<LlmResponse> {
         match self {
-            Self::Step => vec![served::response(vec![
-                served::call(
+            Self::Step => vec![
+                served::response(vec![served::call(
                     "call-remember",
                     REMEMBER_OPERATION,
                     serde_json::json!({ "label": "seed" }),
-                ),
-                served::call(
+                )]),
+                served::response(vec![served::call(
                     "call-note-s",
                     NOTE_OPERATION,
                     serde_json::json!({ "label": "s" }),
-                ),
-            ])],
+                )]),
+            ],
             Self::Cell => vec![served::cell(&format!(
                 "await memory.{REMEMBER}({{ label: \"seed\" }});\n\
                  await notes.{NOTE}({{ label: \"s\" }});"

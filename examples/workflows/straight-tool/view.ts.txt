@@ -1,6 +1,6 @@
 unit Library(FunctionId(565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6))
 statement function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0 ordinal=3 depth=0 block=function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6 ReturnVia { value: Act(ActExpr { kind: Perform { slot: ImportSlot(0), result: Json, then_yield: true }, args: [Literal(Text("hello"))] }), policy: Local(FunctionId(77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e)) }
 scope function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6 ordinal=2 depth=0 Entry
-action function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0/0 Some(Effect(OperationUse { link: LinkId(290b4a4716f1), slot: Import(ImportSlot(0)) }))
+action function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0/0 Some(Effect(OperationUse { link: LinkId(e17dda8becfb), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6 "Say hello"
 caption node 0 site=function 565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6/0 "Send a greeting and give back the reply"

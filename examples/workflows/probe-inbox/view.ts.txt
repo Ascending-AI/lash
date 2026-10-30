@@ -17,11 +17,11 @@ scope function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/
 scope function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/2/1/0/1 ordinal=11 depth=3 Then
 scope function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/2/1/0/2 ordinal=13 depth=3 Else
 scope function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/2/2 ordinal=15 depth=2 Else
-action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(de851ce6f1dc), slot: Import(ImportSlot(0)) } })
+action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/0/0/0 Some(Timer { use_: OperationUse { link: LinkId(6c088566fcba), slot: Import(ImportSlot(0)) } })
 action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/0/0/0/0 library id=ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0 name=ts.sleep_duration exports=[]
 action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/2/1/0/2/0/0 library id=fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7 name=ts.read exports=[]
 action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/2/2/0/0 library id=fd1c7d0814237e5e32653fe8d0a7a3a2d1bf0862a0522db049f7d446d58b01e7 name=ts.read exports=[]
-action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/3/0 Some(Effect(OperationUse { link: LinkId(de851ce6f1dc), slot: Import(ImportSlot(1)) }))
+action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/3/0 Some(Effect(OperationUse { link: LinkId(6c088566fcba), slot: Import(ImportSlot(1)) }))
 action function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/1/1/3/0/0 library id=a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586 name=ts.copy_boundary exports=[]
 caption callable 0 block=function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf "Send a paced inbox digest"
 caption node 0 site=function 4587043cb13d63316ec37b870349a8d400afcc95ee5c6c26906232ffa2a462cf/0 "Start counting at zero"

@@ -1,16 +1,13 @@
 //! A start's environment policy runs once per committed declaration
 //! (FIG-6034): START-POLICY-ONCE (D9).
 //!
-//! A model start declares its child inside its call's attempt, and the
-//! declaration commits with the call's outcome (`round.outcome`, a code
-//! cell's call too) in the transaction that registers the child: on every
-//! path a policy runs on, the declaration and its registration are one
-//! write. Realization is the child's first pass, which builds its runtime
-//! from the registered launch. Each law runs node A until its one cut kills
-//! it, then recovers on node B, which runs the deployment's later build.
-//! DECLARED-SETTINGS-REALIZE (D4) needs a declaration that commits before
-//! its registration, so it is pinned on host ingress
-//! (`lash` `tests::tool_intent_ingress`).
+//! A model start retains its policy result with the call's final payload
+//! (`call.final`, including a code cell's call). The cuts bracket that
+//! declaration: a committed final keeps what the policy stated, and an
+//! aborted final cannot declare a child. Realization uses the retained
+//! declaration without invoking the policy again. Each law runs node A
+//! until its one cut kills it, then recovers on node B, which runs the
+//! deployment's later build.
 
 use super::*;
 
@@ -401,9 +398,8 @@ impl Deployment {
     }
 }
 
-/// The parent's one call commits its outcome, whose transaction registers
-/// the child: the cut lands there.
-const START_OUTCOME: CommitLabel = CommitLabel::ROUND_OUTCOME;
+/// The parent's one call commits the policy result in its final payload.
+const START_OUTCOME: CommitLabel = CommitLabel::CALL_FINAL;
 
 /// START-POLICY-ONCE (D9), through the production round path.
 ///

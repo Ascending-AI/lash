@@ -450,6 +450,8 @@ async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
 async fn sqlite_fence_encodes_again_when_f_moves() {
     use lash_core_store::store::SessionCatalogStore as _;
     use lash_core_store::store::SessionCommitStore as _;
+    const PINNED_RECEIPT_VERSION: u32 =
+        lash_core_store::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
     let (_run, set) = file_set().await;
     let path = set
         .location()
@@ -467,7 +469,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         lash_core_store::store::WriterPin {
             constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
             generation: 1,
-            version: 7,
+            version: PINNED_RECEIPT_VERSION,
         },
     ]));
     let session = SessionId::from("reencoded");
@@ -494,7 +496,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         )
         .await
         .expect("commit re-encodes under writable epoch");
-    assert_ne!(receipt.schema_version, 7);
+    assert_ne!(receipt.schema_version, PINNED_RECEIPT_VERSION);
     let stored: String = raw(set.location())
         .query_row(
             "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
@@ -503,6 +505,9 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         )
         .expect("stored receipt");
     let stored: serde_json::Value = serde_json::from_str(&stored).expect("decode receipt");
-    assert_ne!(stored["schema_version"], serde_json::json!(7));
+    assert_ne!(
+        stored["schema_version"],
+        serde_json::json!(PINNED_RECEIPT_VERSION)
+    );
     assert_eq!(store.fleet_format().version(), 2);
 }

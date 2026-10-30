@@ -9,8 +9,8 @@ scope function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4 
 scope function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/0 ordinal=5 depth=1 Try
 scope function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/1 ordinal=7 depth=1 Catch
 scope function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/2 ordinal=9 depth=1 Finally
-action function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/0/0/0 Some(Effect(OperationUse { link: LinkId(3fd16c1a453f), slot: Import(ImportSlot(0)) }))
-action function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/2/0/0 Some(Effect(OperationUse { link: LinkId(3fd16c1a453f), slot: Import(ImportSlot(0)) }))
+action function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/0/0/0 Some(Effect(OperationUse { link: LinkId(9d3fa5bd23f6), slot: Import(ImportSlot(0)) }))
+action function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1/2/0/0 Some(Effect(OperationUse { link: LinkId(9d3fa5bd23f6), slot: Import(ImportSlot(0)) }))
 caption callable 0 block=function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4 "Try a step, and always finish up"
 caption node 0 site=function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/0 "Start with a placeholder result"
 caption node 1 site=function a433d9372285aa045393758c77c8d82d34e19d9777620c452ded37b088e565c4/1 "Try the echo"

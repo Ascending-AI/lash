@@ -5,6 +5,7 @@
 # lives in the machine instance a worker hosts, which a worker reset drops.
 
 crates/lash-kernel-value/src/json_schema.rs::any::ANY  # immutable unconstrained schema compiled only from the constant empty object; no guest input
+crates/lash-kernel-value/src/json_number/decode.rs::exact_numbers_supported::SUPPORTED  # process-invariant serde_json number capability, probed only with a constant decimal; retains one boolean and no guest input
 crates/lash-kernel-value/src/tokens.rs::<module>::KEYED  # BLAKE3 key schedule derived only from the fixed logical body domain; each digest clones it before reading caller bytes
 crates/lash-kernel-engine/src/embedding.rs::standard::IMAGE  # immutable image and indexes derived only from the build-owned helper release; no guest source, values or run state
 

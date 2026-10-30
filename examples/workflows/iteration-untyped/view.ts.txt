@@ -5,7 +5,7 @@ statement function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40f
 statement function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/2 ordinal=7 depth=0 block=function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f ReturnVia { value: Variable(Name("out")), policy: Local(FunctionId(77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e)) }
 scope function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f ordinal=2 depth=0 Entry
 scope function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/1/1 ordinal=5 depth=1 For
-action function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/1/1/0/2 Some(Effect(OperationUse { link: LinkId(6a3e8f8011ee), slot: Import(ImportSlot(0)) }))
+action function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/1/1/0/2 Some(Effect(OperationUse { link: LinkId(254c873fec71), slot: Import(ImportSlot(0)) }))
 action function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/1/1/0/2/0 library id=a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586 name=ts.copy_boundary exports=[]
 caption callable 0 block=function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f "Echo every item"
 caption node 0 site=function b8a2b53ff89698639611cfe2bc9541cf9ba06cd922ff8d72a868f59bcf40fd1f/0 "Start an empty list of replies"
