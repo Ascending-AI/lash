@@ -461,6 +461,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return Ok(value);
                     };
                     *active = caller;
+                    slab.restore(active);
                     self.depth -= 1;
                     self.activate_mode(&slab.view(active));
                     (self.admitted, self.swift, self.covered) =

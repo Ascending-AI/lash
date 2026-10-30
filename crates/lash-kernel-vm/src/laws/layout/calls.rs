@@ -8,6 +8,8 @@ const SUPERSEDED_RETURN: &str = "let cleanup = fn() { try { return [7] } finally
 
 const NESTED_RETURN: &str = "let cleanup = fn() { try { return [7] } finally { try { return [8] } finally { print \"nested cleanup\" return [9] } } } return apply cleanup()";
 
+const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = call pair(xs[0], xs[1]) let second = call pause(first) return [second, xs[2], xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
+
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const READ_ADD_MISS: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"missing\")) return total } return apply run(map{\"a\": 255})";
 const READ_ADD_FAIL: &str = "let run = fn(obj) { let total = false set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
@@ -306,6 +308,7 @@ fn direct_call_entry_agrees() {
         SAVED_MEMBER_PARK,
         SUPERSEDED_RETURN,
         NESTED_RETURN,
+        ROOT_CALL_STORAGE,
         READ_ADD_WRITE,
         READ_ADD_MISS,
         READ_ADD_FAIL,
@@ -401,6 +404,7 @@ fn direct_call_entry_agrees() {
             || body == SAVED_MEMBER_PARK
             || body == SUPERSEDED_RETURN
             || body == NESTED_RETURN
+            || body == ROOT_CALL_STORAGE
             || body == READ_ADD_WRITE
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
@@ -445,7 +449,14 @@ fn direct_call_entry_agrees() {
             );
             comparisons += 1;
         }
-        if [READ_ADD_WRITE, FORMATTED_APPEND, FORMATTED_MISS].contains(&body) {
+        if [
+            READ_ADD_WRITE,
+            FORMATTED_APPEND,
+            FORMATTED_MISS,
+            ROOT_CALL_STORAGE,
+        ]
+        .contains(&body)
+        {
             let mut refused = false;
             for memory in [512, 1024, 2048, 4096, 8192] {
                 let limits = Bounds {
@@ -484,7 +495,7 @@ fn direct_call_entry_agrees() {
                 "the checkpoint must exercise an actual source memory refusal"
             );
         }
-        if [READ_ADD_WRITE, FORMATTED_APPEND].contains(&body) {
+        if [READ_ADD_WRITE, FORMATTED_APPEND, ROOT_CALL_STORAGE].contains(&body) {
             for limit in 0..charged {
                 let limits = Bounds {
                     charge_limit: limit,
@@ -543,6 +554,7 @@ fn direct_call_entry_agrees() {
         SAVED_MEMBER_PARK,
         SUPERSEDED_RETURN,
         NESTED_RETURN,
+        ROOT_CALL_STORAGE,
         READ_ADD_WRITE,
         READ_ADD_MISS,
         READ_ADD_FAIL,
@@ -576,6 +588,7 @@ fn direct_call_entry_agrees() {
                 || body == SAVED_MEMBER_PARK
                 || body == SUPERSEDED_RETURN
                 || body == NESTED_RETURN
+                || body == ROOT_CALL_STORAGE
                 || body == READ_ADD_WRITE
                 || body == READ_ADD_MISS
                 || body == READ_ADD_FAIL

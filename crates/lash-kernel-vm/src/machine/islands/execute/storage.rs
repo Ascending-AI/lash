@@ -156,7 +156,7 @@ impl Slab {
 
     pub(super) fn call(
         &mut self,
-        caller: &Frame<'_>,
+        caller: &mut Frame<'_>,
         callee: Callee<'_>,
         args: &[u32],
         captured: &[(Value, ArenaHandle)],
@@ -164,6 +164,34 @@ impl Slab {
         #[cfg(test)]
         {
             self.calls += 1;
+        }
+        if let Some(continuation) = caller.continuation
+            && continuation.site.root.is_some()
+            && continuation.site.act.is_none()
+            && caller.callee.compiled.restarts.is_empty()
+        {
+            let retained = std::iter::once(continuation.site.reg)
+                .chain(continuation.live.iter().copied())
+                .chain(args.iter().copied())
+                .chain(
+                    continuation
+                        .site
+                        .inputs
+                        .iter()
+                        .flat_map(|inputs| inputs.reads().map(|read| read.reg())),
+                )
+                .map(|reg| reg as usize + 1)
+                .max()
+                .unwrap_or(0);
+            if retained < caller.operands.len() {
+                let operand_end = caller.operands.start + retained;
+                let pending_end = operand_end + caller.pending.len();
+                self.values.copy_within(caller.pending.clone(), operand_end);
+                self.values[pending_end..caller.pending.end].fill(SlotState::Empty);
+                caller.operands.end = operand_end;
+                caller.pending = operand_end..pending_end;
+                self.extent = pending_end;
+            }
         }
         let ranges = self.open(
             callee.plan.slots,
@@ -183,6 +211,19 @@ impl Slab {
             captured,
         );
         ranges
+    }
+
+    pub(super) fn restore(&mut self, frame: &mut Frame<'_>) {
+        let operand_end = frame.operands.start + frame.callee.compiled.registers;
+        if frame.operands.end == operand_end {
+            return;
+        }
+        let pending_end = operand_end + frame.pending.len();
+        self.values.copy_within(frame.pending.clone(), operand_end);
+        self.values[frame.operands.end..operand_end].fill(SlotState::Value(Value::Null));
+        frame.operands.end = operand_end;
+        frame.pending = operand_end..pending_end;
+        self.extent = pending_end;
     }
 
     pub(super) fn view<'s, 'e>(&'s mut self, state: &'s mut Frame<'e>) -> Values<'s, 'e> {
