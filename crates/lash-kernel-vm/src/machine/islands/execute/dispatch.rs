@@ -701,15 +701,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 self.accumulate(frame, *at);
             }
             Opcode::Publish => {
-                let sites::Publish {
-                    name,
-                    reg,
-                    pc,
-                    bind,
-                } = &code.sites.publish[packet.x as usize];
-
-                if !self.write_session(*name, regs[*reg as usize], *bind) {
-                    return Err(self.at(*pc));
+                let site = &code.sites.publish[packet.x as usize];
+                let value = frame.regs[site.reg as usize];
+                match self
+                    .publish_session_write(frame, site, value)
+                    .map_err(|error| self.halt(error.into()))?
+                {
+                    Some(true) => {}
+                    Some(false) => return Err(self.at(site.pc)),
+                    None => {
+                        if !self.write_session(site.name, value, site.bind) {
+                            return Err(self.at(site.pc));
+                        }
+                    }
                 }
             }
             Opcode::Effect => {

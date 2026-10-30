@@ -197,7 +197,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 prefix,
                 make,
                 publication::CellConstruction { entity, value },
-                |arena, edits, storage| {
+                |arena, _, edits, storage| {
                     debug_assert!(edits.is_empty());
                     storage.batch.publish(arena);
                     frame.slots[site.at] = SlotState::Cell(storage.handle);

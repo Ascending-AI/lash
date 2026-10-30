@@ -12,6 +12,7 @@ pub(in crate::machine::islands::execute) enum ValuePublication {
 mod publication;
 mod returning;
 mod scope;
+mod session;
 mod unit;
 use super::*;
 use crate::compile::room::{self, publication::Frontier};

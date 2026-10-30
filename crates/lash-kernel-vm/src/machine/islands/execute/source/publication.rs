@@ -236,7 +236,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             prefix,
             make,
             Reserve(|_: &mut Arena| Ok(Some(()))),
-            |arena, edits, ()| semantic(arena, edits),
+            |arena, _, edits, ()| semantic(arena, edits),
         )
     }
 
@@ -247,7 +247,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         mut prefix: Prefix,
         make: impl Fn() -> Program,
         prepare: S,
-        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>, S::Prepared),
+        semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
     ) -> Result<bool, HeapFault> {
         let source = &self.exe.code(callee.plan.code).source_room;
         let store = self.logical.ledger();
@@ -348,11 +348,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             prepared.publish_materialized(
                 frontier,
                 &mut store.borrow_mut(),
-                |arena, edits, _entities| semantic(arena, edits, storage),
+                |arena, edits, _entities| semantic(arena, self.session, edits, storage),
             )
         } else {
             prepared.publish(frontier, &mut store.borrow_mut(), |arena, edits| {
-                semantic(arena, edits, storage)
+                semantic(arena, self.session, edits, storage)
             })
         }
         .map_err(|error| match error {

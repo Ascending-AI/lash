@@ -220,7 +220,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     code: site.code.0,
                 },
             },
-            |arena, edits, storage| {
+            |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.batch.publish(arena);
                 *result = Value::Closure(storage.handle);

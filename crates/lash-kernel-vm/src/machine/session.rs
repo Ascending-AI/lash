@@ -629,6 +629,64 @@ impl Session {
     }
 }
 
+/// Physical session bookkeeping reserved for one accepted source write.
+pub(super) struct PreparedSessionWrite {
+    name: BindingName,
+    value: Value,
+    revision: u64,
+    next: u64,
+    present: bool,
+}
+impl PreparedSessionWrite {
+    pub(super) fn publish(self, session: &mut Session) {
+        assert_eq!(
+            session.writes, self.revision,
+            "stale prepared session write"
+        );
+        assert_eq!(session.bindings.contains_key(&self.name.key), self.present);
+        assert!(self.present || session.bindings.len() < session.bindings.capacity());
+        session.bindings.insert(
+            Arc::clone(&self.name.key),
+            Resident {
+                name: self.name,
+                value: self.value,
+                written: Some(self.revision),
+            },
+        );
+        session.writes = self.next;
+    }
+}
+
+impl Session {
+    /// Reserve implementation storage without changing any binding or owner.
+    pub(super) fn prepare_write(
+        &mut self,
+        name: &BindingName,
+        value: Value,
+    ) -> Result<PreparedSessionWrite, lash_kernel_doc::heap::HeapFault> {
+        use lash_kernel_doc::heap::{HeapFault, HostResource};
+        let next = self
+            .writes
+            .checked_add(1)
+            .ok_or_else(|| HeapFault::Malformed("session write ordinal overflow".into()))?;
+        let present = self.bindings.contains_key(&name.key);
+        if !present {
+            self.bindings
+                .try_reserve(1)
+                .map_err(|_| HeapFault::Exhausted {
+                    resource: HostResource::StagingBytes,
+                })?;
+        }
+        Ok(PreparedSessionWrite {
+            name: name.clone(),
+            value,
+            revision: self.writes,
+            next,
+            present,
+        })
+    }
+}
+
 /// A session binding the cell read or wrote.
 struct Resident {
     name: BindingName,

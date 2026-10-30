@@ -817,8 +817,8 @@ fn entered_nested_scope_publication() {
     assert_eq!(charged, 0);
 }
 
-/// Persistent main assignments transfer their RHS into the session root;
-/// their shared declaration does not authorize a variable-cell edit.
+/// Persistent declarations and assignments transfer their RHS to the session
+/// root. Neither creates or writes a variable cell.
 fn persistent_assignment_publication() {
     use crate::compile::room::{self, Phase, Point, publication::*};
     use lash_kernel_doc::{TaskId, Value};
@@ -828,7 +828,7 @@ fn persistent_assignment_publication() {
     use lash_kernel_value::{Name, sites::Site};
     use std::sync::Arc;
 
-    struct Facts;
+    struct Facts(bool);
     impl room::Facts for Facts {
         fn dependencies(&self) -> Option<&[lash_kernel_doc::arena::ArenaHandle]> {
             Some(&[])
@@ -837,9 +837,12 @@ fn persistent_assignment_publication() {
             match measure {
                 room::Measure::Local(_) => Some(17),
                 room::Measure::Release(owners)
-                    if matches!(owners.as_ref(), [room::Owner::Visible { .. }]) =>
+                    if matches!(
+                        owners.as_ref(),
+                        [room::Owner::Visible { .. } | room::Owner::SessionCell { .. }]
+                    ) =>
                 {
-                    Some(17)
+                    Some(if self.0 { 17 } else { 0 })
                 }
                 _ => None,
             }
@@ -854,10 +857,10 @@ fn persistent_assignment_publication() {
             None
         }
     }
-    struct Execution;
+    struct Execution(bool);
     impl room::Execution for Execution {
         fn event(&mut self, _: &Point) -> Option<Box<dyn room::Facts + '_>> {
-            Some(Box::new(Facts))
+            Some(Box::new(Facts(self.0)))
         }
         fn choose(&mut self, _: &Site) -> Option<bool> {
             None
@@ -878,183 +881,199 @@ fn persistent_assignment_publication() {
         }
     }
 
-    let run = Embedder::new("main { let n = 1 set n = 2 return n }");
-    let (program, _) = run.program(false);
-    let source = Arc::new(room::Source::compile(
-        lash_kernel_doc::constant_pool::PoolOwner::Document(program.document.identity()),
-        Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
-        program.document.main.as_ref().unwrap(),
-        &[],
-        Default::default(),
-        &std::collections::BTreeMap::new(),
-        &std::collections::BTreeSet::new(),
-    ));
-    let assignment = source.site.child(1);
-    let commit = Point {
-        site: assignment.clone(),
-        phase: Phase::Commit,
-    };
-    let interval = source
-        .compile_event(&commit, room::ExitKind::Normal)
-        .unwrap();
-    let heap = run.machine.source_law_heap();
-    let ledger_store = heap.logical_ledger();
-    let mut arena = lash_kernel_state::arena::Arena::new();
-    let mut ledger = ledger_store.borrow_mut();
-    let (invocation, prepared) = ledger
-        .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
-        .unwrap();
-    ledger
-        .commit(prepared.admit(u64::MAX).ok().unwrap())
-        .unwrap();
-    let owners = source.owner_slots().unwrap();
-    let session = owners
-        .root(
-            &room::Owner::Visible {
-                at: assignment.clone(),
-                name: Name::new("n"),
-            },
-            TaskId::MAIN,
-            invocation.id(),
-        )
-        .unwrap();
-    assert_eq!(session, Root::session(&Name::new("n")));
-    let operand = owners
-        .root(
-            &room::Owner::Operand(assignment.child(0)),
-            TaskId::MAIN,
-            invocation.id(),
-        )
-        .unwrap();
-    let prepared = ledger
-        .prepare_ownership(
-            &mut arena,
-            heap.pages(),
+    for replacing in [false, true] {
+        let run = Embedder::new("main { let n = 1 set n = 2 return n }");
+        let (program, _) = run.program(false);
+        let source = Arc::new(room::Source::compile(
+            lash_kernel_doc::constant_pool::PoolOwner::Document(program.document.identity()),
+            Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
+            program.document.main.as_ref().unwrap(),
             &[],
-            &[
-                (session, RootValue::Value(&Value::Int(1))),
-                (operand, RootValue::Value(&Value::Int(2))),
-            ],
-        )
-        .unwrap();
-    ledger
-        .commit(prepared.admit(u64::MAX).ok().unwrap())
-        .unwrap();
-    let before = ledger.balance().unwrap().total().unwrap();
-    drop(ledger);
-    let ledger = ledger_store.borrow();
-    let start = Position {
-        at: commit.clone(),
-        unpaid: Some(commit.clone()),
-        recovery: [1; 32],
-        occurrence: Occurrence {
-            task: TaskId::MAIN,
-            invocation: invocation.id(),
-            loops: vec![],
-            action: None,
-            departure: None,
-        },
-    };
-    let next = Position {
-        unpaid: Some(Point {
-            site: source.site.child(2).child(0),
+            Default::default(),
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeSet::new(),
+        ));
+        let assignment = source.site.child(if replacing { 1 } else { 0 });
+        let commit = Point {
+            site: assignment.clone(),
             phase: Phase::Commit,
-        }),
-        recovery: [2; 32],
-        ..start.clone()
-    };
-    let mut frontier = source
-        .frontier(
-            &ledger,
-            heap,
-            &invocation,
-            program.link,
-            lash_kernel_doc::KernelVersion::One,
-            start,
-        )
-        .unwrap();
-    let make = || {
-        Program::new(vec![JournalEvent {
-            inputs: vec![operand, session],
-            outputs: vec![(session, PublicationValue::Existing(operand))],
-            ..Default::default()
-        }])
-    };
-    let allowance = crate::admission::Allowance {
-        occurrences: vec![],
-        before: 0,
-        units: 1,
-        close: None,
-        strict: true,
-        depth: 1,
-        safe_point: 7,
-    };
-    let mut charged = 0;
-    let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
-    let facts = resources(&mut charged, &mut counters)
-        .facts(&allowance)
-        .unwrap();
-    let evaluated = frontier
-        .evaluate_interval(
-            interval.clone(),
-            &mut Execution,
-            &ledger,
-            &arena,
-            heap,
-            make(),
-            next.clone(),
-            allowance.clone(),
-            facts,
-        )
-        .unwrap_or_else(|error| panic!("persistent assignment keeps its session root: {error:?}"));
-    let accepted = evaluated
-        .admit_interval(
-            &frontier,
-            &ledger,
-            &arena,
-            resources(&mut charged, &mut counters),
-            &allowance,
-            before,
-        )
-        .unwrap()
-        .unwrap();
-    let prepared = accepted
-        .prepare_publication(
-            &frontier,
-            &ledger,
-            arena.registration().unwrap(),
-            heap,
-            make(),
-            interval.exit(),
-            &next,
-        )
-        .unwrap();
-    drop(ledger);
-    let committed = prepared
-        .publish(
-            &mut frontier,
-            &mut ledger_store.borrow_mut(),
-            |_, members| assert!(members.is_empty(), "session write is not a cell edit"),
-        )
-        .unwrap();
-    committed
-        .materializations
-        .publish(&mut ledger_store.borrow_mut(), |entities| {
-            assert!(entities.is_empty())
-        })
-        .unwrap();
-    let ledger = ledger_store.borrow();
-    assert_eq!(charged, 1);
-    assert_eq!(ledger.balance().unwrap().total().unwrap(), before - 17);
-    assert_eq!(
+        };
+        let interval = source
+            .compile_event(&commit, room::ExitKind::Normal)
+            .unwrap();
+        let heap = run.machine.source_law_heap();
+        let ledger_store = heap.logical_ledger();
+        let mut arena = lash_kernel_state::arena::Arena::new();
+        let mut ledger = ledger_store.borrow_mut();
+        let (invocation, prepared) = ledger
+            .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
+            .unwrap();
         ledger
-            .holding(session, heap.pages())
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let owners = source.owner_slots().unwrap();
+        let session = owners
+            .root(
+                &if replacing {
+                    room::Owner::Visible {
+                        at: assignment.clone(),
+                        name: Name::new("n"),
+                    }
+                } else {
+                    room::Owner::SessionCell {
+                        at: assignment.clone(),
+                        name: Name::new("n"),
+                    }
+                },
+                TaskId::MAIN,
+                invocation.id(),
+            )
+            .unwrap();
+        assert_eq!(session, Root::session(&Name::new("n")));
+        let operand = owners
+            .root(
+                &room::Owner::Operand(assignment.child(0)),
+                TaskId::MAIN,
+                invocation.id(),
+            )
+            .unwrap();
+        let value = Value::Int(if replacing { 2 } else { 1 });
+        let old = Value::Int(1);
+        let mut seeded = vec![(operand, RootValue::Value(&value))];
+        if replacing {
+            seeded.push((session, RootValue::Value(&old)));
+        }
+        let prepared = ledger
+            .prepare_ownership(&mut arena, heap.pages(), &[], &seeded)
+            .unwrap();
+        ledger
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let before = ledger.balance().unwrap().total().unwrap();
+        drop(ledger);
+        let ledger = ledger_store.borrow();
+        let start = Position {
+            at: commit.clone(),
+            unpaid: Some(commit.clone()),
+            recovery: [1; 32],
+            occurrence: Occurrence {
+                task: TaskId::MAIN,
+                invocation: invocation.id(),
+                loops: vec![],
+                action: None,
+                departure: None,
+            },
+        };
+        let next = Position {
+            unpaid: Some(Point {
+                site: source.site.child(if replacing { 2 } else { 1 }).child(0),
+                phase: Phase::Commit,
+            }),
+            recovery: [2; 32],
+            ..start.clone()
+        };
+        let mut frontier = source
+            .frontier(
+                &ledger,
+                heap,
+                &invocation,
+                program.link,
+                lash_kernel_doc::KernelVersion::One,
+                start,
+            )
+            .unwrap();
+        let make = || {
+            Program::new(vec![JournalEvent {
+                inputs: if replacing {
+                    vec![operand, session]
+                } else {
+                    vec![operand]
+                },
+                outputs: vec![(session, PublicationValue::Existing(operand))],
+                ..Default::default()
+            }])
+        };
+        let allowance = crate::admission::Allowance {
+            occurrences: vec![],
+            before: 0,
+            units: 1,
+            close: None,
+            strict: true,
+            depth: 1,
+            safe_point: 7,
+        };
+        let mut charged = 0;
+        let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
+        let facts = resources(&mut charged, &mut counters)
+            .facts(&allowance)
+            .unwrap();
+        let evaluated = frontier
+            .evaluate_interval(
+                interval.clone(),
+                &mut Execution(replacing),
+                &ledger,
+                &arena,
+                heap,
+                make(),
+                next.clone(),
+                allowance.clone(),
+                facts,
+            )
+            .unwrap_or_else(|error| {
+                panic!("persistent session transfer replacing={replacing}: {error:?}")
+            });
+        let accepted = evaluated
+            .admit_interval(
+                &frontier,
+                &ledger,
+                &arena,
+                resources(&mut charged, &mut counters),
+                &allowance,
+                before,
+            )
             .unwrap()
-            .unwrap()
-            .bytes(),
-        17
-    );
-    assert!(ledger.holding(operand, heap.pages()).unwrap().is_none());
+            .unwrap();
+        let prepared = accepted
+            .prepare_publication(
+                &frontier,
+                &ledger,
+                arena.registration().unwrap(),
+                heap,
+                make(),
+                interval.exit(),
+                &next,
+            )
+            .unwrap();
+        drop(ledger);
+        let committed = prepared
+            .publish(
+                &mut frontier,
+                &mut ledger_store.borrow_mut(),
+                |_, members| assert!(members.is_empty(), "session write is not a cell edit"),
+            )
+            .unwrap();
+        committed
+            .materializations
+            .publish(&mut ledger_store.borrow_mut(), |entities| {
+                assert!(entities.is_empty())
+            })
+            .unwrap();
+        let ledger = ledger_store.borrow();
+        assert_eq!(charged, 1);
+        assert_eq!(
+            ledger.balance().unwrap().total().unwrap(),
+            before - if replacing { 17 } else { 0 }
+        );
+        assert_eq!(
+            ledger
+                .holding(session, heap.pages())
+                .unwrap()
+                .unwrap()
+                .bytes(),
+            17
+        );
+        assert!(ledger.holding(operand, heap.pages()).unwrap().is_none());
+    }
 }
 
 fn shared_cell_publication() {

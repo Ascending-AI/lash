@@ -566,7 +566,8 @@ impl Source {
                 {
                     let at = child(&site, index);
                     persistent.insert(at.clone(), name.clone());
-                    shared.insert((at, name.clone()), true);
+                    // A persistent name owns a session value, without a variable cell.
+                    shared.insert((at, name.clone()), false);
                 }
             }
         }
@@ -806,8 +807,7 @@ impl Source {
             match node {
                 doc::Node::Expr(doc::Expr::List(_)) => continue,
                 doc::Node::Stmt(doc::Stmt::Let { .. }) => {
-                    return (!self.persistent.contains_key(&site))
-                        .then_some(TransferTarget::Binding);
+                    return Some(TransferTarget::Binding);
                 }
                 doc::Node::Stmt(doc::Stmt::Assign {
                     place: doc::Place::Variable(_),

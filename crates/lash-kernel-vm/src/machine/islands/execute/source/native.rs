@@ -302,7 +302,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     limits: self.limits,
                     room,
                 },
-                |arena, edits, storage| {
+                |arena, _, edits, storage| {
                     debug_assert!(edits.is_empty());
                     storage.batch.publish(arena);
                     *result = storage.value;

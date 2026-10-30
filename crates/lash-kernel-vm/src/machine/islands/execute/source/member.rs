@@ -289,7 +289,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     Member::Table(_) => Ok(None),
                 }
             }),
-            |arena, edits, write| {
+            |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list publication changed member arity");
                 };

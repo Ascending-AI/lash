@@ -60,6 +60,7 @@ pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
+    static SESSION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static SCOPE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CLOSURE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CELL_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -72,6 +73,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    SESSION_PUBLICATIONS.with(|count| count.set(0));
     SCOPE_PUBLICATIONS.with(|count| count.set(0));
     CONSTRUCTION_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
@@ -167,4 +169,12 @@ pub(crate) fn closure_constructions() -> u64 {
 }
 pub(in crate::machine::islands) fn closure_constructed() {
     CLOSURE_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn session_publications() -> u64 {
+    SESSION_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine::islands) fn session_published() {
+    SESSION_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }

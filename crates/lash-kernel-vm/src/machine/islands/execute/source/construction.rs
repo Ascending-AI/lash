@@ -203,7 +203,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             || Program::new(vec![event.clone()]),
             publication::ListConstruction { entity, values },
-            |arena, edits, storage| {
+            |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.batch.publish(arena);
                 *result = storage.value;

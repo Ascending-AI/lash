@@ -14,6 +14,7 @@ const ROOT_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } final
 const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } finally { let first = flat.add(xs[0], call pause(xs[1])) return [call pair(first, xs[2]), xs[3], xs[4], xs[5], xs[6], xs[7], xs[8], xs[9]] } } return apply cleanup([7, 8, 9, 10, 11, 12, 13, 14, 15, 16])";
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
+const SOURCE_SESSION: &str = "let saved = [7] set saved = [saved, saved] return saved";
 const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
@@ -227,6 +228,7 @@ fn observe_source_or_register(
         }
     }
     let witnesses = crate::machine::islands::witness::take();
+    let sessions = crate::machine::islands::witness::session_publications();
     let scopes = crate::machine::islands::witness::scope_publications();
     let members = crate::machine::islands::witness::member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
@@ -236,6 +238,18 @@ fn observe_source_or_register(
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
     let closure_constructions = crate::machine::islands::witness::closure_constructions();
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_SESSION)
+    {
+        assert!(
+            sessions >= 2,
+            "both persistent session writes must publish: {sessions}"
+        );
+    }
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -452,6 +466,7 @@ fn direct_call_entry_agrees() {
         SOURCE_CELL,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
+        SOURCE_SESSION,
         READ_ADD_MISS,
         READ_ADD_FAIL,
         FORMATTED_APPEND,
@@ -556,6 +571,7 @@ fn direct_call_entry_agrees() {
             || body == SOURCE_CELL
             || body == SOURCE_MEMBER
             || body == SOURCE_CONSTRUCTION
+            || body == SOURCE_SESSION
             || body == READ_ADD_MISS
             || body == READ_ADD_FAIL
             || body == FORMATTED_APPEND
@@ -582,6 +598,15 @@ fn direct_call_entry_agrees() {
             assert_eq!(
                 reference.printed,
                 vec![Datum::Text("index_out_of_range".into()); 2]
+            );
+        }
+        if body == SOURCE_SESSION {
+            assert_eq!(
+                reference.end,
+                format!(
+                    "finished {:?}",
+                    Datum::List(vec![Datum::List(vec![int(7)]); 2])
+                )
             );
         }
         if body == SOURCE_CONSTRUCTION {
@@ -628,6 +653,7 @@ fn direct_call_entry_agrees() {
             SOURCE_MEMBER,
             SOURCE_CELL,
             SOURCE_CONSTRUCTION,
+            SOURCE_SESSION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
@@ -681,6 +707,7 @@ fn direct_call_entry_agrees() {
             SOURCE_CELL,
             SOURCE_BAD_MEMBER,
             SOURCE_CONSTRUCTION,
+            SOURCE_SESSION,
             SOURCE_UNIT,
             SOURCE_PENDING_UNIT,
             FORMATTED_APPEND,
@@ -754,6 +781,7 @@ fn direct_call_entry_agrees() {
         SOURCE_CELL,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
+        SOURCE_SESSION,
         SOURCE_UNIT,
         SOURCE_PENDING_UNIT,
         READ_ADD_MISS,
@@ -795,6 +823,7 @@ fn direct_call_entry_agrees() {
                 || body == SOURCE_CELL
                 || body == SOURCE_MEMBER
                 || body == SOURCE_CONSTRUCTION
+                || body == SOURCE_SESSION
                 || body == SOURCE_UNIT
                 || body == SOURCE_PENDING_UNIT
                 || body == READ_ADD_MISS
