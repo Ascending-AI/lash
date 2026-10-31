@@ -16,6 +16,7 @@ mod session;
 mod unit;
 use super::*;
 use crate::compile::room::{self, publication::Frontier};
+use crate::machine::source_publication::{LeafExecution, LeafFacts};
 use lash_kernel_doc::{self as doc, heap::HeapFault};
 use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, SourceValue};
 
@@ -377,78 +378,6 @@ fn source_value(
 }
 fn malformed(message: &str) -> HeapFault {
     HeapFault::Malformed(message.into())
-}
-
-#[derive(Default)]
-struct LeafFacts {
-    dependencies: Vec<ArenaHandle>,
-    call: Option<(
-        lash_kernel_value::sites::Site,
-        room::CallSource,
-        room::CheckedRoom,
-    )>,
-    values: std::collections::BTreeMap<room::Measure, i128>,
-}
-impl room::Facts for LeafFacts {
-    fn dependencies(&self) -> Option<&[ArenaHandle]> {
-        Some(&self.dependencies)
-    }
-    fn measure(&self, measure: &room::Measure) -> Option<i128> {
-        self.values.get(measure).copied()
-    }
-    fn call(
-        &self,
-        at: &lash_kernel_value::sites::Site,
-        callee: room::CallSource,
-    ) -> Option<&room::CheckedRoom> {
-        self.call
-            .as_ref()
-            .filter(|(site, source, _)| site == at && *source == callee)
-            .map(|(_, _, room)| room)
-    }
-    fn raised(&self) -> bool {
-        false
-    }
-    fn resolved(
-        &self,
-        _: &lash_kernel_value::sites::Site,
-    ) -> Option<lash_kernel_value::FunctionId> {
-        None
-    }
-}
-struct LeafExecution(std::collections::BTreeMap<room::Point, LeafFacts>);
-impl room::Execution for LeafExecution {
-    fn event(&mut self, at: &room::Point) -> Option<Box<dyn room::Facts + '_>> {
-        struct Borrowed<'a>(&'a LeafFacts);
-        impl room::Facts for Borrowed<'_> {
-            fn dependencies(&self) -> Option<&[ArenaHandle]> {
-                self.0.dependencies()
-            }
-            fn measure(&self, measure: &room::Measure) -> Option<i128> {
-                self.0.measure(measure)
-            }
-            fn call(
-                &self,
-                at: &lash_kernel_value::sites::Site,
-                callee: room::CallSource,
-            ) -> Option<&room::CheckedRoom> {
-                self.0.call(at, callee)
-            }
-            fn raised(&self) -> bool {
-                false
-            }
-            fn resolved(
-                &self,
-                _: &lash_kernel_value::sites::Site,
-            ) -> Option<lash_kernel_value::FunctionId> {
-                None
-            }
-        }
-        Some(Box::new(Borrowed(self.0.get(at)?)))
-    }
-    fn choose(&mut self, _: &lash_kernel_value::sites::Site) -> Option<bool> {
-        None
-    }
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {

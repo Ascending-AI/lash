@@ -644,6 +644,10 @@ impl EvaluatedProgram {
     }
 }
 impl<'a> PreparedProgram<'a> {
+    /// Authenticate the prepared journal under its still-exclusive registration.
+    pub fn is_current(&mut self, ledger: &Ledger) -> bool {
+        self.publication.is_current(ledger)
+    }
     /// Price an itemized release against this unpublished source prefix.
     pub fn release_cost(&self, owners: &[Owner], access: &Access<'_>) -> Result<u64, HeapFault> {
         self.publication.release_cost(owners, access)

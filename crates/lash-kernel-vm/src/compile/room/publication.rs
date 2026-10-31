@@ -65,6 +65,41 @@ pub(crate) struct PreparedPrefix<'a> {
     journal: PreparedProgram<'a>,
     memory_bound: u64,
 }
+/// A validated exact journal. The sufficient source envelope is a proof of
+/// its obligations, never the exact memory request used at its verdict point.
+pub(crate) struct PreparedExactPrefix<'a> {
+    bound: Bound,
+    journal: PreparedProgram<'a>,
+}
+impl<'a> PreparedExactPrefix<'a> {
+    pub(crate) fn admit_exact<'r>(
+        mut self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        resources: SourceResources<'r>,
+        allowance: &Allowance,
+        memory_bound: u64,
+    ) -> Result<Option<SourceAccepted<'r, PreparedPrefix<'a>>>, HeapFault> {
+        if !self.bound.current(frontier)
+            || !self.journal.is_current(ledger)
+            || &self.bound.allowance != allowance
+            || self.journal.peak() > memory_bound
+        {
+            return Ok(None);
+        }
+        let facts = self.bound.resources.clone();
+        resources.admit_interval(
+            &facts,
+            allowance,
+            PreparedPrefix {
+                bound: self.bound,
+                journal: self.journal,
+                memory_bound,
+            },
+        )
+    }
+}
+
 pub(crate) struct CommittedPrefix {
     pub(crate) position: Position,
     pub(crate) exit: ExitKind,
@@ -248,6 +283,57 @@ impl Frontier {
     }
 }
 impl EvaluatedInterval {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one exact source publication frontier"
+    )]
+    pub(crate) fn prepare_exact<'a>(
+        self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        mut registration: Registration<'a>,
+        heap: &PagedHeap,
+        actual: Program,
+        exit: ExitKind,
+        position: &Position,
+    ) -> Result<PreparedExactPrefix<'a>, PublicationError> {
+        if !self.bound.current(frontier)
+            || exit != self.bound.source.exit()
+            || position != &self.bound.next
+        {
+            return Err(PublicationError::Miss("source exit or recovery changed"));
+        }
+        if !self.program.matches(ledger, registration.arena(), &actual) {
+            return Err(PublicationError::Miss(
+                "source program or dependencies changed",
+            ));
+        }
+        let journal = self
+            .program
+            .prepare(ledger, registration, heap, actual)
+            .map_err(|error| match error {
+                logical::MemberFault::Heap(error) => error,
+                logical::MemberFault::Native(error) => fault(&error.to_string()),
+            })?;
+        let before = ledger.balance()?.total()?;
+        let after = journal.balance()?.total()?;
+        let room = self.bound.room.balance();
+        if i128::from(after) - i128::from(before) != room.retained_delta
+            || journal.peak()
+                > before
+                    .checked_add(room.peak_extra)
+                    .ok_or_else(|| fault("source peak overflow"))?
+        {
+            return Err(PublicationError::Miss(
+                "source obligation was understated or ownership changed",
+            ));
+        }
+        Ok(PreparedExactPrefix {
+            bound: self.bound,
+            journal,
+        })
+    }
+
     pub(crate) fn admit_interval<'a>(
         self,
         frontier: &Frontier,
@@ -288,51 +374,25 @@ impl<'r> SourceAccepted<'r, AcceptedInterval> {
         self,
         frontier: &Frontier,
         ledger: &Ledger,
-        mut registration: Registration<'a>,
+        registration: Registration<'a>,
         heap: &PagedHeap,
         actual: Program,
         exit: ExitKind,
         position: &Position,
     ) -> Result<SourceAccepted<'r, PreparedPrefix<'a>>, PublicationError> {
         self.try_map(|accepted| {
-            let evaluation = accepted.evaluation;
-            if !evaluation.bound.current(frontier)
-                || exit != evaluation.bound.source.exit()
-                || position != &evaluation.bound.next
-            {
-                return Err(PublicationError::Miss("source exit or recovery changed"));
-            }
-            if !evaluation
-                .program
-                .matches(ledger, registration.arena(), &actual)
-            {
-                return Err(PublicationError::Miss(
-                    "source program or dependencies changed",
-                ));
-            }
-            let journal = evaluation
-                .program
-                .prepare(ledger, registration, heap, actual)
-                .map_err(|error| match error {
-                    logical::MemberFault::Heap(error) => error,
-                    logical::MemberFault::Native(error) => fault(&error.to_string()),
-                })?;
-            let before = ledger.balance()?.total()?;
-            let after = journal.balance()?.total()?;
-            let room = evaluation.bound.room.balance();
-            if i128::from(after) - i128::from(before) != room.retained_delta
-                || journal.peak()
-                    > before
-                        .checked_add(room.peak_extra)
-                        .ok_or_else(|| fault("source peak overflow"))?
-            {
-                return Err(PublicationError::Miss(
-                    "source obligation was understated or ownership changed",
-                ));
-            }
+            let exact = accepted.evaluation.prepare_exact(
+                frontier,
+                ledger,
+                registration,
+                heap,
+                actual,
+                exit,
+                position,
+            )?;
             Ok(PreparedPrefix {
-                bound: evaluation.bound,
-                journal,
+                bound: exact.bound,
+                journal: exact.journal,
                 memory_bound: accepted.memory_bound,
             })
         })

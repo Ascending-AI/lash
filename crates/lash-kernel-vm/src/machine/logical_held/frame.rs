@@ -21,6 +21,9 @@ pub(in crate::machine) struct FrameRoots {
     active_departure: Cell<bool>,
 }
 impl FrameRoots {
+    pub(in crate::machine) fn invocation(&self) -> &Invocation {
+        &self.invocation
+    }
     pub(in crate::machine) fn bank(&self) -> super::BankRoots {
         self.bank.clone()
     }

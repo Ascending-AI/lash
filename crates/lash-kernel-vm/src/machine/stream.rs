@@ -182,11 +182,17 @@ impl KernelMachine {
                         pc,
                         self.literal(&running.stream.consts[c.ix()])
                     );
+                    if self.publish_source_leaf(running, source_pc, value)? {
+                        continue;
+                    }
                     self.put(at(dst), value);
                 }
                 Op::Local { dst, local } => {
                     let value =
                         inside!(self, running, pc, self.read_local(task, running.exe, local));
+                    if self.publish_source_leaf(running, source_pc, value)? {
+                        continue;
+                    }
                     self.put(at(dst), value);
                 }
                 Op::LetBind { local, src } => {

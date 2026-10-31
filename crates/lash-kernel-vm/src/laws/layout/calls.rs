@@ -236,6 +236,7 @@ fn observe_source_or_register(
     let prepared_natives = crate::machine::islands::witness::prepared_native_publications();
     let native_lists = crate::machine::islands::witness::native_list_publications();
     let native_tables = crate::machine::islands::witness::native_table_publications();
+    let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
     let native_texts = crate::machine::islands::witness::native_text_publications();
@@ -243,6 +244,18 @@ fn observe_source_or_register(
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
     let closure_constructions = crate::machine::islands::witness::closure_constructions();
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CONSTRUCTION)
+    {
+        assert!(
+            precise_source > 0,
+            "the precise executor must publish actual source leaf acquisition before installing its register value"
+        );
+    }
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -614,6 +627,21 @@ fn direct_call_entry_agrees() {
                 Mode::Source,
             );
             assert_eq!(plain, source_only, "source oracle: {body}");
+            if body == SOURCE_CONSTRUCTION {
+                assert_eq!(
+                    observe_source_or_register(
+                        &source,
+                        Layout(0),
+                        3,
+                        bounds,
+                        false,
+                        true,
+                        Mode::Source
+                    ),
+                    observe_reopening(&source, Layout(0), 3, bounds, false, true),
+                    "precise source acquisition preserves cold owners and continuation state"
+                );
+            }
         }
         if body == SOURCE_BAD_MEMBER {
             assert_eq!(

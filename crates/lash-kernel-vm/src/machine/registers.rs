@@ -72,6 +72,26 @@ impl Index<std::ops::Range<usize>> for Arguments {
     }
 }
 
+/// An exclusive bank borrow authenticates the prevalidated register edit until
+/// its accepted source journal commits it or abandons it.
+pub(super) struct PreparedLeaf<'a> {
+    registers: &'a mut Registers,
+    leaf: source::Leaf,
+}
+impl PreparedLeaf<'_> {
+    pub(super) fn owner(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.leaf.owner()
+    }
+    pub(super) fn bytes(&self) -> u64 {
+        self.leaf.bytes()
+    }
+    pub(super) fn publish(self) {
+        let (reg, value) = self.leaf.location();
+        self.registers.put(reg.ix(), value);
+        self.registers.source.publish_leaf(self.leaf);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Registers {
     values: Vec<Value>,
@@ -238,6 +258,30 @@ impl Registers {
         self.clear_range(values.len()..self.extent);
         self.extent = values.len();
         Ok(())
+    }
+
+    pub(super) fn prepare_source_leaf(
+        &mut self,
+        stream: &crate::compile::Stream,
+        pc: u32,
+        value: Value,
+        projection: &Projection<'_>,
+    ) -> Result<Option<PreparedLeaf<'_>>, HeapFault> {
+        let Some(reg) = stream.ops.get(pc as usize).and_then(|op| op.writes()) else {
+            return Ok(None);
+        };
+        if reg.ix() >= self.extent {
+            return Err(HeapFault::Malformed(
+                "source leaf register is outside its admitted window".into(),
+            ));
+        }
+        let Some(leaf) = self.source.prepare_leaf(stream, pc, value, projection)? else {
+            return Ok(None);
+        };
+        Ok(Some(PreparedLeaf {
+            registers: self,
+            leaf,
+        }))
     }
 
     pub(super) fn source_begin(

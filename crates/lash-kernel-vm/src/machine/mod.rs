@@ -37,6 +37,7 @@ mod refine;
 pub(crate) mod registers;
 mod session;
 pub(crate) mod sites;
+mod source_publication;
 mod steps;
 mod stream;
 pub(crate) mod tasks;

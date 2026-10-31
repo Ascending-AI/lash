@@ -29,7 +29,72 @@ struct Operand {
     site: Arc<Site>,
     held: Held,
 }
+pub(super) struct Leaf {
+    operand: Operand,
+    owner: Owner,
+}
+impl Leaf {
+    pub(super) fn owner(&self) -> Owner {
+        self.owner
+    }
+    pub(super) fn bytes(&self) -> u64 {
+        self.operand.held.holding.bytes()
+    }
+    pub(super) fn location(&self) -> (Reg, Value) {
+        (self.operand.reg, self.operand.held.value)
+    }
+}
 impl Operands {
+    pub(super) fn prepare_leaf(
+        &mut self,
+        stream: &Stream,
+        pc: u32,
+        value: Value,
+        projection: &Projection<'_>,
+    ) -> Result<Option<Leaf>, HeapFault> {
+        if !self.active {
+            return Ok(None);
+        }
+        let Some(roots) = &self.roots else {
+            return Ok(None);
+        };
+        let Some(op @ (Op::Const { .. } | Op::Local { .. })) = stream.ops.get(pc as usize) else {
+            return Ok(None);
+        };
+        let reg = op
+            .writes()
+            .ok_or_else(|| invalid("source leaf has no output register"))?;
+        let Some(Some(site)) = stream.source_sites.get(pc as usize) else {
+            return Ok(None);
+        };
+        if self.positions.get(reg.ix()).copied() != Some(usize::MAX) {
+            return Err(invalid("source leaf overwrites an unconsumed operand"));
+        }
+        let owner = roots.operand(site)?;
+        let mut held = projection.hold(value)?;
+        held.owner = Some(owner);
+        self.values
+            .try_reserve(1)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        Ok(Some(Leaf {
+            operand: Operand {
+                reg,
+                site: Arc::clone(site),
+                held,
+            },
+            owner,
+        }))
+    }
+    pub(super) fn publish_leaf(&mut self, leaf: Leaf) {
+        assert!(self.active && self.positions[leaf.operand.reg.ix()] == usize::MAX);
+        assert!(self.values.len() < self.values.capacity());
+        self.positions[leaf.operand.reg.ix()] = self.values.len();
+        // The accepted source journal owns this occurrence already. There is
+        // no observation journal or allocation after the semantic installation.
+        self.values.push(leaf.operand);
+    }
     pub(super) fn context(&mut self, roots: Option<BankRoots>) {
         self.clear();
         self.roots = roots;
