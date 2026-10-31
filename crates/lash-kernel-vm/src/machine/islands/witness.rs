@@ -59,6 +59,8 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PRECISE_TEST_ITERATIONS: std::cell::Cell<[Option<u64>; 2]> = const { std::cell::Cell::new([None; 2]) };
+    static PRECISE_TESTS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static SOURCE_LOOP_PUBLICATIONS: std::cell::RefCell<std::collections::BTreeMap<lash_kernel_value::sites::Site, std::collections::BTreeSet<u64>>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static PRECISE_JOINS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
@@ -88,6 +90,8 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PRECISE_TEST_ITERATIONS.with(|counts| counts.set([None; 2]));
+    PRECISE_TESTS.with(|counts| counts.set([0; 2]));
     SESSION_PUBLICATIONS.with(|count| count.set(0));
     SCOPE_PUBLICATIONS.with(|count| count.set(0));
     CONSTRUCTION_PUBLICATIONS.with(|count| count.set(0));
@@ -430,5 +434,28 @@ pub(in crate::machine) fn source_loop_published(loops: &[(lash_kernel_value::sit
                 }
             }
         }
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn precise_tests() -> [u64; 2] {
+    PRECISE_TESTS.with(|counts| counts.replace([0; 2]))
+}
+
+#[cfg(test)]
+pub(crate) fn precise_test_iterations() -> [Option<u64>; 2] {
+    PRECISE_TEST_ITERATIONS.with(|counts| counts.replace([None; 2]))
+}
+
+pub(in crate::machine) fn precise_test_published(taken: bool, iteration: u64) {
+    PRECISE_TEST_ITERATIONS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(taken)] = Some(iteration);
+        counts.set(next);
+    });
+    PRECISE_TESTS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(taken)] += 1;
+        counts.set(next);
     });
 }

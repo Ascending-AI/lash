@@ -247,6 +247,8 @@ fn observe_source_or_register(
     let session_reads = crate::machine::islands::witness::precise_session_reads();
     let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
     let precise_joins = crate::machine::islands::witness::precise_joins();
+    let precise_tests = crate::machine::islands::witness::precise_tests();
+    let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
     let replay = crate::machine::islands::witness::source_replay_publications();
     if mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS) {
@@ -365,6 +367,15 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_SCOPED_BINDINGS)
     {
+        assert!(
+            precise_tests.iter().all(|count| *count > 0),
+            "both actual while outcomes must consume their condition through source acceptance: {precise_tests:?}"
+        );
+        assert_eq!(
+            precise_test_iterations,
+            [Some(1), Some(0)],
+            "the true first header and false next header have distinct actual source occurrences"
+        );
         assert!(
             precise_joins.iter().all(|count| *count > 0),
             "conditional and lexical expression joins must publish their actual operand transfers: {precise_joins:?}"

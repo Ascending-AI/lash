@@ -10,6 +10,7 @@ mod leaf;
 mod occurrence;
 use occurrence::source_loops;
 mod session;
+mod test;
 use super::session::Session;
 use crate::admission::{Allowance, SourceResources};
 use crate::compile::room::{

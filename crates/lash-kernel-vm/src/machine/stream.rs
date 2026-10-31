@@ -311,6 +311,10 @@ impl KernelMachine {
                 }
                 Op::Test { cond } => {
                     self.close_region(running.stream);
+                    if let Some(tested) = self.publish_source_test(running, source_pc)? {
+                        self.source_complete_joins(running, source_pc)?;
+                        return Ok(Ran::Tested(tested));
+                    }
                     let Value::Bool(tested) = self.take(at(cond)) else {
                         return raise("type_error", "a `while` condition must be a bool");
                     };

@@ -826,6 +826,33 @@ impl Source {
         None
     }
 
+    /// The actual selected continuation of a while condition. Both endpoints
+    /// come from the verified source tree, before any loop-control mutation.
+    pub(crate) fn next_after_while_test(&self, at: &Site, taken: bool) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        let doc::Node::Stmt(doc::Stmt::While { else_block, .. }) = node else {
+            return Err(Refused::Path);
+        };
+        if taken {
+            self.first_event(&child(at, 1))
+        } else if !else_block.is_empty() {
+            self.first_event(&child(at, 2))
+        } else {
+            self.room
+                .peak_extra
+                .get(&point(at, Phase::Commit))
+                .map(|event| event.point.clone())
+                .ok_or(Refused::Path)
+        }
+    }
+
     /// The first unpaid event after an expression, binding or variable assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
