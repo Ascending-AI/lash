@@ -1429,9 +1429,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry e25ba6f2446002bc); a call
+    -- Generated from this build's statements (registry 8ca95acafe658f95); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'e25ba6f2446002bc'
+    IF p_registry IS DISTINCT FROM '8ca95acafe658f95'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2872,8 +2872,6 @@ DECLARE
     item jsonb;
     held record;
     v_frontier BYTEA[];
-    v_locked BYTEA[];
-    v_rows BIGINT;
 BEGIN
     IF p_gate IS NOT NULL THEN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
@@ -2925,28 +2923,7 @@ BEGIN
         SELECT ARRAY(SELECT graph_ref FROM gone WHERE graph_ref IS NOT NULL) INTO v_frontier;
         -- A bridged artifact's row was its graph node's root: peel it
         -- (FIG-5949).
-        WHILE cardinality(v_frontier) > 0 LOOP
-        SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_frontier)::bytea[])
-             ORDER BY hash FOR UPDATE SKIP LOCKED)
-        INTO v_locked;
-        EXIT WHEN cardinality(v_locked) = 0;
-        WITH dead AS (
-                 DELETE FROM lash_blobs AS candidate
-                 WHERE candidate.hash = ANY((v_locked)::bytea[])
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_graph_root_catalog AS root
-                       WHERE root.root_ref = candidate.hash
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidate.hash
-                   )
-                 RETURNING candidate.hash
-             )
-             SELECT (SELECT count(*) FROM dead),
-                 ARRAY(SELECT DISTINCT edge.child_hash
-                     FROM dead JOIN lash_blob_edges AS edge ON edge.parent_hash = dead.hash)
-        INTO v_rows, v_frontier;
-    END LOOP;
+        PERFORM lash_graph_retire((v_frontier), (4096), (p_now));
     END IF;
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END
@@ -2991,21 +2968,26 @@ BEGIN
     RETURN QUERY SELECT v_fleet, v_expires;
 END
 $lash_node_renew$;
-CREATE OR REPLACE FUNCTION lash_graph_peel_plan(p_roots BYTEA[], p_limit BIGINT)
-RETURNS TABLE(candidates BYTEA[], locked BYTEA[], gone BYTEA[])
+CREATE OR REPLACE FUNCTION lash_graph_peel_plan(p_roots BYTEA[], p_limit BIGINT, p_closure BOOLEAN)
+RETURNS TABLE(candidates BYTEA[], locked BYTEA[], gone BYTEA[], deferred BYTEA[])
 LANGUAGE plpgsql VOLATILE AS $lash_graph_peel_plan$
-DECLARE v_candidates BYTEA[]; v_lockable BYTEA[]; v_locked BYTEA[]; v_owner RECORD; v_id TEXT;
+DECLARE v_candidates BYTEA[]; v_eligible BYTEA[]; v_lockable BYTEA[]; v_locked BYTEA[]; v_owner RECORD; v_id TEXT;
 BEGIN
     v_candidates := ARRAY(WITH RECURSIVE candidates AS (
              SELECT unnest((p_roots)::BYTEA[]) AS hash UNION
              SELECT edge.child_hash AS hash FROM candidates JOIN lash_blob_edges AS edge ON edge.parent_hash = candidates.hash
-              WHERE NOT EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
+              WHERE (p_closure)::BOOLEAN AND NOT EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
                 AND (NOT (candidates.hash = ANY((p_roots)::BYTEA[]))
                      OR NOT EXISTS (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash))
                 AND (SELECT count(*) FROM (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
          ) SELECT hash FROM candidates LIMIT (p_limit));
-    v_lockable := v_candidates;
-    FOR v_owner IN SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_candidates)) ORDER BY owner_id LOOP
+    v_eligible := ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_candidates)::BYTEA[]) AS hash), protected AS (
+             SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
+                OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_candidates)::BYTEA[])))
+             UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_candidates)::BYTEA[])
+         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected));
+    v_lockable := v_eligible;
+    FOR v_owner IN SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_lockable)) ORDER BY owner_id LOOP
         SELECT owner_id FROM lash_environment_owners WHERE owner_id = (v_owner.owner_id) FOR UPDATE SKIP LOCKED INTO v_id;
         IF v_id IS NULL THEN v_lockable := array_remove(v_lockable, v_owner.manifest_ref); END IF;
     END LOOP;
@@ -3015,7 +2997,8 @@ BEGIN
              SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
                 OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_locked)::BYTEA[])))
              UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_locked)::BYTEA[])
-         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected));
+         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)),
+        ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY(v_eligible) AND NOT (hash = ANY(v_locked)));
 END
 $lash_graph_peel_plan$;
 CREATE OR REPLACE FUNCTION lash_graph_peel_delete(p_gone BYTEA[])
@@ -3035,12 +3018,13 @@ BEGIN
     DELETE FROM lash_retirement_holds WHERE root_ref IN (
              SELECT root_ref FROM lash_retirement_holds WHERE root_ref = ANY((p_roots)::bytea[])
              ORDER BY root_ref FOR UPDATE SKIP LOCKED);
-    SELECT * FROM lash_graph_peel_plan((p_roots), (p_limit)) INTO v_plan;
-    IF EXISTS (SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_plan.gone)) ORDER BY owner_id) THEN RAISE EXCEPTION 'graph retirement needs the explicit environment bridge'; END IF;
+    SELECT * FROM lash_graph_peel_plan((p_roots), (p_limit), (TRUE)) INTO v_plan;
+    IF EXISTS (SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_plan.gone)) ORDER BY owner_id) THEN RAISE EXCEPTION 'graph retirement needs the explicit environment bridge' USING ERRCODE = 'LX004'; END IF;
     SELECT lash_graph_peel_delete((v_plan.gone)) INTO v_children;
     SELECT COALESCE(array_agg(DISTINCT hash), '{}') INTO v_next FROM (
-        SELECT unnest(p_roots) AS hash UNION SELECT unnest(v_children) UNION
-        SELECT unnest(v_plan.candidates) EXCEPT SELECT unnest(v_plan.locked)
+        (SELECT unnest(p_roots) AS hash EXCEPT SELECT unnest(v_plan.candidates)) UNION
+        (SELECT unnest(v_children) AS hash EXCEPT SELECT unnest(v_plan.candidates)) UNION
+        SELECT unnest(v_plan.deferred) AS hash
     ) AS pending WHERE NOT (hash = ANY(v_plan.gone));
     SELECT ARRAY(SELECT hash FROM lash_blobs
              WHERE hash = ANY((v_next)::bytea[]) OR hash = ANY(('{}'::bytea[])::bytea[])

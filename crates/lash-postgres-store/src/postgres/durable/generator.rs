@@ -237,21 +237,15 @@ fn perform(sql: &str) -> String {
     }
 }
 
-/// A function's peel of `v_frontier` (FIG-5949): each level locks what of
-/// it no other transaction holds, then deletes what of that no root names
-/// and no edge reaches, and the children those reached are the next level.
-/// It needs `v_frontier` and `v_locked` (`BYTEA[]`) and `v_rows` (`BIGINT`).
-pub(crate) fn peel_loop() -> String {
-    let peel_lock = inline(graph::peel_lock().sql(), &["v_frontier"]);
-    let peel_level = inline(graph::peel_level().sql(), &["v_locked"]);
+/// A local artifact end retires one bounded graph set and queues its
+/// continuation. It cannot hold graph delete locks across a peel loop.
+pub(crate) fn retire_graph() -> String {
     format!(
-        "WHILE cardinality(v_frontier) > 0 LOOP
-        {peel_lock}
-        INTO v_locked;
-        EXIT WHEN cardinality(v_locked) = 0;
-        {peel_level}
-        INTO v_rows, v_frontier;
-    END LOOP;"
+        "{};",
+        perform(&inline(
+            prompts::RECLAIM.statement().sql(),
+            &["v_frontier", "4096", "p_now"],
+        ))
     )
 }
 

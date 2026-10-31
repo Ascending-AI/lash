@@ -1022,7 +1022,10 @@ mod tests {
             },
         };
         let text = |body: &str| PromptText::audit(body);
-        let mut tx = store.begin(&actor, Epoch(identity.epoch), u64::MAX).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         for ordinal in 1..=131 {
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: call(ordinal),

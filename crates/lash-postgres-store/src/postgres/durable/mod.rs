@@ -65,7 +65,7 @@ pub(crate) use executor::HeldTexts;
 #[cfg(test)]
 mod generator;
 #[cfg(test)]
-pub(crate) use generator::peel_loop;
+pub(crate) use generator::retire_graph;
 mod claim_facts;
 pub(crate) mod environment;
 mod graph;

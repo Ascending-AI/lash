@@ -49,9 +49,9 @@
 //! catalog, inserted after the hold key-share locks the node. Retirement
 //! steps run one at a time under a transaction advisory lock: a step reaps
 //! expired leases into its frontier, then continues its frontier, oldest
-//! first, before it takes the oldest hold. It peels level by level in
-//! digest order until its node budget is spent, and puts every node its
-//! peel skipped and the frontier it did not reach back on the frontier,
+//! first, before it takes the oldest hold. Each transaction peels one
+//! bounded candidate set in digest order and puts every node its peel
+//! skipped and the frontier it did not reach back on the frontier,
 //! all in one transaction. A frontier node gone meanwhile (an inline peel
 //! or the orphan audit took it) is passed over.
 
@@ -149,13 +149,6 @@ lash_store_sql::statements! {
         lock_children = "SELECT hash, encoding FROM blobs WHERE hash = ANY(?1::bytea[])
              ORDER BY hash FOR KEY SHARE";
 
-        /// Lock for its delete every blob of a step's level `?1` that no
-        /// other transaction holds, in digest order, beside every blob of
-        /// `?1` still stored: the step's peel lock, which never waits.
-        peel_claim = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[])
-                 ORDER BY hash FOR UPDATE SKIP LOCKED),
-             ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[]))";
-
         /// Every edge of parents `?1` to children `?2` (raw digests) not
         /// stored yet: a supplied node another commit installed already has
         /// its edges.
@@ -206,11 +199,7 @@ const RETIREMENT_KEY: &str = "lash.pages.retirement";
 /// Edge pairs one statement inserts.
 const EDGE_BATCH: usize = 4096;
 
-/// The nodes one peel statement of a retirement step examines.
-const PEEL_LEVEL: usize = 8;
-
-/// The frontier digests a retirement step keeps in memory; the rest are
-/// held at once, for later steps.
+/// The retirement frontier limit also bounds one transaction's candidate set.
 const FRONTIER_CAP: usize = 4096;
 
 /// The most manifest bytes the last candidate install held at once: what
@@ -528,40 +517,6 @@ fn fence_epoch(fence: &LeaseFence) -> Option<i64> {
     }
 }
 
-/// One level of a step's peel: locks what of `level` no other transaction
-/// holds, then deletes every locked node nothing names or reaches. Answers
-/// how many it deleted, the children their edges reached, and the stored
-/// nodes it could not lock; a node gone already is neither.
-async fn peel(
-    tx: &mut PgConnection,
-    level: &BTreeSet<String>,
-) -> Result<(u64, BTreeSet<String>, BTreeSet<String>), sqlx::Error> {
-    let wanted: Vec<&str> = level.iter().map(String::as_str).collect();
-    let (locked, stored): (Vec<crate::keys::Key>, Vec<crate::keys::Key>) =
-        crate::observed_sql::query_as(SQL.postgres.peel_claim.sql())
-            .bind(crate::keys::keys(&wanted))
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await?;
-    let skipped: BTreeSet<String> = stored
-        .into_iter()
-        .filter(|node| !locked.contains(node))
-        .map(|key| key.0)
-        .collect();
-    if locked.is_empty() {
-        return Ok((0, BTreeSet::new(), skipped));
-    }
-    let (gone, children): (i64, Vec<crate::keys::Key>) =
-        crate::observed_sql::query_as(graph::peel_level().sql())
-            .bind(crate::keys::keys(&locked))
-            .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await?;
-    Ok((
-        u64::try_from(gone).unwrap_or_default(),
-        children.into_iter().map(|key| key.0).collect(),
-        skipped,
-    ))
-}
-
 /// The next nodes a step peels from: up to `limit` of its own frontier,
 /// oldest first, in one statement; else the oldest hold no other
 /// transaction holds. Answers each node and whether its closure is peeled.
@@ -628,63 +583,28 @@ async fn retire_step_in(
         }
     }
     frontier_put(tx, &reaped, true, now).await?;
-    let mut remaining = limit;
-    // A step examines at most a few times its deletion budget: a frontier
-    // something else still names costs reads, not deletions.
-    let mut examinable = remaining
-        .saturating_mul(4)
-        .saturating_add(PEEL_LEVEL as u64);
-    let mut frontier = BTreeSet::new();
-    let mut skipped = BTreeSet::new();
-    while remaining > 0 && examinable > 0 {
-        if frontier.is_empty() {
-            // The next retired nodes: a closure joins the frontier, an
-            // ended phase's root is peeled alone.
-            let next = next_retired(tx, remaining.min(examinable).min(FRONTIER_CAP as u64)).await?;
-            if next.is_empty() {
-                break;
-            }
-            progress.holds_advanced += next.len() as u64;
-            let mut alone = BTreeSet::new();
-            for (node, closure) in next {
-                if closure {
-                    frontier.insert(node);
-                } else {
-                    alone.insert(node);
-                }
-            }
-            if !alone.is_empty() {
-                examinable = examinable.saturating_sub(alone.len() as u64);
-                let (gone, _, missed) = peel(tx, &alone).await?;
-                progress.nodes_deleted += gone;
-                remaining = remaining.saturating_sub(gone);
-                frontier_put(tx, &missed, false, now).await?;
-                continue;
-            }
-        }
-        // The next nodes in digest order, within the budget.
-        let take = usize::try_from(remaining.min(examinable))
-            .unwrap_or(usize::MAX)
-            .min(PEEL_LEVEL);
-        let level: BTreeSet<String> = frontier.iter().take(take).cloned().collect();
-        for node in &level {
-            frontier.remove(node);
-        }
-        let (examined, gone, children, missed) = graph::peel_set(tx, &level, take).await?;
-        let gone = gone as u64;
-        examinable = examinable.saturating_sub(examined as u64);
-        progress.nodes_deleted += gone;
-        remaining = remaining.saturating_sub(gone);
-        skipped.extend(missed);
-        frontier.extend(children);
-        if let Some(first_excess) = frontier.iter().nth(FRONTIER_CAP).cloned() {
-            let excess = frontier.split_off(&first_excess);
-            frontier_put(tx, &excess, true, now).await?;
-        }
+    // One bounded peel per transaction. Exclusive graph locks never span
+    // another retirement batch or a network round trip to fetch its seeds.
+    let take = limit.min(FRONTIER_CAP as u64);
+    let next = next_retired(tx, take).await?;
+    progress.holds_advanced = next.len() as u64;
+    let Some((_, closure)) = next.first() else {
+        return Ok(progress);
+    };
+    let closure = *closure;
+    let (selected, later): (Vec<_>, Vec<_>) =
+        next.into_iter().partition(|(_, reach)| *reach == closure);
+    let later = later.into_iter().map(|(node, _)| node).collect();
+    frontier_put(tx, &later, !closure, now).await?;
+    let selected = selected.into_iter().map(|(node, _)| node).collect();
+    let (_, gone, mut pending, missed) =
+        graph::peel_set(tx, &selected, take as usize, closure).await?;
+    progress.nodes_deleted = gone as u64;
+    if !closure {
+        pending.clear();
     }
-    // What another transaction held is retired by a later step.
-    frontier.extend(skipped);
-    frontier_put(tx, &frontier, true, now).await?;
+    pending.extend(missed);
+    frontier_put(tx, &pending, closure, now).await?;
     Ok(progress)
 }
 

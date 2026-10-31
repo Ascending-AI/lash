@@ -245,10 +245,13 @@ identity so an expired call still cannot be recorded twice. Explicit
 `PromptWrite::Release` also releases a turn or a whole session; deleting a
 session releases all its roots in its own transaction (FIG-5272).
 On PostgreSQL publications key-share lock stored graph nodes in digest
-order. Collection locks candidate blobs with `FOR UPDATE SKIP LOCKED` and
-rechecks catalog roots and incoming edges before deletion. A candidate held
-by another publisher remains queued, so collection never waits for a
-publication and no recorded call loses its content. An owned call's (§8) request stays until
+order. Collection excludes live or shared candidates before taking
+`FOR UPDATE SKIP LOCKED` locks, then rechecks catalog roots and incoming
+edges under the acquired locks. Each retirement transaction peels one
+candidate set within its node budget and the 4,096-node frontier limit;
+continuations run in later transactions. Exclusive blob locks never span a
+retirement loop. A candidate held by another publisher remains queued, so
+collection never waits for a publication and no recorded call loses its content. An owned call's (§8) request stays until
 its session's release.
 
 A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
@@ -276,7 +279,7 @@ bodies and summary-seeded frames. An immutable indexed directory owns the
 leaf and prefix bodies without recursive ownership; truncation discards only
 its suffix and returns to the already prepared surviving prefix. Cold
 preparation uses the same topology. Stores validate the supplied direct
-frontier under their writer/text locks, install missing nodes and edges once,
+frontier under their writer or graph-node locks, install missing nodes and edges once,
 and retain the missing-fragment refusal. Snapshot recovery reads the closure
 with one recursive statement in either dialect. A separate content domain
 keeps arbitrary audit text from standing for an installed index. For a reusable history, the full-body root and closing-envelope fragments

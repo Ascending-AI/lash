@@ -127,8 +127,6 @@ DECLARE
     item jsonb;
     held record;
     v_frontier BYTEA[];
-    v_locked BYTEA[];
-    v_rows BIGINT;
 BEGIN
     IF p_gate IS NOT NULL THEN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
@@ -186,5 +184,5 @@ BEGIN
 END
 $lash_artifact_end_local$;
 "#
-    .replace("{PEEL}", &crate::durable::peel_loop())
+    .replace("{PEEL}", &crate::durable::retire_graph())
 }

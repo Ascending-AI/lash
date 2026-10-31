@@ -1049,7 +1049,10 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     );
     let branch_hash = branch.hash.clone();
     texts.push(branch);
-    let mut tx = store.begin(&actor, Epoch(identity.epoch), u64::MAX).await.unwrap();
+    let mut tx = store
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
             session: lash_kernel_value::identity::SessionId::from("sql-work-owner"),

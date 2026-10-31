@@ -22,10 +22,10 @@
 //! that retires a root holds it (`lash_retirement_holds`, a root of the
 //! catalog), and bounded retirement steps peel it later
 //! (`super::pages`, whose docs hold the one lock order of holds, peels and
-//! steps): each level's candidates no other transaction holds
-//! are locked `FOR UPDATE SKIP LOCKED` in digest order, then one statement
-//! deletes every locked candidate no root names and no edge reaches and
-//! returns the children their edges reached, the next level. A peel never
+//! steps). Each transaction selects one bounded candidate set, excludes
+//! live/shared nodes, then locks eligible blobs `FOR UPDATE SKIP LOCKED`
+//! in digest order. It rechecks liveness under those locks before deleting
+//! nodes and queues continuations for later transactions. A peel never
 //! waits, so it is never part of a lock cycle: a candidate a writer
 //! key-share locked first is one that writer names, and stays; a writer
 //! that comes after waits for the peel, finds the node gone, and refuses a
@@ -179,7 +179,7 @@ lash_store_sql::statements! {
         retirement_candidates = "WITH RECURSIVE candidates AS (
              SELECT unnest(?1::BYTEA[]) AS hash UNION
              SELECT edge.child_hash AS hash FROM candidates JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
-              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+              WHERE ?3::BOOLEAN AND NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
                 AND (NOT (candidates.hash = ANY(?1::BYTEA[]))
                      OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash))
                 AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
@@ -199,28 +199,8 @@ lash_store_sql::statements! {
              SELECT root_ref FROM retirement_holds WHERE root_ref = ANY(?1::bytea[])
              ORDER BY root_ref FOR UPDATE SKIP LOCKED)";
 
-        peel_plan = "SELECT * FROM lash_graph_peel_plan(?1, ?2)";
+        peel_plan = "SELECT * FROM lash_graph_peel_plan(?1, ?2, ?3)";
         peel_delete = "SELECT lash_graph_peel_delete(?1)";
-
-        /// One level of a peel: delete every blob in `?1` no root names and
-        /// no edge reaches, and answer how many it deleted with the
-        /// children their edges reached (read before the delete took them),
-        /// as one row.
-        peel_level = "WITH dead AS (
-                 DELETE FROM blobs AS candidate
-                 WHERE candidate.hash = ANY(?1::bytea[])
-                   AND NOT EXISTS (
-                       SELECT 1 FROM graph_root_catalog AS root
-                       WHERE root.root_ref = candidate.hash
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
-                   )
-                 RETURNING candidate.hash
-             )
-             SELECT (SELECT count(*) FROM dead),
-                 ARRAY(SELECT DISTINCT edge.child_hash
-                     FROM dead JOIN blob_edges AS edge ON edge.parent_hash = dead.hash)";
 
         /// Execution `?1`'s root, with every blob it reaches along stored
         /// edges and their bytes, in one statement: the root column (no row
@@ -416,17 +396,6 @@ pub(super) fn insert_edges() -> &'static Rendered {
 /// The key-share lock and read of the staged nodes another writer stored.
 pub(super) fn stored_nodes() -> &'static Rendered {
     &SQL.postgres.stored_nodes
-}
-
-/// A peel level's lock, which the generated functions inline.
-#[cfg(test)]
-pub(super) fn peel_lock() -> &'static Rendered {
-    &SQL.postgres.peel_lock
-}
-
-/// A peel level's delete.
-pub(super) fn peel_level() -> &'static Rendered {
-    &SQL.postgres.peel_level
 }
 
 /// One page of the orphan audit.
