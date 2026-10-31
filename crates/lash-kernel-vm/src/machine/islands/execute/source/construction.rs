@@ -20,10 +20,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             Make::List | Make::Tuple => self.arena.sequence_bound(site.members),
             Make::Map | Make::Set => self.arena.table_bound(site.members),
         };
-        if (site.make == Make::Tuple && site.items.is_empty())
-            || self.arena.any_cold()
-            || !self.resident_room(bound)
-        {
+        if self.arena.any_cold() || !self.resident_room(bound) {
             return Ok(ValuePublication::Unavailable);
         }
         self.publish_collection_construction(frame, site.pc, &site.items, site.reg, |values| {
@@ -149,6 +146,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .into(),
         );
         let object = make(values);
+        #[cfg(any(test, feature = "testing"))]
+        let empty_tuple = matches!(&object, doc::NewObject::Tuple(values) if values.is_empty());
         let mut encoding = TokenWriter::new();
         encoding.seq(3);
         encoding.text("lash.source.collection-construction");
@@ -221,7 +220,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         #[cfg(any(test, feature = "testing"))]
         if published {
-            crate::machine::islands::witness::collection_constructed(frame.regs[reg as usize]);
+            if empty_tuple {
+                crate::machine::islands::witness::empty_tuple_constructed(false);
+            } else {
+                crate::machine::islands::witness::collection_constructed(frame.regs[reg as usize]);
+            }
         }
         Ok(if published {
             ValuePublication::Published(frame.regs[reg as usize])

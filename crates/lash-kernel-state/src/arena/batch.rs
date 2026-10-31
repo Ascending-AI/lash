@@ -49,6 +49,7 @@ pub struct PreparedBatch {
     registration_epoch: u64,
     entries: Vec<Entry>,
     dependencies: Vec<ContentVersion>,
+    empty_tuple: Option<(Option<ArenaHandle>, ArenaHandle)>,
 }
 /// An exclusive preparation guard. Splitting it transfers the registration to
 /// the canonical journal and the storage recipe to its infallible closure.
@@ -162,6 +163,35 @@ impl Arena {
         // reservation, so even host exhaustion returns every valid slot.
         registration.reserve_batch(new)?;
         Self::prepare_registered(registration)
+    }
+
+    /// Prepare the live shared empty tuple, including its cache update and
+    /// generation dependency, for the accepted batch's infallible installation.
+    pub fn prepare_empty_tuple(
+        &mut self,
+    ) -> Result<(Value, PreparedInstallation<'_>), NativeError> {
+        let cached = self.resident_empty_tuple();
+        let expected = self.empty_tuple;
+        let mut registration = self.registration()?;
+        let (handle, dependency) = if let Some(Value::Tuple(handle)) = cached {
+            let dependency = registration
+                .arena()
+                .content_version(handle)
+                .ok_or_else(|| malformed("the shared empty tuple has no content version"))?;
+            (handle, Some(dependency))
+        } else {
+            (
+                registration.reserve_body(Body::Tuple(Sequence::whole(Vec::new())))?,
+                None,
+            )
+        };
+        let mut installation = Self::prepare_registered(registration)?;
+        if let Some(dependency) = dependency {
+            reserve(&mut installation.batch.dependencies, 1)?;
+            installation.batch.dependencies.push(dependency);
+        }
+        installation.batch.empty_tuple = Some((expected, handle));
+        Ok((Value::Tuple(handle), installation))
     }
 
     /// Prepare a fresh shared variable without installing a body or granting
@@ -354,6 +384,7 @@ impl Arena {
             registration_epoch: arena.registration_epoch,
             entries,
             dependencies,
+            empty_tuple: None,
         };
         Ok(PreparedInstallation {
             registration,
@@ -370,6 +401,9 @@ impl PreparedBatch {
             && std::rc::Rc::ptr_eq(&self.identity, &arena.identity)
             && self.tokens == arena.tokens
             && self.freed == arena.freed
+            && self
+                .empty_tuple
+                .is_none_or(|(expected, _)| expected == arena.empty_tuple)
             && self.entries.iter().all(|entry| {
                 entry
                     .facts
@@ -414,6 +448,9 @@ impl PreparedBatch {
             }
             arena.objects.install(entry.handle, entry.body);
             arena.place(entry.handle, entry.facts);
+        }
+        if let Some((_, handle)) = self.empty_tuple {
+            arena.empty_tuple = Some(handle);
         }
         // Every forward target exists before a member count is applied.
         for handle in &arena.zero[start..] {
@@ -473,6 +510,45 @@ pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
 
 #[cfg(test)]
 impl Arena {
+    pub(crate) fn check_prepared_empty_tuple() {
+        let mut arena = Arena::new();
+        let before = arena.held();
+        {
+            let (value, storage) = arena.prepare_empty_tuple().unwrap();
+            let (mut registration, _batch) = storage.into_parts();
+            let arena = registration.arena();
+            assert!(arena.body(value.handle().unwrap()).is_err());
+            assert!(arena.resident_empty_tuple().is_none());
+            assert_eq!(arena.held(), before);
+        }
+        assert!(arena.resident_empty_tuple().is_none());
+        assert_eq!(arena.held(), before);
+        let (value, storage) = arena.prepare_empty_tuple().unwrap();
+        let first = value.handle().unwrap();
+        storage.publish();
+        assert!(
+            matches!(arena.tuple(Vec::new(), 8).unwrap(), Value::Tuple(handle) if handle == first)
+        );
+        let held = arena.held();
+        let (value, storage) = arena.prepare_empty_tuple().unwrap();
+        assert_eq!(value.handle(), Some(first));
+        let (mut registration, batch) = storage.into_parts();
+        assert!(batch.is_current(registration.arena()));
+        assert_eq!(registration.arena().held(), held);
+        batch.publish(registration.arena());
+        registration.commit();
+        assert_eq!(arena.held(), held);
+        arena.release(&mut |_| {});
+        assert!(arena.body(first).is_err());
+        let (value, storage) = arena.prepare_empty_tuple().unwrap();
+        assert_ne!(value.handle(), Some(first));
+        storage.publish();
+        assert_eq!(
+            arena.resident_empty_tuple().unwrap().handle(),
+            value.handle()
+        );
+    }
+
     pub(crate) fn check_prepared_closure_edges() {
         // These fields are inert storage metadata here; no source admission or
         // function call is manufactured by this arena-only lifetime oracle.

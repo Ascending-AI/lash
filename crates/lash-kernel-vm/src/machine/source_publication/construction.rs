@@ -77,8 +77,7 @@ impl KernelMachine {
                 | Op::MakeMap { .. }
                 | Op::MakeSet { .. }
                 | Op::MakeRecord { .. }
-        ) || matches!(op,Op::MakeTuple {items} if items.len == 0)
-        {
+        ) {
             return Ok(false);
         }
         #[cfg(any(test, feature = "testing"))]
@@ -289,7 +288,11 @@ impl KernelMachine {
         if published {
             self.grown();
             #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::precise_constructed(self.regs[output_register]);
+            if matches!(op, Op::MakeTuple { items } if items.len == 0) {
+                crate::machine::islands::witness::empty_tuple_constructed(true);
+            } else {
+                crate::machine::islands::witness::precise_constructed(self.regs[output_register]);
+            }
         }
         Ok(published)
     }

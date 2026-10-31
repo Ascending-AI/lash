@@ -69,6 +69,7 @@ thread_local! {
     static PREPARED_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_LIST_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
+    static EMPTY_TUPLE_CONSTRUCTIONS: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
     static PRECISE_CONSTRUCTIONS: std::cell::Cell<[u64;5]> = const { std::cell::Cell::new([0;5]) };
     static PRECISE_SOURCE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -86,6 +87,7 @@ pub(crate) fn begin() {
     PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_LIST_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TABLE_PUBLICATIONS.with(|counts| counts.set([0; 3]));
+    EMPTY_TUPLE_CONSTRUCTIONS.with(|counts| counts.set([0; 2]));
     PRECISE_CONSTRUCTIONS.with(|counts| counts.set([0; 5]));
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
     TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
@@ -292,6 +294,19 @@ pub(in crate::machine) fn precise_constructed(value: lash_kernel_doc::Value) {
     PRECISE_CONSTRUCTIONS.with(|counts| {
         let mut next = counts.get();
         next[index] += 1;
+        counts.set(next);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn empty_tuple_constructions() -> [u64; 2] {
+    EMPTY_TUPLE_CONSTRUCTIONS.with(|counts| counts.replace([0; 2]))
+}
+
+pub(in crate::machine) fn empty_tuple_constructed(precise: bool) {
+    EMPTY_TUPLE_CONSTRUCTIONS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(precise)] += 1;
         counts.set(next);
     });
 }

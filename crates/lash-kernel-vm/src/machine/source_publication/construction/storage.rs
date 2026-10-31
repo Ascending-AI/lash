@@ -80,14 +80,20 @@ impl StoragePreparation for Construction<'_> {
             family: doc::heap::FamilyId::PRIMARY,
             ordinal: arena.next_ordinal(),
         });
-        let mut nursery = doc::Nursery::unaccounted(arena.objects());
-        let value = nursery.allocate(self.object);
+        let (value, mut installation) = if matches!(&self.object, doc::NewObject::Tuple(values) if values.is_empty())
+        {
+            arena.prepare_empty_tuple().map_err(native_fault)?
+        } else {
+            let mut nursery = doc::Nursery::unaccounted(arena.objects());
+            let value = nursery.allocate(self.object);
+            let installation = arena
+                .prepare_install(nursery.into_new())
+                .map_err(native_fault)?;
+            (value, installation)
+        };
         let handle = value
             .handle()
-            .ok_or_else(|| malformed("construction has no fresh handle"))?;
-        let mut installation = arena
-            .prepare_install(nursery.into_new())
-            .map_err(native_fault)?;
+            .ok_or_else(|| malformed("construction has no prepared handle"))?;
         let body = if let Some(entity) = entity {
             let body = match installation.collection(handle).map_err(native_fault)? {
                 doc::NewObject::List(values) => VirtualBody::NativeList(values),

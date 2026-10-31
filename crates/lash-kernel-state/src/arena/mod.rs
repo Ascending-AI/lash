@@ -1623,6 +1623,7 @@ mod tests {
     /// freed as any object is, and the next is made afresh.
     #[test]
     fn an_empty_tuple_is_one_object_while_one_is_live() {
+        Arena::check_prepared_empty_tuple();
         let mut arena = Arena::new();
         let Ok(Value::Tuple(first)) = arena.tuple(Vec::new(), 8) else {
             panic!("an empty tuple")
