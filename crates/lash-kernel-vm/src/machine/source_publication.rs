@@ -1,7 +1,9 @@
 //! The source frontier, resource admission and semantic journal share one commit.
 mod binding;
 mod cell;
+mod closure;
 pub(in crate::machine) use cell::{CellConstruction, PreparedObjectConstruction};
+pub(in crate::machine) use closure::ClosureConstruction;
 pub(in crate::machine) mod construction;
 mod leaf;
 mod session;

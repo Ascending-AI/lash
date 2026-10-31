@@ -193,7 +193,7 @@ pub(in crate::machine) fn cell_constructed() {
 pub(crate) fn closure_constructions() -> u64 {
     CLOSURE_CONSTRUCTIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn closure_constructed() {
+pub(in crate::machine) fn closure_constructed() {
     CLOSURE_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
 }
 
@@ -363,6 +363,7 @@ pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
         | Op::MakeSet { .. }
         | Op::MakeMap { .. }
         | Op::MakeRecord { .. } => 3,
+        Op::Closure { .. } => return,
         _ => unreachable!("a replay publication has a prepared source operation"),
     };
     SOURCE_REPLAY_PUBLICATIONS.with(|total| {

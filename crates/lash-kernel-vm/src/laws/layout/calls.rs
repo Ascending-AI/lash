@@ -284,6 +284,10 @@ fn observe_source_or_register(
         }
         if source.contains(SOURCE_CELL) {
             assert!(
+                closure_constructions >= 2,
+                "precise closures must publish their prepared bodies and real captured cells: {closure_constructions}"
+            );
+            assert!(
                 cells >= 2,
                 "precise owning and captured cell writes must publish real member journals: {cells}"
             );

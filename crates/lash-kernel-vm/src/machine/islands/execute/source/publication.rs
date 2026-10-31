@@ -1,72 +1,14 @@
 //! The resource owner and canonical journal commit at the same source frontier.
 use super::*;
 use crate::admission::SourceResources;
-use doc::heap::EntityId;
-use lash_kernel_state::kernel_internals::logical::{MemberEdit, Program, VirtualBody};
-use std::sync::Arc;
+use lash_kernel_state::kernel_internals::logical::{MemberEdit, Program};
 
 use crate::machine::source_publication::{Admission, Context};
 pub(super) use crate::machine::source_publication::{
     Prefix, PreparedStorage, Reserve, StoragePreparation, native_fault,
 };
 
-pub(super) use crate::machine::source_publication::{CellConstruction, PreparedObjectConstruction};
-pub(super) struct ClosureConstruction {
-    pub(super) entity: EntityId,
-    pub(super) identity: Arc<doc::arena::ClosureIdentity>,
-    pub(super) captures: Vec<ArenaHandle>,
-    pub(super) entities: Vec<EntityId>,
-    pub(super) code: doc::arena::LocalCode,
-}
-impl StoragePreparation for ClosureConstruction {
-    type Prepared = PreparedObjectConstruction;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        let [entity] = event.entities.as_slice() else {
-            return Ok(None);
-        };
-        if !matches!(&entity.body, VirtualBody::Closure(captures) if captures == &self.entities)
-            || entity.entity != self.entity
-            || !matches!(event.outputs.as_slice(), [(_, PV::Page(doc::heap::PageValue::Closure(id)))] if *id == self.entity)
-            || !event.inputs.is_empty()
-            || event.member.is_some()
-            || event.frame.is_some()
-            || !event.scratch.is_empty()
-            || self.captures.len() != self.entities.len()
-            || !self
-                .captures
-                .iter()
-                .zip(&self.entities)
-                .all(|(handle, entity)| {
-                    arena
-                        .facts(*handle)
-                        .is_ok_and(|facts| facts.entity == Some(*entity))
-                })
-        {
-            return Ok(None);
-        }
-        let (handle, mut installation) = arena
-            .prepare_closure(self.identity, self.captures, self.code)
-            .map_err(native_fault)?;
-        installation
-            .bind_entity(handle, self.entity)
-            .map_err(native_fault)?;
-        let (registration, batch) = installation.into_parts();
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedObjectConstruction { batch, handle },
-            actual,
-        }))
-    }
-}
+pub(super) use crate::machine::source_publication::{CellConstruction, ClosureConstruction};
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(super) fn publish_source(
         &mut self,

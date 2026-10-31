@@ -181,6 +181,7 @@ impl KernelMachine {
                 | Op::LetBind { .. }
                 | Op::LetBindShared { .. }
                 | Op::LetEnd { .. }
+                | Op::Closure { .. }
                 | Op::MakeTuple { .. }
                 | Op::MakeList { .. }
                 | Op::MakeSet { .. }
@@ -191,11 +192,7 @@ impl KernelMachine {
                         continue;
                     }
                 }
-                Op::Unbound { .. }
-                | Op::Field { .. }
-                | Op::Index { .. }
-                | Op::Closure { .. }
-                | Op::Pin { .. } => {
+                Op::Unbound { .. } | Op::Field { .. } | Op::Index { .. } | Op::Pin { .. } => {
                     inside!(self, running, pc, self.in_region_rare(running, op));
                 }
                 Op::Nested { act, args } => {
@@ -563,6 +560,12 @@ impl KernelMachine {
                     return Ok(true);
                 }
                 self.put(at(dst), value);
+            }
+            Op::Closure { .. } => {
+                if self.publish_source_closure(running, pc)? {
+                    return Ok(true);
+                }
+                self.in_region_rare(running, op)?;
             }
             Op::MakeTuple { .. }
             | Op::MakeList { .. }

@@ -132,7 +132,8 @@ impl Operands {
             | Op::MakeTuple { .. }
             | Op::MakeMap { .. }
             | Op::MakeSet { .. }
-            | Op::MakeRecord { .. }),
+            | Op::MakeRecord { .. }
+            | Op::Closure { .. }),
         ) = stream.ops.get(pc as usize)
         else {
             return Ok(None);
