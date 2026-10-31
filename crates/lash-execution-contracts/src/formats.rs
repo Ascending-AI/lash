@@ -30,8 +30,10 @@ use crate::EngineStateFormat;
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/transcript.rs",
 ///         cover(TurnTranscript, TranscriptEntry),
 ///         path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs",
-///         cover(Driver, InFlight, Pinned, StoredWaitId, Blocked, Immediate),
+///         cover(Driver, InFlight, Pinned, Blocked, Immediate),
 ///     ),
+///     items(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", StoredWaitId),
+///     impls(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", "Serialize for StoredWaitId", "Deserialize for StoredWaitId"),
 /// )
 /// version_surface = "drain"
 /// format_manifest = "RunRecord"
