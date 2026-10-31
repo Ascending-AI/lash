@@ -800,12 +800,10 @@ impl Edit<'_, '_> {
         }
         self.roots(changes)
     }
-    fn roots(&mut self, changes: Vec<(Owner, Option<Holding>)>) -> Result<(), HeapFault> {
-        let mut unique = BTreeMap::new();
-        for (owner, value) in changes {
-            if unique.insert(owner, value).is_some() {
-                return Err(invalid("owner replaced twice in one transfer"));
-            }
+    fn roots(&mut self, mut changes: Vec<(Owner, Option<Holding>)>) -> Result<(), HeapFault> {
+        changes.sort_unstable_by_key(|(owner, _)| *owner);
+        if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(invalid("owner replaced twice in one transfer"));
         }
         let access = self.access;
         let mut edges = BTreeMap::<EntityId, (u64, u64)>::new();
@@ -821,7 +819,7 @@ impl Edit<'_, '_> {
                 Ok(())
             })
         };
-        for (owner, value) in unique {
+        for (owner, value) in changes {
             let key = owner_key(owner);
             let next = value.map(|value| RootHolding { owner, value });
             self.state

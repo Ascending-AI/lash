@@ -14,7 +14,7 @@ pub enum SourceValue {
     Capture(ArenaHandle),
 }
 impl SourceValue {
-    fn root(&self) -> RootValue<'_> {
+    pub(super) fn root(&self) -> RootValue<'_> {
         match self {
             Self::Value(value) => RootValue::Value(value),
             Self::Page(value) => RootValue::Page(value),
@@ -73,26 +73,11 @@ impl Lifecycle {
         }
         let result = (|| {
             let mut ledger = self.ledger.borrow_mut();
-            let mut inputs = Vec::new();
-            let mut outputs = Vec::new();
-            for (owner, next) in pending.iter() {
-                if ledger.holding(*owner, heap.pages())?.is_some() {
-                    inputs.push(*owner);
-                }
-                if let Some(value) = next {
-                    outputs.push((*owner, value.root()));
-                }
-            }
             let mut registration = arena
                 .registration()
                 .map_err(|error| invalid(&error.to_string()))?;
-            let prepared = ledger.prepare_source_event(
-                registration.arena(),
-                heap,
-                &inputs,
-                &outputs,
-                &events,
-            )?;
+            let prepared =
+                ledger.prepare_runtime_event(registration.arena(), heap, &pending, &events)?;
             let accepted = prepared
                 .admit(u64::MAX)
                 .map_err(|_| invalid("source holding overflow"))?;
