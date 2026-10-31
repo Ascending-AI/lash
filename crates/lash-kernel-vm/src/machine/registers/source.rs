@@ -198,7 +198,8 @@ impl Operands {
             return Ok(None);
         };
         let Some(
-            op @ (Op::MakeList { .. }
+            op @ (Op::Const { .. }
+            | Op::MakeList { .. }
             | Op::MakeTuple { .. }
             | Op::MakeMap { .. }
             | Op::MakeSet { .. }

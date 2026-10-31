@@ -545,6 +545,9 @@ impl KernelMachine {
                 self.put(reg, value);
             }
             Op::Const { dst, c } => {
+                if self.publish_source_literal(running, pc)? {
+                    return Ok(true);
+                }
                 let value = self.literal(&running.stream.consts[c.ix()])?;
                 if self.publish_source_leaf(running, pc, value)? {
                     return Ok(true);

@@ -7,6 +7,7 @@ pub(in crate::machine) use closure::ClosureConstruction;
 pub(in crate::machine) mod construction;
 mod join;
 mod leaf;
+mod literal;
 mod occurrence;
 mod read;
 use occurrence::source_loops;
