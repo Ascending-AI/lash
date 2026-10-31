@@ -180,6 +180,13 @@ impl Totals {
     }
 }
 
+/// A replacement selected while the index exclusively owns the observed row.
+pub(super) enum RowEdit<T> {
+    Keep,
+    Put(T),
+    Remove,
+}
+
 #[derive(Clone)]
 pub(super) struct Index<T: Cell> {
     base: Tree<T>,
@@ -283,16 +290,48 @@ impl<T: Cell> Index<T> {
     pub fn get(&self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         self.get_with(key, access, |v| v.cloned())
     }
+    /// Read the current row once, then apply its checked replacement under
+    /// this exclusive borrow. Aggregates use that same authenticated old row.
+    pub(super) fn replace_with(
+        &mut self,
+        key: &[u8],
+        access: &Access<'_>,
+        replace: impl FnOnce(Option<&T>) -> Result<RowEdit<T>, HeapFault>,
+    ) -> Result<bool, HeapFault> {
+        let (old, replacement) = self.get_with(key, access, |previous| {
+            replace(previous)
+                .map(|replacement| (previous.map_or(Totals::default(), Totals::row), replacement))
+        })??;
+        match replacement {
+            RowEdit::Keep => Ok(false),
+            RowEdit::Put(value) => {
+                self.changed(old, Totals::row(&value), access)?;
+                self.insert(key, Some(value));
+                Ok(true)
+            }
+            RowEdit::Remove => {
+                if old.len == 0 {
+                    return Err(invalid("removed source row is absent"));
+                }
+                self.changed(old, Totals::default(), access)?;
+                if self.base.get_with(key, access, |v| v.is_some())? {
+                    self.insert(key, None);
+                } else if let Some(root) = &mut self.hot
+                    && erase(root, key)
+                {
+                    self.hot = None;
+                }
+                Ok(true)
+            }
+        }
+    }
     pub fn write(
         &mut self,
         key: impl AsRef<[u8]>,
         value: T,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
-        let key = key.as_ref();
-        let old = self.get_with(key, access, |v| v.map_or(Totals::default(), Totals::row))?;
-        self.changed(old, Totals::row(&value), access)?;
-        self.insert(key, Some(value));
+        self.replace_with(key.as_ref(), access, |_| Ok(RowEdit::Put(value)))?;
         Ok(())
     }
     pub fn update(
@@ -347,18 +386,16 @@ impl<T: Cell> Index<T> {
         Ok(true)
     }
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
-        let Some(value) = self.get(key, access)? else {
-            return Ok(None);
-        };
-        self.changed(Totals::row(&value), Totals::default(), access)?;
-        if self.base.get_with(key, access, |v| v.is_some())? {
-            self.insert(key, None);
-        } else if let Some(root) = &mut self.hot
-            && erase(root, key)
-        {
-            self.hot = None;
-        }
-        Ok(Some(value))
+        let mut removed = None;
+        self.replace_with(key, access, |previous| {
+            removed = previous.cloned();
+            Ok(if removed.is_some() {
+                RowEdit::Remove
+            } else {
+                RowEdit::Keep
+            })
+        })?;
+        Ok(removed)
     }
     pub fn len(&self) -> u64 {
         self.totals.len

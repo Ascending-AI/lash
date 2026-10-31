@@ -803,22 +803,14 @@ impl Edit<'_, '_> {
     fn roots(&mut self, changes: Vec<(Owner, Option<Holding>)>) -> Result<(), HeapFault> {
         let mut unique = BTreeMap::new();
         for (owner, value) in changes {
-            if value.is_none()
-                && self
-                    .state
-                    .roots(owner)
-                    .get(&owner_key(owner), self.access)?
-                    .is_none()
-            {
-                return Err(invalid("released source owner is absent"));
-            }
             if unique.insert(owner, value).is_some() {
                 return Err(invalid("owner replaced twice in one transfer"));
             }
         }
+        let access = self.access;
         let mut edges = BTreeMap::<EntityId, (u64, u64)>::new();
         let mut collect = |value: &Holding, adding: bool| {
-            value.each_edge(self.access, &mut |edge| {
+            value.each_edge(access, &mut |edge| {
                 if let Identity::Object(entity) = edge.target {
                     let counts = edges.entry(entity).or_default();
                     let count = if adding { &mut counts.1 } else { &mut counts.0 };
@@ -829,56 +821,50 @@ impl Edit<'_, '_> {
                 Ok(())
             })
         };
-        for (owner, value) in &unique {
-            if let Some(value) = value {
-                codec::validate_root(&RootHolding {
-                    owner: *owner,
-                    value: value.clone(),
-                })?;
-                if matches!(
-                    owner,
-                    Owner::Value {
-                        slot: Slot::Capture(_),
-                        ..
-                    }
-                ) {
-                    value.each_edge(self.access, &mut |edge| {
-                        if edge.count != 1 || !matches!(edge.target, Identity::Object(_)) {
-                            return Err(invalid("capture must borrow one variable cell"));
-                        }
-                        Ok(())
-                    })?;
-                }
-                collect(value, true)?;
-            }
-            self.state
-                .roots(*owner)
-                .get_with(&owner_key(*owner), self.access, |old| {
-                    old.map_or(Ok(()), |old| collect(&old.value, false))
-                })??;
-        }
         for (owner, value) in unique {
             let key = owner_key(owner);
-            if let Some(previous) = self.state.roots(owner).get(&key, self.access)?
-                && let Some(value) = &value
-                && value.bytes == previous.value.bytes
-                && value.links.is_empty()
-                && previous.value.links.is_empty()
-            {
-                continue;
-            }
-            match value {
-                Some(value) => {
-                    self.state.roots_mut(owner).write(
-                        key,
-                        RootHolding { owner, value },
-                        self.access,
-                    )?;
-                }
-                None => {
-                    self.state.roots_mut(owner).remove(&key, self.access)?;
-                }
-            }
+            let next = value.map(|value| RootHolding { owner, value });
+            self.state
+                .roots_mut(owner)
+                .replace_with(&key, access, |old| {
+                    if next.is_none() && old.is_none() {
+                        return Err(invalid("released source owner is absent"));
+                    }
+                    if let Some(next) = &next {
+                        codec::validate_root(next)?;
+                        if matches!(
+                            owner,
+                            Owner::Value {
+                                slot: Slot::Capture(_),
+                                ..
+                            }
+                        ) {
+                            next.value.each_edge(access, &mut |edge| {
+                                if edge.count != 1 || !matches!(edge.target, Identity::Object(_)) {
+                                    return Err(invalid("capture must borrow one variable cell"));
+                                }
+                                Ok(())
+                            })?;
+                        }
+                        collect(&next.value, true)?;
+                    }
+                    if let Some(old) = old {
+                        collect(&old.value, false)?;
+                    }
+                    Ok(match next {
+                        Some(next)
+                            if old.is_some_and(|previous| {
+                                next.value.bytes == previous.value.bytes
+                                    && next.value.links.is_empty()
+                                    && previous.value.links.is_empty()
+                            }) =>
+                        {
+                            index::RowEdit::Keep
+                        }
+                        Some(next) => index::RowEdit::Put(next),
+                        None => index::RowEdit::Remove,
+                    })
+                })?;
         }
         for (entity, (removed, added)) in edges {
             let key = entity_key(entity);
