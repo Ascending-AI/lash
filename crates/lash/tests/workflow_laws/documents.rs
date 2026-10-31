@@ -208,7 +208,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     assert_eq!(read.document(), &document);
 
     core.processes()
-        .cancel(&process, core.effect_host())
+        .cancel(lash::OperationId::mint(), &process)
         .await
         .expect("the cancel is requested");
     reader.shutdown().await.expect("the reader shuts down");

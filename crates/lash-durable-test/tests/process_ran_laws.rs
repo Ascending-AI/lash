@@ -279,6 +279,7 @@ impl Counted {
         let settings = recorded.observing(observe).into_engine_settings();
         core.processes()
             .start(
+                lash::OperationId::mint(),
                 lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
@@ -286,7 +287,6 @@ impl Counted {
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
-                core.effect_host(),
             )
             .await
             .map(|receipt| receipt.process_id)
@@ -521,9 +521,12 @@ impl Counted {
     async fn tampered_laws(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         let mut violations = Vec::new();
         let core = self.core();
-        let steps = lash_core::facade_support::read_process_steps(&core.effect_host(), process)
-            .await
-            .expect("the steps read");
+        let steps = lash_core::facade_support::read_process_steps(
+            &lash_core::ActorContext::detached(core.backend().clone()),
+            process,
+        )
+        .await
+        .expect("the steps read");
         let record = core
             .processes()
             .get(process)
@@ -554,7 +557,9 @@ impl Counted {
         let replay = |steps: Vec<RecordedProcessStep>, segment: u64| {
             let engine = engine.clone();
             let request = lash_vm_runtime::ProcessReplayRequest {
-                pages: core.effect_host().pages().expect("the store's pages"),
+                pages: lash_core::ActorContext::detached(core.backend().clone())
+                    .pages()
+                    .expect("the store's pages"),
                 process: process.clone(),
                 settings: launch.settings.clone(),
                 payload: payload.clone(),

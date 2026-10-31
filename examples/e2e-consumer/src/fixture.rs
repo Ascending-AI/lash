@@ -212,7 +212,7 @@ Ok(move |ctx: lash::plugins::PluginTaskContext, text: <EchoTask as lash::plugins
                     // observe its release rather than consume a new permit.
                     let operation = (
                         ctx.session_id.clone(),
-                        ctx.scoped_effect_controller.scope_id().to_owned(),
+                        ctx.execution_scope_id().to_owned(),
                     );
                     if text.starts_with("hold:")
                         && !controls.fulfilled_tasks.lock_recover().contains(&operation)

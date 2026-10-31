@@ -1,0 +1,15 @@
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+ --> tests/ui/process_start_requires_operation.rs:2:41
+  |
+2 |     let _ = session.admin().processes().start(request).await;
+  |                                         ^^^^^ ------- argument #1 of type `lash::OperationId` is missing
+  |
+note: method defined here
+ --> src/admin/process_admin.rs
+  |
+  |     pub async fn start(
+  |                  ^^^^^
+help: provide the argument
+  |
+2 |     let _ = session.admin().processes().start(/* lash::OperationId */, request).await;
+  |                                               ++++++++++++++++++++++++

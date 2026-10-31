@@ -112,6 +112,7 @@ mod error;
 pub mod formats;
 mod language_observation;
 mod observation_feed;
+mod operation;
 mod parked_work;
 #[cfg(feature = "postgres")]
 mod postgres_host;
@@ -123,6 +124,7 @@ mod postgres_process_replay;
 mod postgres_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
+pub use operation::OperationId;
 mod process_authority;
 mod process_feed;
 mod process_history;
@@ -478,7 +480,7 @@ pub use lash_core::{
 /// Lash's identity for one tool call (ADR 0117): what a tool keys its
 /// idempotency on, through [`tools::AttemptContext::call_id`].
 pub use lash_core::{InvalidToolCallId, ToolCallId, ToolCallRootError};
-pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
+pub use lash_core::{SessionAdministration, SessionDeleteContext};
 /// The one substrate a [`LashCore`] takes every persistence port and its
 /// durable store from: the concrete durable backend over one [`StoreSet`]
 /// (ADR 0132 §1). [`LashCore::builder`] requires one, which
@@ -623,7 +625,7 @@ pub mod tools {
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
     };
     pub use lash_core::AttemptContext;
-    pub use lash_core::AttemptProcessReads;
+    pub use lash_core::AttemptProcesses;
     pub use lash_core::AttemptSessionReads;
     pub use lash_core::CancelHint;
     /// The deferred provider and what it records: a [`DeferredMatch`] per
@@ -1008,12 +1010,8 @@ pub mod runtime {
         ExecutionEnvironmentSyncFailureKind,
     };
 
-    /// The one effect context of an actor's activation (ADR 0132 §1).
-    pub use lash_core::ActorContext;
     pub use lash_core::ExecutionDebts;
-    /// The lazy binding of a recorded model that
-    /// [`RuntimeEffectLocalExecutor::direct`] takes: bound only when an
-    /// unjournaled completion's body runs.
+    /// The lazy binding of a recorded model, resolved when its completion runs.
     pub use lash_core::LlmProfileBinding;
     /// The durable session extension and turn options exposed to runtime integrators.
     pub use lash_core::ProtocolSessionExtension;
@@ -1056,7 +1054,6 @@ pub mod runtime {
     pub use lash_core::runtime::RuntimeEffectEnvelope;
     pub use lash_core::runtime::RuntimeEffectInvocation;
     pub use lash_core::runtime::RuntimeEffectKind;
-    pub use lash_core::runtime::RuntimeEffectLocalExecutor;
     pub use lash_core::runtime::RuntimeEffectOutcome;
     pub use lash_core::runtime::RuntimeEffectReplayMismatchReport;
     pub use lash_core::runtime::RuntimeEnvironmentBuilder;

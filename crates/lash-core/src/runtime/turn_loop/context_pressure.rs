@@ -162,7 +162,7 @@ impl LashRuntime {
             prompt_usage: previous_prompt_usage,
             max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
             traces: manager.trace_emitter(),
-            scoped_effect_controller: scoped_effect_controller.clone(),
+            execution_scope: scoped_effect_controller.execution_scope().clone(),
             direct_completions: manager.direct_completion_client(
                 scoped_effect_controller.clone(),
                 Some(turn_phase_id(trace_turn_id, "context-pressure")),

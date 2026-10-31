@@ -349,6 +349,7 @@ fn run_callback_on(
         let process = first
             .processes()
             .start(
+                lash::OperationId::mint(),
                 lash::process::ProcessStartRequest::engine(
                     lash_vm_runtime::LASH_VM_ENGINE_KIND,
                     payload,
@@ -356,7 +357,6 @@ fn run_callback_on(
                     lash::process::ProcessOriginator::host(),
                     lash::process::LifetimeDecision::Detached,
                 ),
-                first.effect_host(),
             )
             .await
             .unwrap()
@@ -895,6 +895,7 @@ pub async fn a_code_only_imported_callback_keeps_publication_provenance_across_c
     let process = first
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND,
                 payload,
@@ -902,7 +903,6 @@ pub async fn a_code_only_imported_callback_keeps_publication_provenance_across_c
                 lash::process::ProcessOriginator::host(),
                 lash::process::LifetimeDecision::Detached,
             ),
-            first.effect_host(),
         )
         .await
         .unwrap()

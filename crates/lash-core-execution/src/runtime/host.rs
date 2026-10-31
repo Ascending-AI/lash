@@ -258,7 +258,7 @@ pub struct RuntimeControlConfig {
     /// Optional host pool; absence uses the shared standard pool. Every model
     /// call, including direct compaction, uses the selected pool.
     pub prompt_render_pool: Option<Arc<crate::plugin::prompt::PromptRenderPool>>,
-    pub effect_host: ActorContext,
+    pub(crate) effect_host: ActorContext,
     /// Every execution bound this runtime enforces (spec v3 Part C): the
     /// tool default and inline ceiling, the model call's hard total, the
     /// control-phase bound, the stop grace, the wait bounds and the provider
@@ -507,7 +507,7 @@ impl RuntimeHostConfig {
     }
 
     /// Replace the effect host.
-    pub fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
+    pub(crate) fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
         self.control.effect_host = effect_host;
         self
     }

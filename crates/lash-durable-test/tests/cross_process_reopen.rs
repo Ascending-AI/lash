@@ -221,6 +221,7 @@ async fn start(core: &lash::LashCore, case: &corpus::Case) -> ProcessId {
     let settings = core.processes().engine_defaults(kind, &payload).unwrap();
     core.processes()
         .start(
+            lash::OperationId::mint(),
             lash::process::ProcessStartRequest::engine(
                 kind.to_owned(),
                 payload,
@@ -228,7 +229,6 @@ async fn start(core: &lash::LashCore, case: &corpus::Case) -> ProcessId {
                 lash::process::ProcessOriginator::host(),
                 lash::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .unwrap()

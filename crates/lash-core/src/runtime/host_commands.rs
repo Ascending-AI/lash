@@ -400,7 +400,8 @@ impl LashRuntime {
                 // The task's effects run under the command's own scope, and
                 // a host's cancel of its run stops its code.
                 let stop = tokio_util::sync::CancellationToken::new();
-                let task = plugins.run_plugin_task(
+                let task = crate::facade_support::run_plugin_task(
+                    plugins.as_ref(),
                     name,
                     args,
                     Some(session_id.clone()),

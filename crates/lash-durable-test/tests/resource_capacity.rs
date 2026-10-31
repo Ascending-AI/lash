@@ -85,6 +85,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     let process = core
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash_execution_contracts::process::ProcessStartRequest::engine(
                 "testing-fixture".to_owned(),
                 json!({}),
@@ -92,7 +93,6 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .expect("the process starts")

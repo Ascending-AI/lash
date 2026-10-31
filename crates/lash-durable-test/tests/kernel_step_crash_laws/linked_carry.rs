@@ -673,6 +673,7 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
     let process = core
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND,
                 payload.clone(),
@@ -680,7 +681,6 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
                 lash::process::ProcessOriginator::host(),
                 lash::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .unwrap()

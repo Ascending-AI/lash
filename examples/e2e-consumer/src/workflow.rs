@@ -651,6 +651,7 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
         .core
         .processes()
         .start(
+            lash::OperationId::new(request.key),
             ProcessStartRequest::definition(
                 definition.id.clone(),
                 Some(definition.signature.clone()),
@@ -658,9 +659,7 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
                 EngineLaunch::new(env_ref, settings),
                 ProcessOriginator::host(),
                 Lifetime::Detached,
-            )
-            .with_host_start_key(request.key),
-            host.core.effect_host(),
+            ),
         )
         .await
         .map_err(api_error)?;

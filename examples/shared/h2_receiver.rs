@@ -600,7 +600,7 @@ impl ReceiverEnginePlugin {
 pub async fn register_receiver(
     core: &lash::LashCore,
     session: &lash::SessionId,
-    scoped: lash::runtime::ActorContext,
+    operation: lash::OperationId,
 ) -> Result<ProcessStartReceipt> {
     // The receiver runs under an execution environment the host publishes; a
     // host pin keeps it alive for the process (ADR 0113).
@@ -615,9 +615,8 @@ pub async fn register_receiver(
         ProcessOriginator::host_scoped(format!("h2:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_host_start_key(format!("h2-receiver:{session}"))
     .with_observers([session.clone()]);
-    Ok(core.processes().start(start, scoped).await?)
+    Ok(core.processes().start(operation, start).await?)
 }
 
 /// Start a source process observed by `session`, under `key`.
@@ -625,7 +624,7 @@ pub async fn start_source(
     core: &lash::LashCore,
     session: &lash::SessionId,
     key: &str,
-    scoped: lash::runtime::ActorContext,
+    operation: lash::OperationId,
 ) -> Result<ProcessStartReceipt> {
     let env_ref = core
         .host_artifacts()
@@ -638,9 +637,8 @@ pub async fn start_source(
         ProcessOriginator::host_scoped(format!("h2-source:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_host_start_key(format!("h2-source:{session}:{key}"))
     .with_observers([session.clone()]);
-    Ok(core.processes().start(start, scoped).await?)
+    Ok(core.processes().start(operation, start).await?)
 }
 
 /// Start a sleeper process observed by `session`, sleeping for `millis`.
@@ -648,7 +646,7 @@ pub async fn start_sleeper(
     core: &lash::LashCore,
     session: &lash::SessionId,
     millis: i64,
-    scoped: lash::runtime::ActorContext,
+    operation: lash::OperationId,
 ) -> Result<ProcessStartReceipt> {
     let env_ref = core
         .host_artifacts()
@@ -666,9 +664,8 @@ pub async fn start_sleeper(
         ProcessOriginator::host_scoped(format!("h2-sleeper:{session}")),
         lash::process::Lifetime::Detached,
     )
-    .with_host_start_key(format!("h2-sleeper:{session}"))
     .with_observers([session.clone()]);
-    Ok(core.processes().start(start, scoped).await?)
+    Ok(core.processes().start(operation, start).await?)
 }
 
 /// The start payload of `session`'s source `key`: what names the source to

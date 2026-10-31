@@ -1041,6 +1041,7 @@ impl HostArtifacts {
         self.core
             .processes()
             .start(
+                crate::OperationId::new(start_key),
                 lash_execution_contracts::process::ProcessStartRequest::inline(
                     lash_vm_runtime::LASH_VM_ENGINE_KIND,
                     request,
@@ -1048,9 +1049,7 @@ impl HostArtifacts {
                     launch,
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::LifetimeDecision::Detached,
-                )
-                .with_host_start_key(start_key),
-                self.core.effect_host(),
+                ),
             )
             .await
     }

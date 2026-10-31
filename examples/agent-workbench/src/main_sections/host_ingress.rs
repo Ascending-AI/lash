@@ -10,20 +10,6 @@ use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
 
 impl AppState {
-    /// A context for one runtime operation of this host, `operation`.
-    async fn host_operation(
-        &self,
-        operation: String,
-    ) -> Result<lash::runtime::ActorContext, AppError> {
-        self.core
-            .session_administration()
-            .await
-            .effect_host()
-            .scoped(lash::runtime::AdmittedScope::runtime_operation(operation))
-            // Audited: constructing this scope only validates the local runtime-operation id.
-            .map_err(AppError::internal)
-    }
-
     /// Request the cancellation of `process_id` on behalf of `session_id`.
     pub(crate) async fn cancel_process(
         &self,
@@ -31,13 +17,11 @@ impl AppState {
         process_id: &ProcessId,
         operation_id: &str,
     ) -> Result<lash::persistence::ProcessCancelReceipt, AppError> {
-        let operation = self
-            .host_operation(format!("workbench-process-cancel:{operation_id}"))
-            .await?;
+        let operation = lash::OperationId::new(format!("workbench-process-cancel:{operation_id}"));
         let receipt = self
             .core
             .processes()
-            .cancel(process_id, operation)
+            .cancel(operation, process_id)
             .await
             // Audited: process cancellation uses the global process registry and never consults a session tombstone.
             .map_err(AppError::internal)?;

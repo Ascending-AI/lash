@@ -846,7 +846,7 @@ mod process_visibility_tests {
                             &service,
                             &SessionId::from(SESSION_ID),
                             lash_execution_contracts::process::ProcessListMode::Live,
-                            crate::ProcessOpScope::new(scope),
+                            crate::facade_support::process_scope(scope),
                         )
                         .await
                         .expect("list visible process records");
@@ -878,7 +878,7 @@ mod process_visibility_tests {
                                 SESSION_ID,
                             )),
                             std::slice::from_ref(&hidden_process_id),
-                            crate::ProcessOpScope::new(scope),
+                            crate::facade_support::process_scope(scope),
                         )
                         .await;
                         assert_eq!(result.is_ok(), hidden_is_visible);

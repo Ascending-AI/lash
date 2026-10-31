@@ -145,14 +145,37 @@ impl AttemptSessionReads {
     }
 }
 
-/// Integrator class 3 controller-free process reads for a recorded leaf attempt.
+/// Process reads and child declarations bound to one recorded leaf attempt.
 #[derive(Clone)]
-pub struct AttemptProcessReads {
+pub struct AttemptProcesses {
+    start_identity: crate::ToolIntentIdentity,
+    can_start: bool,
     owner: lash_vocabulary::identity::RuntimeOwner,
     processes: Arc<dyn crate::ProcessService>,
 }
 
-impl AttemptProcessReads {
+impl AttemptProcesses {
+    /// Declare this call's child. Return it as the pending outcome's resolver;
+    /// the runtime commits its start with the call and owns its cancellation.
+    pub fn start(
+        &self,
+        request: lash_execution_contracts::tool_intent::StartProcessIntent,
+    ) -> Result<
+        lash_execution_contracts::DeclaredStart,
+        lash_execution_contracts::DeclaredStartRefused,
+    > {
+        if request.owner != self.owner {
+            return Err(lash_execution_contracts::DeclaredStartRefused::ForeignOwner);
+        }
+        if !self.can_start {
+            return Err(lash_execution_contracts::DeclaredStartRefused::CompletionUnavailable);
+        }
+        Ok(lash_execution_contracts::declared_start::declared_start(
+            request,
+            self.start_identity.clone(),
+        ))
+    }
+
     /// Integrator class 3 listing through the attempt-safe process filter.
     pub async fn list_handles_filtered(
         &self,
@@ -203,7 +226,7 @@ pub struct AttemptContext<'run> {
     parent_scope: crate::AdmittedScope,
     execution_scope_id: String,
     sessions: AttemptSessionReads,
-    processes: AttemptProcessReads,
+    processes: AttemptProcesses,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
     /// The process this attempt executes inside, resolved once at context
     /// construction. `ToolContext` carries the same single fact.

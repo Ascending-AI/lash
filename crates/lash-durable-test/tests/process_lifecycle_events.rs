@@ -520,7 +520,7 @@ async fn start(core: &lash::LashCore) -> lash_vocabulary::identity::ProcessId {
         lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
-        .start(request, core.effect_host())
+        .start(lash::OperationId::mint(), request)
         .await
         .expect("the process starts")
         .process_id

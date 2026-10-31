@@ -22,10 +22,6 @@ fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 
 fn processes_area_witnesses() {
-    // W0007: lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation;
-    // W0008: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation;
     // W0011: lash::SessionCreateRequest::observed_processes [field]
     field_witness(|value: &lash::SessionCreateRequest| {
         let _ = &value.observed_processes;
@@ -429,8 +425,6 @@ fn processes_area_witnesses() {
     type_witness::<lash::persistence::ProcessOpScope>();
     // W0225: lash::persistence::ProcessOpScope::agent_frame_id [function]
     let _ = lash::persistence::ProcessOpScope::agent_frame_id;
-    // W0226: lash::persistence::ProcessOpScope::new [function]
-    let _ = lash::persistence::ProcessOpScope::new(todo!());
     // W0227: lash::persistence::ProcessOpScope::with_agent_frame_id [function]
     let _ = lash::persistence::ProcessOpScope::with_agent_frame_id;
     // W0228: lash::persistence::ProcessOpScope::with_parent_invocation [function]

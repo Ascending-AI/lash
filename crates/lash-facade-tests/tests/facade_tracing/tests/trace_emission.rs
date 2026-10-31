@@ -1105,8 +1105,8 @@ async fn a_process_start_attributes_its_time_to_each_phase_it_reached() -> Resul
     .await?;
     core.processes()
         .start(
+            lash::OperationId::mint(),
             lash_facade_tests::session_process::request("mock-model"),
-            core.effect_host(),
         )
         .await?;
     let starts = observed.spans("lash.process.start");

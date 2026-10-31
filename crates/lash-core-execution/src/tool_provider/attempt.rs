@@ -184,6 +184,14 @@ impl<'run> AttemptContext<'run> {
             .runtime_execution_context
             .as_ref()
             .and_then(crate::RuntimeExecutionContext::attempt_phase_probe);
+        let start_identity =
+            lash_execution_contracts::tool_intent::derive_tool_intent_identity_under(
+                &context.owner.runtime_owner(),
+                &execution_scope_id,
+                &context.call_id,
+                0,
+                context.parent_invocation.as_ref(),
+            );
         Self {
             history: context
                 .runtime_execution_context
@@ -215,7 +223,9 @@ impl<'run> AttemptContext<'run> {
                     .as_ref()
                     .map(|dispatch| Arc::clone(&dispatch.tool_catalog)),
             },
-            processes: AttemptProcessReads {
+            processes: AttemptProcesses {
+                start_identity,
+                can_start: completion.key().is_ok(),
                 owner: context.owner.runtime_owner(),
                 processes: Arc::clone(&context.processes),
             },
@@ -297,8 +307,8 @@ impl<'run> AttemptContext<'run> {
     pub fn sessions(&self) -> AttemptSessionReads {
         self.sessions.clone()
     }
-    /// Integrator class 3 controller-free process reads for this attempt.
-    pub fn processes(&self) -> AttemptProcessReads {
+    /// Process reads and child declarations attributed to this call.
+    pub fn processes(&self) -> AttemptProcesses {
         self.processes.clone()
     }
     /// Integrator class 3 read of the tool catalog this attempt was dispatched

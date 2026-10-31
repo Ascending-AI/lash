@@ -261,9 +261,10 @@ impl CheckpointBindingFixture {
                 async move {
                     let session_id = ctx
                         .session_id
+                        .clone()
                         .ok_or(CheckpointAssignmentError::SessionRequired)?;
                     let invocation = lash_core::runtime::causal::turn_effect_invocation(
-                        ctx.scoped_effect_controller.execution_scope(),
+                        ctx.execution_scope(),
                         &session_id,
                         &lash_vocabulary::identity::TurnId::fixture(format!("checkpoint-{turn}")),
                         turn,
@@ -273,9 +274,9 @@ impl CheckpointBindingFixture {
                     );
                     let packages = checkpoint_packages(&backend, services.as_ref())?;
                     let mut built = lash_core::testing::TestExecutionContextBuilder::new(
-                        lash_core::testing::TestExecutionPorts::lent(
+                        lash_core::facade_support::lent_test_execution_ports(
                             &backend,
-                            ctx.scoped_effect_controller,
+                            lash_core::facade_support::plugin_task_actor(&ctx).clone(),
                         ),
                     )
                     .session_id(session_id.clone())

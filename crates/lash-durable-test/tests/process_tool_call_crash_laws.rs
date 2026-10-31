@@ -739,6 +739,7 @@ async fn start_sleeping_process(deployment: &Holding) {
     let settings = core.processes().engine_defaults(kind, &payload).unwrap();
     core.processes()
         .start(
+            lash::OperationId::mint(),
             lash::process::ProcessStartRequest::engine(
                 kind.to_owned(),
                 payload,
@@ -746,7 +747,6 @@ async fn start_sleeping_process(deployment: &Holding) {
                 lash::process::ProcessOriginator::host(),
                 lash::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .unwrap();
@@ -1414,6 +1414,7 @@ impl DynamicCalls {
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         core.processes()
             .start(
+                lash::OperationId::mint(),
                 lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
@@ -1421,7 +1422,6 @@ impl DynamicCalls {
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
-                core.effect_host(),
             )
             .await
             .map(|receipt| receipt.process_id)

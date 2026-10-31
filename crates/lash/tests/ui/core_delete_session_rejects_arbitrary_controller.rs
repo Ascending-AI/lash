@@ -1,5 +1,5 @@
 async fn check(
-    unrelated: lash::runtime::ActorContext,
+    unrelated: (),
 ) {
     let _ = lash::LashCore::delete_session("session-id", unrelated).await;
 }

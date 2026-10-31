@@ -40,7 +40,7 @@ impl super::TraceRuntime {
     /// scope `retained` that a durable admission already retained, which
     /// proposed and settled its own candidate. The result retains data only;
     /// replay never restores the ephemeral permit.
-    pub async fn record_boundary(
+    pub(crate) async fn record_boundary(
         &self,
         controller: &ActorContext,
         key: String,

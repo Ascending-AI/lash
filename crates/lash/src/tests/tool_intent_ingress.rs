@@ -116,7 +116,7 @@ async fn equivalent_recorded_start_has_the_same_identity_across_routes() -> Resu
     .await
     .open()
     .await?;
-    let effect_host = session.effect_host();
+    let effect_host = session.binding.actor_context();
     let scoped = effect_host.scoped(lash_core::AdmittedScope::turn(
         SESSION,
         "session-recorded-intent-route",

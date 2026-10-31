@@ -285,7 +285,7 @@ async fn start_under(
         lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
-        .start(request, core.effect_host())
+        .start(lash::OperationId::mint(), request)
         .await
         .expect("the process starts")
         .process_id
@@ -1173,7 +1173,7 @@ async fn a_later_build_without_the_component_never_claims_its_process() {
 
     later
         .processes()
-        .cancel(&cancelled, later.effect_host())
+        .cancel(lash::OperationId::mint(), &cancelled)
         .await
         .expect("the cancel is requested");
     let output = tokio::time::timeout(

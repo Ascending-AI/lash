@@ -1348,11 +1348,12 @@ async fn a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_i
             .await
             .expect("the starting core's node drains");
 
+        let operation = lash::OperationId::new(format!("cut-start-input-{fault}"));
         let request = host_start(&format!("cut-start-input-{fault}"), input.clone());
         let start_key = request.start_key().cloned().expect("a host start key");
         let core = law.core.clone();
         let starter = tokio::spawn(STARTER.scope((), async move {
-            core.processes().start(request, core.effect_host()).await
+            core.processes().start(operation, request).await
         }));
         tokio::time::timeout(SETTLE, reached.acquire())
             .await

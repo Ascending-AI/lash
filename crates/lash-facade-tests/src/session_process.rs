@@ -143,7 +143,10 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
     let stated_id =
         named.then(|| lash_kernel_value::identity::SessionId::fixture(CHILD.to_owned()));
     create_request.session_id = stated_id.clone();
-    let started = core.processes().start(request, core.effect_host()).await?;
+    let started = core
+        .processes()
+        .start(lash::OperationId::mint(), request)
+        .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         core.processes().await_output(&started.process_id),

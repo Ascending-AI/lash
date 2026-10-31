@@ -388,7 +388,8 @@ impl SpawnAgent {
             Some("spawn".to_string()),
         ));
         let start = context
-            .declare_start(StartProcessIntent {
+            .processes()
+            .start(StartProcessIntent {
                 owner: context.owner().runtime_owner(),
                 declaration,
             })

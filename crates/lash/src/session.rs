@@ -1,4 +1,3 @@
-use lash_core::ActorContext;
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
@@ -174,7 +173,7 @@ impl SessionBuilder {
         DurableSession::from_catalog(
             self.session_id,
             Arc::clone(&self.core.store_factory),
-            self.core.env.core.control.effect_host.clone(),
+            lash_core::facade_support::runtime_actor(&self.core.env.core.control).clone(),
             live_replay_store,
             Arc::clone(&self.core.env.core.providers.models),
             self.core.env.core.tracing.clone(),
@@ -316,7 +315,7 @@ impl SessionBuilder {
         Ok(DurableSession::from_binding(
             self.session_id,
             store,
-            self.core.env.core.control.effect_host.clone(),
+            lash_core::facade_support::runtime_actor(&self.core.env.core.control).clone(),
             Arc::clone(&self.core.live_replay_store),
             catalog,
             Arc::clone(&self.core.env.core.providers.models),
@@ -888,7 +887,7 @@ impl LashSession {
             store: self.binding.store(),
             observation_work_limits: self.binding.observation_work_limits(),
             published_heads: self.binding.published_heads(),
-            backend: self.binding.effect_host().backend().clone(),
+            backend: self.binding.actor_context().backend().clone(),
         }
     }
 
@@ -901,10 +900,6 @@ impl LashSession {
     /// rather than shadowing the durable relation.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.parent_session_id.as_deref()
-    }
-
-    pub fn effect_host(&self) -> ActorContext {
-        self.binding.effect_host()
     }
 
     /// Accept `input` durably and ask the engine to work the session: the
@@ -1119,7 +1114,7 @@ impl LashSession {
         DurableSession::from_binding(
             SessionId::from(self.runtime.observe().session_id()),
             self.binding.store(),
-            self.binding.effect_host(),
+            self.binding.actor_context(),
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
             self.binding.llm_profiles(),
@@ -1141,7 +1136,7 @@ impl LashSession {
     pub async fn revoke_durable_waits(&self) -> Result<()> {
         let session_id = self.session_id();
         self.binding
-            .effect_host()
+            .actor_context()
             .cancel_await_events_for_session(&session_id)
             .await
             .map_err(EmbedError::Runtime)

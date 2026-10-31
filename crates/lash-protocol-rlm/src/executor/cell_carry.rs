@@ -43,8 +43,7 @@ pub(super) async fn carry(
         })
     };
     // Authorize and authenticate the correspondence before publishing code or pages.
-    if !ctx
-        .actor_context()
+    if !lash_core::facade_support::execution_actor(ctx)
         .carries_sessions()
         .await
         .map_err(|e| text(&e))?
@@ -99,7 +98,9 @@ pub(super) async fn carry(
             ))
         })?;
     let execution = super::link::execution_id(snapshots.exec());
-    let stores = ctx.actor_context().backend().stores();
+    let stores = lash_core::facade_support::execution_actor(ctx)
+        .backend()
+        .stores();
     let resolutions = stores.execution_resolutions();
     let mut outcomes = BTreeMap::new();
     for use_ in envelope.environment.uses.keys() {
@@ -368,7 +369,10 @@ pub(super) async fn carry(
         CommitId::mint(),
     )
     .map_err(|e| text(&e))?;
-    let mut tx = ctx.actor_context().begin().await.map_err(|e| text(&e))?;
+    let mut tx = lash_core::facade_support::execution_actor(ctx)
+        .begin()
+        .await
+        .map_err(|e| text(&e))?;
     tx.stage(prepared.nodes);
     tx.stage_all(staging);
     for write in writes {
@@ -404,8 +408,14 @@ pub(super) async fn carry(
         requirements: envelope.environment.requirements.clone(),
     };
     tx.require(read.held.root);
-    tx.stamp_formats(ctx.actor_context().backend().formats().session().clone());
-    ctx.actor_context()
+    tx.stamp_formats(
+        lash_core::facade_support::execution_actor(ctx)
+            .backend()
+            .formats()
+            .session()
+            .clone(),
+    );
+    lash_core::facade_support::execution_actor(ctx)
         .commit_owing(tx, lash_durable::CommitLabel::new("cell.successor"), &owing)
         .await
         .map_err(|e| text(&e))?;

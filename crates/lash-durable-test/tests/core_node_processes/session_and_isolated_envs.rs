@@ -188,8 +188,8 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
     let host_started = starter
         .processes()
         .start(
+            lash::OperationId::mint(),
             host_session_turn(lash_core::PluginOptions::default()),
-            starter.effect_host(),
         )
         .await
         .expect("the host's session-turn start registers")
@@ -231,7 +231,7 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
     );
     fresh
         .processes()
-        .cancel(&tool_declared, fresh.effect_host())
+        .cancel(lash::OperationId::mint(), &tool_declared)
         .await
         .expect("the cancel is requested");
     let cancelled = tokio::time::timeout(
@@ -254,7 +254,7 @@ async fn a_session_turn_process_runs_without_an_environment_on_a_cold_worker() {
     .expect("the options encode");
     let refused = fresh
         .processes()
-        .start(host_session_turn(unresolved), fresh.effect_host())
+        .start(lash::OperationId::mint(), host_session_turn(unresolved))
         .await;
     assert!(
         refused.is_err(),

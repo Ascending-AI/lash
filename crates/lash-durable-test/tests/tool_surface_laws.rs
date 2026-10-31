@@ -1178,7 +1178,7 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
         let receipt = world
             .core
             .processes()
-            .start(request, world.core.effect_host())
+            .start(lash::OperationId::new(label), request)
             .await
             .expect("the host start registers");
         started.insert(label, receipt.process_id);
@@ -1233,7 +1233,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
         let _ = world
             .core
             .processes()
-            .start(request.clone(), world.core.effect_host())
+            .start(lash::OperationId::new("lost-host-start-ack"), request.clone())
             .await
             .expect("the first start commits");
         let filter = lash_execution_contracts::process::ProcessListFilter {
@@ -1259,7 +1259,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
                 world
                     .core
                     .processes()
-                    .cancel(&original_id, world.core.effect_host())
+                    .cancel(lash::OperationId::mint(), &original_id)
                     .await
                     .expect("end the retained process");
                 world
@@ -1272,7 +1272,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             let retry = world
                 .core
                 .processes()
-                .start(request.clone(), world.core.effect_host())
+                .start(lash::OperationId::new("lost-host-start-ack"), request.clone())
                 .await
                 .expect("the same host request recovers its id");
             assert_eq!(retry.process_id, original_id);
@@ -1288,7 +1288,7 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             let error = world
                 .core
                 .processes()
-                .start(changed, world.core.effect_host())
+                .start(lash::OperationId::new("lost-host-start-ack"), changed)
                 .await
                 .expect_err("a different request under the retained key conflicts");
             assert!(matches!(

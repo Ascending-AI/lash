@@ -6,8 +6,8 @@ use lash::tools::ToolIntents;
 // constructor: it cannot be built from a batch of intents, and it cannot hold
 // a second start.
 fn declare(context: &AttemptContext<'_>, first: StartProcessIntent, second: StartProcessIntent) {
-    let _from_intents = context.declare_start(ToolIntents::default());
-    let _two_starts = context.declare_start(first, second);
+    let _from_intents = context.processes().start(ToolIntents::default());
+    let _two_starts = context.processes().start(first, second);
 }
 
 fn main() {}

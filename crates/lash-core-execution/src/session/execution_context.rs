@@ -360,7 +360,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// The owned actor's context this execution runs under: what its VM
     /// snapshots and their operations' admissions commit through.
-    pub fn actor_context(&self) -> &crate::ActorContext {
+    pub(crate) fn actor_context(&self) -> &crate::ActorContext {
         &self.dispatch.effect_controller
     }
 

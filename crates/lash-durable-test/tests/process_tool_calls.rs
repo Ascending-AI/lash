@@ -456,7 +456,7 @@ async fn run_groups(world: &World, witness: &Witness, name: &str, groups: &[&[&s
         if let Ok(processes) = processes {
             for process in processes {
                 let steps = lash_core::facade_support::read_process_steps(
-                    &world.core.effect_host(),
+                    &lash_core::ActorContext::detached(world.core.backend().clone()),
                     &process.id,
                 )
                 .await;

@@ -362,7 +362,7 @@ async fn burst(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     meter.window("process.burst.observations", provisional as usize, window);
     node.core
         .processes()
-        .cancel(&quiet, node.core.effect_host())
+        .cancel(lash::OperationId::mint(), &quiet)
         .await?;
     let (_, quiet_delivered) = quiet_feed.await??;
     let invalidations: u64 = counts.iter().map(|c| c.invalidate_all).sum();

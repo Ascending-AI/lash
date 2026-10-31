@@ -679,7 +679,10 @@ async fn run_workflow(
         }
         let started = state
             .commands
-            .start(published.start_request(&key, request.inputs))
+            .start(
+                lash::OperationId::new(&key),
+                published.start_request(request.inputs),
+            )
             .await;
         (saved.version, started)
     };

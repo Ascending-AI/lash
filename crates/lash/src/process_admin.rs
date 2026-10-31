@@ -112,7 +112,7 @@ impl Processes {
         process_id: &ProcessId,
         call_id: &crate::ToolCallId,
     ) -> Result<Option<crate::tools::ToolCallRecord>> {
-        let host = self.core.effect_host();
+        let host = self.core.actor_context();
         if let Some(record) =
             lash_core::facade_support::read_process_tool_call(&host, process_id, call_id).await?
         {
@@ -132,7 +132,7 @@ impl Processes {
         &self,
         process_id: &ProcessId,
     ) -> Result<Vec<crate::tools::ToolCallRecord>> {
-        let host = self.core.effect_host();
+        let host = self.core.actor_context();
         let kernel_run = format!(
             "{}/{}",
             lash_vm_runtime::LASH_VM_ENGINE_KIND,
@@ -196,7 +196,7 @@ impl Processes {
         };
         // The steps are read before the record: a record still retained
         // after them proves the steps read were retained too.
-        let host = self.core.effect_host();
+        let host = self.core.actor_context();
         let steps = lash_core::facade_support::read_process_steps(&host, process_id).await?;
         let process = match self.make_observer().process(process_id).await {
             Ok(Some(process)) => process,
@@ -521,11 +521,15 @@ impl Processes {
     /// registered. The start is registered exactly as stated, so a retry
     /// under its host key is returned the retained process whatever the
     /// host passes to other starts by then.
+    /// `operation` is the idempotency identity of this host ingress, retained
+    /// by the caller for retries. Lash binds it to this core.
     pub async fn start(
         &self,
+        operation: crate::OperationId,
         request: lash_execution_contracts::process::ProcessStartRequest,
-        scoped_effect_controller: ActorContext,
     ) -> Result<lash_execution_contracts::process::ProcessStartReceipt> {
+        let scoped_effect_controller = self.operation_context(&operation)?;
+        let request = operation.key_start(request);
         // The start's `lash.process.start` producer opens here, before the
         // first await, under the caller's context the request chose (else
         // the ambient one): the process is admitted under it.
@@ -544,15 +548,8 @@ impl Processes {
             )))
         });
         let started = async {
-            // The registrar mints the id; the key only makes the start
-            // idempotent. A host mints only host keys: a key of a family lash
-            // derives for its own start paths is refused, never adopted (ADR
-            // 0107). The request is registered as the host stated it: lash
-            // lays nothing of its own under a session-turn start (FIG-4594),
-            // so the start-key fence compares only what the host stated.
-            let request = scoped_effect_controller
-                .key_host_start(request)
-                .map_err(EmbedError::Plugin)?;
+            // The operation identity keys registration. The registrar mints
+            // the process id and fences the request's stated content.
             // A root start's session grant is the host's lookup, whether it
             // came from `session_scope` or from a remote start's
             // `until_session` data (FIG-3607 R3). The start's recorded
@@ -563,9 +560,9 @@ impl Processes {
             let registration = request.into_registration();
             // A host start is its own operation (ADR 0113 §3.3): its staging
             // holds the stated environment under `Start(key)` until
-            // registration carries it onto the record. The caller's context
-            // names no execution of the start's own: the core's host context
-            // is one scope every host start shares, settled at once.
+            // registration carries it onto the record. The core-bound
+            // operation context holds no actor execution claim of its own,
+            // so preparation is retained independently under the start key.
             let mut session_turn_admission = None;
             if let lash_execution_contracts::process::ProcessStartTarget::Input(
                 lash_execution_contracts::process::ProcessInput::SessionTurn {
@@ -1007,9 +1004,10 @@ impl Processes {
     /// Requests cancellation of the identified process.
     pub async fn cancel(
         &self,
+        operation: crate::OperationId,
         process_id: &ProcessId,
-        scoped_effect_controller: ActorContext,
     ) -> Result<lash_execution_contracts::process::ProcessCancelReceipt> {
+        let scoped_effect_controller = self.operation_context(&operation)?;
         #[expect(
             clippy::expect_used,
             reason = "an execution scope is a struct of opaque string identities, whose \
@@ -1074,8 +1072,9 @@ impl Processes {
     /// session-scoped stop use [`SessionProcessAdmin::cancel_all`](crate::process::SessionProcessAdmin::cancel_all).
     pub async fn cancel_all(
         &self,
-        scoped_effect_controller: ActorContext,
+        operation: crate::OperationId,
     ) -> Result<Vec<lash_execution_contracts::process::ProcessCancelReceipt>> {
+        let scoped_effect_controller = self.operation_context(&operation)?;
         let outcome = self
             .run_command(
                 lash_core::ProcessCommand::List {
@@ -1093,12 +1092,13 @@ impl Processes {
         };
         let mut summaries = Vec::with_capacity(running.len());
         for process in running {
-            summaries.push(
-                self.cancel(&process.process_id, scoped_effect_controller.clone())
-                    .await?,
-            );
+            summaries.push(self.cancel(operation.clone(), &process.process_id).await?);
         }
         Ok(summaries)
+    }
+
+    fn operation_context(&self, operation: &crate::OperationId) -> Result<ActorContext> {
+        operation.bind(&self.core.actor_context())
     }
 
     /// Processes are global; this re-homes only observer membership, never the process itself.

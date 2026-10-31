@@ -1,3 +1,4 @@
+pub use lash_core::plugin::CallbackProcesses;
 /// Coherent environment sources and mailbox changes. Version adoption and
 /// retention remain owned by the engine; hosts only publish source facts.
 pub mod environment {

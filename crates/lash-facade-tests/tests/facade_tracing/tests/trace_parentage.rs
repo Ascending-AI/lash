@@ -93,7 +93,10 @@ async fn a_serialized_process_start_links_its_explicit_caller() -> Result<()> {
         .trace_link_mode(lash_trace::TraceLinkMode::Link);
     let encoded = serde_json::to_value(request).expect("serialize the queued start");
     let decoded = serde_json::from_value(encoded).expect("decode the queued start");
-    let started = core.processes().start(decoded, core.effect_host()).await?;
+    let started = core
+        .processes()
+        .start(lash::OperationId::mint(), decoded)
+        .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         core.processes().await_output(&started.process_id),
@@ -521,8 +524,8 @@ async fn a_session_turn_child_shares_the_trace_of_its_process() -> Result<()> {
     let started = core
         .processes()
         .start(
+            lash::OperationId::mint(),
             session_turn_process::request("mock-model"),
-            core.effect_host(),
         )
         .await?;
     let output = tokio::time::timeout(

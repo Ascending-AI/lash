@@ -42,9 +42,7 @@ pub fn host_admitted_scope(
     config: &crate::RuntimeHostConfig,
     admitted: crate::AdmittedScope,
 ) -> crate::ActorContext {
-    config
-        .control
-        .effect_host
+    crate::facade_support::runtime_actor(&config.control)
         .scoped(admitted)
         .expect("a valid admitted scope")
 }

@@ -816,7 +816,7 @@ impl BenchmarkPlugins {
 
 fn benchmark_plugin_factories(
     scenario: RuntimePerfScenario,
-    effect_host: &lash::runtime::ActorContext,
+    effect_host: &lash::Backend,
     settlement_control: Option<&Arc<BenchmarkSettlementControl>>,
 ) -> anyhow::Result<BenchmarkPlugins> {
     let wiring = scenario.wiring();
@@ -952,7 +952,7 @@ pub(crate) async fn build_embed_core(
     scenario: RuntimePerfScenario,
 ) -> anyhow::Result<(BenchmarkCore, RuntimePerfStoreFactory, TurnEntry)> {
     let InProcessLane { backend, stores } = in_process_lane().await?;
-    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
+    let effect_host = backend.clone();
     let provider = benchmark_provider(scenario).into_handle();
     let core = match scenario.execution_mode() {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider)
@@ -1017,7 +1017,7 @@ pub(crate) async fn build_runtime(
         stores: store_factory,
     } = in_process_lane().await?;
     let backend = perf_backend;
-    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
+    let effect_host = backend.clone();
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
@@ -1197,7 +1197,7 @@ pub(crate) async fn build_runtime_with_stores(
         wiring.measure_commit_bytes,
     );
     let backend = durable_backend(layered)?;
-    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
+    let effect_host = backend.clone();
     let plugins = benchmark_plugin_factories(scenario, &effect_host, None)?;
     let mut plugin_stack = runtime_perf_plugin_stack(
         scenario.uses_standard_compaction(),

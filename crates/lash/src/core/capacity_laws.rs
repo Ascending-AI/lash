@@ -3,6 +3,7 @@ use super::runtime_host_config::tests::Sink;
 use super::*;
 use crate::runtime::*;
 use crate::tracing::*;
+use lash_core::RuntimeEffectLocalExecutor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn envelope(
@@ -45,7 +46,7 @@ async fn facade_held_observation_capacity_limits_the_live_suffix() {
     let actor = ActorContext::unavailable()
         .scoped(AdmittedScope::turn("capacity", "turn"))
         .unwrap();
-    let standing = config.tracing.shift(None, &actor);
+    let standing = lash_core::facade_support::trace_shift(&config.tracing, None, &actor);
     for _ in 0..3 {
         standing.observe_deferred(|| {
             (

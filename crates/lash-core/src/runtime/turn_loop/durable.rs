@@ -110,15 +110,15 @@ impl LashRuntime {
             )
         });
         let turn_context = crate::TurnContext::default();
-        let turn_boundary = tracing
-            .record_boundary(
-                controller,
-                format!("trace:turn:{run}:started"),
-                retained_trace,
-                lash_trace::TraceTransitionKind::Started,
-            )
-            .await
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
+        let turn_boundary = crate::facade_support::record_trace_boundary(
+            tracing,
+            controller,
+            format!("trace:turn:{run}:started"),
+            retained_trace,
+            lash_trace::TraceTransitionKind::Started,
+        )
+        .await
+        .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         let controller = controller.with_trace_scope(turn_boundary.scope.clone());
         let previous_prompt_usage = self.state.last_prompt_usage.clone();
         let turn_index = self.state.turn_index + 1;

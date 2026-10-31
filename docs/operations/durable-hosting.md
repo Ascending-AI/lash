@@ -524,7 +524,7 @@ session actor drives that turn. The RLM plugin contributes the Lash VM
 engine and its VM step bodies through the same registration path.
 
 Hosts start processes through
-`core.processes().start(request, core.effect_host()).await` or send input
+`core.processes().start(operation_id, request).await` or send input
 through `LashSession::send`; they observe the resulting receipts, handles
 and lifecycle facts. The core's node advances the processes. Hosts need no
 separate runner or process activation. With `serve_sessions(false)`, the

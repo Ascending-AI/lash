@@ -1020,12 +1020,7 @@ impl ToolIntentIngress {
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let registry = self.process_registry()?;
-        let scoped = self
-            .core
-            .env
-            .core
-            .control
-            .effect_host
+        let scoped = lash_core::facade_support::runtime_actor(&self.core.env.core.control)
             .scoped(lash_core::AdmittedScope::new(self.scope.clone()))
             .map_err(lash_execution_contracts::plugin_error::PluginError::Runtime)?;
         #[expect(

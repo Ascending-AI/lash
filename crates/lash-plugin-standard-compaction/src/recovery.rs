@@ -409,7 +409,7 @@ pub(crate) async fn overflow_recovery_decision(
         Some(&recovery_instructions(elided_parts, config)),
         config,
         &ctx.direct_completions,
-        &ctx.scoped_effect_controller,
+        &ctx.execution_scope,
     )
     .await
     {

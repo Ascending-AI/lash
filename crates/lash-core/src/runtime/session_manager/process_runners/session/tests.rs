@@ -411,7 +411,7 @@ async fn plugin_process_reads_are_canonical_observations() {
         .list_visible(
             runtime.session_id(),
             lash_execution_contracts::process::ProcessListMode::All,
-            crate::ProcessOpScope::new(crate::ActorContext::detached(backend.clone())),
+            crate::facade_support::process_scope(crate::ActorContext::detached(backend.clone())),
         )
         .await
         .expect("plugin read");

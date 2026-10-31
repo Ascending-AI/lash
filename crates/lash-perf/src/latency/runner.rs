@@ -523,7 +523,7 @@ pub(super) fn build_core(
     compat_server: &Option<OpenAiCompatBenchServer>,
     transport: Option<Arc<dyn lash_http_transport::HttpTransport>>,
 ) -> Result<lash::LashCore> {
-    let effect_host = lash::runtime::ActorContext::detached(backend.clone());
+    let effect_host = backend.clone();
     let provider: lash::provider::ProviderHandle = if let Some(server) = compat_server {
         let mut compat = lash_provider_openai::OpenAiCompatibleProvider::new(
             "latency-gate",

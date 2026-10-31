@@ -142,6 +142,23 @@ pub(crate) use lash_core_execution::tool_result;
 pub use lash_core_execution::trace;
 
 pub mod facade_support {
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core_execution::facade_support::lent_test_execution_ports;
+
+    pub use lash_core_execution::facade_support::{
+        bind_runtime_actor, execution_actor, plugin_task_actor, process_actor, process_scope,
+        record_trace_boundary, run_plugin_task, runtime_actor, trace_shift,
+    };
+    pub fn session_administration(
+        catalog: std::sync::Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
+        actor: crate::ActorContext,
+        process: Option<crate::runtime::ProcessWorkWiring>,
+        environments: std::sync::Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
+        engines: crate::ProcessEngineRegistry,
+    ) -> crate::SessionAdministration {
+        crate::SessionAdministration::new(catalog, actor, process, environments, engines)
+    }
+
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{
         DurableSessionOps, EMPTY_HEAD_REVISION, HostInputAdmission, QueueWithdrawalObservation,
@@ -395,7 +412,7 @@ pub mod facade_support {
     pub use crate::runtime::watch_process_registry;
     pub use crate::runtime::{ParkRefused, ParkedSession};
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
-    pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
+    pub use crate::runtime::{SessionAdministration, SessionDeleteContext};
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
@@ -1030,7 +1047,6 @@ pub use runtime::SessionCreationHead;
 pub use runtime::SessionCursor;
 pub use runtime::SessionCursorError;
 pub use runtime::SessionDeleteContext;
-pub use runtime::SessionDeleteExecution;
 pub use runtime::SessionEntry;
 pub use runtime::SessionListFilter;
 pub use runtime::SessionObservationEvent;
@@ -1200,10 +1216,10 @@ pub use lash_core_execution::ToolOutcomeDone;
 
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessRequest,
-    IsolatedStart, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ResolveTargetError,
-    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcesses, AttemptSessionReads, IsolatedProcessRequest, IsolatedStart,
+    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ResolveTargetError, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

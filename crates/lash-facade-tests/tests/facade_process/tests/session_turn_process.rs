@@ -26,7 +26,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() -> Result<()> 
     .await?;
     let started = core
         .processes()
-        .start(request("mock-model"), core.effect_host())
+        .start(lash::OperationId::mint(), request("mock-model"))
         .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
@@ -74,13 +74,13 @@ async fn a_session_turn_process_cancelled_mid_turn_ends_cancelled_and_keeps_its_
     .await?;
     let started = core
         .processes()
-        .start(request("mock-model"), core.effect_host())
+        .start(lash::OperationId::mint(), request("mock-model"))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(30), entered.notified())
         .await
         .expect("the child's turn reaches its model");
     core.processes()
-        .cancel(&started.process_id, core.effect_host())
+        .cancel(lash::OperationId::mint(), &started.process_id)
         .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -151,7 +151,7 @@ async fn a_partially_created_child_finishes_from_its_recorded_creation_request()
         .fail(|| lash_core::StoreError::Contended);
     let started = core
         .processes()
-        .start(started("mock-model", true), core.effect_host())
+        .start(lash::OperationId::mint(), started("mock-model", true))
         .await?;
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while script.calls(StoreOp::commit_runtime_state) <= commits {
@@ -222,7 +222,7 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     .await?;
     let started = core
         .processes()
-        .start(request(UNSERVED), core.effect_host())
+        .start(lash::OperationId::mint(), request(UNSERVED))
         .await?;
     assert!(
         tokio::time::timeout(
@@ -293,7 +293,7 @@ async fn child_turn_provider_cause_reaches_the_parent() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let started = core
         .processes()
-        .start(request("mock-model"), core.effect_host())
+        .start(lash::OperationId::mint(), request("mock-model"))
         .await?;
     let answer = tokio::time::timeout(
         std::time::Duration::from_secs(60),

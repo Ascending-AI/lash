@@ -807,18 +807,9 @@ impl HostTriggers {
                 subscription.owner_session
             )),
             lash::process::Lifetime::Until(lifetime),
-        )
-        .with_host_start_key(delivery.start_key());
-        let operation = core
-            .session_administration()
-            .await
-            .effect_host()
-            .scoped(lash::runtime::AdmittedScope::runtime_operation(format!(
-                "workbench-trigger-delivery:{}",
-                delivery.start_key()
-            )))
-            .map_err(lash::EmbedError::from)?;
-        let receipt = core.processes().start(request, operation).await?;
+        );
+        let operation = lash::OperationId::new(delivery.start_key());
+        let receipt = core.processes().start(operation, request).await?;
         Ok(receipt.process_id)
     }
 

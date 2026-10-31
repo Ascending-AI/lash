@@ -42,7 +42,7 @@ impl BoundSession {
             observer_pacing,
             published_heads,
             store,
-            effect_host: env.core.control.effect_host.clone(),
+            effect_host: lash_core::facade_support::runtime_actor(&env.core.control).clone(),
             observation_work_limits: env.core.observation_work_limits,
             process,
             backend: env.core.backend().clone(),
@@ -70,7 +70,7 @@ impl BoundSession {
         self.store.clone()
     }
 
-    pub(crate) fn effect_host(&self) -> ActorContext {
+    pub(crate) fn actor_context(&self) -> ActorContext {
         self.effect_host.clone()
     }
 
@@ -101,9 +101,9 @@ impl BoundSession {
     }
 
     pub(crate) fn administration(&self) -> lash_core::SessionAdministration {
-        lash_core::SessionAdministration::new(
+        lash_core::facade_support::session_administration(
             self.catalog(),
-            self.effect_host(),
+            self.actor_context(),
             Some(self.process.clone()),
             Arc::clone(&self.process_env_store),
             self.process_engines.clone(),
@@ -121,7 +121,7 @@ impl BoundSession {
             .core
             .with_backend(self.backend.clone())
             .map_err(crate::EmbedError::IngressConfiguration)?;
-        env.core.control.effect_host = self.effect_host();
+        lash_core::facade_support::bind_runtime_actor(&mut env.core.control, self.actor_context());
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
         Ok(env.with_work_ports(self.process.clone()))

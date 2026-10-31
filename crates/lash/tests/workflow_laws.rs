@@ -314,6 +314,7 @@ async fn start_with(
 ) -> lash_vocabulary::identity::ProcessId {
     core.processes()
         .start(
+            lash::OperationId::new(key),
             lash_execution_contracts::process::ProcessStartRequest::definition(
                 definition.id.clone(),
                 Some(definition.signature.clone()),
@@ -329,9 +330,7 @@ async fn start_with(
                 ),
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
-            )
-            .with_host_start_key(key),
-            core.effect_host(),
+            ),
         )
         .await
         .expect("the process starts")

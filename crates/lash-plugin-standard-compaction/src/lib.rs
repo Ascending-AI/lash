@@ -565,7 +565,7 @@ pub fn pressure_compaction_request_ids(
         &state,
         &snapshot,
         &prompt_text,
-        ctx.scoped_effect_controller.execution_scope(),
+        &ctx.execution_scope,
     )
     .map(Some)
 }
@@ -584,7 +584,7 @@ async fn summarize_compaction_prefix(
     instructions: Option<&str>,
     config: &StandardCompactionConfig,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
-    scoped_effect_controller: &lash_core::ActorContext,
+    execution_scope: &lash_core::ExecutionScope,
 ) -> Result<Option<String>, ContextError> {
     if prefix_messages.is_empty() {
         return Ok(None);
@@ -593,13 +593,8 @@ async fn summarize_compaction_prefix(
     let (snapshot, prompt_text) =
         prepare_compaction_request(state, prefix_messages, instructions, config)?;
 
-    let (compaction_session_id, turn_id) = compaction_request_ids(
-        session_id,
-        state,
-        &snapshot,
-        &prompt_text,
-        scoped_effect_controller.execution_scope(),
-    )?;
+    let (compaction_session_id, turn_id) =
+        compaction_request_ids(session_id, state, &snapshot, &prompt_text, execution_scope)?;
     let read_view = snapshot.read_view();
     let rendered = lash_protocol_types::session_model::render_prompt(read_view.messages());
 
@@ -626,8 +621,7 @@ async fn summarize_compaction_prefix(
         provider_trace: None,
         attempt_control: Default::default(),
     };
-    let caused_by = scoped_effect_controller
-        .execution_scope()
+    let caused_by = execution_scope
         .turn_id()
         .map(|parent_turn_id| lash_core::CausalRef::Turn {
             session_id: session_id.clone(),
@@ -719,7 +713,7 @@ async fn compact_messages_core(
     instructions: Option<&str>,
     config: &StandardCompactionConfig,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
-    scoped_effect_controller: &lash_core::ActorContext,
+    execution_scope: &lash_core::ExecutionScope,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
     let cut_point = find_compaction_cut_point(messages, prefix_len, config);
@@ -738,7 +732,7 @@ async fn compact_messages_core(
         instructions,
         config,
         direct_completions,
-        scoped_effect_controller,
+        execution_scope,
     )
     .await?
     else {
@@ -904,10 +898,10 @@ impl StandardCompactionPressureHook {
 
 fn turn_trace_context(
     session_id: &SessionId,
-    scoped_effect_controller: &lash_core::ActorContext,
+    execution_scope: &lash_core::ExecutionScope,
 ) -> lash_core::TraceContext {
     let trace_context = lash_core::TraceContext::default().for_session(session_id.clone());
-    match scoped_effect_controller.turn_id() {
+    match execution_scope.turn_id().cloned() {
         Some(turn_id) => trace_context.for_turn(turn_id),
         None => trace_context,
     }
@@ -948,7 +942,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
             return Ok(ContextPressureDecision::Continue);
         }
         ctx.traces.emit(
-            turn_trace_context(&ctx.session_id, &ctx.scoped_effect_controller),
+            turn_trace_context(&ctx.session_id, &ctx.execution_scope),
             lash_core::TraceEvent::CompactionNeeded {
                 used_tokens: pressure.used_tokens,
                 max_context_tokens: pressure.max_context_tokens,
@@ -975,7 +969,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
             None,
             &self.config,
             &ctx.direct_completions,
-            &ctx.scoped_effect_controller,
+            &ctx.execution_scope,
         )
         .await?
         else {
@@ -1052,7 +1046,7 @@ impl ContextCompactor for StandardContextCompactor {
         &self,
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
-        let trace_context = turn_trace_context(&ctx.session_id, &ctx.scoped_effect_controller);
+        let trace_context = turn_trace_context(&ctx.session_id, &ctx.execution_scope);
         ctx.traces.emit(
             trace_context.clone(),
             lash_core::TraceEvent::CompactionStarted {
@@ -1073,7 +1067,7 @@ impl ContextCompactor for StandardContextCompactor {
             ctx.instructions.as_deref(),
             &self.config,
             &ctx.direct_completions,
-            &ctx.scoped_effect_controller,
+            &ctx.execution_scope,
         )
         .await;
         let summary_nodes = compaction

@@ -299,6 +299,7 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
     let process = core
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND,
                 old.payload.clone(),
@@ -306,7 +307,6 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>) -> usize {
                 lash::process::ProcessOriginator::host(),
                 lash::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .unwrap()

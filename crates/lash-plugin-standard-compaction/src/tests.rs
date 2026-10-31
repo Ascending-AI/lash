@@ -142,15 +142,6 @@ impl RecordingTraces {
     }
 }
 
-fn test_turn_controller() -> lash_core::ActorContext {
-    lash_core::ActorContext::unavailable()
-        .scoped(lash_core::AdmittedScope::turn(
-            SessionId::from("root"),
-            "standard-compaction-test-turn",
-        ))
-        .expect("test scoped effect controller")
-}
-
 fn build_omission_ctx(
     state: SessionSnapshot,
     prompt_usage: Option<LlmUsage>,
@@ -182,7 +173,10 @@ fn build_pressure_ctx(
         prompt_usage,
         max_context_tokens,
         traces: traces.emitter(),
-        scoped_effect_controller: test_turn_controller(),
+        execution_scope: lash_core::ExecutionScope::turn(
+            SessionId::from("root"),
+            "standard-compaction-test-turn",
+        ),
         direct_completions,
         plugin_config: Default::default(),
         trace: traces.extension(),
@@ -200,11 +194,9 @@ fn build_compaction_ctx(
         instructions,
         state: state.read_view(),
         traces: traces.emitter(),
-        scoped_effect_controller: lash_core::ActorContext::unavailable()
-            .scoped(lash_core::AdmittedScope::runtime_operation(
-                "standard-compaction-compact-test",
-            ))
-            .expect("test scoped effect controller"),
+        execution_scope: lash_core::ExecutionScope::runtime_operation(
+            "standard-compaction-compact-test",
+        ),
         direct_completions,
         plugin_config: Default::default(),
         trace: Default::default(),
@@ -644,11 +636,9 @@ fn recovery_ctx(
         prompt_usage: None,
         max_context_tokens: Some(max_context_tokens),
         traces: traces.emitter(),
-        scoped_effect_controller: lash_core::ActorContext::unavailable()
-            .scoped(lash_core::AdmittedScope::runtime_operation(
-                "standard-compaction-recovery-test",
-            ))
-            .expect("test scoped effect controller"),
+        execution_scope: lash_core::ExecutionScope::runtime_operation(
+            "standard-compaction-recovery-test",
+        ),
         direct_completions: RecordingLlmCompletions::client(direct),
         plugin_config: Default::default(),
         trace: traces.extension(),

@@ -275,7 +275,7 @@ pub(crate) fn benchmark_provider_with_control(
 
 #[derive(Clone)]
 pub(crate) struct BenchmarkEchoTool {
-    completion_resolver: lash::runtime::ActorContext,
+    completion_resolver: lash::Backend,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
     completion_witness: Option<Arc<super::smoke::CompletionWitness>>,
 }

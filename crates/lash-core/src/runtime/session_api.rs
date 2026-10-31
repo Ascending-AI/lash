@@ -494,7 +494,7 @@ impl LashRuntime {
     }
 
     pub fn effect_host(&self) -> ActorContext {
-        self.host.core.control.effect_host.clone()
+        crate::facade_support::runtime_actor(&self.host.core.control).clone()
     }
 
     /// Durably accept `input` for this session, caused by `parent`: the

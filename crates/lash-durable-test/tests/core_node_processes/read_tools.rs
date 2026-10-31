@@ -206,7 +206,7 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let steps = lash_core_execution::runtime::process::steps::read_process_steps(
-                &first.effect_host(),
+                &lash_core::ActorContext::detached(first.backend().clone()),
                 &process,
             )
             .await
@@ -250,7 +250,7 @@ async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory
                 record.terminal()
             );
             let steps = lash_core_execution::runtime::process::steps::read_process_steps(
-                &first.effect_host(),
+                &lash_core::ActorContext::detached(first.backend().clone()),
                 &process,
             )
             .await
@@ -437,7 +437,7 @@ async fn a_resumed_process_renews_its_page_lease_during_a_long_host_read_on_sqli
         read.release.notify_one();
         loop {
             let steps = lash_core_execution::runtime::process::steps::read_process_steps(
-                &core.effect_host(), &process,
+                &lash_core::ActorContext::detached(core.backend().clone()), &process,
             ).await.unwrap();
             for step in &steps {
                 assert!(
@@ -735,7 +735,7 @@ async fn process_read_refusal(kind: &'static str) {
         );
     }
     let steps = lash_core_execution::runtime::process::steps::read_process_steps(
-        &core.effect_host(),
+        &lash_core::ActorContext::detached(core.backend().clone()),
         &process,
     )
     .await

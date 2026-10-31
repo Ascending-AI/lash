@@ -9,7 +9,10 @@ pub(super) fn session_turn_start(
     key: &str,
     text: &str,
     spec: &lash::SessionSpec,
-) -> lash_execution_contracts::process::ProcessStartRequest {
+) -> (
+    lash::OperationId,
+    lash_execution_contracts::process::ProcessStartRequest,
+) {
     session_turn_start_of(
         key,
         text,
@@ -25,18 +28,23 @@ pub(super) fn session_turn_start_of(
     key: &str,
     text: &str,
     create_request: lash_execution_contracts::session_types::SessionCreateRequest,
-) -> lash_execution_contracts::process::ProcessStartRequest {
-    lash_execution_contracts::process::ProcessStartRequest::session_turn(
-        "keys-session-turn-start",
-        create_request.with_session_id(lash_kernel_value::identity::SessionId::fixture(format!(
-            "{key}-child"
-        ))),
-        TurnInput::text(text),
-        lash_execution_contracts::process::SessionTurnOutcome::Turn,
-        lash_execution_contracts::process::ProcessOriginator::host(),
-        lash_execution_contracts::process::Lifetime::Detached,
+) -> (
+    lash::OperationId,
+    lash_execution_contracts::process::ProcessStartRequest,
+) {
+    (
+        lash::OperationId::new(key),
+        lash_execution_contracts::process::ProcessStartRequest::session_turn(
+            "keys-session-turn-start",
+            create_request.with_session_id(lash_kernel_value::identity::SessionId::fixture(
+                format!("{key}-child"),
+            )),
+            TurnInput::text(text),
+            lash_execution_contracts::process::SessionTurnOutcome::Turn,
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
+        ),
     )
-    .with_host_start_key(key)
 }
 
 /// Issue `request` on `core` through its own effect host. `operation`
@@ -45,9 +53,12 @@ pub(super) async fn start_on(
     _double: &Double,
     core: &LashCore,
     _operation: &str,
-    request: lash_execution_contracts::process::ProcessStartRequest,
+    (operation, request): (
+        lash::OperationId,
+        lash_execution_contracts::process::ProcessStartRequest,
+    ),
 ) -> Result<lash_execution_contracts::process::ProcessStartReceipt, lash::EmbedError> {
-    core.processes().start(request, core.effect_host()).await
+    core.processes().start(operation, request).await
 }
 
 /// The create request the start retained under `process_id` recorded.

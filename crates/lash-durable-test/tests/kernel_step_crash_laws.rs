@@ -329,6 +329,7 @@ impl KernelSteps {
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         core.processes()
             .start(
+                lash::OperationId::mint(),
                 lash_execution_contracts::process::ProcessStartRequest::engine(
                     kind.to_owned(),
                     payload,
@@ -336,7 +337,6 @@ impl KernelSteps {
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::LifetimeDecision::Detached,
                 ),
-                core.effect_host(),
             )
             .await
             .map(|receipt| receipt.process_id)

@@ -407,7 +407,7 @@ impl StaticToolExecute for ExtTools {
                     pending.on_cancel = hint;
                     return lash_core::ToolAttemptOutcome::pending(
                         pending.resolved_by_declared_start(
-                            call.context.declare_start(declared.unwrap()).unwrap(),
+                            call.context.processes().start(declared.unwrap()).unwrap(),
                         ),
                     );
                 }

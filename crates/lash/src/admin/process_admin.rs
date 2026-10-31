@@ -1,6 +1,5 @@
 use super::AdminContext;
 use crate::support::{Arc, EmbedError, Result};
-use lash_core::ActorContext;
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
 
@@ -43,8 +42,8 @@ impl SessionProcessAdmin {
 
     pub async fn start(
         &self,
+        operation: crate::OperationId,
         request: lash_execution_contracts::process::ProcessStartRequest,
-        scoped_effect_controller: ActorContext,
     ) -> Result<lash_execution_contracts::process::ProcessHandleView> {
         let (session_id, processes) = {
             let writer = self.context.runtime.writer();
@@ -54,11 +53,10 @@ impl SessionProcessAdmin {
                 runtime.process_service()?,
             )
         };
-        let request = scoped_effect_controller
-            .key_host_start(request)
-            .map_err(EmbedError::Plugin)?;
+        let request = operation.key_start(request);
         let start_key = request.start_key().cloned();
-        let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
+        let actor = self.context.target.context().await?.parts.effect_host;
+        let scope = lash_core::facade_support::process_scope(operation.bind(&actor)?);
         let summary = processes
             .start_from_request(&session_id, request, scope)
             .await
@@ -164,8 +162,8 @@ impl SessionProcessAdmin {
     /// Requests cancellation of a process.
     pub async fn cancel(
         &self,
+        operation: crate::OperationId,
         process_id: &ProcessId,
-        scoped_effect_controller: ActorContext,
     ) -> Result<lash_execution_contracts::process::ProcessCancelReceipt> {
         let (owner, processes) = {
             let writer = self.context.runtime.writer();
@@ -177,7 +175,8 @@ impl SessionProcessAdmin {
                 runtime.process_service()?,
             )
         };
-        let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
+        let actor = self.context.target.context().await?.parts.effect_host;
+        let scope = lash_core::facade_support::process_scope(operation.bind(&actor)?);
         processes
             .validate_visible(&owner, std::slice::from_ref(process_id), scope.clone())
             .await
@@ -193,7 +192,7 @@ impl SessionProcessAdmin {
     /// Requests cancellation of every process in the session.
     pub async fn cancel_all(
         &self,
-        scoped_effect_controller: ActorContext,
+        operation: crate::OperationId,
     ) -> Result<Vec<lash_execution_contracts::process::ProcessCancelReceipt>> {
         let (session_id, processes) = {
             let writer = self.context.runtime.writer();
@@ -203,7 +202,8 @@ impl SessionProcessAdmin {
                 runtime.process_service()?,
             )
         };
-        let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
+        let actor = self.context.target.context().await?.parts.effect_host;
+        let scope = lash_core::facade_support::process_scope(operation.bind(&actor)?);
         let summaries = processes
             .cancel_all_visible(&session_id, scope)
             .await
@@ -214,9 +214,9 @@ impl SessionProcessAdmin {
     /// Re-homes addressability only; the process itself is global.
     pub async fn transfer(
         &self,
+        operation: crate::OperationId,
         to_session_id: &SessionId,
         process_ids: Vec<ProcessId>,
-        scoped_effect_controller: ActorContext,
     ) -> Result<()> {
         let (session_id, processes) = {
             let writer = self.context.runtime.writer();
@@ -226,7 +226,8 @@ impl SessionProcessAdmin {
                 runtime.process_service()?,
             )
         };
-        let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
+        let actor = self.context.target.context().await?.parts.effect_host;
+        let scope = lash_core::facade_support::process_scope(operation.bind(&actor)?);
         processes
             .transfer(&session_id, to_session_id, process_ids, scope)
             .await

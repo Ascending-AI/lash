@@ -132,6 +132,91 @@ mod finish_tool;
 pub use finish_tool::{FinishToolProvider, finish_tool, finish_tool_id, suppress_default_finish};
 
 pub mod facade_support {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn lent_test_execution_ports(
+        backend: &lash_execution_contracts::backend::Backend,
+        actor: crate::ActorContext,
+    ) -> crate::testing::TestExecutionPorts {
+        crate::testing::TestExecutionPorts::lent(backend, actor)
+    }
+
+    pub fn execution_actor<'a>(
+        context: &'a crate::RuntimeExecutionContext<'_>,
+    ) -> &'a crate::ActorContext {
+        context.actor_context()
+    }
+    pub fn trace_shift(
+        tracing: &crate::trace::TraceRuntime,
+        scope: Option<lash_trace::DurableTraceScope>,
+        actor: &crate::ActorContext,
+    ) -> crate::trace::TraceStanding {
+        tracing.shift(scope, actor)
+    }
+    pub async fn record_trace_boundary(
+        tracing: &crate::trace::TraceRuntime,
+        actor: &crate::ActorContext,
+        key: String,
+        retained: lash_trace::DurableTraceScope,
+        transition: lash_trace::TraceTransitionKind,
+    ) -> Result<crate::trace::TraceBoundaryReceipt, crate::RuntimeEffectControllerError> {
+        tracing
+            .record_boundary(actor, key, retained, transition)
+            .await
+    }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal task invocation binds its actor, services, cancellation, and trace together"
+    )]
+    pub async fn run_plugin_task(
+        plugins: &crate::PluginSession,
+        name: &str,
+        args: serde_json::Value,
+        session_id: Option<lash_kernel_value::identity::SessionId>,
+        default_to_current_session: bool,
+        bindings: std::sync::Arc<crate::plugin::ServiceBindings>,
+        actor: crate::ActorContext,
+        cancellation: tokio_util::sync::CancellationToken,
+        trace: crate::trace::ExtensionTrace,
+    ) -> Result<
+        (
+            String,
+            crate::plugin::PluginOperationOutcome<serde_json::Value>,
+        ),
+        crate::plugin::PluginOperationInvokeError,
+    > {
+        plugins
+            .run_plugin_task(
+                name,
+                args,
+                session_id,
+                default_to_current_session,
+                bindings,
+                actor,
+                cancellation,
+                trace,
+            )
+            .await
+    }
+    pub fn plugin_task_actor(context: &crate::plugin::PluginTaskContext) -> &crate::ActorContext {
+        &context.scoped_effect_controller
+    }
+    pub fn process_scope(actor: crate::ActorContext) -> crate::ProcessOpScope<'static> {
+        crate::ProcessOpScope::new(actor)
+    }
+    pub fn process_actor<'a>(scope: &'a crate::ProcessOpScope<'_>) -> &'a crate::ActorContext {
+        &scope.effect_controller
+    }
+
+    pub fn runtime_actor(control: &crate::runtime::RuntimeControlConfig) -> &crate::ActorContext {
+        &control.effect_host
+    }
+    pub fn bind_runtime_actor(
+        control: &mut crate::runtime::RuntimeControlConfig,
+        actor: crate::ActorContext,
+    ) {
+        control.effect_host = actor;
+    }
+
     pub use crate::Response;
     pub use crate::runtime::effect::scope_status;
     pub use lash_core_ids::operational_metrics::{DurableCommitCost, StoreObserver, sql, turn};
@@ -1096,10 +1181,10 @@ pub(crate) use store::{
 /// running inside a durable process.
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessRequest,
-    IsolatedStart, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ResolveTargetError,
-    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcesses, AttemptSessionReads, IsolatedProcessRequest, IsolatedStart,
+    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ResolveTargetError, ToolCall,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProvider,
 };
 
 pub(crate) use lash_core_store::process_identity::StartKeyDerivation;

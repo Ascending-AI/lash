@@ -176,14 +176,6 @@ fn processes_area_witnesses_b() {
     variant_witness(|value: &lash::runtime::RuntimeEffectKind| {
         matches!(value, lash::runtime::RuntimeEffectKind::Process)
     });
-    // W0408: lash::runtime::RuntimeEffectLocalExecutor::into_process [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::into_process;
-    // W0409: lash::runtime::RuntimeEffectLocalExecutor::processes [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::processes;
-    // W0410: lash::runtime::RuntimeEffectLocalExecutor::take_process_outcome_observer [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::take_process_outcome_observer;
-    // W0411: lash::runtime::RuntimeEffectLocalExecutor::with_process_outcome_observer [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_outcome_observer;
     // W0412: lash::runtime::RuntimeEffectOutcome::Process [variant]
     variant_witness(|value: &lash::runtime::RuntimeEffectOutcome| {
         matches!(value, lash::runtime::RuntimeEffectOutcome::Process { .. })
@@ -425,8 +417,6 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessRunOutcome::is_terminal;
     // W0687: lash::plugins::ProcessRunOutcome::terminal_output [function]
     let _ = lash::plugins::ProcessRunOutcome::terminal_output;
-    // W0691: lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_env_store;
     // W0692: lash::durability::ProcessLocalExecution::process_env_store [field]
     field_witness(|value: &lash::durability::ProcessLocalExecution| {
         let _ = &value.process_env_store;

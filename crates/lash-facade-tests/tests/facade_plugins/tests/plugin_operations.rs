@@ -45,7 +45,7 @@ async fn a_task_that_commits_a_phase_settles_its_head_once() -> Result<()> {
             let seen = Arc::clone(&seen);
             async move {
                 seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let owner = &ctx.scoped_effect_controller;
+                let owner = lash_core::facade_support::plugin_task_actor(&ctx);
                 let tx = owner.begin().await.map_err(|error| error.to_string())?;
                 owner
                     .commit(
@@ -108,7 +108,6 @@ async fn a_session_operation_keeps_its_artifact_referrer_live_until_settlement()
             let published = published.clone();
             async move {
                 let journal = ctx
-                    .scoped_effect_controller
                     .execution_scope()
                     .journal_identity()
                     .map_err(|error| error.to_string())?;
@@ -284,7 +283,7 @@ async fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> 
                 let first = first.clone();
                 async move {
                     assert!(matches!(
-                        ctx.scoped_effect_controller.execution_scope(),
+                        ctx.execution_scope(),
                         lash_core::ExecutionScope::SessionOperation { .. }
                     ));
                     if first.swap(false, std::sync::atomic::Ordering::SeqCst) {
@@ -365,8 +364,8 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
         let spec = lash_core::facade_support::PluginSpec::new()
             .with_plugin_task_typed::<Task, _, _>(|ctx, _| async move {
                 let session = ctx.session_id.clone().unwrap();
-                let scope = lash_core::ProcessOpScope::new(ctx.scoped_effect_controller);
-                let cx = scope
+                let processes = ctx.processes();
+                let cx = processes
                     .start_cx()
                     .map_err(|error| error.to_string())?
                     .expect("an operation is an opener");
@@ -382,16 +381,14 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
                     ),
                 ] {
                     let request = lash_execution_contracts::testing::held_engine_request(
-                        serde_json::Value::Null,
+                        serde_json::json!({ "child": key }),
                         lash_execution_contracts::process::ProcessOriginator::session(
                             lash_execution_contracts::process::SessionScope::new(session.clone()),
                         ),
                         lifetime,
-                    )
-                    .with_host_start_key(format!("operation-session-process:{key}"));
-                    let process = ctx
-                        .bindings
-                        .start_from_request(&session, request, scope.clone())
+                    );
+                    let process = processes
+                        .start(request)
                         .await
                         .map_err(|error| error.to_string())?;
                     started.push(process.process_id.to_string());

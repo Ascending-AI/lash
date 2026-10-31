@@ -3,7 +3,7 @@ use lash_core_store::tool_surface::RecordedPackages;
 use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 pub(crate) async fn record(ctx: &lash_core::RuntimeExecutionContext<'_>) -> RecordedPackages {
-    let backend = ctx.actor_context().backend();
+    let backend = lash_core::facade_support::execution_actor(ctx).backend();
     let store = backend.package_store();
     let claim = ctx.execution_claim().expect("cell execution claim");
     let consumer = PublicationContext {

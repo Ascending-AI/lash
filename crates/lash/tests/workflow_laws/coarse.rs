@@ -707,6 +707,7 @@ async fn launch(
     let process = core
         .processes()
         .start(
+            lash::OperationId::new(key),
             lash::process::ProcessStartRequest::definition(
                 definition.id,
                 Some(definition.signature),
@@ -714,9 +715,7 @@ async fn launch(
                 lash::process::EngineLaunch::new(env_ref, Some(settings)),
                 lash::process::ProcessOriginator::host(),
                 lash::process::Lifetime::Detached,
-            )
-            .with_host_start_key(key),
-            core.effect_host(),
+            ),
         )
         .await
         .unwrap()

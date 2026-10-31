@@ -32,6 +32,7 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
         .core
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash_execution_contracts::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                 payload,
@@ -39,7 +40,6 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
-            deployment.core.effect_host(),
         )
         .await
         .expect_err("a start over a document no store holds is refused");

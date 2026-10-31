@@ -37,7 +37,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         .output_into(&events)
         .await?;
     let transcript = lash_core::testing::turn_transcript(
-        running.effect_host().durable_reads()?,
+        running.actor_context().durable_reads()?,
         &session_id,
         &run,
     )

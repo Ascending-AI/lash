@@ -179,9 +179,10 @@ pub async fn start(
         EngineLaunch::new(env, Some(settings)),
         ProcessOriginator::host(),
         Lifetime::Detached,
-    )
-    .with_host_start_key(key);
-    core.processes().start(request, core.effect_host()).await
+    );
+    core.processes()
+        .start(lash::OperationId::new(key), request)
+        .await
 }
 // ANCHOR_END: publish
 

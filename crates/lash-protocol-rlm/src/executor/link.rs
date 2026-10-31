@@ -302,13 +302,12 @@ pub(super) async fn link_cell(
         environment.registry,
     );
     if !ctx.hold_cell_registration(&registration) {
-        let mut tx = ctx
-            .actor_context()
+        let mut tx = lash_core::facade_support::execution_actor(ctx)
             .begin()
             .await
             .map_err(|error| host_failure(error.to_string()))?;
         tx.register_execution(registration);
-        ctx.actor_context()
+        lash_core::facade_support::execution_actor(ctx)
             .commit(tx, lash_durable::CommitLabel::new("execution.register"))
             .await
             .map_err(|error| host_failure(error.to_string()))?;

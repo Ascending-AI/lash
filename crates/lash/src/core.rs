@@ -411,9 +411,9 @@ impl LashCore {
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
         let ports = self.substrate_slot.ports().await;
         let env = self.env.clone().with_work_ports(ports.process.clone());
-        lash_core::SessionAdministration::new(
+        lash_core::facade_support::session_administration(
             Arc::clone(&self.store_factory),
-            env.core.control.effect_host.clone(),
+            lash_core::facade_support::runtime_actor(&env.core.control).clone(),
             Some(ports.process),
             Arc::clone(&env.core.durability.process_env_store),
             self.host_process_engines.clone(),
@@ -530,8 +530,8 @@ impl LashCore {
         crate::admin::Completions { core: self.clone() }
     }
 
-    pub fn effect_host(&self) -> ActorContext {
-        self.env.core.control.effect_host.clone()
+    pub(crate) fn actor_context(&self) -> ActorContext {
+        lash_core::facade_support::runtime_actor(&self.env.core.control).clone()
     }
 
     /// Exact-turn cooperative control for this deployment's effect host.
@@ -547,7 +547,7 @@ impl LashCore {
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
     pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
-        let backend = self.effect_host().backend().clone();
+        let backend = self.actor_context().backend().clone();
         let withdrawals = facade_support::QueueWithdrawalObservation::new(
             backend.session_store_factory(),
             Arc::clone(&self.live_replay_store),

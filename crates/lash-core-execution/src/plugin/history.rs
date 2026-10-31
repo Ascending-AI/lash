@@ -57,7 +57,7 @@ pub struct CompactionContext<'run> {
     pub instructions: Option<String>,
     pub state: SessionReadView,
     pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ActorContext,
+    pub execution_scope: crate::ExecutionScope,
     /// A summarizer call through it, made for
     /// [`PromptPurpose::Compaction`](crate::prompt_sections::PromptPurpose::Compaction),
     /// composes the session's compaction sections over an empty tool offer
@@ -90,7 +90,7 @@ pub struct ContextPressureContext<'run> {
     /// The context window the turn's model runs under.
     pub max_context_tokens: Option<usize>,
     pub traces: PluginTraceEmitter,
-    pub scoped_effect_controller: crate::ActorContext,
+    pub execution_scope: crate::ExecutionScope,
     /// A summarizer call through it is made for the compaction purpose, as
     /// [`CompactionContext::direct_completions`] says.
     pub direct_completions: crate::DirectCompletionClient<'run>,

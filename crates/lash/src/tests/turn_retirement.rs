@@ -284,7 +284,7 @@ async fn assert_retired(
     let transcript = lash_core::testing::turn_transcript(
         world
             .core
-            .effect_host()
+            .actor_context()
             .durable_reads()
             .expect("the durable reads"),
         &lash_kernel_value::identity::SessionId::fixture(session),
@@ -360,7 +360,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     .expect("the cell parks on its approval")?;
     let (settled, pending) =
         lash_core::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
-            &world.core.effect_host(),
+            &world.core.actor_context(),
             session.session_id(),
             &lash_vocabulary::identity::TurnId::fixture(run),
             Some(&lash_vocabulary::identity::TurnId::fixture(run)),
@@ -512,7 +512,7 @@ async fn a_committed_turn_retires_its_consumed_cell_and_compacts_its_waits() -> 
 
     assert_retired(&world, session_name, run).await;
     let transcript = lash_core::testing::turn_transcript(
-        world.core.effect_host().durable_reads()?,
+        world.core.actor_context().durable_reads()?,
         session.session_id(),
         &lash_vocabulary::identity::TurnId::fixture(run),
     )

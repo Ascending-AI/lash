@@ -181,13 +181,13 @@ impl PluginOperationInvocation {
                 bindings,
                 scoped_effect_controller,
                 cancellation_token,
-            } => PluginOperationContext::Task(PluginTaskContext {
+            } => PluginOperationContext::Task(PluginTaskContext::new(
                 session_id,
                 bindings,
                 scoped_effect_controller,
                 cancellation_token,
                 trace,
-            }),
+            )),
         }
     }
 }
@@ -1110,7 +1110,7 @@ impl PluginSession {
         clippy::too_many_arguments,
         reason = "plugin task invocation carries mutation services plus the scoped effect boundary"
     )]
-    pub async fn run_plugin_task(
+    pub(crate) async fn run_plugin_task(
         &self,
         name: &str,
         args: serde_json::Value,

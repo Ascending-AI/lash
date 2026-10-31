@@ -1670,7 +1670,7 @@ async fn start_under(
         lash_execution_contracts::process::LifetimeDecision::Detached,
     );
     core.processes()
-        .start(shape(request), core.effect_host())
+        .start(lash::OperationId::mint(), shape(request))
         .await
         .expect("the process starts")
         .process_id
@@ -1835,7 +1835,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
         let receipt = deployment
             .core
             .processes()
-            .start(request, deployment.core.effect_host())
+            .start(lash::OperationId::mint(), request)
             .await;
         artifacts.release(pin).await.expect("the pin is released");
         let process = receipt

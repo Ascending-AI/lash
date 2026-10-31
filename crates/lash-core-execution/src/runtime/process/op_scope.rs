@@ -1,4 +1,3 @@
-use crate::ActorContext;
 /// Passive correlation with the language call that declared a process start.
 #[derive(Clone)]
 pub(crate) struct LanguageCallAttribution {
@@ -18,7 +17,7 @@ pub(crate) type LanguageCallAttributions = std::sync::Arc<
 #[derive(Clone)]
 pub struct ProcessOpScope<'scope> {
     pub parent_invocation: Option<crate::RuntimeInvocation>,
-    pub effect_controller: crate::ActorContext,
+    pub(crate) effect_controller: crate::ActorContext,
     pub agent_frame_id: Option<crate::FrameNodeId>,
     pub turn_cancellation: Option<crate::ProcessTurnCancellation>,
     /// The lineage of the process this operation runs inside, when it runs
@@ -43,7 +42,7 @@ impl<'scope> ProcessOpScope<'scope> {
 
     /// Constructs a `ProcessOpScope` for store and durable-substrate implementors while persisting
     /// and coordinating durable process execution.
-    pub fn new(scoped_effect_controller: crate::ActorContext) -> Self {
+    pub(crate) fn new(scoped_effect_controller: crate::ActorContext) -> Self {
         Self {
             parent_invocation: None,
             effect_controller: scoped_effect_controller,
@@ -224,10 +223,6 @@ impl<'scope> ProcessOpScope<'scope> {
     /// coordinating durable process execution.
     pub fn agent_frame_id(&self) -> Option<&crate::FrameNodeId> {
         self.agent_frame_id.as_ref()
-    }
-
-    pub fn controller(&self) -> &ActorContext {
-        &self.effect_controller
     }
 }
 

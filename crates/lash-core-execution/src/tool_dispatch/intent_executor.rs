@@ -10,7 +10,7 @@ use super::ToolDispatchContext;
 /// lash store to commit with the call's outcome (ADR 0132 §5).
 pub struct IntentRealizationContext<'run> {
     pub limits: lash_execution_contracts::tool_intent::ToolIntentLimits,
-    pub effect_controller: crate::ActorContext,
+    pub(crate) effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
     pub processes: Arc<dyn crate::ProcessService>,
     pub process_engines: crate::ProcessEngineRegistry,

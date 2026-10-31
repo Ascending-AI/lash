@@ -123,7 +123,7 @@ async fn a_cancel_during_a_sleep_reports_it_cancelled_and_leaves_an_elapsed_one_
         let core = core_over(files.open().await, "cancelled-sleep-resumed").await;
         timer_park_after(&core, &process, first).await;
         core.processes()
-            .cancel(&process, core.effect_host())
+            .cancel(lash::OperationId::mint(), &process)
             .await
             .expect("the cancel is requested");
         let output = tokio::time::timeout(

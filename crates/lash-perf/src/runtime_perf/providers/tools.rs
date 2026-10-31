@@ -1,7 +1,7 @@
 use super::*;
 
 impl BenchmarkEchoTool {
-    pub(crate) fn new(completion_resolver: lash::runtime::ActorContext) -> Self {
+    pub(crate) fn new(completion_resolver: lash::Backend) -> Self {
         Self {
             completion_resolver,
             completion_witness: crate::runtime_perf::smoke::completion_witness(),
@@ -10,7 +10,7 @@ impl BenchmarkEchoTool {
     }
 
     pub(crate) fn with_settlement_control(
-        completion_resolver: lash::runtime::ActorContext,
+        completion_resolver: lash::Backend,
         settlement_control: Arc<BenchmarkSettlementControl>,
     ) -> Self {
         Self {
@@ -207,7 +207,7 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
 }
 
 async fn execute_benchmark_async(
-    completion_resolver: lash::runtime::ActorContext,
+    completion_resolver: lash::Backend,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
     completion_witness: Option<Arc<crate::runtime_perf::smoke::CompletionWitness>>,
     call: lash_core::ToolCall<'_>,
@@ -237,7 +237,7 @@ async fn execute_benchmark_async(
         }
         drop(pending_phase);
         let outcome = lash_core::waits::resolve_host(
-            completion_resolver.backend(),
+            &completion_resolver,
             key.as_str(),
             Resolution::Ok(serde_json::json!({
                 "value": value,

@@ -28,7 +28,7 @@ impl crate::plugin::SessionReadService for RuntimeSessionStateService {
             )?
         };
         crate::runtime::durable::services::RuntimeTurnServices::committed_turn(
-            &current.host.core.control.effect_host,
+            crate::facade_support::runtime_actor(&current.host.core.control),
             &store,
             turn_id,
             &decoders,

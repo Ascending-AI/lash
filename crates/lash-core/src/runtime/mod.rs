@@ -77,9 +77,7 @@ mod session_api;
 mod session_carry;
 pub mod session_delete;
 use lash_core_store::session_catalog;
-pub use session_administration::{
-    SessionAdministration, SessionDeleteContext, SessionDeleteExecution,
-};
+pub use session_administration::{SessionAdministration, SessionDeleteContext};
 pub use session_catalog::*;
 #[cfg(feature = "testing")]
 pub mod session_manager;

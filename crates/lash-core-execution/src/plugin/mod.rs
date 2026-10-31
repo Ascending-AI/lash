@@ -25,6 +25,8 @@ pub use lash_protocol_types::{
 };
 
 mod actions;
+mod callback_processes;
+pub use callback_processes::CallbackProcesses;
 mod composition;
 mod config_observers;
 mod execution_state;

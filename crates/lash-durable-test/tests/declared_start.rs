@@ -442,7 +442,8 @@ impl DeclaringProbe {
         forge: Forge,
     ) -> Result<Option<lash_execution_contracts::DeclaredStart>, String> {
         let declared = context
-            .declare_start(start)
+            .processes()
+            .start(start)
             .map_err(|error| error.to_string())?;
         let mut bytes = serde_json::to_value(&declared).map_err(|error| error.to_string())?;
         match forge {

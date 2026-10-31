@@ -539,6 +539,7 @@ mod tests {
         let start = || async {
             core.processes()
                 .start(
+                    crate::OperationId::mint(),
                     crate::process::ProcessStartRequest::definition(
                         publication.id.clone(),
                         Some(publication.signature.clone()),
@@ -555,7 +556,6 @@ mod tests {
                         crate::process::ProcessOriginator::host(),
                         crate::process::Lifetime::Detached,
                     ),
-                    core.effect_host(),
                 )
                 .await
                 .unwrap()

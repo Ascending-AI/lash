@@ -97,6 +97,7 @@ impl Module {
         let process = core
             .processes()
             .start(
+                lash::OperationId::new(format!("{:?}-{entry}", self.language)),
                 lash::process::ProcessStartRequest::definition(
                     publication.definition.id.clone(),
                     Some(publication.definition.signature.clone()),
@@ -104,9 +105,7 @@ impl Module {
                     lash::process::EngineLaunch::new(env_ref, Some(settings)),
                     lash::process::ProcessOriginator::host(),
                     lash::process::Lifetime::Detached,
-                )
-                .with_host_start_key(format!("{:?}-{entry}", self.language)),
-                core.effect_host(),
+                ),
             )
             .await
             .expect("the process starts")

@@ -83,7 +83,7 @@ pub(crate) async fn execute_cell(
     request: ExecRequest,
     services: &CellServices,
 ) -> ExecResponse {
-    let backend = ctx.actor_context().backend();
+    let backend = lash_core::facade_support::execution_actor(&ctx).backend();
     let library = match services.workers.config().worker_library() {
         Ok(library) => library,
         Err(error) => {
@@ -128,7 +128,7 @@ pub(crate) async fn execute_cell(
         }
     };
     let snapshots = Arc::new(lash_vm_broker::DurableSnapshotStore::new(
-        ctx.actor_context(),
+        lash_core::facade_support::execution_actor(&ctx),
         exec.clone(),
     ));
     let opened = match opened {
@@ -181,7 +181,9 @@ pub(crate) async fn execute_cell(
     // A cell with no parked state enters its program from the start: the
     // one entry no resume may repeat (ADR 0132 §8).
     if !resumes && opened.is_ok() {
-        ctx.actor_context().probe().vm_program_entered(&exec);
+        lash_core::facade_support::execution_actor(&ctx)
+            .probe()
+            .vm_program_entered(&exec);
     }
     // Boxed: the cell's outputs are prepared under the same context after
     // the cell, and an unboxed context held across the cell would size
@@ -371,7 +373,9 @@ async fn run_cell(
     // (FIG-6000).
     if let Some(held) = ctx.held_response()
         && !services.workers.worker_ready()
-        && let Err(error) = held.commit_alone(ctx.actor_context()).await
+        && let Err(error) = held
+            .commit_alone(lash_core::facade_support::execution_actor(&ctx))
+            .await
     {
         let message = format!("the model response that asked for the cell did not commit: {error}");
         ctx.record_nested_effect_error(
@@ -383,16 +387,19 @@ async fn run_cell(
         ));
     }
     state.begin_code_execution();
-    state.page_clock(Arc::clone(ctx.actor_context().clock()));
+    state.page_clock(Arc::clone(
+        lash_core::facade_support::execution_actor(&ctx).clock(),
+    ));
     state.note_pages(ctx.session_pages());
     // The wall time the cell held workers before this activation counts
     // against its cap (FIG-6786).
     let held = resumed.as_ref().map_or(std::time::Duration::ZERO, |cell| {
         std::time::Duration::from_millis(cell.graph.state.held_ms)
     });
-    let workers = services
-        .workers
-        .begin_execution(held, Arc::clone(ctx.actor_context().clock()));
+    let workers = services.workers.begin_execution(
+        held,
+        Arc::clone(lash_core::facade_support::execution_actor(&ctx).clock()),
+    );
     let services = CellServices {
         workers,
         ..services.clone()
@@ -444,8 +451,7 @@ async fn run_linked_cell(
     };
     let execution = link::execution_id(snapshots.exec());
     let mut pins = BTreeMap::new();
-    let resolutions = ctx
-        .actor_context()
+    let resolutions = lash_core::facade_support::execution_actor(&ctx)
         .backend()
         .stores()
         .execution_resolutions();
@@ -599,7 +605,7 @@ async fn run_linked_cell(
     let ledgers = Arc::new(Mutex::new(ledgers));
     let plans_reads = !routes.is_empty();
     let cell_reads = Arc::new(reads::CellReads {
-        clock: Arc::clone(ctx.actor_context().clock()),
+        clock: Arc::clone(lash_core::facade_support::execution_actor(&ctx).clock()),
         routes,
         history: ctx.read_history(),
         config: ctx.owner_config().clone(),

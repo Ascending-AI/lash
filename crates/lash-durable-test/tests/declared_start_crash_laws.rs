@@ -451,7 +451,7 @@ impl Spawn {
         );
         request.observers = vec![session()];
         core.processes()
-            .start(request, core.effect_host())
+            .start(lash::OperationId::mint(), request)
             .await
             .map(|started| started.process_id)
             .map_err(|error| format!("start the target: {error}"))

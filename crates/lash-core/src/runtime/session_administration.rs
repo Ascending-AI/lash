@@ -26,7 +26,7 @@ impl SessionAdministration {
     ///
     /// This is a trusted host integration boundary. The host must compose all
     /// supplied services from the same physical persistence deployment.
-    pub fn new(
+    pub(crate) fn new(
         store_factory: Arc<dyn DeploymentStore>,
         effect_host: ActorContext,
         process: Option<ProcessWorkWiring>,
@@ -42,20 +42,8 @@ impl SessionAdministration {
         }
     }
 
-    /// Replace the execution host while retaining this administration owner.
-    ///
-    /// Backend adapters use this only while installing their own executor.
-    pub fn with_effect_host(mut self, effect_host: ActorContext) -> Self {
-        self.effect_host = effect_host;
-        self
-    }
-
     pub fn store_factory(&self) -> &Arc<dyn DeploymentStore> {
         &self.store_factory
-    }
-
-    pub fn effect_host(&self) -> &ActorContext {
-        &self.effect_host
     }
 
     pub fn process(&self) -> Option<&ProcessWorkWiring> {
@@ -81,28 +69,6 @@ impl SessionAdministration {
     }
 }
 
-/// Trusted backend seam for issuing a deletion controller with its owner.
-///
-/// Rust keeps the returned controller and administration inseparable after
-/// issuance. Implementations remain responsible for truthfully pairing their
-/// SDK handler context with the physical deployment behind `administration`;
-/// the type system cannot inspect external routing configuration.
-pub trait SessionDeleteExecution {
-    fn administration(&self) -> &SessionAdministration;
-
-    fn scoped(&self, admitted: AdmittedScope) -> Result<ActorContext, RuntimeError>;
-}
-
-impl SessionDeleteExecution for SessionAdministration {
-    fn administration(&self) -> &SessionAdministration {
-        self
-    }
-
-    fn scoped(&self, admitted: AdmittedScope) -> Result<ActorContext, RuntimeError> {
-        self.effect_host.scoped(admitted)
-    }
-}
-
 /// Owner-issued capability for deleting exactly one session.
 pub struct SessionDeleteContext<'a> {
     session_id: SessionId,
@@ -113,23 +79,18 @@ pub struct SessionDeleteContext<'a> {
 }
 
 impl<'a> SessionDeleteContext<'a> {
-    /// Mint a context from a trusted backend execution adapter.
-    ///
-    /// The session-delete scope is derived here; callers cannot supply a scope
-    /// for one session alongside administration services for another.
-    pub fn from_execution<E>(
-        executor: &'a E,
+    fn from_execution(
+        administration: &SessionAdministration,
         session_id: impl AsRef<str>,
-    ) -> Result<Self, RuntimeError>
-    where
-        E: SessionDeleteExecution + ?Sized,
-    {
+    ) -> Result<Self, RuntimeError> {
         let session_id = SessionId::parse(session_id.as_ref())?;
-        let controller = executor.scoped(AdmittedScope::session_delete(&session_id))?;
+        let controller = administration
+            .effect_host
+            .scoped(AdmittedScope::session_delete(&session_id))?;
         Ok(Self {
             run: std::marker::PhantomData,
             session_id,
-            administration: executor.administration().clone(),
+            administration: administration.clone(),
             controller,
         })
     }
@@ -142,7 +103,7 @@ impl<'a> SessionDeleteContext<'a> {
         &self.administration
     }
 
-    pub fn controller(&self) -> &ActorContext {
+    pub(crate) fn controller(&self) -> &ActorContext {
         &self.controller
     }
 }

@@ -258,11 +258,55 @@ pub struct PluginCommandContext {
 pub struct PluginTaskContext {
     pub session_id: Option<SessionId>,
     pub bindings: Arc<ServiceBindings>,
-    pub scoped_effect_controller: crate::ActorContext,
+    pub(crate) scoped_effect_controller: crate::ActorContext,
+    processes: Arc<super::CallbackProcesses>,
     pub cancellation_token: tokio_util::sync::CancellationToken,
     /// Where the operation stands in the trace: under the producer span of
     /// the host call that admitted it; untraced for a query.
     pub(crate) trace: crate::trace::ExtensionTrace,
+}
+
+impl PluginTaskContext {
+    pub(crate) fn new(
+        session_id: Option<SessionId>,
+        bindings: Arc<ServiceBindings>,
+        scoped_effect_controller: crate::ActorContext,
+        cancellation_token: tokio_util::sync::CancellationToken,
+        trace: crate::trace::ExtensionTrace,
+    ) -> Self {
+        let processes = Arc::new(super::CallbackProcesses {
+            session: session_id.clone(),
+            service: bindings.clone(),
+            scope: crate::ProcessOpScope::new(scoped_effect_controller.clone())
+                .with_turn_cancellation(&crate::runtime::TurnCancelWait::observing(
+                    cancellation_token.clone(),
+                    scoped_effect_controller.execution_scope().clone(),
+                )),
+        });
+        Self {
+            session_id,
+            bindings,
+            scoped_effect_controller,
+            processes,
+            cancellation_token,
+            trace,
+        }
+    }
+
+    /// Passive correlation for the admitted execution of this callback.
+    pub fn execution_scope(&self) -> &crate::ExecutionScope {
+        self.scoped_effect_controller.execution_scope()
+    }
+
+    /// The runtime's stable correlation identity for this callback's scope.
+    pub fn execution_scope_id(&self) -> &str {
+        self.scoped_effect_controller.scope_id()
+    }
+
+    /// Operations attributed to this task's runtime scope and deployment.
+    pub fn processes(&self) -> super::CallbackProcesses {
+        self.processes.as_ref().clone()
+    }
 }
 
 macro_rules! operation_trace {

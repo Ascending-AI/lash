@@ -55,7 +55,7 @@ impl From<ActorContext> for TestEffectController {
 /// without one names each port it runs the law over.
 #[derive(Clone)]
 pub struct TestExecutionPorts {
-    pub effect_host: ActorContext,
+    pub(crate) effect_host: ActorContext,
     pub process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     pub artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
     pub process_engines: crate::ProcessEngineRegistry,
@@ -69,7 +69,7 @@ pub struct TestExecutionPorts {
     /// it opens that execution, lends its controller here, and closes it once
     /// the context is gone: the borrow keeps the context from outliving it.
     /// `None` takes the host's own controller.
-    pub lent_controller: Option<crate::ActorContext>,
+    pub(crate) lent_controller: Option<crate::ActorContext>,
 }
 
 impl TestExecutionPorts {
@@ -84,7 +84,7 @@ impl TestExecutionPorts {
     /// The controller's admitted scope is the scope the context claims: the
     /// default test turn of the builder's session, or the scope of the parent
     /// invocation the fixture installs. The build refuses a disagreement.
-    pub fn lent(
+    pub(crate) fn lent(
         backend: &lash_execution_contracts::backend::Backend,
         controller: crate::ActorContext,
     ) -> Self {
@@ -110,25 +110,6 @@ impl TestExecutionPorts {
             Arc::clone(&self.clock),
         ));
         self
-    }
-
-    /// Ports over a tier's bare host, for a conformance law that proves a
-    /// host rather than a backend: the process-exec-env store the tier
-    /// supplies beside it, no attachment port (puts are refused), and the
-    /// system clock.
-    pub fn over_host(
-        effect_host: ActorContext,
-        process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
-    ) -> Self {
-        Self {
-            effect_host,
-            process_env_store,
-            artifact_ports: None,
-            process_engines: crate::ProcessEngineRegistry::new(),
-            attachment_store: Arc::new(crate::attachments::UnavailableAttachmentStore),
-            clock: Arc::new(crate::SystemClock),
-            lent_controller: None,
-        }
     }
 }
 

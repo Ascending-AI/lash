@@ -73,9 +73,13 @@ async fn setup(
     Path(session): Path<lash::SessionId>,
 ) -> AppResult<Json<lash::persistence::ProcessStartReceipt>> {
     let core = &state.app.core;
-    let receipt = receiver::register_receiver(core, &session, core.effect_host())
-        .await
-        .map_err(error)?;
+    let receipt = receiver::register_receiver(
+        core,
+        &session,
+        lash::OperationId::new(format!("h2-receiver:{session}")),
+    )
+    .await
+    .map_err(error)?;
     std::fs::write(
         &state.retained_path,
         serde_json::to_vec(&receipt.process_id).map_err(error)?,
@@ -103,9 +107,14 @@ async fn start_sleeper(
             .map_err(error)?,
     );
     let core = &state.app.core;
-    let receipt = receiver::start_sleeper(core, &session, millis, core.effect_host())
-        .await
-        .map_err(error)?;
+    let receipt = receiver::start_sleeper(
+        core,
+        &session,
+        millis,
+        lash::OperationId::new(format!("h2-sleeper:{session}")),
+    )
+    .await
+    .map_err(error)?;
     if state.receiver.set(receipt.process_id.clone()).is_err() {
         return Err(error("the fixture is bound to another process"));
     }
@@ -119,9 +128,14 @@ async fn start_source(
 ) -> AppResult<Json<lash::persistence::ProcessStartReceipt>> {
     let core = &state.app.core;
     Ok(Json(
-        receiver::start_source(core, &session, &key, core.effect_host())
-            .await
-            .map_err(error)?,
+        receiver::start_source(
+            core,
+            &session,
+            &key,
+            lash::OperationId::new(format!("h2-source:{session}:{key}")),
+        )
+        .await
+        .map_err(error)?,
     ))
 }
 

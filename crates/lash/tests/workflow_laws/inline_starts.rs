@@ -552,40 +552,45 @@ fn inline_request(
     n: i64,
     launch: &lash_execution_contracts::process::EngineLaunch,
     key: &str,
-) -> lash_execution_contracts::process::ProcessStartRequest {
+) -> (
+    lash::OperationId,
+    lash_execution_contracts::process::ProcessStartRequest,
+) {
     let mut args = serde_json::Map::new();
     args.insert("n".to_owned(), serde_json::json!(n));
-    lash_execution_contracts::process::ProcessStartRequest::inline(
-        lash::process::LASH_VM_ENGINE_KIND,
-        lash::vm::KernelInlineRequest::Callable {
-            link: value.callable.link,
-            function: Box::new(value.clone()),
-            origin: lash::package::CallableOrigin {
-                authored: [value.callable.link].into(),
-                publications: Default::default(),
-            },
-        }
-        .into_request(
-            Default::default(),
-            lash::package::PublicationContext {
-                domain: lash::package::PublicationDomain("inline-host".into()),
-                scope: lash::package::PublicationScope::Host,
-                publisher: lash::package::PublisherInstance("inline-laws".into()),
-                root: lash::package::Segment::new("inline").unwrap(),
-            },
-            lash::package::Attachment {
-                packages: Default::default(),
-                members: Default::default(),
-                deferred: Default::default(),
-            },
-        )
-        .unwrap(),
-        args,
-        launch.clone(),
-        lash_execution_contracts::process::ProcessOriginator::host(),
-        lash_execution_contracts::process::LifetimeDecision::Detached,
+    (
+        lash::OperationId::new(key),
+        lash_execution_contracts::process::ProcessStartRequest::inline(
+            lash::process::LASH_VM_ENGINE_KIND,
+            lash::vm::KernelInlineRequest::Callable {
+                link: value.callable.link,
+                function: Box::new(value.clone()),
+                origin: lash::package::CallableOrigin {
+                    authored: [value.callable.link].into(),
+                    publications: Default::default(),
+                },
+            }
+            .into_request(
+                Default::default(),
+                lash::package::PublicationContext {
+                    domain: lash::package::PublicationDomain("inline-host".into()),
+                    scope: lash::package::PublicationScope::Host,
+                    publisher: lash::package::PublisherInstance("inline-laws".into()),
+                    root: lash::package::Segment::new("inline").unwrap(),
+                },
+                lash::package::Attachment {
+                    packages: Default::default(),
+                    members: Default::default(),
+                    deferred: Default::default(),
+                },
+            )
+            .unwrap(),
+            args,
+            launch.clone(),
+            lash_execution_contracts::process::ProcessOriginator::host(),
+            lash_execution_contracts::process::LifetimeDecision::Detached,
+        ),
     )
-    .with_host_start_key(key)
 }
 
 /// The structured package refusal survives the controller and host boundary.
@@ -611,10 +616,13 @@ fn admission_refusal(
 
 async fn host_start(
     core: &lash::LashCore,
-    request: lash_execution_contracts::process::ProcessStartRequest,
+    (operation, request): (
+        lash::OperationId,
+        lash_execution_contracts::process::ProcessStartRequest,
+    ),
 ) -> lash::Result<lash_vocabulary::identity::ProcessId> {
     core.processes()
-        .start(request, core.effect_host())
+        .start(operation, request)
         .await
         .map(|receipt| receipt.process_id)
 }

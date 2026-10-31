@@ -444,7 +444,7 @@ impl TraceRuntime {
 
     /// The standing of shift code that issues its steps through `controller`:
     /// it may emit once one of those steps' bodies has really run.
-    pub fn shift(
+    pub(crate) fn shift(
         &self,
         scope: Option<DurableTraceScope>,
         controller: &crate::ActorContext,
@@ -475,7 +475,7 @@ impl TraceRuntime {
 
     /// The standing of the shift code that issues its steps through
     /// `controller`, under the scope that controller retained.
-    pub fn turn_execution(&self, controller: &crate::ActorContext) -> TraceStanding {
+    pub(crate) fn turn_execution(&self, controller: &crate::ActorContext) -> TraceStanding {
         self.shift(controller.trace_scope().cloned(), controller)
     }
 

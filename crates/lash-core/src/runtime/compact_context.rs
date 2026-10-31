@@ -206,7 +206,7 @@ impl LashRuntime {
             state,
             instructions,
             traces: services.trace_emitter(),
-            scoped_effect_controller: controller.clone(),
+            execution_scope: controller.execution_scope().clone(),
             direct_completions: services.direct_completion_client(controller.clone(), None),
             trace: self.hook_trace(controller),
         };

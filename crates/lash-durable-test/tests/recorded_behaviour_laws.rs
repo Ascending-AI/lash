@@ -360,6 +360,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     let started = first
         .processes()
         .start(
+            lash::OperationId::mint(),
             lash_execution_contracts::process::ProcessStartRequest::engine(
                 lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                 payload,
@@ -367,7 +368,6 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
-            first.effect_host(),
         )
         .await
         .expect("the drained core still records the start")

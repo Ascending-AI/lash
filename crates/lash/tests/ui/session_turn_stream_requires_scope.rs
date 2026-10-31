@@ -1,7 +1,7 @@
 async fn check(
     session: lash::LashSession,
     events: &dyn lash::TurnActivitySink,
-    scope: lash::runtime::ActorContext,
+    scope: (),
 ) {
     let _ = session
         .turn(lash::TurnInput::text("hello"))

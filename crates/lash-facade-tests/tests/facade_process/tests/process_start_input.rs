@@ -93,7 +93,7 @@ async fn a_host_uploaded_start_input_is_held_by_its_registered_process() -> Resu
         .expect("the upload is stored");
     let started = core
         .processes()
-        .start(request(input.clone()), core.effect_host())
+        .start(lash::OperationId::mint(), request(input.clone()))
         .await?;
     let record = core
         .backend()
@@ -142,7 +142,7 @@ async fn an_unavailable_host_uploaded_start_input_is_refused_before_registration
     elsewhere.shutdown().await?;
     let refused = core
         .processes()
-        .start(request(input), core.effect_host())
+        .start(lash::OperationId::mint(), request(input))
         .await;
     assert!(
         refused.is_err(),
@@ -258,12 +258,10 @@ async fn a_start_input_acquisition_fault_retries_the_same_registered_process() -
         .await
         .expect("the upload is stored");
     const KEY: &str = "uploaded-start-retry";
+    let start_request = request(input.clone());
     let processes_api = core.processes();
     let first = processes_api
-        .start(
-            request(input.clone()).with_host_start_key(KEY),
-            core.effect_host(),
-        )
+        .start(lash::OperationId::new(KEY), start_request.clone())
         .await;
     let started = match first {
         Ok(started) => started,
@@ -273,13 +271,17 @@ async fn a_start_input_acquisition_fault_retries_the_same_registered_process() -
                 "a live fault is no permanent refusal: {error}"
             );
             processes_api
-                .start(
-                    request(input.clone()).with_host_start_key(KEY),
-                    core.effect_host(),
-                )
+                .start(lash::OperationId::new(KEY), start_request.clone())
                 .await?
         }
     };
+    let repeated = processes_api
+        .start(lash::OperationId::new(KEY), start_request.clone())
+        .await?;
+    assert_eq!(
+        started.process_id, repeated.process_id,
+        "one operation starts one process"
+    );
     assert!(
         faulted.load(Ordering::SeqCst) >= 2,
         "the first input acquisition met the fault and a later one ran"
@@ -293,7 +295,7 @@ async fn a_start_input_acquisition_fault_retries_the_same_registered_process() -
     assert_eq!(registered[0].id, started.process_id);
     assert_eq!(
         registered[0].start_key.as_ref(),
-        request(input.clone()).with_host_start_key(KEY).start_key(),
+        start_request.clone().with_host_start_key(KEY).start_key(),
         "the retry registered under the host's key"
     );
     let referrers = core
@@ -308,6 +310,20 @@ async fn a_start_input_acquisition_fault_retries_the_same_registered_process() -
         )),
         "the retried start's process holds its input: {referrers:?}"
     );
+    let backend = core.backend().clone();
     core.shutdown().await?;
+    let reopened = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(lash_facade_tests::runtime_lease_owner())?;
+    let replayed = reopened
+        .processes()
+        .start(lash::OperationId::new(KEY), start_request)
+        .await?;
+    assert_eq!(
+        started.process_id, replayed.process_id,
+        "a replay after reopening keeps the operation's process"
+    );
+    assert_eq!(processes(&reopened).await?.len(), 1);
+    reopened.shutdown().await?;
     Ok(())
 }

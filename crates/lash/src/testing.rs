@@ -45,19 +45,15 @@ pub use lash_execution_contracts::testing::process_execution_env_fixture;
 /// e.g. [`tools::compile_with_deferred_resolution`](crate::tools::compile_with_deferred_resolution)
 /// — without a production runtime.
 ///
-/// Each takes the [`TestExecutionPorts`] it runs over: a backend's ports
-/// (`&backend` converts), a backend's with the controller one engine
-/// execution lent through [`TestExecutionPorts::lent`] (the context then
-/// cannot outlive that execution), or a host's with
-/// [`TestExecutionPorts::over_host`]. There is no in-memory default.
+/// Each takes the backend's ports through [`TestExecutionPorts::of`] or
+/// `&backend`. Actor-bound conformance fixtures live in the internal core
+/// testing package. There is no in-memory default.
 pub use lash_core::testing::{
     TestExecutionPorts, cancelled_code_execution_context, code_execution_context,
     code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
     code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
-    code_execution_context_with_tool_provider_catalog_and_invocation,
-    code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
-    exec_code_invocation,
+    code_execution_context_with_tool_provider_catalog_and_invocation, exec_code_invocation,
 };
 
 /// The normalized behavior-transcript vocabulary. Render a scenario's real facts

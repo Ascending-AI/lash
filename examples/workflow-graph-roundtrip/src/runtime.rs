@@ -67,7 +67,6 @@ pub(crate) struct Published {
 impl Published {
     pub(crate) fn start_request(
         &self,
-        key: &str,
         inputs: serde_json::Map<String, serde_json::Value>,
     ) -> ProcessStartRequest {
         ProcessStartRequest::definition(
@@ -78,7 +77,6 @@ impl Published {
             ProcessOriginator::host(),
             Lifetime::Detached,
         )
-        .with_host_start_key(key)
     }
 }
 
@@ -1062,13 +1060,10 @@ impl CommandClient {
 
     pub(crate) async fn start(
         &self,
+        operation: lash::OperationId,
         request: ProcessStartRequest,
     ) -> Result<ProcessStartReceipt, RunError> {
-        Ok(self
-            .0
-            .processes()
-            .start(request, self.0.effect_host())
-            .await?)
+        Ok(self.0.processes().start(operation, request).await?)
     }
 }
 

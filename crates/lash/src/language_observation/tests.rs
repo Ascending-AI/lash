@@ -106,12 +106,12 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     let started = core
         .processes()
         .start(
+            crate::OperationId::mint(),
             lash_execution_contracts::testing::held_engine_request(
                 serde_json::Value::Null,
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .expect("start a blocked process");
@@ -241,7 +241,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         before.sites
     );
     core.processes()
-        .cancel(process, core.effect_host())
+        .cancel(crate::OperationId::mint(), process)
         .await
         .expect("cancel the blocked process");
     let committed = tokio::time::timeout(

@@ -254,6 +254,7 @@ async fn start(
         .expect("the kernel's settings");
     core.processes()
         .start(
+            lash::OperationId::mint(),
             lash_execution_contracts::process::ProcessStartRequest::engine(
                 kind.to_owned(),
                 payload,
@@ -261,7 +262,6 @@ async fn start(
                 lash_execution_contracts::process::ProcessOriginator::host(),
                 lash_execution_contracts::process::LifetimeDecision::Detached,
             ),
-            core.effect_host(),
         )
         .await
         .expect("the process starts")

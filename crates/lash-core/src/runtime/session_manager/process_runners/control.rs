@@ -28,7 +28,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             current,
             registry: Arc::clone(registry),
             parent_invocation: scope.parent_invocation.clone(),
-            scoped_effect_controller: scope.effect_controller.clone(),
+            scoped_effect_controller: crate::facade_support::process_actor(scope).clone(),
             turn_cancellation: scope.turn_cancellation.clone(),
         })
     }
@@ -678,8 +678,9 @@ impl ProcessCapability {
                 ),
             );
         };
-        let requester = serde_json::to_string(scope.effect_controller.execution_scope())
-            .expect("execution scopes contain only serializable identities");
+        let requester =
+            serde_json::to_string(crate::facade_support::process_actor(&scope).execution_scope())
+                .expect("execution scopes contain only serializable identities");
         let record = match registry
             .request_process_cancel(
                 process_id,

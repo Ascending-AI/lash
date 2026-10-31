@@ -1,5 +1,6 @@
 //! Backend certification laws shared by store implementations.
 
+pub use lash_core::ActorContext;
 use lash_core::*;
 use lash_execution_contracts::*;
 mod conformance;

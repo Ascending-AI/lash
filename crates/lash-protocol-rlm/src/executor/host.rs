@@ -687,9 +687,7 @@ impl KernelEffects for CellHost<'_> {
                 },
             });
         }
-        let now_ms = self
-            .ctx
-            .actor_context()
+        let now_ms = lash_core::facade_support::execution_actor(&self.ctx)
             .durable_now()
             .await
             .map_err(|error| ParentFault(error.to_string()))?;

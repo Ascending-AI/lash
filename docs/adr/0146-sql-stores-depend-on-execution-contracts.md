@@ -71,7 +71,7 @@ Cycles break by ownership, without erasing typed causes:
    `TurnPrelude::read(&reference, store)`. `CoreConfigOwner::surface_refusal`
    becomes `CoreConfigRefusal::surface_refusal`. The pure `DeclaredStart`
    record owns its private decoding forms in contracts, while
-   `DeclaredStart::new(context, start)` becomes `AttemptContext::declare_start(start)`.
+   `DeclaredStart::new(context, start)` becomes `AttemptContext::processes().start(start)` per the FIG-7574 host-context ruling in ADR 0051.
    Each body moves to its
    receiving runtime type or local refusal, retaining the same data and order.
 6. Successor refusal values move; scheduling/carry operations stay with the

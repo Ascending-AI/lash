@@ -856,6 +856,7 @@ mod sweep {
         let started = core
             .processes()
             .start(
+                lash::OperationId::new("sweep-child"),
                 lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "sweep-child",
                     lash_execution_contracts::session_types::SessionCreateRequest::root(
@@ -869,9 +870,7 @@ mod sweep {
                     },
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::Lifetime::Detached,
-                )
-                .with_host_start_key("sweep-child"),
-                core.effect_host(),
+                ),
             )
             .await?;
         Ok(started.process_id)
@@ -1527,6 +1526,7 @@ mod sweep {
         let started = core
             .processes()
             .start(
+                lash::OperationId::new("fig4628-committed-child"),
                 lash_execution_contracts::process::ProcessStartRequest::session_turn(
                     "fig4628-session-turn",
                     lash_execution_contracts::session_types::SessionCreateRequest::root(
@@ -1538,9 +1538,7 @@ mod sweep {
                     lash_execution_contracts::process::SessionTurnOutcome::Turn,
                     lash_execution_contracts::process::ProcessOriginator::host(),
                     lash_execution_contracts::process::Lifetime::Detached,
-                )
-                .with_host_start_key("fig4628-committed-child"),
-                core.effect_host(),
+                ),
             )
             .await
             .expect("the start is admitted");

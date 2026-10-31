@@ -4,11 +4,19 @@ error[E0433]: cannot find `StartKeyDerivation` in `process`
 10 |     let _ = lash::process::StartKeyDerivation::LASH_START_PATHS.for_keyless_host();
    |                            ^^^^^^^^^^^^^^^^^^ could not find `StartKeyDerivation` in `process`
 
-error[E0599]: no method named `start` found for struct `AttemptProcessReads` in the current scope
- --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:7:33
+error[E0308]: mismatched types
+ --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:7:39
   |
 7 |     let _ = context.processes().start(request.clone());
-  |                                 ^^^^^ method not found in `AttemptProcessReads`
+  |                                 ----- ^^^^^^^^^^^^^^^ expected `StartProcessIntent`, found `ProcessStartRequest`
+  |                                 |
+  |                                 arguments to this method are incorrect
+  |
+note: method defined here
+ --> $WORKSPACE/crates/lash-core-execution/src/tool_provider.rs
+  |
+  |     pub fn start(
+  |            ^^^^^
 
 error[E0599]: no method named `with_start_key` found for struct `ProcessStartRequest` in the current scope
  --> tests/ui/model_code_cannot_mint_a_host_start_key.rs:8:29

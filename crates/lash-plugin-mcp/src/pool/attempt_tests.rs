@@ -659,7 +659,7 @@ async fn process_mcp_trace(propagation: crate::McpTracePropagation) {
     );
     let process = core
         .processes()
-        .start(request, core.effect_host())
+        .start(lash::OperationId::mint(), request)
         .await
         .unwrap()
         .process_id;

@@ -442,7 +442,7 @@ impl Scenario for ProcessCrash {
         );
         let process = core
             .processes()
-            .start(request, core.effect_host())
+            .start(lash::OperationId::mint(), request)
             .await
             .map(|receipt| receipt.process_id)
             .map_err(|error| format!("start the process: {error}"))?;

@@ -67,6 +67,18 @@ and the registered format contracts do.
 
 Workflow authoring is exposed through lash::workflow::authoring: a Draft, typed Operation batches and their refusals. HostArtifacts opens stored definitions as ordinary editable content and prints them as standalone source. Publication accepts the resulting document or ordinarily imported source with an explicit environment; it accepts no authenticated edit token or original-definition claim. Internal materialization and source-worker implementation types do not become additional host editing interfaces.
 
+## Host operations and callback authority
+
+Sam's 2026-10-31 ruling, FIG-7574, defines two entries. External ingress
+supplies an `OperationId`, which is the operation's idempotency key. Lash
+constructs its context from the receiving core. Code inside Lash uses the
+typed capability its callback receives, including `ctx.processes().start`.
+The tool entry declares a child in its pending outcome, so its committed call
+owns replay, cancellation and fencing. Plugin tasks use their bound process
+capability. Hosts never obtain or construct `ActorContext` or admitted scopes.
+Explicit actor contexts remain internal to runtime and conformance execution.
+Compactors receive scope facts and a bound direct-completion client.
+
 ## Plugin authoring
 
 `lash::plugins` exposes plugin operations, hook arguments, state access,

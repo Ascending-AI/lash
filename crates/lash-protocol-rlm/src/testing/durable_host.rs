@@ -162,7 +162,7 @@ impl DurableHost {
     /// Every port of the host's backend, its claimed context serving the
     /// effects.
     pub(crate) fn ports(&self) -> lash_core::testing::TestExecutionPorts {
-        lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context())
+        lash_core::facade_support::lent_test_execution_ports(&self.backend, self.context())
     }
 
     /// Commits `capture` as the working state of the host's turn, as the

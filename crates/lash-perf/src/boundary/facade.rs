@@ -628,7 +628,10 @@ async fn lifecycle(
             lash_execution_contracts::process::ProcessOriginator::host(),
             lash_execution_contracts::process::LifetimeDecision::Detached,
         );
-        let started = core.processes().start(request, core.effect_host()).await?;
+        let started = core
+            .processes()
+            .start(lash::OperationId::mint(), request)
+            .await?;
         meter.operation("process.start", &started.process_id, "ok", start);
         ensure!(
             ids.insert(started.process_id.clone()),
@@ -643,7 +646,7 @@ async fn lifecycle(
             .await?;
             let start = Instant::now();
             core.processes()
-                .cancel(&started.process_id, core.effect_host())
+                .cancel(lash::OperationId::mint(), &started.process_id)
                 .await?;
             meter.operation("process.cancel", &started.process_id, "ok", start);
         }

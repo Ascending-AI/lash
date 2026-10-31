@@ -18,9 +18,12 @@ impl Completions {
     /// shares keys only with trusted callers. A concurrent resolver may settle a
     /// returned key, so callers handle `AlreadyResolved`, `Conflict` and `Revoked`.
     pub async fn parked(&self, owner: CallOwner) -> Result<Vec<ParkedCall>> {
-        lash_core::parked(self.core.env.core.control.effect_host.backend(), owner)
-            .await
-            .map_err(EmbedError::from)
+        lash_core::parked(
+            lash_core::facade_support::runtime_actor(&self.core.env.core.control).backend(),
+            owner,
+        )
+        .await
+        .map_err(EmbedError::from)
     }
 
     /// Snapshot the pending keys `process`'s engine pinned, with the name it pinned each under
@@ -30,9 +33,12 @@ impl Completions {
     /// after a restart or a handover. They are bearer capabilities under the same rules as
     /// [`parked`](Self::parked).
     pub async fn pinned_keys(&self, process: &ProcessId) -> Result<Vec<PinnedEngineKey>> {
-        lash_core::waits::pinned_keys(self.core.env.core.control.effect_host.backend(), process)
-            .await
-            .map_err(EmbedError::from)
+        lash_core::waits::pinned_keys(
+            lash_core::facade_support::runtime_actor(&self.core.env.core.control).backend(),
+            process,
+        )
+        .await
+        .map_err(EmbedError::from)
     }
 
     /// Resolve the wait `key` names, first writer wins.
@@ -53,7 +59,8 @@ impl Completions {
         key: &str,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveAnswer> {
-        let backend = self.core.env.core.control.effect_host.backend();
+        let backend =
+            lash_core::facade_support::runtime_actor(&self.core.env.core.control).backend();
         lash_core::waits::resolve_host(backend, key, resolution)
             .await
             .map_err(|error| durable_error(error.to_string()))

@@ -35,7 +35,7 @@ pub(crate) async fn resolve_use(
         &grant.provider,
     )
     .map_err(|error| ResolutionError::Corrupt(error.to_string()))?;
-    let cx = ctx.actor_context();
+    let cx = lash_core::facade_support::execution_actor(ctx);
     let cancel = ctx.cancellation();
     FirstUse {
         held: ctx.held_response(),

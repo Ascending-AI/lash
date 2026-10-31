@@ -141,10 +141,6 @@ fn drain_area_witnesses() {
     type_witness::<lash::runtime::RuntimeEffectEnvelope>();
     // W0075: lash::runtime::RuntimeEffectKind [enum]
     type_witness::<lash::runtime::RuntimeEffectKind>();
-    // W0076: lash::runtime::RuntimeEffectLocalExecutor [struct]
-    type_witness::<lash::runtime::RuntimeEffectLocalExecutor>();
-    // W0077: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_scope [function]
-    let _ = lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_scope;
     // W0078: lash::runtime::RuntimeEffectOutcome [enum]
     type_witness::<lash::runtime::RuntimeEffectOutcome>();
     // W0079: lash::runtime::RuntimeError::is_retryable [function]
@@ -1106,10 +1102,6 @@ fn drain_area_witnesses() {
     type_witness::<lash::durability::RuntimeEffectReplayTrace>();
     // W0432: lash::runtime::RuntimeControlConfig [struct]
     type_witness::<lash::runtime::RuntimeControlConfig>();
-    // W0433: lash::runtime::RuntimeControlConfig::effect_host [field]
-    field_witness(|value: &lash::runtime::RuntimeControlConfig| {
-        let _ = &value.effect_host;
-    });
     // W0436: lash::runtime::RuntimeControlConfig::process_tool_visibility_filter [field]
     field_witness(|value: &lash::runtime::RuntimeControlConfig| {
         let _ = &value.process_tool_visibility_filter;
