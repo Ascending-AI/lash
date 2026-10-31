@@ -336,22 +336,13 @@
       "additionalProperties": false,
       "description": "Consumption at a cell decision, from existing kernel and supervisor meters.",
       "properties": {
-        "consumed": {
-          "description": "Budget consumed. Charges saturate at the budget; `observed` retains\nthe raw kernel charge, including the refused crossing unit.\nNone means Lash has no meter for this bound, or no receipt arrived.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "limit": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "observed": {
-          "description": "The raw meter reading, which can pass the bound.",
+          "description": "The raw meter reading, which can pass the bound. None means no\nmeter or receipt was available.",
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -516,39 +507,11 @@
       ]
     },
     "CellFailure": {
+      "additionalProperties": false,
       "description": "Structured failure returned by a code executor.",
       "properties": {
-        "bound": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ExecutionBoundFact"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "defect": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CellDefect"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The rule of a session's cells the program broke, when that is why\nthe cell failed, kept typed through the plugin and host result."
-        },
-        "exec_failure": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ExecCodeFailureReason"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Why the `exec_code` effect failed before the executor produced a\nresponse, when that is the failure: the closed reason, kept typed\nthrough the protocol driver and the trajectory it records."
+        "cause": {
+          "$ref": "#/$defs/CellFailureCause"
         },
         "feedback": {
           "description": "Each pure repair callback's identity and answer, in registration order,\nincluding empty answers. Retained with the failure for replay and attribution.",
@@ -557,60 +520,264 @@
           },
           "type": "array"
         },
-        "kind": {
-          "$ref": "#/$defs/CellFailureKind"
-        },
         "message": {
           "type": "string"
-        },
-        "read_panic": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ReadPanic"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "schema_admission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SchemaAdmissionError"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "tool_call_limit": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToolCallLimitExceeded"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
-        },
-        "worker_limit": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkerLimit"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The measured run limit, kept typed through the plugin and host result."
         }
       },
       "required": [
-        "kind",
+        "cause",
         "message"
       ],
       "type": "object"
+    },
+    "CellFailureCause": {
+      "description": "The primary failure owns its classification and any accompanying bound evidence.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/CellFailureKind"
+            },
+            "type": {
+              "const": "unclassified",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "$ref": "#/$defs/WorkerLimit"
+            },
+            "type": {
+              "const": "worker_limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Setup stopped with its owner after the worker reported this limit.",
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "$ref": "#/$defs/WorkerLimit"
+            },
+            "type": {
+              "const": "worker_setup_stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exceeded": {
+              "$ref": "#/$defs/ToolCallLimitExceeded"
+            },
+            "type": {
+              "const": "tool_call_limit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "exceeded"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "$ref": "#/$defs/ExecCodeFailureReason"
+            },
+            "type": {
+              "const": "exec_failure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "panic": {
+              "$ref": "#/$defs/ReadPanic"
+            },
+            "type": {
+              "const": "read_panic",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "panic"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/SchemaAdmissionError"
+            },
+            "type": {
+              "const": "schema_admission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bound": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExecutionBoundFact"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "defect": {
+              "$ref": "#/$defs/CellDefect"
+            },
+            "type": {
+              "const": "defect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "defect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "fact": {
+              "$ref": "#/$defs/ExecutionBoundFact"
+            },
+            "type": {
+              "const": "bound",
+              "type": "string"
+            },
+            "worker_limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkerLimit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "fact"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "CellFailureKind": {
       "description": "Why an executed code cell failed.",
@@ -974,14 +1141,6 @@
     "ExecutionBoundFact": {
       "description": "The bound that ended a kernel execution, with only the receipts received.",
       "properties": {
-        "consumed": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "function": {
           "anyOf": [
             {
@@ -992,21 +1151,8 @@
             }
           ]
         },
-        "limit": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "observed": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "resource": {
-          "$ref": "#/$defs/CellResource"
+        "reading": {
+          "$ref": "#/$defs/CellConsumption"
         },
         "site": {
           "anyOf": [
@@ -1020,8 +1166,7 @@
         }
       },
       "required": [
-        "resource",
-        "limit"
+        "reading"
       ],
       "type": "object"
     },

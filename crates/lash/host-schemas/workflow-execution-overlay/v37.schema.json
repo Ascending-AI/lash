@@ -17,6 +17,34 @@
       ],
       "type": "object"
     },
+    "CellConsumption": {
+      "additionalProperties": false,
+      "description": "Consumption at a cell decision, from existing kernel and supervisor meters.",
+      "properties": {
+        "limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed": {
+          "description": "The raw meter reading, which can pass the bound. None means no\nmeter or receipt was available.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/CellResource"
+        }
+      },
+      "required": [
+        "resource",
+        "limit"
+      ],
+      "type": "object"
+    },
     "CellResource": {
       "description": "A cell bound in its native units. Time values use nanoseconds.",
       "oneOf": [
@@ -74,14 +102,6 @@
     "ExecutionBoundFact": {
       "description": "The bound that ended a kernel execution, with only the receipts received.",
       "properties": {
-        "consumed": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "function": {
           "anyOf": [
             {
@@ -92,21 +112,8 @@
             }
           ]
         },
-        "limit": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "observed": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "resource": {
-          "$ref": "#/$defs/CellResource"
+        "reading": {
+          "$ref": "#/$defs/CellConsumption"
         },
         "site": {
           "anyOf": [
@@ -120,8 +127,7 @@
         }
       },
       "required": [
-        "resource",
-        "limit"
+        "reading"
       ],
       "type": "object"
     },

@@ -482,15 +482,10 @@ export type CausalRef = ({
  * Consumption at a cell decision, from existing kernel and supervisor meters.
  */
 export type CellConsumption = {
-  /**
-   * Budget consumed. Charges saturate at the budget; `observed` retains
-   * the raw kernel charge, including the refused crossing unit.
-   * None means Lash has no meter for this bound, or no receipt arrived.
-   */
-  "consumed"?: (number | null);
   "limit": number;
   /**
-   * The raw meter reading, which can pass the bound.
+   * The raw meter reading, which can pass the bound. None means no
+   * meter or receipt was available.
    */
   "observed"?: (number | null);
   "resource": CellResource;
@@ -537,38 +532,55 @@ export type CellDefect = ({
  * Structured failure returned by a code executor.
  */
 export type CellFailure = {
-  "bound"?: (ExecutionBoundFact | null);
-  /**
-   * The rule of a session's cells the program broke, when that is why
-   * the cell failed, kept typed through the plugin and host result.
-   */
-  "defect"?: (CellDefect | null);
-  /**
-   * Why the `exec_code` effect failed before the executor produced a
-   * response, when that is the failure: the closed reason, kept typed
-   * through the protocol driver and the trajectory it records.
-   */
-  "exec_failure"?: (ExecCodeFailureReason | null);
+  "cause": CellFailureCause;
   /**
    * Each pure repair callback's identity and answer, in registration order,
    * including empty answers. Retained with the failure for replay and attribution.
    */
   "feedback"?: Array<CellFailureRepair>;
-  "kind": CellFailureKind;
   "message": string;
-  "read_panic"?: (ReadPanic | null);
-  "schema_admission"?: (SchemaAdmissionError | null);
-  /**
-   * The session's `max_tool_calls` refusal, when that is why the cell
-   * failed (FIG-4546), kept typed through the plugin and host result.
-   */
-  "tool_call_limit"?: (ToolCallLimitExceeded | null);
-  /**
-   * The measured run limit, kept typed through the plugin and host result.
-   */
-  "worker_limit"?: (WorkerLimit | null);
-  [key: string]: unknown;
 };
+
+/**
+ * The primary failure owns its classification and any accompanying bound evidence.
+ */
+export type CellFailureCause = ({
+  "bound"?: (ExecutionBoundFact | null);
+  "kind": CellFailureKind;
+  "type": "unclassified";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "limit": WorkerLimit;
+  "type": "worker_limit";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "limit": WorkerLimit;
+  "type": "worker_setup_stopped";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "exceeded": ToolCallLimitExceeded;
+  "type": "tool_call_limit";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "reason": ExecCodeFailureReason;
+  "type": "exec_failure";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "panic": ReadPanic;
+  "type": "read_panic";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "error": SchemaAdmissionError;
+  "type": "schema_admission";
+} | {
+  "bound"?: (ExecutionBoundFact | null);
+  "defect": CellDefect;
+  "type": "defect";
+} | {
+  "fact": ExecutionBoundFact;
+  "type": "bound";
+  "worker_limit"?: (WorkerLimit | null);
+});
 
 /**
  * Why an executed code cell failed.
@@ -705,11 +717,8 @@ export type ExecCodeFailureReason = ("executor_unavailable" | "runtime_stopped" 
  * The bound that ended a kernel execution, with only the receipts received.
  */
 export type ExecutionBoundFact = {
-  "consumed"?: (number | null);
   "function"?: (FunctionName | null);
-  "limit": number;
-  "observed"?: (number | null);
-  "resource": CellResource;
+  "reading": CellConsumption;
   "site"?: (Site | null);
   [key: string]: unknown;
 };
