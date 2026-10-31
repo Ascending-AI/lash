@@ -10,32 +10,9 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         records: &[lash_durable::packages::PackageRecordHold],
     ) -> Result<(), lash_durable::DurableError> {
         use lash_execution_contracts::module_artifacts::{
-            ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+            ModuleArtifactStore, package_artifact_holds,
         };
-        let mut holds = Vec::new();
-        for record in records {
-            holds.extend(
-                record
-                    .dependencies
-                    .iter()
-                    .map(|reference| ModuleArtifactHold::Retain {
-                        module_ref: reference,
-                    }),
-            );
-            holds.push(match record.bytes.as_deref() {
-                Some(bytes) => ModuleArtifactHold::Publish {
-                    module_ref: &record.reference,
-                    body: if record.document {
-                        ModuleArtifactBody::Document(bytes)
-                    } else {
-                        ModuleArtifactBody::Bytes(bytes)
-                    },
-                },
-                None => ModuleArtifactHold::Retain {
-                    module_ref: &record.reference,
-                },
-            });
-        }
+        let holds = package_artifact_holds(records);
         self.hold_module_artifacts(claim, &holds)
             .await
             .map_err(Into::into)
@@ -107,24 +84,6 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         .map_err(backend)?
         .is_some();
         Ok(!held && is_fenced_tx(&mut tx, referrer).await?)
-    }
-    async fn hold_package_record(
-        &self,
-        claim: &ReferrerClaim,
-        reference: &str,
-        bytes: Option<&[u8]>,
-        dependencies: &[String],
-    ) -> Result<(), lash_durable::DurableError> {
-        self.hold_package_batch(
-            claim,
-            &[lash_durable::packages::PackageRecordHold {
-                reference: reference.to_owned(),
-                bytes: bytes.map(<[u8]>::to_vec),
-                document: false,
-                dependencies: dependencies.to_vec(),
-            }],
-        )
-        .await
     }
     async fn put_package_labels(
         &self,

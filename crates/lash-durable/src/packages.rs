@@ -288,7 +288,18 @@ pub trait PackageStorage: Send + Sync {
         reference: &str,
         bytes: Option<&[u8]>,
         dependencies: &[String],
-    ) -> Result<(), DurableError>;
+    ) -> Result<(), DurableError> {
+        self.hold_package_batch(
+            claim,
+            &[PackageRecordHold {
+                reference: reference.to_owned(),
+                bytes: bytes.map(<[u8]>::to_vec),
+                document: false,
+                dependencies: dependencies.to_vec(),
+            }],
+        )
+        .await
+    }
     async fn put_package_labels(
         &self,
         claim: &ReferrerClaim,

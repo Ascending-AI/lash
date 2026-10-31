@@ -295,6 +295,38 @@ impl<'a> ModuleArtifactHold<'a> {
     }
 }
 
+/// Translate package roots and dependencies into one atomic module-artifact hold batch.
+#[must_use]
+pub fn package_artifact_holds(
+    records: &[lash_durable::packages::PackageRecordHold],
+) -> Vec<ModuleArtifactHold<'_>> {
+    let mut holds = Vec::new();
+    for record in records {
+        holds.extend(
+            record
+                .dependencies
+                .iter()
+                .map(|reference| ModuleArtifactHold::Retain {
+                    module_ref: reference,
+                }),
+        );
+        holds.push(match record.bytes.as_deref() {
+            Some(bytes) => ModuleArtifactHold::Publish {
+                module_ref: &record.reference,
+                body: if record.document {
+                    ModuleArtifactBody::Document(bytes)
+                } else {
+                    ModuleArtifactBody::Bytes(bytes)
+                },
+            },
+            None => ModuleArtifactHold::Retain {
+                module_ref: &record.reference,
+            },
+        });
+    }
+    holds
+}
+
 /// The module-artifact store of one store set: the admitted kernel documents.
 ///
 /// A module is published once under its module reference (an opaque key) as
