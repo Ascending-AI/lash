@@ -11,6 +11,7 @@ mod literal;
 mod occurrence;
 mod read;
 use occurrence::source_loops;
+mod scope;
 mod session;
 mod test;
 use super::session::Session;

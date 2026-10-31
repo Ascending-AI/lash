@@ -180,6 +180,20 @@ impl Operands {
             value: operand.held.value,
         }))
     }
+    pub(super) fn publish_releases(&mut self, owners: &[Owner]) {
+        let released = |held: &Held| held.owner.is_some_and(|owner| owners.contains(&owner));
+        let mut at = 0;
+        while at < self.values.len() {
+            if released(&self.values[at].held) {
+                let reg = self.values[at].reg;
+                let _ = self.remove_value(reg);
+            } else {
+                at += 1;
+            }
+        }
+        self.atoms.retain(|held| !released(held));
+        self.entry.retain(|held| !released(held));
+    }
     pub(super) fn publish_transfer(&mut self, transfer: Transfer) {
         let Some(operand) = self.remove_value(transfer.reg) else {
             unreachable!("an exclusively prepared source transfer exists");

@@ -59,6 +59,7 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PRECISE_SCOPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_LITERALS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
     static PRECISE_READS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_TEST_ITERATIONS: std::cell::Cell<[Option<u64>; 2]> = const { std::cell::Cell::new([None; 2]) };
@@ -92,6 +93,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PRECISE_SCOPES.with(|count| count.set(0));
     PRECISE_LITERALS.with(|counts| counts.set([0; 4]));
     PRECISE_READS.with(|counts| counts.set([0; 2]));
     PRECISE_TEST_ITERATIONS.with(|counts| counts.set([None; 2]));
@@ -497,4 +499,13 @@ pub(in crate::machine) fn precise_literal_published(literal: &lash_kernel_doc::L
         next[index] += 1;
         counts.set(next);
     });
+}
+
+#[cfg(test)]
+pub(crate) fn precise_scopes() -> u64 {
+    PRECISE_SCOPES.with(|count| count.replace(0))
+}
+
+pub(in crate::machine) fn precise_scope_published() {
+    PRECISE_SCOPES.with(|count| count.set(count.get() + 1));
 }

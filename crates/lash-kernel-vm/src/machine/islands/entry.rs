@@ -904,9 +904,12 @@ impl KernelMachine {
             _ => return self.block_ended(task, host, exe),
         };
         let Some(stmt) = exe.block(block).stmts.get(next).copied() else {
-            frame.control.pop();
-            for at in &exe.block(block).declares {
-                frame.set_slot(*at, SlotState::Empty);
+            if !self.publish_source_scope_leave(task, exe)? {
+                let frame = self.frame(task)?;
+                frame.control.pop();
+                for at in &exe.block(block).declares {
+                    frame.set_slot(*at, SlotState::Empty);
+                }
             }
             return self.block_ended(task, host, exe);
         };

@@ -109,6 +109,16 @@ impl PreparedTransfer<'_> {
     }
 }
 
+pub(super) struct PreparedReleases<'a> {
+    registers: &'a mut Registers,
+    owners: Vec<lash_kernel_state::kernel_internals::logical::Owner>,
+}
+impl PreparedReleases<'_> {
+    pub(super) fn publish(self) {
+        self.registers.source.publish_releases(&self.owners);
+    }
+}
+
 pub(super) struct PreparedJoin<'a> {
     registers: &'a mut Registers,
     join: source::Join,
@@ -198,6 +208,22 @@ impl Registers {
             registers: self,
             transfer,
         }))
+    }
+    pub(super) fn prepare_source_releases(
+        &mut self,
+        owners: &[lash_kernel_state::kernel_internals::logical::Owner],
+    ) -> Result<PreparedReleases<'_>, HeapFault> {
+        let mut prepared = Vec::new();
+        prepared
+            .try_reserve(owners.len())
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        prepared.extend_from_slice(owners);
+        Ok(PreparedReleases {
+            registers: self,
+            owners: prepared,
+        })
     }
     pub(super) fn source_context(&mut self, roots: Option<super::logical_held::BankRoots>) {
         self.source.context(roots);

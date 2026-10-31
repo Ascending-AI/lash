@@ -204,7 +204,48 @@ impl PreparedBinding<'_> {
     }
 }
 
+pub(super) struct PreparedScopeSlots<'slots, 'code> {
+    slots: &'slots mut Slots,
+    declares: &'code [u32],
+}
+impl PreparedScopeSlots<'_, '_> {
+    pub(super) fn publish(self) {
+        for at in self.declares {
+            let at = *at as usize;
+            self.slots.values[at] = SlotState::Empty;
+            if !self.slots.changed[at] {
+                self.slots.changed[at] = true;
+                self.slots.edits.push(at);
+            }
+        }
+    }
+}
+
 impl Slots {
+    pub(super) fn prepare_scope<'slots, 'code>(
+        &'slots mut self,
+        declares: &'code [u32],
+    ) -> Result<PreparedScopeSlots<'slots, 'code>, HeapFault> {
+        let mut edits = 0;
+        for at in declares {
+            let at = *at as usize;
+            if at >= self.values.len() || at >= self.changed.len() {
+                return Err(HeapFault::Malformed(
+                    "scope declaration has no frame slot".into(),
+                ));
+            }
+            edits += usize::from(!self.changed[at]);
+        }
+        self.edits
+            .try_reserve(edits)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        Ok(PreparedScopeSlots {
+            slots: self,
+            declares,
+        })
+    }
     pub(super) fn prepare_binding(
         &mut self,
         at: u32,

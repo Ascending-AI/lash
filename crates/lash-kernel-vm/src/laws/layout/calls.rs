@@ -250,6 +250,7 @@ fn observe_source_or_register(
     let precise_tests = crate::machine::islands::witness::precise_tests();
     let precise_reads = crate::machine::islands::witness::precise_reads();
     let precise_literals = crate::machine::islands::witness::precise_literals();
+    let precise_scopes = crate::machine::islands::witness::precise_scopes();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
     let replay = crate::machine::islands::witness::source_replay_publications();
@@ -361,6 +362,18 @@ fn observe_source_or_register(
         assert!(
             cell_constructions > 0,
             "the precise shared binding must publish its prepared cell with the actual RHS transfer"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CONSTRUCTION)
+    {
+        assert!(
+            precise_scopes > 0,
+            "the source nested scope must publish its genuine owner release before clearing bindings"
         );
     }
     if mode == Mode::Source

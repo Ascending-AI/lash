@@ -40,8 +40,11 @@ impl KernelMachine {
 
     #[inline(never)]
     fn leave_blocks(&mut self, task: TaskId, exe: &Executable, edge: StepEdge) -> Result<(), Halt> {
-        let frame = self.frame(task)?;
         for _ in 0..edge.leaves {
+            if self.publish_source_scope_leave(task, exe)? {
+                continue;
+            }
+            let frame = self.frame(task)?;
             if let Some(Control::Block { block, .. }) = frame.control.pop() {
                 for at in &exe.block(block).declares {
                     frame.set_slot(*at, SlotState::Empty);
