@@ -14,12 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
-    RequestTexts,
+    DomainRefusal, ModelCallId, PreparedPromptRecord, PromptCallKey, PromptSnapshotRow, PromptText,
+    PromptWrite,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_kernel_value::identity::SessionId;
-use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
+use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART};
 use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension};
 
@@ -248,29 +248,13 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     DomainRefusal::PromptCallRecorded { call: call.clone() },
                 )));
             }
-            let snapshot_by_hash: BTreeMap<_, _> = snapshot_texts
-                .iter()
-                .map(|text| (text.hash.as_str(), text))
-                .collect();
-            let text = |hash: &str| {
-                request_texts
-                    .get(hash)
-                    .or_else(|| snapshot_by_hash.get(hash).copied())
-            };
-            let mut frontier: BTreeSet<&str> = snapshot_texts
-                .iter()
-                .map(|text| text.hash.as_str())
-                .chain(request_texts.roots().iter().map(String::as_str))
-                .chain(prefix.as_deref())
-                .collect();
+            let prepared =
+                PreparedPromptRecord::new(snapshot_texts, request_texts, prefix.as_deref());
+            let mut frontier = prepared.roots().clone();
             let mut unheld = BTreeMap::new();
-            if let Some(delta) = request_texts.supplied_delta() {
+            if let Some(supplied) = prepared.supplied() {
                 // One set read validates the complete direct frontier. A
                 // remembered digest never resurrects a missing old body.
-                let supplied: BTreeMap<_, _> = delta
-                    .map(|text| (text.hash.as_str(), text))
-                    .chain(snapshot_by_hash.iter().map(|(hash, text)| (*hash, *text)))
-                    .collect();
                 frontier.extend(
                     supplied
                         .values()
@@ -301,7 +285,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                         if held.contains(hash) || unheld.contains_key(hash) {
                             continue;
                         }
-                        let Some(text) = text(hash) else {
+                        let Some(text) = prepared.text(hash) else {
                             return Ok(Err(DurableError::Domain(
                                 DomainRefusal::PromptFragmentMissing {
                                     hash: hash.to_owned(),
@@ -320,14 +304,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                     .map(|(hash, text)| stored_text(hash, text))
                     .collect();
                 hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
-                let paths: BTreeSet<_> = unheld
-                    .iter()
-                    .flat_map(|(hash, text)| {
-                        text.children
-                            .iter()
-                            .map(move |child| (*hash, child.as_str()))
-                    })
-                    .collect();
+                let paths = PreparedPromptRecord::paths(unheld.values().copied());
                 if !paths.is_empty() {
                     cached_execute(tx, SQLITE_SQL.insert_index_edges.sql(), [encode(&paths)?])?;
                 }
@@ -335,12 +312,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             cached_execute(
                 tx,
                 SQLITE_SQL.insert_edges.sql(),
-                rusqlite::params![
-                    session,
-                    owner,
-                    ordinal,
-                    encode(&edges(snapshot_texts, request_texts))?
-                ],
+                rusqlite::params![session, owner, ordinal, encode(&prepared.edges())?],
             )?;
             if matches!(call.call, ModelCallId::Turn { .. }) {
                 let old = if let Some(prefix) = prefix {
@@ -482,24 +454,6 @@ pub(crate) fn release_unretained(
     }
     reclaim(tx, &released)?;
     Ok(calls.len())
-}
-
-/// Each distinct `(part, hash)` edge of a root over `snapshot_texts` and
-/// `request_texts`.
-fn edges<'a>(
-    snapshot_texts: &'a [PromptText],
-    request_texts: &'a RequestTexts,
-) -> BTreeSet<(&'static str, &'a str)> {
-    snapshot_texts
-        .iter()
-        .map(|text| (SNAPSHOT_PART, text.hash.as_str()))
-        .chain(
-            request_texts
-                .roots()
-                .iter()
-                .map(|hash| (REQUEST_PART, hash.as_str())),
-        )
-        .collect()
 }
 
 /// A root handoff records cleanup atomically; one bounded set handles the

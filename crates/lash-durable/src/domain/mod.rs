@@ -62,7 +62,8 @@ pub use processes::{
     SessionParksRedrive,
 };
 pub use prompts::{
-    ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite, RequestTexts,
+    ModelCallId, PreparedPromptRecord, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
+    RequestTexts,
 };
 pub use run_records::AdmittedId;
 pub use session_close::{SESSION_CLOSE_MAIL, SessionCloseRow, SessionCloseStep, SessionCloseWrite};

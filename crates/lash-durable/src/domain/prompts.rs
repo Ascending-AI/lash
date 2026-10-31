@@ -13,6 +13,8 @@
 //! reclamation finishes. A text goes with the last edge that references it.
 //! [`PromptWrite::Release`] also supports explicit root and session deletion.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
@@ -88,6 +90,97 @@ impl std::fmt::Display for ModelCallId {
 /// One stored text, and a request's texts under the roots its record holds
 /// edges to.
 pub use lash_core_store::prompt_sections::{PromptText, RequestTexts};
+
+/// Borrowed content and ownership of a prompt record. Text lookup remains lazy;
+/// each adapter decides which immutable nodes its transaction already holds.
+pub struct PreparedPromptRecord<'a> {
+    roots: BTreeSet<&'a str>,
+    snapshots: BTreeMap<&'a str, &'a PromptText>,
+    supplied: Option<BTreeMap<&'a str, &'a PromptText>>,
+    request: &'a RequestTexts,
+}
+
+impl<'a> PreparedPromptRecord<'a> {
+    /// Prepare the direct roots and supplied delta without walking held paths.
+    #[must_use]
+    pub fn new(
+        snapshot: &'a [PromptText],
+        request: &'a RequestTexts,
+        prefix: Option<&'a str>,
+    ) -> Self {
+        let snapshots: BTreeMap<_, _> = snapshot
+            .iter()
+            .map(|text| (text.hash.as_str(), text))
+            .collect();
+        let roots = snapshots
+            .keys()
+            .copied()
+            .chain(request.roots().iter().map(String::as_str))
+            .chain(prefix)
+            .collect();
+        let supplied = request.supplied_delta().map(|delta| {
+            delta
+                .map(|text| (text.hash.as_str(), text))
+                .chain(snapshots.iter().map(|(hash, text)| (*hash, *text)))
+                .collect()
+        });
+        Self {
+            roots,
+            snapshots,
+            supplied,
+            request,
+        }
+    }
+
+    /// Snapshot, request and reusable-prefix roots in digest order.
+    #[must_use]
+    pub fn roots(&self) -> &BTreeSet<&'a str> {
+        &self.roots
+    }
+
+    /// New bodies when the producer supplies a delta, preserving snapshot precedence.
+    #[must_use]
+    pub fn supplied(&self) -> Option<&BTreeMap<&'a str, &'a PromptText>> {
+        self.supplied.as_ref()
+    }
+
+    /// Resolve one body, retaining request precedence for a complete request.
+    #[must_use]
+    pub fn text(&self, hash: &str) -> Option<&'a PromptText> {
+        self.request
+            .get(hash)
+            .or_else(|| self.snapshots.get(hash).copied())
+    }
+
+    /// Distinct ownership edges, keeping snapshot and request lifetimes separate.
+    #[must_use]
+    pub fn edges(&self) -> BTreeSet<(&'static str, &'a str)> {
+        self.snapshots
+            .keys()
+            .map(|hash| ("snapshot", *hash))
+            .chain(
+                self.request
+                    .roots()
+                    .iter()
+                    .map(|hash| ("request", hash.as_str())),
+            )
+            .collect()
+    }
+
+    /// Immutable child paths of the bodies an adapter chose to install.
+    pub fn paths<'b>(
+        texts: impl IntoIterator<Item = &'b PromptText>,
+    ) -> BTreeSet<(&'b str, &'b str)> {
+        texts
+            .into_iter()
+            .flat_map(|text| {
+                text.children
+                    .iter()
+                    .map(move |child| (text.hash.as_str(), child.as_str()))
+            })
+            .collect()
+    }
+}
 
 /// One call's root, as its admission recorded it, while it is retained.
 #[derive(Clone, Debug, PartialEq, Eq)]

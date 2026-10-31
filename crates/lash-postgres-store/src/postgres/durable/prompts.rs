@@ -26,13 +26,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
-    DomainRefusal, ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite,
-    RequestTexts,
+    DomainRefusal, ModelCallId, PreparedPromptRecord, PromptCallKey, PromptSnapshotRow, PromptText,
+    PromptWrite,
 };
 use lash_durable::{DurableError, Epoch};
 use lash_kernel_value::identity::SessionId;
 use lash_store_sql::Dialect;
-use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
+use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART};
 use lash_vocabulary::identity::TurnId;
 use sqlx::PgConnection;
 
@@ -385,24 +385,13 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     };
     // Keep the request's root list intact. A held immutable root stops the
     // server frontier, even when its descendants were not supplied.
-    let roots: BTreeSet<_> = snapshot_texts
-        .iter()
-        .map(|text| text.hash.clone())
-        .chain(request_texts.roots().iter().cloned())
-        .chain(prefix.iter().cloned())
-        .collect();
-    let snapshots: BTreeMap<_, _> = snapshot_texts
-        .iter()
-        .map(|text| (text.hash.as_str(), text))
-        .collect();
-    let supplied = request_texts.supplied_delta().map(|delta| {
-        delta
-            .map(|text| (text.hash.as_str(), text))
-            .chain(snapshots.iter().map(|(hash, text)| (*hash, *text)))
-            .collect::<BTreeMap<_, _>>()
-    });
+    let prepared = PreparedPromptRecord::new(snapshot_texts, request_texts, prefix.as_deref());
     let mut texts = BTreeMap::new();
-    let mut frontier = roots.clone();
+    let mut frontier: BTreeSet<_> = prepared
+        .roots()
+        .iter()
+        .map(|hash| (*hash).to_owned())
+        .collect();
     let mut validation = Vec::new();
     // Preserve the server's root-first refusal order while batching the
     // complete direct frontier into its first lock/read, even on a cold chain.
@@ -415,12 +404,10 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
             // An owner's delta already distinguishes new bodies from external
             // references. A remembered hash from a retired frame cannot prune
             // one of those new bodies and force a stale-hint retry.
-            let text = match &supplied {
+            let text = match prepared.supplied() {
                 Some(supplied) => supplied.get(hash.as_str()).copied(),
                 None if held.contains(&hash) => None,
-                None => request_texts
-                    .get(&hash)
-                    .or_else(|| snapshots.get(hash.as_str()).copied()),
+                None => prepared.text(&hash),
             };
             if let Some(text) = text {
                 next.extend(text.children.iter().cloned());
@@ -434,21 +421,13 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
         .iter()
         .map(|(hash, text)| (Some(hash.clone()), text.map(|text| text.text.to_string())))
         .unzip();
-    let paths: BTreeSet<_> = texts
-        .iter()
-        .flat_map(|(hash, text)| {
-            text.iter().flat_map(move |text| {
-                text.children
-                    .iter()
-                    .map(move |child| (hash.clone(), child.clone()))
-            })
-        })
-        .collect();
+    let paths = PreparedPromptRecord::paths(texts.values().filter_map(|text| *text));
     let (parents, children): (Vec<_>, Vec<_>) = paths
         .into_iter()
-        .map(|(parent, child)| (Some(parent), Some(child)))
+        .map(|(parent, child)| (Some(parent.to_owned()), Some(child.to_owned())))
         .unzip();
-    let (parts, edges): (Vec<_>, Vec<_>) = edges(snapshot_texts, request_texts)
+    let (parts, edges): (Vec<_>, Vec<_>) = prepared
+        .edges()
         .into_iter()
         .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
         .unzip();
@@ -510,24 +489,6 @@ pub(super) async fn apply(
             .await
             .map_err(sqlx_failure),
     }
-}
-
-/// Each distinct `(part, hash)` edge of a root over `snapshot_texts` and
-/// `request_texts`.
-fn edges<'a>(
-    snapshot_texts: &'a [PromptText],
-    request_texts: &'a RequestTexts,
-) -> BTreeSet<(&'static str, &'a str)> {
-    snapshot_texts
-        .iter()
-        .map(|text| (SNAPSHOT_PART, text.hash.as_str()))
-        .chain(
-            request_texts
-                .roots()
-                .iter()
-                .map(|hash| (REQUEST_PART, hash.as_str())),
-        )
-        .collect()
 }
 
 /// Release every snapshot root of `session`, or of its turn `run` alone, and
