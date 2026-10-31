@@ -354,17 +354,6 @@ impl Step {
         self
     }
 
-    /// This step, which runs only when `slot` holds a row exactly when
-    /// `holds`.
-    pub(super) fn when_row(mut self, slot: u8, holds: bool) -> Self {
-        self.when = Some(When {
-            slot,
-            column: None,
-            holds,
-        });
-        self
-    }
-
     /// This step, which runs only when `slot` holds a row whose `column`
     /// is true exactly when `holds`.
     pub(super) fn when_flag(mut self, slot: u8, column: &'static str, holds: bool) -> Self {

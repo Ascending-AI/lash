@@ -876,7 +876,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 text.graph_nodes()
                     .map_err(|error| refused("prompt codec", error))?,
             );
-            root = NodeId::from_hex(&text.hash).expect("the graph codec minted the address");
+            root = NodeId::from_hex(&text.hash)
+                .ok_or_else(|| LawBroken("the graph codec minted an invalid address".into()))?;
             Some(text)
         } else {
             None
@@ -886,9 +887,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             | RootSource::PromptRequestBody
             | RootSource::PromptPrefix => {
                 use crate::domain::{ModelCallId, PromptCallKey, PromptWrite, RequestTexts};
-                let text = prompt
-                    .clone()
-                    .expect("a prompt source prepared its content");
+                let text = prompt.clone().ok_or_else(|| {
+                    LawBroken("a prompt source did not prepare its content".into())
+                })?;
                 let audit = source == RootSource::PromptSnapshot;
                 (
                     Some(DomainWrite::Prompt(PromptWrite::Record {
