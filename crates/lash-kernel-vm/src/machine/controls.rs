@@ -1,7 +1,7 @@
 //! Only changed source control roles are published. Advancing a block has no
 //! value role and never triggers a scan of enclosing controls or cold frames.
 use super::{Completion, Control, TryPhase};
-use crate::compile::StmtId;
+use crate::compile::{BlockId, StmtId};
 use lash_kernel_doc::{Value, heap::HeapFault};
 
 #[derive(Clone, Copy)]
@@ -68,7 +68,43 @@ impl<'a> IntoIterator for &'a Controls {
         self.values.iter()
     }
 }
+/// Reserves only physical block placement. It owns no guest price or root.
+pub(super) struct PreparedBlock<'a> {
+    controls: &'a mut Controls,
+    block: BlockId,
+}
+impl PreparedBlock<'_> {
+    pub(super) fn publish(self) {
+        debug_assert!(self.controls.values.len() < self.controls.values.capacity());
+        debug_assert!(
+            self.controls.marked.len() > self.controls.values.len()
+                || self.controls.marked.len() < self.controls.marked.capacity()
+        );
+        self.controls.push(Control::Block {
+            block: self.block,
+            next: 0,
+        });
+    }
+}
 impl Controls {
+    pub(super) fn prepare_block(&mut self, block: BlockId) -> Result<PreparedBlock<'_>, HeapFault> {
+        self.values
+            .try_reserve(1)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        if self.marked.len() <= self.values.len() {
+            self.marked
+                .try_reserve(1)
+                .map_err(|_| HeapFault::Exhausted {
+                    resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+                })?;
+        }
+        Ok(PreparedBlock {
+            controls: self,
+            block,
+        })
+    }
     fn changed(&mut self, at: usize) {
         if roles(&self.values[at]).is_some() && !self.marked[at] {
             self.marked[at] = true;

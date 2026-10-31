@@ -109,6 +109,25 @@ impl PreparedTransfer<'_> {
     }
 }
 
+pub(super) struct PreparedEnd<'a> {
+    registers: &'a mut Registers,
+    transfer: source::Transfer,
+}
+impl PreparedEnd<'_> {
+    pub(super) fn owner(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.transfer.owner()
+    }
+    pub(super) fn value(&self) -> Value {
+        self.transfer.value()
+    }
+    pub(super) fn publish(self) {
+        self.registers.take(self.transfer.index(), Value::Null);
+        self.registers.source.publish_transfer(self.transfer);
+        // Preparation proved that no other bank receipt owns a source root.
+        self.registers.source.clear();
+    }
+}
+
 pub(super) struct PreparedReleases<'a> {
     registers: &'a mut Registers,
     owners: Vec<lash_kernel_state::kernel_internals::logical::Owner>,
@@ -189,10 +208,10 @@ fn reusable(value: &Value) -> bool {
 }
 
 impl Registers {
-    pub(super) fn prepare_source_transfer(
-        &mut self,
+    fn checked_source_transfer(
+        &self,
         reg: lash_kernel_exec::Reg,
-    ) -> Result<Option<PreparedTransfer<'_>>, lash_kernel_doc::heap::HeapFault> {
+    ) -> Result<Option<source::Transfer>, HeapFault> {
         let Some(transfer) = self.source.prepare_transfer(reg)? else {
             return Ok(None);
         };
@@ -200,11 +219,35 @@ impl Registers {
             .get(transfer.index())
             .is_some_and(|value| value.same(&transfer.value()))
         {
-            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
+            return Err(HeapFault::Malformed(
                 "source transfer snapshot differs from its register".into(),
             ));
         }
+        Ok(Some(transfer))
+    }
+    pub(super) fn prepare_source_transfer(
+        &mut self,
+        reg: lash_kernel_exec::Reg,
+    ) -> Result<Option<PreparedTransfer<'_>>, HeapFault> {
+        let Some(transfer) = self.checked_source_transfer(reg)? else {
+            return Ok(None);
+        };
         Ok(Some(PreparedTransfer {
+            registers: self,
+            transfer,
+        }))
+    }
+    pub(super) fn prepare_source_end(
+        &mut self,
+        at: &lash_kernel_value::sites::Site,
+    ) -> Result<Option<PreparedEnd<'_>>, HeapFault> {
+        let Some(reg) = self.source.end_register(at)? else {
+            return Ok(None);
+        };
+        let Some(transfer) = self.checked_source_transfer(reg)? else {
+            return Ok(None);
+        };
+        Ok(Some(PreparedEnd {
             registers: self,
             transfer,
         }))

@@ -123,7 +123,10 @@ impl Operands {
             .get(at)
             .ok_or_else(|| invalid("source join has no operand"))?;
         if operand.site != join.from {
-            return Err(invalid("source join names another operand"));
+            return Err(invalid(&format!(
+                "source join names another operand: register {:?}, expected {:?} -> {:?}, found {:?}",
+                join.value, join.from, join.to, operand.site,
+            )));
         }
         let Some(roots) = &self.roots else {
             return Ok(None);
@@ -154,6 +157,26 @@ impl Operands {
         operand.held.owner = Some(join.output);
     }
 
+    pub(super) fn end_register(&self, at: &Site) -> Result<Option<Reg>, HeapFault> {
+        if !self.active || self.roots.is_none() {
+            return Ok(None);
+        }
+        let [operand] = self.values.as_slice() else {
+            return Ok(None);
+        };
+        if self
+            .atoms
+            .iter()
+            .chain(&self.entry)
+            .any(|held| held.owner.is_some())
+        {
+            return Ok(None);
+        }
+        if operand.site.as_ref() != at {
+            return Err(invalid("source end names another operand"));
+        }
+        Ok(Some(operand.reg))
+    }
     pub(super) fn prepare_transfer(&self, reg: Reg) -> Result<Option<Transfer>, HeapFault> {
         if !self.active {
             return Ok(None);
@@ -608,7 +631,10 @@ impl Operands {
             .get_mut(at)
             .ok_or_else(|| invalid("source join has no operand"))?;
         if operand.site != join.from {
-            return Err(invalid("source join names another operand"));
+            return Err(invalid(&format!(
+                "source join names another operand: register {:?}, expected {:?} -> {:?}, found {:?}",
+                join.value, join.from, join.to, operand.site,
+            )));
         }
         if let Some(roots) = &self.roots {
             if let Some(owner) = operand.held.owner {

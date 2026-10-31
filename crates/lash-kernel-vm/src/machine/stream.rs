@@ -272,6 +272,13 @@ impl KernelMachine {
                 }
                 Op::JumpIfFalse { cond, skip } => {
                     self.close_region(running.stream);
+                    if let Some(taken) = self.publish_source_test(running, source_pc)? {
+                        if !taken {
+                            pc += skip as usize;
+                        }
+                        self.source_complete_joins(running, source_pc)?;
+                        continue;
+                    }
                     match self.take(at(cond)) {
                         Value::Bool(true) => {}
                         Value::Bool(false) => pc += skip as usize,
@@ -298,6 +305,14 @@ impl KernelMachine {
                 }
                 Op::Branch { cond, then_, else_ } => {
                     self.close_region(running.stream);
+                    if let Some(taken) = self.publish_source_test(running, source_pc)? {
+                        let block = BlockId(if taken { then_.0 } else { else_.0 });
+                        if running.exe.block(block).stmts.is_empty() {
+                            self.observe_empty_block(task, block, running.exe);
+                            return Ok(Ran::Done);
+                        }
+                        return Ok(Ran::Step);
+                    }
                     let block = match self.take(at(cond)) {
                         Value::Bool(true) => BlockId(then_.0),
                         Value::Bool(false) => BlockId(else_.0),
@@ -324,6 +339,9 @@ impl KernelMachine {
                 }
                 Op::End => {
                     self.close_region(running.stream);
+                    if self.publish_source_end(running, source_pc)? {
+                        return Ok(Ran::Done);
+                    }
                     return self.source_done(running, source_pc, Ran::Done);
                 }
                 op => {

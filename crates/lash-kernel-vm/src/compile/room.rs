@@ -853,6 +853,26 @@ impl Source {
         }
     }
 
+    /// The selected arm is an actual child of this source conditional.
+    /// Its first event is determined before either operand or control changes.
+    pub(crate) fn next_after_if_test(&self, at: &Site, taken: bool) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        if !matches!(
+            node,
+            doc::Node::Expr(doc::Expr::If { .. }) | doc::Node::Stmt(doc::Stmt::If { .. })
+        ) {
+            return Err(Refused::Path);
+        }
+        self.first_event(&child(at, if taken { 1 } else { 2 }))
+    }
+
     /// The next event after a resident, non-protocol cursor has selected its branch.
     pub(crate) fn next_after_for_cursor(
         &self,
@@ -918,6 +938,7 @@ impl Source {
             doc::Node::Expr(_)
                 | doc::Node::Stmt(
                     doc::Stmt::Let { .. }
+                        | doc::Stmt::Do { .. }
                         | doc::Stmt::Assign {
                             place: doc::Place::Variable(_),
                             ..

@@ -1,4 +1,4 @@
-//! While tests consume the actual condition in their accepted source journal.
+//! Conditional tests consume their actual condition before selecting control.
 use super::*;
 use crate::compile::room::publication::Occurrence;
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
@@ -14,7 +14,12 @@ impl KernelMachine {
         running: &Running<'_>,
         pc: u32,
     ) -> Result<Option<bool>, Halt> {
-        let Op::Test { cond } = running.stream.ops[pc as usize] else {
+        let op = running.stream.ops[pc as usize];
+        let (Op::Test { cond } | Op::Branch { cond, .. } | Op::JumpIfFalse { cond, .. }) = op
+        else {
+            return Ok(None);
+        };
+        let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(None);
         };
         let (source, link, loops) = {
@@ -22,27 +27,31 @@ impl KernelMachine {
             let Some(mut loops) = source_loops(frame, running.exe)? else {
                 return Ok(None);
             };
-            let Some(Control::While { stmt, started }) = frame.control.last() else {
-                return Err(malformed("source test has no active while").into());
-            };
-            let Some((site, iteration)) = loops.last_mut() else {
-                return Err(malformed("source test has no loop occurrence").into());
-            };
-            if *stmt != running.id || site != &running.stmt.site {
-                return Err(malformed("source test names another while").into());
+            if matches!(op, Op::Test { .. }) {
+                let Some(Control::While { stmt, started }) = frame.control.last() else {
+                    return Err(malformed("source test has no active while").into());
+                };
+                let Some((loop_site, iteration)) = loops.last_mut() else {
+                    return Err(malformed("source test has no loop occurrence").into());
+                };
+                if *stmt != running.id
+                    || loop_site != site.as_ref()
+                    || site.as_ref() != &running.stmt.site
+                {
+                    return Err(malformed("source test names another while").into());
+                }
+                // A header tests the next pass; body coordinates name the pass
+                // already entered and use started - 1.
+                *iteration = *started;
             }
-            // A header tests the next pass; body coordinates name the pass
-            // already entered and use started - 1.
-            *iteration = *started;
             (
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
                 loops,
             )
         };
-        let site = &running.stmt.site;
         let at = Point {
-            site: site.clone(),
+            site: (**site).clone(),
             phase: Phase::Test,
         };
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
@@ -55,7 +64,12 @@ impl KernelMachine {
         let doc::Value::Bool(taken) = bank.value() else {
             return Ok(None);
         };
-        let Ok(unpaid) = source.next_after_while_test(site, taken) else {
+        let successor = if matches!(op, Op::Test { .. }) {
+            source.next_after_while_test(site, taken)
+        } else {
+            source.next_after_if_test(site, taken)
+        };
+        let Ok(unpaid) = successor else {
             return Ok(None);
         };
         let input = bank.owner();
@@ -89,6 +103,32 @@ impl KernelMachine {
             .logical
             .as_ref()
             .ok_or_else(|| malformed("precise source has no entered invocation"))?;
+        let expected = source
+            .owner_slots()
+            .map_err(|_| malformed("source test owners failed verification"))?
+            .root(
+                &Selector::Operand(site.child(0)),
+                running.task,
+                roots.invocation().id(),
+            )
+            .ok_or_else(|| malformed("source test has no canonical condition owner"))?;
+        if input != expected {
+            return Err(malformed("source test consumes another condition owner").into());
+        }
+        let block = if let Op::Branch { then_, else_, .. } = op {
+            let block = crate::compile::BlockId(if taken { then_.0 } else { else_.0 });
+            let selected = running.exe.block(block);
+            if selected.site != site.child(if taken { 1 } else { 2 }) {
+                return Err(malformed("source test selects another conditional block").into());
+            }
+            if selected.stmts.is_empty() {
+                None
+            } else {
+                Some(frame.control.prepare_block(block)?)
+            }
+        } else {
+            None
+        };
         let start = Position {
             at: at.clone(),
             unpaid: Some(at.clone()),
@@ -169,14 +209,24 @@ impl KernelMachine {
                     ..Default::default()
                 }])
             },
-            Reserve(move |_: &mut Arena| Ok(Some(bank))),
-            |_, _, edits, bank| {
+            Reserve(move |_: &mut Arena| Ok(Some((bank, block)))),
+            |_, _, edits, (bank, block)| {
                 debug_assert!(edits.is_empty());
                 bank.publish();
+                if let Some(block) = block {
+                    block.publish();
+                }
             },
         )?;
         #[cfg(any(test, feature = "testing"))]
-        if published {
+        if published && !matches!(op, Op::Test { .. }) {
+            crate::machine::islands::witness::precise_branch_published(
+                matches!(op, Op::Branch { .. }),
+                taken,
+            );
+        }
+        #[cfg(any(test, feature = "testing"))]
+        if published && matches!(op, Op::Test { .. }) {
             let Some(frontier) = &frame.source_frontier else {
                 unreachable!("a committed source test has a frontier");
             };

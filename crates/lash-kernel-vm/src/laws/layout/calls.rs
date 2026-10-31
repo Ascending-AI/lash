@@ -19,7 +19,7 @@ const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empt
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 // K-CHG-001: an unpaid source region cannot publish a captured closure.
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
-const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { do \"a deferred source payload beyond the inline representation\" do 1000000000000000000000000 do b\"0011ff\" let callback = &literal do apply callback(value) let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } else { do value } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
+const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { if true { do value } else { do value } if false { do value } else { do value } do \"a deferred source payload beyond the inline representation\" do 1000000000000000000000000 do b\"0011ff\" let callback = &literal do apply callback(value) let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } else { do value } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
@@ -253,6 +253,8 @@ fn observe_source_or_register(
     let precise_scopes = crate::machine::islands::witness::precise_scopes();
     let while_scopes = crate::machine::islands::witness::while_scopes();
     let for_scopes = crate::machine::islands::witness::for_scopes();
+    let precise_ends = crate::machine::islands::witness::precise_ends();
+    let precise_branches = crate::machine::islands::witness::precise_branches();
     let condition_iterations = crate::machine::islands::witness::precise_condition_iterations();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
@@ -410,6 +412,14 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_SCOPED_BINDINGS)
     {
+        assert!(
+            precise_branches.iter().flatten().all(|count| *count > 0),
+            "both expression and statement conditional outcomes must consume their actual source condition before control changes: {precise_branches:?}"
+        );
+        assert!(
+            precise_ends.iter().all(|count| *count > 0),
+            "do completion must release actual scalar and heap RHS owners through acceptance: {precise_ends:?}"
+        );
         assert!(
             precise_literals.iter().all(|count| *count > 0),
             "deferred integer, text, bytes and genuine function literals must install through source acceptance: {precise_literals:?}"
