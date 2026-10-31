@@ -425,6 +425,14 @@ impl Operands {
                 held: projection.hold(registers[reg.ix()])?,
             })?;
         }
+        self.complete_joins(stream, pc)
+    }
+    /// Accepted operations install their input/output receipts themselves,
+    /// then run the same checked source-role joins as ordinary operations.
+    pub(super) fn complete_joins(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
+        if !self.active {
+            return Err(invalid("source join has no active owner bank"));
+        }
         if let Some(joins) = stream.source_joins.get(&pc) {
             for join in joins {
                 let at = *self

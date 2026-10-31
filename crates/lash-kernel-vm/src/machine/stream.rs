@@ -183,6 +183,7 @@ impl KernelMachine {
                         self.literal(&running.stream.consts[c.ix()])
                     );
                     if self.publish_source_leaf(running, source_pc, value)? {
+                        self.source_complete_joins(running.stream, source_pc)?;
                         continue;
                     }
                     self.put(at(dst), value);
@@ -191,6 +192,7 @@ impl KernelMachine {
                     let value =
                         inside!(self, running, pc, self.read_local(task, running.exe, local));
                     if self.publish_source_leaf(running, source_pc, value)? {
+                        self.source_complete_joins(running.stream, source_pc)?;
                         continue;
                     }
                     self.put(at(dst), value);
@@ -222,6 +224,7 @@ impl KernelMachine {
                         pc,
                         self.publish_source_construction(running, source_pc)
                     ) {
+                        self.source_complete_joins(running.stream, source_pc)?;
                         continue;
                     }
                     inside!(self, running, pc, self.in_region_rare(running, op));

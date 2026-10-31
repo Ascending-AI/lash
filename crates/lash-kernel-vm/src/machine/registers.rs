@@ -363,6 +363,14 @@ impl Registers {
         self.source.atom(index, value, projection)
     }
 
+    pub(super) fn source_complete_joins(
+        &mut self,
+        stream: &crate::compile::Stream,
+        pc: u32,
+    ) -> Result<(), HeapFault> {
+        self.source.complete_joins(stream, pc)
+    }
+
     pub(super) fn source_complete(
         &mut self,
         stream: &crate::compile::Stream,

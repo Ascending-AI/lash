@@ -144,6 +144,14 @@ impl KernelMachine {
         self.logical_flush()?;
         Ok(())
     }
+    pub(super) fn source_complete_joins(
+        &mut self,
+        stream: &Stream,
+        pc: u32,
+    ) -> Result<(), HeapFault> {
+        self.regs.source_complete_joins(stream, pc)?;
+        self.logical_flush()
+    }
     pub(super) fn source_complete(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
         let projection = Projection {
             arena: &self.arena,

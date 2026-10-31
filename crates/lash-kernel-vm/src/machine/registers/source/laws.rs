@@ -144,6 +144,25 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
             .is_err(),
         "a transfer receipt cannot survive its source bank"
     );
+    // K-EVAL-008: a prepared else result still passes through its compiler
+    // join before an enclosing true arm joins. Const, Local and construction
+    // outputs must all reach the same real outer source owner.
+    for layout in [crate::Layout(0), crate::Layout(1)] {
+        let mut joined = crate::laws::embedder::Embedder::try_over(
+            "main { let run = fn(value) { return [if(true, if(false, 0, 2), 0), if(true, if(false, 0, value), 0), if(true, if(false, [], [7]), [])] } return apply run(7) }",
+            crate::laws::embedder::Setup { layout, ..Default::default() },
+            None,
+        ).unwrap();
+        joined.machine.force_source_execution();
+        let expected = lash_kernel_doc::Datum::List(vec![
+            crate::laws::embedder::int(2),
+            crate::laws::embedder::int(7),
+            lash_kernel_doc::Datum::List(vec![crate::laws::embedder::int(7)]),
+        ]);
+        assert!(
+            matches!(joined.run_to_end(&[]), crate::End::Finished(ref end) if end.result == expected)
+        );
+    }
     let mut live = crate::laws::embedder::Embedder::new(
         "main {
 if true {
