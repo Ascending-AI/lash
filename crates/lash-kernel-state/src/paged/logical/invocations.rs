@@ -135,11 +135,33 @@ impl Ledger {
         invocation: &Invocation,
         access: &Access<'_>,
     ) -> Result<Vec<Owner>, HeapFault> {
+        self.invocation_range(
+            invocation,
+            codec::invocation_key(invocation.task, invocation.id),
+            access,
+        )
+    }
+    pub(super) fn invocation_operands(
+        &self,
+        invocation: &Invocation,
+        access: &Access<'_>,
+    ) -> Result<Vec<Owner>, HeapFault> {
+        self.invocation_range(
+            invocation,
+            codec::operand_prefix(invocation.task, invocation.id),
+            access,
+        )
+    }
+    fn invocation_range(
+        &self,
+        invocation: &Invocation,
+        prefix: codec::Key,
+        access: &Access<'_>,
+    ) -> Result<Vec<Owner>, HeapFault> {
         if !Rc::ptr_eq(&self.identity, &invocation.ledger) {
             return Err(invalid("logical invocation belongs to another ledger"));
         }
         self.invocation(invocation.task, invocation.id, access)?;
-        let prefix = codec::invocation_key(invocation.task, invocation.id);
         let mut cursor = prefix.as_slice().to_vec();
         let mut owners = Vec::new();
         while let Some((key, record)) = self.state.execution.after(Some(&cursor), access)? {

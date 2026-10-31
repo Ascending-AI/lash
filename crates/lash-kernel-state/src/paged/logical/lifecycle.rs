@@ -42,6 +42,28 @@ impl Lifecycle {
     pub fn replace(&self, owner: Owner, next: Option<SourceValue>) {
         self.pending.borrow_mut().insert(owner, next);
     }
+    /// Retire only this activation's actual operands, including unpublished
+    /// replacements. The caller can reacquire live roles in the same journal.
+    pub fn clear_operands(
+        &self,
+        invocation: &Invocation,
+        access: &Access<'_>,
+    ) -> Result<(), HeapFault> {
+        let owners = self
+            .ledger
+            .borrow()
+            .invocation_operands(invocation, access)?;
+        let mut pending = self.pending.borrow_mut();
+        for owner in owners {
+            pending.insert(owner, None);
+        }
+        let first = invocation.owner(Slot::Operand(0));
+        let last = invocation.owner(Slot::Operand(u32::MAX));
+        for (_, value) in pending.range_mut(first..=last) {
+            *value = None;
+        }
+        Ok(())
+    }
     pub fn flush(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
         let mut pending = self.pending.borrow_mut();
         let events = arena.take_member_events();

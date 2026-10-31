@@ -53,6 +53,11 @@ pub(super) fn invocation_key(task: TaskId, invocation: u64) -> Key {
     key.append(&invocation.to_be_bytes());
     key
 }
+pub(super) fn operand_prefix(task: TaskId, invocation: u64) -> Key {
+    let mut key = invocation_key(task, invocation);
+    key.append(&[slot_parts(Slot::Operand(0)).0]);
+    key
+}
 pub(super) fn owner_key(owner: Owner) -> Key {
     match owner {
         Owner::Frame { task, invocation }

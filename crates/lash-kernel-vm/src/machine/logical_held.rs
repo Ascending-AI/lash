@@ -128,8 +128,9 @@ impl KernelMachine {
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
         self.logical_flush()?;
+        let access = self.heap.pages().clone();
         let roots = if let Some(roots) = &self.frame(task)?.logical {
-            roots.clear_operands()?;
+            roots.clear_operands(&access)?;
             Some(roots.bank())
         } else {
             None

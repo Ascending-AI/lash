@@ -26,28 +26,8 @@ impl FrameRoots {
     }
     /// Re-entry replaces packet operand mirrors with the actual live source
     /// roles in the same pending ownership journal. Continuations stay owned.
-    pub(in crate::machine) fn clear_operands(&self) -> Result<(), HeapFault> {
-        let owners = self
-            .bank
-            .slots
-            .group(
-                &crate::compile::room::Owner::Operands(self.source.site.clone()),
-                self.bank.task,
-                self.invocation.id(),
-            )
-            .ok_or_else(|| HeapFault::Malformed("source operand scope is absent".into()))?;
-        for owner in owners {
-            if matches!(
-                owner,
-                Owner::Value {
-                    slot: Slot::Operand(_),
-                    ..
-                }
-            ) {
-                self.bank.lifecycle.replace(owner, None);
-            }
-        }
-        Ok(())
+    pub(in crate::machine) fn clear_operands(&self, access: &Access<'_>) -> Result<(), HeapFault> {
+        self.bank.lifecycle.clear_operands(&self.invocation, access)
     }
     pub(in crate::machine) fn restore(
         lifecycle: Lifecycle,

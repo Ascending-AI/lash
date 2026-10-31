@@ -206,29 +206,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .source
             .as_ref()
             .ok_or_else(|| malformed("packet frame has no source activation"))?;
-        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let slots = source
-            .owner_slots()
-            .map_err(|_| malformed("packet source owners failed verification"))?;
-        let owners = slots
-            .group(
-                &room::Owner::Operands(source.site.clone()),
-                self.task,
-                activation.invocation.id(),
-            )
-            .ok_or_else(|| malformed("packet operand scope is absent"))?;
-        for owner in owners {
-            if matches!(
-                owner,
-                Owner::Value {
-                    slot: lash_kernel_state::kernel_internals::logical::Slot::Operand(_),
-                    ..
-                }
-            ) {
-                self.logical.replace(owner, None);
-            }
-        }
-        Ok(())
+        self.logical
+            .clear_operands(&activation.invocation, self.heap.pages())
     }
 
     pub(super) fn source_bindings(&self, frame: &storage::Values<'_, '_>) -> Result<(), HeapFault> {

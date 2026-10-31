@@ -756,23 +756,42 @@ impl BuildHelpers {
     /// Exact admission closure, skipping absent roots as `admits` does.
     /// `reach` separately refuses a missing helper when closure is required.
     pub fn admitted(&self, roots: &crate::LibraryDependencies) -> BTreeSet<FunctionId> {
+        let mut reached = BTreeSet::new();
+        let _ = self.visit_admitted(roots, |id| {
+            reached.insert(id);
+            std::ops::ControlFlow::Continue(())
+        });
+        reached
+    }
+
+    fn visit_admitted(
+        &self,
+        roots: &crate::LibraryDependencies,
+        mut visit: impl FnMut(FunctionId) -> std::ops::ControlFlow<()>,
+    ) -> std::ops::ControlFlow<()> {
         let mut pending: Vec<_> = roots.iter().copied().collect();
         let mut seen = BTreeSet::new();
-        let mut reached = BTreeSet::new();
         while let Some(id) = pending.pop() {
             if !seen.insert(id) {
                 continue;
             }
             if let Some(callees) = self.callees(&id) {
-                reached.insert(id);
+                visit(id)?;
                 pending.extend(callees.iter().copied());
             }
         }
-        reached
+        std::ops::ControlFlow::Continue(())
     }
 
     pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
-        self.admitted(roots).contains(function)
+        self.visit_admitted(roots, |id| {
+            if id == *function {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        })
+        .is_break()
     }
 }
 impl crate::FunctionCatalog for BuildHelpers {
