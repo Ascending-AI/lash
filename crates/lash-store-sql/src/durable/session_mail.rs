@@ -25,6 +25,22 @@ crate::statements! {
              WHERE session_id = ?1 AND admitted_run IS NULL AND state = 'pending_active'
              ORDER BY enqueue_seq";
 
+        /// Operation `?2` of session `?1` still has an open unbound command
+        /// in a live session, or its derived run `?3` is unfinished. Closing
+        /// sessions remain live; the run branch preserves the turn read's
+        /// admission and phase-row predicates independently of session standing.
+        operation_is_open = "SELECT (
+                 EXISTS (SELECT 1 FROM session_meta WHERE session_id = ?1)
+                 AND NOT EXISTS (SELECT 1 FROM deleted_sessions WHERE session_id = ?1)
+                 AND EXISTS (SELECT 1 FROM queued_work_batches
+                     WHERE session_id = ?1 AND batch_id = ?2
+                       AND admitted_run IS NULL AND terminal_cause IS NULL)
+             ) OR EXISTS (
+                 SELECT 1 FROM session_runs r
+                 JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
+                 WHERE r.session_id = ?1 AND r.run = ?3
+                   AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL)";
+
         /// Enter the operation run of open plugin task `?2` of session `?1`
         /// at `?3`, keeping a first entry; no row when it is no longer open.
         enter_operation = "UPDATE queued_work_batches

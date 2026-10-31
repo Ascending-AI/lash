@@ -1001,6 +1001,13 @@ impl DurableReads for Retiring {
         self.inner.ending_scopes(session).await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &crate::domain::OperationRun,
+    ) -> Result<bool, crate::DurableError> {
+        self.inner.operation_is_open(operation).await
+    }
+
     async fn session_mailbox(
         &self,
         session: &SessionId,

@@ -59,6 +59,24 @@ static SQLITE: std::sync::LazyLock<SqliteSessionMailStatements> = std::sync::Laz
     )
 });
 
+/// One snapshot of the operation's command and unfinished-run authorities.
+pub(super) fn operation_is_open(
+    tx: &Connection,
+    operation: &lash_durable::domain::OperationRun,
+) -> Answer<bool> {
+    let run = operation.run_id();
+    Ok(Ok(tx
+        .prepare_cached(SQL.session_mail.operation_is_open.sql())?
+        .query_row(
+            rusqlite::params![
+                operation.session_id.as_str(),
+                operation.operation_id,
+                run.as_str()
+            ],
+            |row| row.get(0),
+        )?))
+}
+
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
         code: None,
@@ -491,4 +509,153 @@ pub(crate) fn open_inputs_query() -> String {
         "SELECT item.value ->> 0 FROM ({}) AS mailbox JOIN json_each(mailbox.inputs) AS item ORDER BY CAST(item.key AS INTEGER)",
         SQLITE.mailbox.sql()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use lash_core_store::store::{
+        ControlIntentStore as _, QueuedWorkStore as _, SessionCatalogStore as _,
+    };
+    use lash_durable::domain::{DomainWrite, OperationRun, TurnWrite};
+    use lash_durable::{
+        ActorKey, CommitLabel, DurableReads as _, DurableStore as _, NodeId, NodeSpec,
+    };
+
+    /// CLEANUP-LIVENESS: only a live unbound command or its exact unfinished
+    /// run can defer cleanup. Closing is live, deletion wins over a command,
+    /// and a run retains its own authority until it ends.
+    #[tokio::test]
+    async fn cleanup_liveness_joins_the_exact_open_command_and_unfinished_run() {
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let store = set.durable_store();
+        let factory = set.session_store_factory();
+        let session = lash_kernel_value::identity::SessionId::fixture("cleanup-liveness");
+        let absent = OperationRun {
+            session_id: session.clone(),
+            operation_id: "absent".to_owned(),
+        };
+        assert!(!store.operation_is_open(&absent).await.unwrap());
+        factory
+            .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+                &session,
+            ))
+            .await
+            .unwrap();
+        let batch = factory
+            .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+                session.clone(),
+                lash_core::DeliveryPolicy::EarliestSafeBoundary,
+                lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                    reason: "cleanup liveness".to_owned(),
+                },
+            ))
+            .await
+            .unwrap();
+        let operation = OperationRun {
+            session_id: session.clone(),
+            operation_id: batch.batch_id.to_string(),
+        };
+        assert!(store.operation_is_open(&operation).await.unwrap());
+        assert!(!store.operation_is_open(&absent).await.unwrap());
+        factory.begin_session_close(&session, 1).await.unwrap();
+        assert!(
+            store.operation_is_open(&operation).await.unwrap(),
+            "a closing session is live"
+        );
+
+        const DELETED: &str =
+            "INSERT INTO deleted_sessions (session_id, created_at_ms, head_revision, relation_kind)
+            VALUES ('cleanup-liveness', 0, 0, 'root')";
+        store
+            .conn
+            .call(|connection| connection.execute(DELETED, []))
+            .await
+            .unwrap();
+        assert!(
+            !store.operation_is_open(&operation).await.unwrap(),
+            "a deleted session's command is not open"
+        );
+        store
+            .conn
+            .call(|connection| {
+                connection.execute(
+                    "DELETE FROM deleted_sessions WHERE session_id = 'cleanup-liveness'",
+                    [],
+                )
+            })
+            .await
+            .unwrap();
+        let run = operation.run_id();
+        let bound = run.clone();
+        store.conn.call(move |connection| connection.execute(
+            "UPDATE queued_work_batches SET admitted_run = ?1, admitted_by = ?1 WHERE session_id = 'cleanup-liveness'",
+            [bound.as_str()],
+        )).await.unwrap();
+        assert!(
+            !store.operation_is_open(&operation).await.unwrap(),
+            "a bound batch alone cannot defer cleanup"
+        );
+
+        let actor = ActorKey::session(session.as_str()).unwrap();
+        let formats = store.actor(&actor).await.unwrap().unwrap().formats;
+        let node = store
+            .register_node(&NodeSpec {
+                node: NodeId::new("cleanup-liveness"),
+                decodes: vec![formats],
+                serves: Vec::new(),
+                capabilities: Default::default(),
+                ttl_millis: 60_000,
+            })
+            .await
+            .unwrap();
+        let epoch = store.claim(&node, 1).await.unwrap()[0].epoch;
+        let mut admit = store.begin(&actor, epoch, u64::MAX).await.unwrap();
+        admit.write(DomainWrite::Turn(TurnWrite::Admit {
+            session: session.clone(),
+            run: run.clone(),
+            admission: lash_core_store::store::RunAdmissionRecord::Command {
+                batch: batch.batch_id,
+            },
+            turn_deadline: None,
+        }));
+        store
+            .commit(admit, CommitLabel::new("law.cleanup.admit"))
+            .await
+            .unwrap();
+        assert!(store.operation_is_open(&operation).await.unwrap());
+        assert!(
+            !store.operation_is_open(&absent).await.unwrap(),
+            "another operation's unfinished run does not match"
+        );
+        store
+            .conn
+            .call(|connection| connection.execute(DELETED, []))
+            .await
+            .unwrap();
+        assert!(
+            store.operation_is_open(&operation).await.unwrap(),
+            "the unfinished run survives deletion independently"
+        );
+        store.conn.call(|connection| connection.execute(
+            "UPDATE queued_work_batches SET admitted_run = NULL, admitted_by = NULL,
+                terminal_cause = 'applied', terminal_at_ms = 1 WHERE session_id = 'cleanup-liveness'", [],
+        )).await.unwrap();
+        assert!(
+            store.operation_is_open(&operation).await.unwrap(),
+            "a settled command does not end its unfinished run"
+        );
+        let mut end = store.begin(&actor, epoch, u64::MAX).await.unwrap();
+        end.write(DomainWrite::Turn(TurnWrite::Terminal {
+            session,
+            run,
+            cause: Box::new(lash_core_store::store::RunTerminalCause::CommandsApplied),
+            head_revision: None,
+            transcript: None,
+        }));
+        store
+            .commit(end, CommitLabel::new("law.cleanup.end"))
+            .await
+            .unwrap();
+        assert!(!store.operation_is_open(&operation).await.unwrap());
+    }
 }

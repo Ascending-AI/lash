@@ -199,6 +199,13 @@ impl DurableReads for TestDatabase {
         self.inner.ending_scopes(session).await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash_durable::domain::OperationRun,
+    ) -> Result<bool, lash_durable::DurableError> {
+        self.inner.operation_is_open(operation).await
+    }
+
     async fn session_mailbox(
         &self,
         session: &lash_kernel_value::identity::SessionId,

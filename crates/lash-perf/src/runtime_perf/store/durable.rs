@@ -355,6 +355,19 @@ impl DurableReads for RuntimePerfDurableStore {
         self.inner.ending_scopes(session).await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash_durable::domain::OperationRun,
+    ) -> Result<bool, lash_durable::DurableError> {
+        let observation = self.metrics.observe_call("durable_operation_is_open");
+        let started = Instant::now();
+        let answer = self.inner.operation_is_open(operation).await;
+        self.metrics
+            .record_timing("cleanup_liveness", started.elapsed());
+        drop(observation);
+        answer
+    }
+
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError> {
         let observation = self.metrics.observe_call("durable_session_mailbox");
         let started = Instant::now();

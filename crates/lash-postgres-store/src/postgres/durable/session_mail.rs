@@ -246,6 +246,20 @@ fn session_actor(session: &SessionId) -> Result<lash_durable::ActorKey, crate::S
         .map_err(|error| crate::StoreError::Backend(error.to_string()))
 }
 
+/// One snapshot of the operation's command and unfinished-run authorities.
+pub(super) async fn operation_is_open(
+    tx: &mut PgConnection,
+    operation: &lash_durable::domain::OperationRun,
+) -> Result<bool, DurableError> {
+    crate::observed_sql::query_scalar(SQL.session_mail.operation_is_open.sql())
+        .bind(operation.session_id.as_str())
+        .bind(&operation.operation_id)
+        .bind(operation.run_id().as_str())
+        .fetch_one(crate::observed_sql::executor(tx))
+        .await
+        .map_err(sqlx_failure)
+}
+
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     DurableError::Store(StoreFailure {
         code: None,

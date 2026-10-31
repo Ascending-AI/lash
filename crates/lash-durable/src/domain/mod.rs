@@ -39,6 +39,7 @@ pub mod namespace_value;
 pub mod pages;
 pub mod processes;
 pub mod prompts;
+pub use lash_core_store::tool_run::OperationRun;
 pub use model_calls::{ModelCallOwner, ModelCallPinRow, ModelCallPinWrite, ModelCallWrite};
 pub mod run_records;
 pub mod session_close;
@@ -614,6 +615,11 @@ pub trait DurableReads: Send + Sync {
     /// L6b: the session's scopes whose cascade still has children to mark,
     /// in the order they began ending.
     async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError>;
+
+    /// Whether this operation has an unbound nonterminal command in a live
+    /// session, including a closing session, or its exact unfinished run.
+    /// Both branches are read in one protected snapshot without loading bodies.
+    async fn operation_is_open(&self, operation: &OperationRun) -> Result<bool, DurableError>;
 
     /// L3s: the session's open mail.
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError>;

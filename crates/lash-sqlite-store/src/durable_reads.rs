@@ -205,6 +205,15 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash_durable::domain::OperationRun,
+    ) -> Result<bool, DurableError> {
+        let operation = operation.clone();
+        self.query(move |tx| session_mail::operation_is_open(tx, &operation))
+            .await
+    }
+
     async fn session_mailbox(
         &self,
         session: &lash_kernel_value::identity::SessionId,

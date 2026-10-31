@@ -497,6 +497,13 @@ impl DurableReads for RecordedStore {
         self.inner.ending_scopes(session).await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash::durable::domain::OperationRun,
+    ) -> Result<bool, lash::durable::DurableError> {
+        self.inner.operation_is_open(operation).await
+    }
+
     async fn session_mailbox(
         &self,
         session: &SessionId,

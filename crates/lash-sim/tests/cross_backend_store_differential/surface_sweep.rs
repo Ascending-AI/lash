@@ -458,6 +458,9 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 durable_read_coverage::DurableReadMethod::EndingScopes,
             )),
             surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::OperationIsOpen,
+            )),
+            surface(SurfaceMethod::DurableRead(
                 durable_read_coverage::DurableReadMethod::SessionMailbox,
             )),
             surface(SurfaceMethod::DurableRead(

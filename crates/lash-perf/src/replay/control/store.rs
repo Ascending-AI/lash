@@ -401,6 +401,14 @@ impl DurableReads for ObservedStore {
             .await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash_durable::domain::OperationRun,
+    ) -> Result<bool, lash_durable::DurableError> {
+        self.observe("operation_is_open", self.inner.operation_is_open(operation))
+            .await
+    }
+
     async fn session_mailbox(&self, session: &SessionId) -> Result<SessionMailbox, DurableError> {
         self.observe("session_mailbox", self.inner.session_mailbox(session))
             .await

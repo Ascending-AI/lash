@@ -120,27 +120,14 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
             Some(crate::ExecutionScope::SessionOperation {
                 session_id,
                 operation_id,
-            }) => {
-                let mail = self
-                    .durable
-                    .session_mailbox(&session_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let command_is_open = mail
-                    .batches
-                    .iter()
-                    .any(|batch| batch.batch.as_str() == operation_id.as_str());
-                let run = crate::tool_run::OperationRun {
-                    session_id: session_id.clone(),
+            }) => self
+                .durable
+                .operation_is_open(&crate::tool_run::OperationRun {
+                    session_id,
                     operation_id,
-                }
-                .run_id();
-                command_is_open
-                    || lash_durable::DurableReads::turn(self.durable.as_ref(), &session_id)
-                        .await
-                        .map_err(|error| error.to_string())?
-                        .is_some_and(|row| row.run == run)
-            }
+                })
+                .await
+                .map_err(|error| error.to_string())?,
             Some(
                 crate::ExecutionScope::SessionDelete { .. }
                 | crate::ExecutionScope::RuntimeOperation { .. },

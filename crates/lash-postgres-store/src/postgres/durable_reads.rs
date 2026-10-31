@@ -192,6 +192,14 @@ impl DurableReads for PostgresDurableStore {
             .await
     }
 
+    async fn operation_is_open(
+        &self,
+        operation: &lash_durable::domain::OperationRun,
+    ) -> Result<bool, DurableError> {
+        self.read(|connection| Box::pin(session_mail::operation_is_open(connection, operation)))
+            .await
+    }
+
     async fn session_mailbox(
         &self,
         session: &lash_kernel_value::identity::SessionId,

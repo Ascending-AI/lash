@@ -26,6 +26,7 @@ pub(super) enum DurableReadMethod {
     UntilChildren,
     SessionClose,
     EndingScopes,
+    OperationIsOpen,
     SessionMailbox,
     PromptSnapshot,
     PromptTexts,
@@ -51,6 +52,7 @@ impl DurableReadMethod {
             Self::UntilChildren => "until_children",
             Self::SessionClose => "session_close",
             Self::EndingScopes => "ending_scopes",
+            Self::OperationIsOpen => "operation_is_open",
             Self::SessionMailbox => "session_mailbox",
             Self::PromptSnapshot => "prompt_snapshot",
             Self::PromptTexts => "prompt_texts",
@@ -189,6 +191,16 @@ pub(super) async fn drive(
                 .ending_scopes(session)
                 .await
                 .expect("execute ending_scopes")
+        ),
+        DurableReadMethod::OperationIsOpen => format!(
+            "{:?}",
+            store
+                .operation_is_open(&lash_durable::domain::OperationRun {
+                    session_id: session.clone(),
+                    operation_id: "coverage-absent-operation".to_owned(),
+                })
+                .await
+                .expect("execute operation_is_open")
         ),
         DurableReadMethod::SessionMailbox => format!(
             "{:?}",
