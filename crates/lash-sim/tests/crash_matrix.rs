@@ -98,9 +98,9 @@ async fn remaining_reproducer_cells(case: Case) {
     }
 }
 
-/// FIG-7348: after closing cancels a race's losing sleep, restoring that
-/// cancellation keeps the winner and its turn alive. The loser's durable
-/// record names the cell's Closing, not a host stop.
+/// FIG-7348: the guest race helper cancels its losing direct sleep before
+/// returning the winner. Recovery keeps that ModelRequested decision, the
+/// winner and its turn alive; later cell closing cannot replace the origin.
 #[tokio::test]
 async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled() {
     let worlds = RefCell::new(Vec::new());
@@ -118,6 +118,11 @@ async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled()
     let session = lash_sim::crash_matrix::services::session_id("cell-cell");
     let run = lash_sim::crash_matrix::cases::run_of(&session);
     // The uncut deployment comes first; each cut's deployment follows it.
+    let mut decisions = BTreeMap::new();
+    for cut in &report.cells {
+        let (call, cancellation) = sleep_cancel_decision(&cut.writes);
+        assert!(decisions.insert(call, cancellation).is_none());
+    }
     let worlds = worlds.into_inner();
     for world in &worlds[1..] {
         let core = lash_sim::crash_matrix::cells::cell_core(world).expect("the cell's core");
@@ -137,7 +142,16 @@ async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled()
         let lash::tools::ToolCallOutcome::Cancelled(cancelled) = &loser.output.outcome else {
             panic!("the race loser is cancelled: {loser:?}");
         };
-        assert_eq!(cancelled.origin, Some(lash_core::CancelOrigin::RunClosing));
+        assert_eq!(
+            cancelled.origin,
+            Some(lash_core::CancelOrigin::ModelRequested)
+        );
+        if let Some(decision) = decisions.remove(&loser.call_id) {
+            assert_eq!(
+                *cancelled, decision,
+                "recovery must retain the first decision"
+            );
+        }
         let transcript = durable.transcript().await.expect("the race's transcript");
         let cell = transcript
             .visible()
@@ -156,6 +170,87 @@ async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled()
             serde_json::json!({ "ok": true, "wrote": { "x": 7, "session": "cell-cell" } })
         );
     }
+    assert!(
+        decisions.is_empty(),
+        "every cut's sleep decision was restored"
+    );
+}
+
+fn sleep_cancel_decision(
+    writes: &[lash_durable_test::Write],
+) -> (lash_core::ToolCallId, lash_core::ToolCancellation) {
+    use lash_core_execution::runtime::actor::round::graph::RoundFact;
+    use lash_core_store::checkpoint_graph::GraphDecoder;
+    use lash_core_store::tool_run::AttemptOutcome;
+    use lash_durable::domain::RunFactKind as Kind;
+
+    let mut decisions = Vec::new();
+    for write in writes.iter().filter(|write| write.committed()) {
+        let mut decoder = GraphDecoder::new(write.facts.as_ref(), write.facts.read_limits);
+        for row in write
+            .facts
+            .rows
+            .iter()
+            .filter(|row| row.kind == Kind::XCancel)
+        {
+            let Ok(RoundFact::Cancel { cancellation, .. }) =
+                RoundFact::load(&mut decoder, row.record)
+            else {
+                panic!("a cancellation row must hold its typed decision");
+            };
+            let Some(call) = row.call.clone() else {
+                panic!("a cancellation decision must identify its call");
+            };
+            decisions.push((call, cancellation));
+        }
+    }
+    let [(call, cancellation)] = decisions.as_slice() else {
+        panic!("exactly one direct sleep cancellation decision: {decisions:?}");
+    };
+    assert_eq!(
+        cancellation.origin,
+        Some(lash_core::CancelOrigin::ModelRequested)
+    );
+    let mut starts = 0;
+    let mut outcomes = 0;
+    for write in writes.iter().filter(|write| write.committed()) {
+        let mut decoder = GraphDecoder::new(write.facts.as_ref(), write.facts.read_limits);
+        for row in write
+            .facts
+            .rows
+            .iter()
+            .filter(|row| row.call.as_ref() == Some(call))
+        {
+            match row.kind {
+                Kind::XStart => starts += 1,
+                Kind::XOutcome => {
+                    let Ok(RoundFact::Outcome { output, .. }) =
+                        RoundFact::load(&mut decoder, row.record)
+                    else {
+                        panic!("an outcome row must hold its typed outcome");
+                    };
+                    let AttemptOutcome::Cancelled {
+                        cancellation: actual,
+                        ..
+                    } = output.outcome
+                    else {
+                        panic!("the losing sleep must settle cancelled");
+                    };
+                    assert_eq!(
+                        &actual, cancellation,
+                        "settlement must keep the first origin"
+                    );
+                    outcomes += 1;
+                }
+                Kind::Retry | Kind::XFinal | Kind::XFinalOutcome => {
+                    panic!("the cancelled sleep cannot retry or commit a final: {row:?}");
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!((starts, outcomes), (1, 1), "one admission and one outcome");
+    (call.clone(), cancellation.clone())
 }
 
 /// A stale-epoch cut at the cell's first save, which commits the model
