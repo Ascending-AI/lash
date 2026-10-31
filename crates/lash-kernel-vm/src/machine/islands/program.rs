@@ -1340,9 +1340,10 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &values);
             }
-            Kind::Closure { code, miss } => {
+            Kind::Closure { code, ahead, miss } => {
                 self.emit(Op::Closure {
                     pc,
+                    ahead: *ahead,
                     code: *code,
                     reg,
                     miss: *miss,

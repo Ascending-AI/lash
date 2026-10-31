@@ -66,6 +66,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         site: &sites::Closure,
     ) -> Result<Next, Stop> {
+        if !self.fits(site.ahead) {
+            return Err(self.at(site.miss));
+        }
         match self
             .publish_closure_construction(frame, site)
             .map_err(|error| self.halt(error.into()))?

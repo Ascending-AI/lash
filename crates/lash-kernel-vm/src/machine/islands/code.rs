@@ -323,6 +323,7 @@ operations! {
             }
             Closure closure {
                 pc: u32,
+                ahead: u64,
                 code: CodeId,
                 reg: u32,
                 miss: u32,

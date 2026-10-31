@@ -17,6 +17,8 @@ const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat
 const SOURCE_SESSION: &str = "let saved = [7] set saved = [saved, saved] return saved";
 const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empty_b = () if same(empty_a, empty_b) { } else { return empty_b } let negative = resident.negate(value) let restored = resident.add(negative, 14) let minimum = resident.minimum(restored, 9) let pair = [[minimum], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let copied = resident.copy(other) set copied[0] = value let temporary = resident.copy([[value], value]) if same(temporary[0][0], value) { } else { return temporary } let made_tuple = ((pair, pair), value) if same(made_tuple[0][1], pair) { } else { return made_tuple } let made_map = map{\"a\": value, \"a\": pair} let copied_map = resident.copy_map(made_map) if same(copied_map[\"a\"], pair) { } else { return copied_map } let made_set = set{value, value} let copied_set = resident.copy_set(made_set) if copied_set[value] { } else { return copied_set } let made_record = {b: value, a: pair} let copied_record = resident.copy_record(made_record) if same(copied_record.a, pair) { } else { return copied_record } let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") let repeated = text.repeat(joined, 2) let trimmed = text.slice(repeated, 0, 5) if same(trimmed, \"a can\") { } else { return trimmed } if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
+// K-CHG-001: an unpaid source region cannot publish a captured closure.
+const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
@@ -516,6 +518,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_CELL,
+        SOURCE_CLOSURE_PREFIX,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
         SOURCE_SESSION,
@@ -591,6 +594,9 @@ fn direct_call_entry_agrees() {
         if body == READ_ADD_WRITE {
             assert_eq!(natural.end, format!("finished {:?}", int(256)));
         }
+        if body == SOURCE_CLOSURE_PREFIX {
+            assert_eq!(natural.end, format!("finished {:?}", int(7)));
+        }
         if body == SUPERSEDED_RETURN {
             assert_eq!(
                 natural.end,
@@ -621,6 +627,7 @@ fn direct_call_entry_agrees() {
             || body == READ_ADD_WRITE
             || body == SOURCE_BAD_MEMBER
             || body == SOURCE_CELL
+            || body == SOURCE_CLOSURE_PREFIX
             || body == SOURCE_MEMBER
             || body == SOURCE_CONSTRUCTION
             || body == SOURCE_SESSION
@@ -772,6 +779,7 @@ fn direct_call_entry_agrees() {
             READ_ADD_WRITE,
             SOURCE_MEMBER,
             SOURCE_CELL,
+            SOURCE_CLOSURE_PREFIX,
             SOURCE_BAD_MEMBER,
             SOURCE_CONSTRUCTION,
             SOURCE_SESSION,

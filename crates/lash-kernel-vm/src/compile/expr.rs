@@ -238,7 +238,7 @@ pub(crate) enum Kind {
     },
     /// A closure of `code` over the cells of the variables it shares:
     /// `miss` is where an exit at it resumes.
-    Closure { code: CodeId, miss: u32 },
+    Closure { code: CodeId, ahead: u64, miss: u32 },
     /// A value its statement still uses, pinned for it.
     Pin(Box<Expr>),
     /// A control statement's operand the register program leaves to the
@@ -578,6 +578,7 @@ impl<'s> Reader<'s> {
                     dst,
                     Kind::Closure {
                         code: CodeId(code.0),
+                        ahead: units(&self.open),
                         miss: self.miss(pc),
                     },
                 ),
