@@ -557,7 +557,9 @@ async fn process_tool_call_limit_staged_calls(tier: Tier) {
 /// lease acquisition must preserve both groups of process effects.
 async fn a_sibling_commit_during_checkpoint_lease_preserves_staged_calls(tier: Tier) {
     use lash_core::testing::DurableCommitHook;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use lash_durable::domain::pages::{LeaseFence, RootLeaseRequest};
+    use lash_durable::domain::{ExecRootWrite, RootOwner, RunFactKind, RunFactWrite};
+    use lash_durable::{DomainWrite, DurableError};
     let witness = Arc::new(Witness::default());
     let hook = Arc::new(std::sync::OnceLock::<Arc<DurableCommitHook>>::new());
     let Some(world) = layered_world(tier, &witness, {
@@ -577,35 +579,58 @@ async fn a_sibling_commit_during_checkpoint_lease_preserves_staged_calls(tier: T
         return;
     };
     let hook = hook.get().unwrap();
-    let sampled = Arc::new(AtomicBool::new(false));
-    let committed = Arc::new(tokio::sync::Notify::new());
+    let sampled = Arc::new(std::sync::OnceLock::<RootLeaseRequest>::new());
+    let committed = tokio::sync::watch::channel(0_u64).0;
+    let writes = Arc::new(Mutex::new(Vec::<(
+        lash_durable::ActorTx,
+        lash_durable::ActorCommit,
+    )>::new()));
     hook.arm_root_lease({
         let witness = Arc::clone(&witness);
         let sampled = Arc::clone(&sampled);
-        let committed = Arc::clone(&committed);
+        let committed = committed.clone();
+        let writes = Arc::clone(&writes);
         move |request| {
             let pause = matches!(
-                request.owner,
-                lash_durable::domain::RootOwner::Exec(lash_durable::domain::ExecKey::Process(_))
-            ) && !sampled.swap(true, Ordering::SeqCst);
+                (&request.owner, &request.fence),
+                (RootOwner::Exec(lash_durable::domain::ExecKey::Process(process)),
+                 LeaseFence::Actor { actor, .. }) if actor.id() == process.as_str()
+            ) && sampled.set(request.clone()).is_ok();
             let witness = Arc::clone(&witness);
-            let committed = Arc::clone(&committed);
+            let writes = Arc::clone(&writes);
+            let mut committed = committed.subscribe();
             async move {
                 if pause {
                     witness.gate.send_replace(true);
-                    committed.notified().await;
+                    committed
+                        .wait_for(|_| {
+                            let LeaseFence::Actor { actor, epoch } = &request.fence else {
+                                unreachable!("the sampled resume has an actor fence");
+                            };
+                            writes.lock_recover().iter().any(|(tx, _)| {
+                                tx.actor() == actor
+                                    && tx.epoch() == *epoch
+                                    && tx.domain().iter().any(|write| {
+                                        matches!(write,
+                                            DomainWrite::ExecRoot(ExecRootWrite::Put {
+                                                exec, expected_root: Some(expected), root, ..
+                                            }) if RootOwner::Exec(exec.clone()) == request.owner
+                                                && *expected == request.expected && root != expected
+                                        )
+                                    })
+                            })
+                        })
+                        .await
+                        .expect("the commit observer remains alive");
                 }
             }
         }
     });
-    hook.arm_after_commit({
-        let sampled = Arc::clone(&sampled);
-        let committed = Arc::clone(&committed);
-        move |label| {
-            if label == lash_durable::CommitLabel::PROCESS_ADVANCE && sampled.load(Ordering::SeqCst)
-            {
-                committed.notify_one();
-            }
+    hook.arm_committed_tx({
+        let writes = Arc::clone(&writes);
+        move |tx, receipt, _| {
+            writes.lock_recover().push((tx.clone(), receipt.clone()));
+            committed.send_modify(|revision| *revision += 1);
         }
     });
     let output = world.run("process-root-race", served::spec(LIMIT), vec![served::cell(
@@ -616,18 +641,74 @@ async fn a_sibling_commit_during_checkpoint_lease_preserves_staged_calls(tier: T
          const held = await processes.start({ definition: body });\n\
          await control.finish(await held);"
     )]).await;
-    assert!(
-        sampled.load(Ordering::SeqCst),
-        "the resume sampled a process root"
-    );
+    assert!(sampled.get().is_some(), "the resume sampled a process root");
+    let sampled = sampled.get().unwrap();
+    let leases = hook.root_lease_results();
+    // Only this exact sampled request belongs to the injected race. Later
+    // helper checks and activations can independently cross an owner commit.
     assert_eq!(
-        hook.calls("root_revision_conflict"),
+        leases
+            .iter()
+            .filter(|(request, result)| request == sampled
+                && matches!(
+                    result,
+                    Err(DurableError::Graph(
+                        lash_durable::domain::checkpoint_graph::GraphRefusal::RevisionConflict
+                    ))
+                ))
+            .count(),
         1,
-        "a real sibling commit displaced the sampled root"
+        "a real sibling commit displaced the sampled root: {leases:#?}"
+    );
+    let writes = writes.lock_recover().clone();
+    let LeaseFence::Actor { actor, epoch } = &sampled.fence else {
+        unreachable!();
+    };
+    let process_writes: Vec<_> = writes
+        .iter()
+        .filter(|(tx, _)| tx.actor() == actor)
+        .collect();
+    for (tx, receipt) in &process_writes {
+        assert_eq!(tx.epoch(), *epoch, "one unchanged process claim");
+        assert_eq!(
+            receipt.revision.0,
+            tx.revision().0 + 1,
+            "one atomic owner commit"
+        );
+    }
+    let displacing: Vec<_> = process_writes.iter().flat_map(|(tx, _)| tx.domain()).filter(|write| matches!(write,
+            DomainWrite::ExecRoot(ExecRootWrite::Put { exec, expected_root: Some(expected), .. })
+                if RootOwner::Exec(exec.clone()) == sampled.owner && *expected == sampled.expected
+        )).collect();
+    assert_eq!(
+        displacing.len(),
+        1,
+        "one committed root replacement displaced the sampled request: {process_writes:#?}"
     );
     for label in ["twice-0", "twice-1", "twice-2", "twice-3"] {
-        witness.only(label);
+        let execution = witness.only(label);
+        assert_eq!(
+            process_writes
+                .iter()
+                .flat_map(|(tx, _)| tx.domain())
+                .filter(|write| matches!(write,
+                    DomainWrite::RunFact(RunFactWrite::Append {
+                        kind: RunFactKind::XOutcome | RunFactKind::XFinalOutcome,
+                        call: Some(call), ..
+                    }) if *call == execution.call_id
+                ))
+                .count(),
+            1,
+            "`{label}` has exactly one committed outcome for its executed call: {process_writes:#?}"
+        );
+        eprintln!(
+            "{tier:?}: `{label}` executed and committed once as {}",
+            execution.call_id
+        );
     }
+    eprintln!(
+        "{tier:?}: sampled {sampled:?}; displacement {displacing:#?}; all lease results {leases:#?}"
+    );
     assert_eq!(
         output.finished().map(|(_, value)| value.clone()),
         Some(serde_json::json!("done")),

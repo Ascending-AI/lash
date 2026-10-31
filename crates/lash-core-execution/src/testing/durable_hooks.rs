@@ -48,6 +48,8 @@ type RetainedBeginHook = Arc<
 type RootLeaseHook =
     Arc<dyn Fn(RootLeaseRequest) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 type AfterCommitHook = Arc<dyn Fn(CommitLabel) + Send + Sync>;
+type CommittedTxHook = Arc<dyn Fn(&ActorTx, &ActorCommit, CommitLabel) + Send + Sync>;
+type LeaseResult = (RootLeaseRequest, Result<RootLease, DurableError>);
 
 tokio::task_local! {
     static CONTROL_OBSERVATION: ();
@@ -68,6 +70,8 @@ pub struct DurableCommitHook {
     retained_begin: Arc<Mutex<Option<RetainedBeginHook>>>,
     after_commit: Arc<Mutex<Option<AfterCommitHook>>>,
     root_lease: Arc<Mutex<Option<RootLeaseHook>>>,
+    lease_results: Arc<Mutex<Vec<LeaseResult>>>,
+    committed_tx: Arc<Mutex<Option<CommittedTxHook>>>,
     calls: Arc<Mutex<std::collections::BTreeMap<&'static str, u64>>>,
     process_opens: Arc<Mutex<std::collections::BTreeMap<ActorKey, u64>>>,
 }
@@ -82,6 +86,8 @@ impl DurableCommitHook {
             retained_begin: Arc::default(),
             after_commit: Arc::default(),
             root_lease: Arc::default(),
+            lease_results: Arc::default(),
+            committed_tx: Arc::default(),
             calls: Arc::default(),
             process_opens: Arc::default(),
         }
@@ -161,12 +167,27 @@ impl DurableCommitHook {
         *self.after_commit.lock_recover() = Some(Arc::new(hook));
     }
 
+    /// Exact requests and storage results for acquisitions made under the lease hook.
+    #[must_use]
+    pub fn root_lease_results(&self) -> Vec<LeaseResult> {
+        self.lease_results.lock_recover().clone()
+    }
+
+    /// Observe a successful `DurableStore::commit` transaction and its storage receipt.
+    pub fn arm_committed_tx(
+        &self,
+        hook: impl Fn(&ActorTx, &ActorCommit, CommitLabel) + Send + Sync + 'static,
+    ) {
+        *self.committed_tx.lock_recover() = Some(Arc::new(hook));
+    }
+
     /// Pass every commit through again.
     pub fn disarm(&self) {
         *self.hook.lock_recover() = None;
         *self.retained_begin.lock_recover() = None;
         *self.after_commit.lock_recover() = None;
         *self.root_lease.lock_recover() = None;
+        *self.committed_tx.lock_recover() = None;
     }
 
     /// Runs the armed hook, if any, before `tx` commits under `label`.
@@ -199,10 +220,16 @@ impl PageStore for DurableCommitHook {
         request: RootLeaseRequest,
     ) -> Result<RootLease, DurableError> {
         let hook = self.root_lease.lock_recover().clone();
+        let observed = hook.as_ref().map(|_| request.clone());
         if let Some(hook) = hook {
             hook(request.clone()).await;
         }
         let result = self.page_store()?.acquire_root_lease(request).await;
+        if let Some(request) = observed {
+            self.lease_results
+                .lock_recover()
+                .push((request, result.clone()));
+        }
         if matches!(
             result,
             Err(DurableError::Graph(
@@ -545,7 +572,12 @@ impl DurableStore for DurableCommitHook {
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         self.before_commit(&tx, label).await?;
+        let observed = self.committed_tx.lock_recover().clone();
+        let written = observed.as_ref().map(|_| tx.clone());
         let committed = self.inner.commit(tx, label).await?;
+        if let Some((hook, written)) = observed.zip(written) {
+            hook(&written, &committed, label);
+        }
         if let Some(hook) = self.after_commit.lock_recover().clone() {
             hook(label);
         }
