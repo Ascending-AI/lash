@@ -11,6 +11,7 @@
 //! mails its own session with [`SessionMailWrite::Enqueue`]: a frame switch
 //! commits its follow-on that way, in its `turn.commit`.
 
+use crate::{DurableError, StoreFailure, StoreFailureKind};
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::BatchId;
 use lash_vocabulary::identity::InputId;
@@ -193,4 +194,80 @@ pub enum OperationCancelAnswer {
     /// No open plugin task's command is `batch`: it settled, was withdrawn,
     /// or never existed. Nothing was written.
     NotOpen,
+}
+
+/// Decode extracted input columns with the session delivery rules.
+pub fn decode_input(
+    input: String,
+    seq: i64,
+    source_key: Option<String>,
+    run_spec_hash: Option<String>,
+    delivery: (&str, &str),
+    trace_cause: Option<&str>,
+    origin_json: &str,
+) -> Result<MailInput, DurableError> {
+    let (state, ingress_json) = delivery;
+    let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
+        serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
+    let active_turn = match state {
+        "pending_active" => ingress.active_turn_id().cloned(),
+        _ => None,
+    };
+    Ok(MailInput {
+        input: InputId::parse(input).map_err(|error| undecodable("input id", error))?,
+        enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("input order", error))?,
+        source_key,
+        origin: serde_json::from_str(origin_json)
+            .map_err(|error| undecodable("input origin", error))?,
+        run_spec_hash,
+        active_turn,
+        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
+            "pending turn input",
+            trace_cause,
+        )
+        .map_err(|error| undecodable("input trace cause", error))?,
+    })
+}
+
+/// Decode extracted batch columns with the session admission rules.
+pub fn decode_batch(
+    batch: String,
+    seq: i64,
+    policy: &str,
+    payload_json: &str,
+    cancel_requested: bool,
+) -> Result<MailBatch, DurableError> {
+    Ok(MailBatch {
+        batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,
+        enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("batch order", error))?,
+        kind: batch_kind(payload_json)?,
+        after_current_turn: policy == "after_current_turn_commit",
+        cancel_requested,
+    })
+}
+
+/// What a batch whose payload is `payload_json` asks the session for.
+pub fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
+    let payload: lash_core_store::queued_work_vocabulary::QueuedWorkPayload =
+        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
+    let lash_core_store::queued_work_vocabulary::QueuedWorkPayload::SessionCommand { command } =
+        &payload;
+    Ok(
+        if matches!(
+            **command,
+            lash_core_store::queued_work_vocabulary::SessionCommand::RunPluginTask { .. }
+        ) {
+            MailBatchKind::Operation
+        } else {
+            MailBatchKind::Control
+        },
+    )
+}
+
+fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
+    DurableError::Store(StoreFailure {
+        code: None,
+        kind: StoreFailureKind::Corrupt,
+        message: format!("session mail {what} does not decode: {detail}"),
+    })
 }

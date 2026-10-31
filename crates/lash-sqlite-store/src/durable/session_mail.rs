@@ -4,9 +4,10 @@
 //! The dispatch in `durable/mod.rs` calls [`apply`] inside the fenced owner
 //! commit, after the fence; a refusal rolls the whole commit back.
 
+use lash_durable::domain::session_mail::{batch_kind, decode_batch, decode_input};
 use lash_durable::domain::{
-    DomainRefusal, MailBatch, MailBatchKind, MailInput, OperationCancelAnswer,
-    OperationCancelRequest, SessionMailWrite, SessionMailbox, queued_input_run,
+    DomainRefusal, MailBatchKind, OperationCancelAnswer, OperationCancelRequest, SessionMailWrite,
+    SessionMailbox, queued_input_run,
 };
 use lash_durable::{ActorKey, DurableInstant, Woken};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
@@ -151,72 +152,6 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
         }
     }
     Ok(Ok(mailbox))
-}
-
-fn decode_input(
-    input: String,
-    seq: i64,
-    source_key: Option<String>,
-    run_spec_hash: Option<String>,
-    delivery: (&str, &str),
-    trace_cause: Option<&str>,
-    origin_json: &str,
-) -> Result<MailInput, DurableError> {
-    let (state, ingress_json) = delivery;
-    let ingress: lash_core_store::turn_input_vocabulary::TurnInputIngress =
-        serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
-    let active_turn = match state {
-        "pending_active" => ingress.active_turn_id().cloned(),
-        _ => None,
-    };
-    Ok(MailInput {
-        input: InputId::parse(input).map_err(|error| undecodable("input id", error))?,
-        enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("input order", error))?,
-        source_key,
-        origin: serde_json::from_str(origin_json)
-            .map_err(|error| undecodable("input origin", error))?,
-        run_spec_hash,
-        active_turn,
-        trace_cause: lash_core_store::store_backend_support::decode_trace_cause(
-            "pending turn input",
-            trace_cause,
-        )
-        .map_err(|error| undecodable("input trace cause", error))?,
-    })
-}
-
-fn decode_batch(
-    batch: String,
-    seq: i64,
-    policy: &str,
-    payload_json: &str,
-    cancel_requested: bool,
-) -> Result<MailBatch, DurableError> {
-    Ok(MailBatch {
-        batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,
-        enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("batch order", error))?,
-        kind: batch_kind(payload_json)?,
-        after_current_turn: policy == "after_current_turn_commit",
-        cancel_requested,
-    })
-}
-
-/// What a batch whose payload is `payload_json` asks the session for.
-fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
-    let payload: lash_core_store::queued_work_vocabulary::QueuedWorkPayload =
-        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let lash_core_store::queued_work_vocabulary::QueuedWorkPayload::SessionCommand { command } =
-        &payload;
-    Ok(
-        if matches!(
-            **command,
-            lash_core_store::queued_work_vocabulary::SessionCommand::RunPluginTask { .. }
-        ) {
-            MailBatchKind::Operation
-        } else {
-            MailBatchKind::Control
-        },
-    )
 }
 
 /// A host's cancel of plugin task `request.batch`'s operation run
