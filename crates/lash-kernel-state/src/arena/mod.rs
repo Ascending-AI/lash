@@ -77,6 +77,8 @@ mod bench;
 mod chunks;
 mod keys;
 mod layouts;
+mod table_write;
+pub use table_write::PreparedTableMember;
 mod list_write;
 mod ops;
 mod reach;

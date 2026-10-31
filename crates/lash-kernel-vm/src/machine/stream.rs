@@ -354,7 +354,7 @@ impl KernelMachine {
                 }
                 Op::SetIndex { .. } | Op::RemoveIndex { .. } => {
                     self.close_region(running.stream);
-                    if self.publish_source_list_member(running, source_pc)? {
+                    if self.publish_source_indexed_member(running, source_pc)? {
                         self.source_complete_joins(running, source_pc)?;
                         return Ok(Ran::Done);
                     }

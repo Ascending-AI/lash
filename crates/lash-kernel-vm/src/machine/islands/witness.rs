@@ -97,6 +97,7 @@ thread_local! {
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static TABLE_MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static LIST_REMOVAL_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -137,6 +138,7 @@ pub(crate) fn begin() {
     CELL_PUBLICATIONS.with(|count| count.set(0));
     CELL_CONSTRUCTIONS.with(|count| count.set(0));
     CLOSURE_CONSTRUCTIONS.with(|count| count.set(0));
+    TABLE_MEMBER_PUBLICATIONS.with(|count| count.set(0));
     LIST_REMOVAL_PUBLICATIONS.with(|count| count.set(0));
     MEMBER_PUBLICATIONS.with(|count| count.set(0));
     COUNTS.with(|counts| *counts.borrow_mut() = Some(Counts::new()));
@@ -162,6 +164,13 @@ pub(crate) fn scope_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn scope_published() {
     SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+#[cfg(test)]
+pub(crate) fn table_member_publications() -> u64 {
+    TABLE_MEMBER_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine) fn table_member_published() {
+    TABLE_MEMBER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 #[cfg(test)]
 pub(crate) fn list_removal_publications() -> u64 {
