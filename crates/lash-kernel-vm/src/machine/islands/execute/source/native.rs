@@ -18,10 +18,52 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
+        self.publish_native_answer(frame, site, args, false)
+    }
+
+    /// Prepared operators use the same source event and journal as native calls.
+    /// Their canonical entry computes a value and price before either publishes.
+    pub(in crate::machine::islands::execute) fn publish_prepared_value(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &OperatorSite,
+        args: &[Value],
+    ) -> Result<ValuePublication, HeapFault> {
+        if !self.resident_room(0)
+            || self.arena.any_cold()
+            || site.root.is_some()
+            || site.counted.is_some()
+            || site.act.is_some()
+            || !self.admits(site)
+            || !matches!(self.exe.lib(site.lib).run, LibRun::Native { .. })
+        {
+            return Ok(ValuePublication::Unavailable);
+        }
+        // These are the actual operator coordinates, including its unpaid close
+        // and compiled depth requirement; no new call or source Point is made.
+        let native = NativeSite {
+            lib: site.lib,
+            close: site.close,
+            pc: site.pc,
+            reg: site.reg,
+            depth: site.depth,
+        };
+        self.publish_native_answer(frame, &native, args, true)
+    }
+
+    fn publish_native_answer(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &NativeSite,
+        args: &[Value],
+        prepared: bool,
+    ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
-        let text = matches!(site.direct(self.exe), Some(Direct::TextJoin))
-            || function.header.signature.result == lash_kernel_value::Type::Text;
-        if (!text
+        let text = !prepared
+            && (matches!(site.direct(self.exe), Some(Direct::TextJoin))
+                || function.header.signature.result == lash_kernel_value::Type::Text);
+        if (!prepared
+            && !text
             && !matches!(
                 site.direct(self.exe),
                 Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_))
@@ -59,6 +101,43 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if registers.len() != args.len() {
             return Ok(ValuePublication::Unavailable);
         }
+        // Check the complete source consumer before evaluating a prepared
+        // answer. Unsupported expressions retain their original handler.
+        let answer = if prepared {
+            let Some((entry, fast)) = &function.specialization.prepared else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            if !function
+                .header
+                .signature
+                .params
+                .iter()
+                .zip(args)
+                .all(|(param, value)| {
+                    (param.optional && matches!(value, Value::Absent))
+                        || crate::compile::import_result_fits(&param.ty, *value)
+                })
+            {
+                return Ok(ValuePublication::Unavailable);
+            }
+            let Some(answer) = entry.answer(args, self.charging) else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            if !scalar(&answer.value)
+                || !crate::compile::import_result_fits(
+                    &function.header.signature.result,
+                    answer.value,
+                )
+            {
+                return Ok(ValuePublication::Unavailable);
+            }
+            let Some(answer) = self.answered(function, fast, args, answer) else {
+                return Ok(ValuePublication::Unavailable);
+            };
+            Some(answer)
+        } else {
+            None
+        };
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };
@@ -72,12 +151,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )) {
             Ok(Some(contract))
                 if (contract.events.is_empty()
-                    || (text
+                    || ((text || prepared)
                         && contract.events.iter().all(|event| {
                             matches!(event, doc::NativeResourceEvent::Scratch { .. })
                         })))
                     && contract.exit == doc::NativeResourceExit::Returned
-                    && (!text
+                    && (!(text || prepared)
                         || contract.output.origin == doc::NativeResourceOrigin::Immutable) =>
             {
                 contract
@@ -90,7 +169,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        let answer = match (site.direct(self.exe), args.first()) {
+        let answer = answer.or_else(|| match (site.direct(self.exe), args.first()) {
             (Some(Direct::Length(kind, units)), Some(value)) if value.kind() == kind => value
                 .handle()
                 .and_then(|handle| self.arena.len(handle).ok())
@@ -99,7 +178,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             (Some(Direct::Item(_)), _) => self.item_answer(site, args),
             (Some(Direct::Member(_)), _) => self.membership(site, args),
             _ => None,
-        };
+        });
         if answer.is_none() && !text {
             return Ok(ValuePublication::Unavailable);
         }
@@ -240,7 +319,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             close: self.accounting.then_some(site.close).flatten(),
             strict: false,
-            depth: 0,
+            depth: match site.depth {
+                Depth::None => 0,
+                Depth::Operation(extra) => u64::from(extra.saturating_sub(1)),
+                Depth::Template(extra) => u64::from(extra),
+            },
             safe_point: self.charged,
         };
         let scratch_events = if scratch == 0 {
@@ -320,7 +403,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         #[cfg(any(test, feature = "testing"))]
         if published {
-            if text {
+            if prepared {
+                crate::machine::islands::witness::prepared_native_published();
+            } else if text {
                 crate::machine::islands::witness::native_text_published();
             } else {
                 crate::machine::islands::witness::native_read_published();

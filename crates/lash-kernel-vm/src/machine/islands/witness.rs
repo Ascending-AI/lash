@@ -66,6 +66,7 @@ thread_local! {
     static CELL_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CELL_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static RETURN_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PREPARED_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_TEXT_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -76,6 +77,7 @@ pub(crate) fn begin() {
     SESSION_PUBLICATIONS.with(|count| count.set(0));
     SCOPE_PUBLICATIONS.with(|count| count.set(0));
     CONSTRUCTION_PUBLICATIONS.with(|count| count.set(0));
+    PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(0));
     RETURN_PUBLICATIONS.with(|count| count.set(0));
@@ -177,4 +179,12 @@ pub(crate) fn session_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn session_published() {
     SESSION_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn prepared_native_publications() -> u64 {
+    PREPARED_NATIVE_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine::islands) fn prepared_native_published() {
+    PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }

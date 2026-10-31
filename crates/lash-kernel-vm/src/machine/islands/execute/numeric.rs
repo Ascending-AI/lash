@@ -43,6 +43,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         to: &Destination,
     ) -> Result<Next, Stop> {
         let x = self.operand(frame, arg)?;
+        if let Some(next) = self.prepared_destination(frame, site, &[x], to)? {
+            return Ok(next);
+        }
         let answer = if !OBSERVING && !self.accounting && self.admitted {
             site.entry(self.exe).call(&[x]).map(|value| Ok(Ok(value)))
         } else if !OBSERVING {
@@ -113,6 +116,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let y = self.operand(frame, right).inspect_err(|_| {
             self.scratch.exit.regs.push((left.reg(), x));
         })?;
+        if let Some(next) = self.prepared_destination(frame, site, &[x, y], to)? {
+            return Ok(next);
+        }
         let answer = if !OBSERVING {
             let typed = site.pair(self.exe).and_then(|kernel| {
                 super::super::compiled::typed(site, &kernel, x, y, self.charging, self.exe)
@@ -150,6 +156,35 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             }
         };
         self.destination(frame, site.reg, value, to)
+    }
+
+    pub(super) fn prepared_destination(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        site: &OperatorSite,
+        args: &[Value],
+        to: &Destination,
+    ) -> Result<Option<Next>, Stop> {
+        if matches!(to, Destination::Write(write) if write.accumulates) {
+            return Ok(None);
+        }
+        match self
+            .publish_prepared_value(frame, site, args)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            source::ValuePublication::Published(value) => {
+                self.destination(frame, site.reg, value, to).map(Some)
+            }
+            source::ValuePublication::Declined => {
+                if let Some(close) = &site.close
+                    && !self.close(close)
+                {
+                    return Err(self.at_operands(close.head, site.reg, args));
+                }
+                Err(self.at_operands(site.pc, site.reg, args))
+            }
+            source::ValuePublication::Unavailable => Ok(None),
+        }
     }
 
     #[inline(always)]

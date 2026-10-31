@@ -67,6 +67,26 @@ pub(in crate::laws) fn helper_probes(
                 .unwrap(),
         ));
     }
+    for (name, native, signature) in [
+        (
+            "resident.minimum",
+            "num.min",
+            "a: Number, b: Number) -> Number",
+        ),
+        ("resident.add", "num.add", "a: Number, b: Number) -> Number"),
+        ("resident.negate", "num.neg", "value: Number) -> Number"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({signature}\nkernel 1\ncharge 1\nnative\n"
+        ))
+        .unwrap();
+        out.push((
+            name,
+            registry
+                .register(definition, lash_kernel_lib::native(native))
+                .unwrap(),
+        ));
+    }
     // Use the shipped length contract without changing the deliberately
     // uncertified Len native shared by the older fixtures.
     let length = lash_kernel_doc::parse_definition(

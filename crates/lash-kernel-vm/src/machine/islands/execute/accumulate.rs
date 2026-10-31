@@ -172,6 +172,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         covered: bool,
         to: &Destination,
     ) -> Result<Next, Stop> {
+        if let Some(next) = self.prepared_destination(frame, site, values, to)? {
+            return Ok(next);
+        }
         if let Destination::Write(write) = to
             && self.exe.lib(site.lib).kernels(self.exe).append
         {

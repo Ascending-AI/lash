@@ -15,7 +15,7 @@ const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } fin
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const SOURCE_SESSION: &str = "let saved = [7] set saved = [saved, saved] return saved";
-const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let pair = [[value], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") let repeated = text.repeat(joined, 2) let trimmed = text.slice(repeated, 0, 5) if same(trimmed, \"a can\") { } else { return trimmed } if true { let alias = [other, other] } return other } return apply f(7)";
+const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let negative = resident.negate(value) let restored = resident.add(negative, 14) let minimum = resident.minimum(restored, 9) let pair = [[minimum], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") let repeated = text.repeat(joined, 2) let trimmed = text.slice(repeated, 0, 5) if same(trimmed, \"a can\") { } else { return trimmed } if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
@@ -233,6 +233,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
     let native_reads = crate::machine::islands::witness::native_read_publications();
+    let prepared_natives = crate::machine::islands::witness::prepared_native_publications();
     let native_texts = crate::machine::islands::witness::native_text_publications();
     let returns = crate::machine::islands::witness::return_publications();
     let cells = crate::machine::islands::witness::cell_publications();
@@ -289,6 +290,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_CONSTRUCTION)
     {
+        assert!(
+            prepared_natives >= 3,
+            "prepared unary, binary and minimum results must publish under source acceptance: {prepared_natives}"
+        );
         assert!(
             native_texts >= 3,
             "join, repeat and slice must install their actual native results under source acceptance: {native_texts}"
