@@ -211,16 +211,21 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
     assert_eq!(before.config.generation, seeded(7));
     let resident_before = state.export().await;
 
-    let refused = state
+    let refused = match state
         .open_agent_frame(frame("first-frame"), "reopen-first-frame".to_owned())
         .await
-        .expect("the historical open is submitted")
-        .settle_with(
-            &live.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
-        .await
-        .expect_err("the session left the first frame");
+    {
+        Ok(mutation) => {
+            mutation
+                .settle_with(
+                    &live.admin().commands(),
+                    lash::testing::admin_fixture_outcome,
+                )
+                .await
+        }
+        Err(refusal) => Err(refusal),
+    }
+    .expect_err("the session left the first frame");
     let lash::EmbedError::Runtime(error) = refused else {
         panic!("the refusal is the runtime's: {refused:?}");
     };

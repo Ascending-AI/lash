@@ -714,6 +714,7 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
                 .unwrap();
         let catalog = stores.session_store_factory();
         let pages = stores.durable_store().pages();
+        let environments = stores.durable_store().environments();
         let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
             .build()
             .unwrap();
@@ -818,14 +819,17 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
                 turn + 1
             );
             assert_eq!((blobs, pointers, edges), (6, 6, 6));
+            let head = environments
+                .environment_head(&id)
+                .await
+                .unwrap()
+                .expect("the checkpoint-graph head is retained");
             assert_eq!(
                 db.query_row(
                     "SELECT count(*) FROM artifact_referrer_edges AS edge
-                     JOIN environment_heads AS head
-                       ON edge.referrer_id = json_extract(head.head_json, '$.owner')
-                     WHERE head.session_id = ?1 AND edge.referrer_kind = 'environment_version'
+                     WHERE edge.referrer_id = ?1 AND edge.referrer_kind = 'environment_version'
                        AND edge.artifact_ref IN (SELECT reference FROM fact_hashes)",
-                    [id.as_str()],
+                    [head.owner.to_string()],
                     |r| r.get::<_, i64>(0),
                 )
                 .unwrap(),
