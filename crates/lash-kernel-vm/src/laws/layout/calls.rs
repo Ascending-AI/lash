@@ -240,6 +240,7 @@ fn observe_source_or_register(
     let native_tables = crate::machine::islands::witness::native_table_publications();
     let empty_tuples = crate::machine::islands::witness::empty_tuple_constructions();
     let precise_constructions = crate::machine::islands::witness::precise_constructions();
+    let precise_bindings = crate::machine::islands::witness::precise_bindings();
     let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
@@ -255,6 +256,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_CONSTRUCTION)
     {
+        assert!(
+            precise_bindings.iter().all(|count| *count > 0),
+            "precise scalar and reference bindings must consume their real RHS in the accepted journal: {precise_bindings:?}"
+        );
         assert!(
             empty_tuples[1] >= 2,
             "both precise empty tuples must publish separate source occurrences: {empty_tuples:?}"

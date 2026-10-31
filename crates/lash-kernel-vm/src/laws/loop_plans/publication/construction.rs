@@ -8,6 +8,18 @@ pub(super) fn successors() {
     for (text, completed, next, phase) in [
         (
             "main { let xs = [1, 2] return xs }",
+            vec![0],
+            vec![1, 0],
+            Phase::Commit,
+        ),
+        (
+            "main { if true { let xs = [1] } return 1 }",
+            vec![0, 1, 0],
+            vec![0, 1],
+            Phase::Leave,
+        ),
+        (
+            "main { let xs = [1, 2] return xs }",
             vec![0, 0],
             vec![0],
             Phase::Commit,

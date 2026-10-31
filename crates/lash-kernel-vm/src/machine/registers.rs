@@ -92,6 +92,23 @@ impl PreparedLeaf<'_> {
     }
 }
 
+pub(super) struct PreparedTransfer<'a> {
+    registers: &'a mut Registers,
+    transfer: source::Transfer,
+}
+impl PreparedTransfer<'_> {
+    pub(super) fn owner(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.transfer.owner()
+    }
+    pub(super) fn value(&self) -> Value {
+        self.transfer.value()
+    }
+    pub(super) fn publish(self) {
+        self.registers.take(self.transfer.index(), Value::Null);
+        self.registers.source.publish_transfer(self.transfer);
+    }
+}
+
 pub(super) struct PreparedConstruction<'a> {
     registers: &'a mut Registers,
     construction: source::Construction,
@@ -144,6 +161,26 @@ fn reusable(value: &Value) -> bool {
 }
 
 impl Registers {
+    pub(super) fn prepare_source_transfer(
+        &mut self,
+        reg: lash_kernel_exec::Reg,
+    ) -> Result<Option<PreparedTransfer<'_>>, lash_kernel_doc::heap::HeapFault> {
+        let Some(transfer) = self.source.prepare_transfer(reg)? else {
+            return Ok(None);
+        };
+        if !self
+            .get(transfer.index())
+            .is_some_and(|value| value.same(&transfer.value()))
+        {
+            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
+                "source transfer snapshot differs from its register".into(),
+            ));
+        }
+        Ok(Some(PreparedTransfer {
+            registers: self,
+            transfer,
+        }))
+    }
     pub(super) fn source_context(&mut self, roots: Option<super::logical_held::BankRoots>) {
         self.source.context(roots);
     }

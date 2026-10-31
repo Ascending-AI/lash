@@ -317,6 +317,9 @@ impl KernelMachine {
                 }
                 Op::Bind { local, src } => {
                     self.close_region(running.stream);
+                    if self.publish_source_binding(running, source_pc)? {
+                        return Ok(Ran::Done);
+                    }
                     let value = self.take(at(src));
                     self.bind(task, local.at, false, value)?;
                     return self.source_done(running, source_pc, Ran::Done);

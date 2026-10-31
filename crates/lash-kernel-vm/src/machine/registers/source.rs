@@ -29,6 +29,22 @@ struct Operand {
     site: Arc<Site>,
     held: Held,
 }
+pub(super) struct Transfer {
+    reg: Reg,
+    owner: Owner,
+    value: Value,
+}
+impl Transfer {
+    pub(super) fn index(&self) -> usize {
+        self.reg.ix()
+    }
+    pub(super) fn owner(&self) -> Owner {
+        self.owner
+    }
+    pub(super) fn value(&self) -> Value {
+        self.value
+    }
+}
 pub(super) struct Leaf {
     operand: Operand,
     owner: Owner,
@@ -68,6 +84,38 @@ impl Construction {
     }
 }
 impl Operands {
+    pub(super) fn prepare_transfer(&self, reg: Reg) -> Result<Option<Transfer>, HeapFault> {
+        if !self.active {
+            return Ok(None);
+        }
+        let Some(roots) = &self.roots else {
+            return Ok(None);
+        };
+        let position = self
+            .positions
+            .get(reg.ix())
+            .copied()
+            .ok_or_else(|| invalid("source transfer input register is missing"))?;
+        let operand = self
+            .values
+            .get(position)
+            .ok_or_else(|| invalid("source transfer input has no owner"))?;
+        let owner = roots.operand(&operand.site)?;
+        if operand.reg != reg || operand.held.owner != Some(owner) {
+            return Err(invalid("source transfer input has another owner"));
+        }
+        Ok(Some(Transfer {
+            reg,
+            owner,
+            value: operand.held.value,
+        }))
+    }
+    pub(super) fn publish_transfer(&mut self, transfer: Transfer) {
+        let Some(operand) = self.remove_value(transfer.reg) else {
+            unreachable!("an exclusively prepared source transfer exists");
+        };
+        assert!(operand.held.owner == Some(transfer.owner));
+    }
     pub(super) fn prepare_construction(
         &mut self,
         stream: &Stream,
