@@ -19,11 +19,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     ) -> Result<ValuePublication, HeapFault> {
         use crate::compile::expr::Make;
         let bound = match site.make {
-            Make::List => self.arena.sequence_bound(site.members),
+            Make::List | Make::Tuple => self.arena.sequence_bound(site.members),
             Make::Map | Make::Set => self.arena.table_bound(site.members),
-            Make::Tuple => return Ok(ValuePublication::Unavailable),
         };
-        if self.arena.any_cold() || !self.resident_room(bound) {
+        if (site.make == Make::Tuple && site.items.is_empty())
+            || self.arena.any_cold()
+            || !self.resident_room(bound)
+        {
             return Ok(ValuePublication::Unavailable);
         }
         self.publish_collection_construction(frame, site.pc, &site.items, site.reg, |values| {
@@ -38,7 +40,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         .map(|[key, value]| (*key, *value))
                         .collect(),
                 ),
-                Make::Tuple => unreachable!(),
+                Make::Tuple => doc::NewObject::Tuple(values),
             }
         })
     }
@@ -211,6 +213,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 release,
                 ledger: store.clone(),
                 heap: self.heap,
+                depth_limit: self.limits.value_depth(),
             },
             |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());

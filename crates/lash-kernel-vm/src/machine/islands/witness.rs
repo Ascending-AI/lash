@@ -69,6 +69,7 @@ thread_local! {
     static PREPARED_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_LIST_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
+    static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TABLE_CONSTRUCTIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static NATIVE_TEXT_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -83,6 +84,7 @@ pub(crate) fn begin() {
     PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_LIST_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TABLE_PUBLICATIONS.with(|counts| counts.set([0; 3]));
+    TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
     TABLE_CONSTRUCTIONS.with(|counts| counts.set([0; 3]));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(0));
@@ -238,6 +240,10 @@ pub(in crate::machine::islands) fn collection_constructed(value: lash_kernel_doc
             construction_published();
             return;
         }
+        Value::Tuple(_) => {
+            TUPLE_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
+            return;
+        }
         Value::Map(_) => 0,
         Value::Set(_) => 1,
         Value::Record(_) => 2,
@@ -248,4 +254,9 @@ pub(in crate::machine::islands) fn collection_constructed(value: lash_kernel_doc
         next[index] += 1;
         counts.set(next);
     });
+}
+
+#[cfg(test)]
+pub(crate) fn tuple_constructions() -> u64 {
+    TUPLE_CONSTRUCTIONS.with(|count| count.replace(0))
 }

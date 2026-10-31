@@ -1,7 +1,10 @@
 //! A constructor's normalized detached body is its canonical publication recipe.
 use super::super::publication::{PreparedStorage, StoragePreparation, native_fault};
 use super::*;
-use lash_kernel_state::{arena::PreparedBatch, kernel_internals::logical::Ledger};
+use lash_kernel_state::{
+    arena::PreparedBatch,
+    kernel_internals::logical::{Holding, Ledger, RootValue},
+};
 
 pub(super) struct Construction<'a> {
     pub(super) object: doc::NewObject,
@@ -9,6 +12,7 @@ pub(super) struct Construction<'a> {
     pub(super) at: Point,
     pub(super) release: Box<[room::Owner]>,
     pub(super) ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
+    pub(super) depth_limit: usize,
     pub(super) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
 }
 pub(super) struct Prepared {
@@ -16,7 +20,7 @@ pub(super) struct Prepared {
     pub(super) value: Value,
     at: Point,
     release: Box<[room::Owner]>,
-    members: u64,
+    obligation: (Measure, u64),
     released: u64,
 }
 impl StoragePreparation for Construction<'_> {
@@ -45,16 +49,32 @@ impl StoragePreparation for Construction<'_> {
                 valid_keys(arena, entries.iter().map(|(key, _)| key))?
             }
             doc::NewObject::Set(values) => valid_keys(arena, values.iter())?,
-            doc::NewObject::List(_) => true,
+            doc::NewObject::List(_) | doc::NewObject::Tuple(_) => true,
             _ => false,
         };
         if !valid {
             return Ok(None);
         }
-        let entity = doc::heap::EntityId {
+        let tuple = if let doc::NewObject::Tuple(values) = &self.object {
+            let values = values
+                .iter()
+                .map(|value| crate::machine::project::project(arena, self.heap.pages(), value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let tuple = lash_kernel_state::kernel_internals::stored_pages::tuple(
+                self.heap.pages(),
+                values,
+            )?;
+            if tuple.summary.depth as usize > self.depth_limit {
+                return Ok(None);
+            }
+            Some(doc::heap::PageValue::Tuple(tuple))
+        } else {
+            None
+        };
+        let entity = tuple.is_none().then(|| doc::heap::EntityId {
             family: doc::heap::FamilyId::PRIMARY,
             ordinal: arena.next_ordinal(),
-        };
+        });
         let mut nursery = doc::Nursery::unaccounted(arena.objects());
         let value = nursery.allocate(self.object);
         let handle = value
@@ -63,34 +83,63 @@ impl StoragePreparation for Construction<'_> {
         let mut installation = arena
             .prepare_install(nursery.into_new())
             .map_err(native_fault)?;
-        let body = match installation.collection(handle).map_err(native_fault)? {
-            doc::NewObject::List(values) => VirtualBody::NativeList(values),
-            doc::NewObject::Map(entries) => VirtualBody::NativeMap(entries),
-            doc::NewObject::Set(values) => VirtualBody::NativeSet(values),
-            doc::NewObject::Record(entries) => VirtualBody::NativeRecord(entries),
-            _ => return Err(malformed("construction has another body kind")),
+        let body = if let Some(entity) = entity {
+            let body = match installation.collection(handle).map_err(native_fault)? {
+                doc::NewObject::List(values) => VirtualBody::NativeList(values),
+                doc::NewObject::Map(entries) => VirtualBody::NativeMap(entries),
+                doc::NewObject::Set(values) => VirtualBody::NativeSet(values),
+                doc::NewObject::Record(entries) => VirtualBody::NativeRecord(entries),
+                _ => return Err(malformed("construction has another body kind")),
+            };
+            installation
+                .bind_entity(handle, entity)
+                .map_err(native_fault)?;
+            Some((entity, body))
+        } else {
+            None
         };
-        installation
-            .bind_entity(handle, entity)
-            .map_err(native_fault)?;
         let (mut registration, batch) = installation.into_parts();
-        let members = body.member_bytes(self.heap, registration.arena())?;
-        let released = self.ledger.borrow().release_cost_preserving_body(
-            registration.arena(),
-            self.heap,
-            &event.inputs,
-            &body,
-        )?;
-        let page = match value {
-            Value::List(_) => doc::heap::PageValue::List(entity),
-            Value::Map(_) => doc::heap::PageValue::Map(entity),
-            Value::Set(_) => doc::heap::PageValue::Set(entity),
-            Value::Record(_) => doc::heap::PageValue::Record(entity),
-            _ => return Err(malformed("construction has another body kind")),
-        };
         let mut event = event.clone();
+        let (page, obligation, released) = if let Some((entity, body)) = body {
+            let members = body.member_bytes(self.heap, registration.arena())?;
+            let released = self.ledger.borrow().release_cost_preserving_body(
+                registration.arena(),
+                self.heap,
+                &event.inputs,
+                &body,
+            )?;
+            let page = match value {
+                Value::List(_) => doc::heap::PageValue::List(entity),
+                Value::Map(_) => doc::heap::PageValue::Map(entity),
+                Value::Set(_) => doc::heap::PageValue::Set(entity),
+                Value::Record(_) => doc::heap::PageValue::Record(entity),
+                _ => return Err(malformed("construction has another body kind")),
+            };
+            event.entities.push(VirtualEntity { entity, body });
+            (
+                page,
+                (Measure::Members(self.at.site.clone()), members),
+                released,
+            )
+        } else {
+            let page = tuple.ok_or_else(|| malformed("construction lost its immutable recipe"))?;
+            let bytes = Holding::from_page(self.heap.pages(), &page)?.bytes();
+            let released = self.ledger.borrow().release_cost_preserving(
+                registration.arena(),
+                self.heap,
+                &event.inputs,
+                &[(self.output, RootValue::Page(&page))],
+            )?;
+            (
+                page,
+                (
+                    Measure::Local(room::Owner::Operand(self.at.site.clone())),
+                    bytes,
+                ),
+                released,
+            )
+        };
         event.outputs.push((self.output, PV::Page(page)));
-        event.entities.push(VirtualEntity { entity, body });
         Ok(Some(PreparedStorage {
             registration,
             storage: Prepared {
@@ -98,7 +147,7 @@ impl StoragePreparation for Construction<'_> {
                 value,
                 at: self.at,
                 release: self.release,
-                members,
+                obligation,
                 released,
             },
             actual: Program::new(vec![event]),
@@ -110,8 +159,8 @@ impl StoragePreparation for Construction<'_> {
             .get_mut(&storage.at)
             .ok_or_else(|| malformed("construction lost its source event"))?;
         facts.values.insert(
-            Measure::Members(storage.at.site.clone()),
-            i128::from(storage.members),
+            storage.obligation.0.clone(),
+            i128::from(storage.obligation.1),
         );
         facts.values.insert(
             Measure::Release(storage.release.clone()),
