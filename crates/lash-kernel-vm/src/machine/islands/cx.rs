@@ -791,10 +791,11 @@ pub(crate) fn measured_text_formula(
 
 /// A detached shallow list uses the same sequence extent and Plan evaluator.
 /// Deep-result measurements require the graph view and stay on the precise path.
-pub(crate) fn measured_sequence_formula(
+pub(crate) fn measured_collection_formula(
     arena: &Arena,
     plan: &Plan,
     args: &[Value],
+    result: Value,
     len: u64,
 ) -> Option<u64> {
     measured_formula_by(plan, |source, measure| match source {
@@ -802,7 +803,11 @@ pub(crate) fn measured_sequence_formula(
             .get(index)
             .map_or(Some(0), |value| value_measure(arena, value, measure, 0, 0)),
         Source::Result => match measure {
-            Measure::Size => Some(crate::data::sequence_size(len)),
+            Measure::Size => Some(if matches!(result, Value::Map(_)) {
+                crate::data::map_size(len)
+            } else {
+                crate::data::sequence_size(len)
+            }),
             Measure::NestedSize | Measure::Magnitude => Some(crate::data::empty_measure(measure)),
             Measure::DeepSize => None,
         },

@@ -68,6 +68,7 @@ thread_local! {
     static RETURN_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PREPARED_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_LIST_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static NATIVE_TEXT_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -80,6 +81,7 @@ pub(crate) fn begin() {
     CONSTRUCTION_PUBLICATIONS.with(|count| count.set(0));
     PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_LIST_PUBLICATIONS.with(|count| count.set(0));
+    NATIVE_TABLE_PUBLICATIONS.with(|counts| counts.set([0; 3]));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(0));
     RETURN_PUBLICATIONS.with(|count| count.set(0));
@@ -197,4 +199,27 @@ pub(crate) fn native_list_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn native_list_published() {
     NATIVE_LIST_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn native_table_publications() -> [u64; 3] {
+    NATIVE_TABLE_PUBLICATIONS.with(|counts| counts.replace([0; 3]))
+}
+pub(in crate::machine::islands) fn native_collection_published(value: lash_kernel_doc::Value) {
+    use lash_kernel_doc::Value;
+    let index = match value {
+        Value::List(_) => {
+            native_list_published();
+            return;
+        }
+        Value::Map(_) => 0,
+        Value::Set(_) => 1,
+        Value::Record(_) => 2,
+        _ => return,
+    };
+    NATIVE_TABLE_PUBLICATIONS.with(|counts| {
+        let mut next = counts.get();
+        next[index] += 1;
+        counts.set(next);
+    });
 }

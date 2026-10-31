@@ -53,6 +53,9 @@ pub enum VirtualBody {
     List(Vec<PageValue>),
     /// Evaluated resident members retain their native provenance and identities.
     NativeList(Vec<Value>),
+    NativeMap(Vec<(Value, Value)>),
+    NativeSet(Vec<Value>),
+    NativeRecord(Vec<(Value, Value)>),
     Variable(PageValue),
     /// A fresh shared variable retains the evaluated RHS provenance.
     NativeVariable(Value),
@@ -87,6 +90,40 @@ impl VirtualBody {
             Self::NativeList(values) => {
                 for value in values {
                     add(Holding::from_native(arena, access, value)?, false)?;
+                }
+            }
+            Self::NativeMap(entries) | Self::NativeRecord(entries) => {
+                let record = matches!(self, Self::NativeRecord(_));
+                let mut keys = BTreeSet::new();
+                for (key, value) in entries {
+                    if record && !matches!(key, Value::Text(_) | Value::LongText(_)) {
+                        return Err(invalid("record field is not text"));
+                    }
+                    let normal = arena
+                        .semantics()
+                        .normal_key(key)
+                        .map_err(|error| invalid(&error.to_string()))?
+                        .ok_or_else(|| invalid("virtual table key is not a key"))?;
+                    if !keys.insert(normal) {
+                        return Err(invalid("virtual table key occurs twice"));
+                    }
+                    add(Holding::from_native(arena, access, key)?, record)?;
+                    add(Holding::from_native(arena, access, value)?, false)?;
+                }
+            }
+            Self::NativeSet(values) => {
+                let mut keys = BTreeSet::new();
+                for key in values {
+                    let normal = arena
+                        .semantics()
+                        .normal_key(key)
+                        .map_err(|error| invalid(&error.to_string()))?
+                        .ok_or_else(|| invalid("virtual set key is not a key"))?;
+                    if !keys.insert(normal) {
+                        return Err(invalid("virtual set key occurs twice"));
+                    }
+                    add(Holding::from_native(arena, access, key)?, false)?;
+                    add(Holding::from_native(arena, access, &Value::Absent)?, false)?;
                 }
             }
             Self::List(values) => {
@@ -150,8 +187,16 @@ impl VirtualBody {
         };
         match (self, other) {
             (Self::List(a), Self::List(b)) | (Self::Set(a), Self::Set(b)) => values(a, b),
-            (Self::NativeList(a), Self::NativeList(b)) => {
+            (Self::NativeList(a), Self::NativeList(b))
+            | (Self::NativeSet(a), Self::NativeSet(b)) => {
                 a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.same(b))
+            }
+            (Self::NativeMap(a), Self::NativeMap(b))
+            | (Self::NativeRecord(a), Self::NativeRecord(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .zip(b)
+                        .all(|((ak, av), (bk, bv))| ak.same(bk) && av.same(bv))
             }
             (Self::Variable(a), Self::Variable(b)) => encode_body(a) == encode_body(b),
             (Self::NativeVariable(a), Self::NativeVariable(b)) => a.same(b),
@@ -250,8 +295,16 @@ impl JournalEvent {
     fn handles(&self, handles: &mut Vec<ArenaHandle>) {
         for entity in &self.entities {
             match &entity.body {
-                VirtualBody::NativeList(values) => {
+                VirtualBody::NativeList(values) | VirtualBody::NativeSet(values) => {
                     handles.extend(values.iter().filter_map(Value::handle))
+                }
+                VirtualBody::NativeMap(entries) | VirtualBody::NativeRecord(entries) => {
+                    handles.extend(
+                        entries
+                            .iter()
+                            .flat_map(|(key, value)| [key.handle(), value.handle()])
+                            .flatten(),
+                    );
                 }
                 VirtualBody::NativeVariable(value) => handles.extend(value.handle()),
                 _ => {}
@@ -716,6 +769,37 @@ impl VirtualBody {
                     add(PublicationValue::Native(*value))?;
                 }
                 Kind::List
+            }
+            Self::NativeSet(values) => {
+                for value in values {
+                    add(PublicationValue::Native(*value))?;
+                    add(PublicationValue::Native(Value::Absent))?;
+                }
+                Kind::Set
+            }
+            Self::NativeMap(entries) => {
+                for (key, value) in entries {
+                    add(PublicationValue::Native(*key))?;
+                    add(PublicationValue::Native(*value))?;
+                }
+                Kind::Map
+            }
+            Self::NativeRecord(entries) => {
+                let mut names = 0_u64;
+                for (key, value) in entries {
+                    let bytes = arena
+                        .semantics()
+                        .text(key)
+                        .map_err(|error| invalid(&error.to_string()))?
+                        .len() as u64;
+                    names = names
+                        .checked_add(bytes)
+                        .ok_or_else(|| invalid("record name overflow"))?;
+                    add(PublicationValue::Native(*value))?;
+                }
+                Kind::Record {
+                    field_name_bytes: names,
+                }
             }
             Self::List(values) => {
                 for value in values {

@@ -69,7 +69,7 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
             }
             _ => 0,
         },
-        Value::Map(handle) => arena.len(*handle)?.saturating_mul(2),
+        Value::Map(handle) => return Ok(map_size(arena.len(*handle)?)),
         _ => 0,
     };
     Ok(extent.saturating_add(1))
@@ -78,6 +78,11 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
 /// The canonical shallow size of a sequence, resident or detached.
 pub(crate) fn sequence_size(len: u64) -> u64 {
     len.saturating_add(1)
+}
+
+/// Maps count both keys and values in their canonical shallow extent.
+pub(crate) fn map_size(len: u64) -> u64 {
+    sequence_size(len.saturating_mul(2))
 }
 
 /// The size of a value the arena holds nothing of (`K-CHG-004`): a word,

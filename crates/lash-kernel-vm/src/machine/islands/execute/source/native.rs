@@ -1,5 +1,5 @@
 //! Native results publish their canonical occurrences and logical scratch.
-mod list;
+mod collection;
 mod text;
 use super::*;
 use crate::admission::Allowance;
@@ -60,16 +60,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         prepared: bool,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
-        let list = !prepared
+        let collection = !prepared
             && matches!(
                 function.header.signature.result,
                 lash_kernel_value::Type::List(_)
+                    | lash_kernel_value::Type::Map(_)
+                    | lash_kernel_value::Type::Set(_)
+                    | lash_kernel_value::Type::Record(_)
             );
         let text = !prepared
             && (matches!(site.direct(self.exe), Some(Direct::TextJoin))
                 || function.header.signature.result == lash_kernel_value::Type::Text);
         if (!prepared
-            && !list
+            && !collection
             && !text
             && !matches!(
                 site.direct(self.exe),
@@ -156,9 +159,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.arena.objects(),
             &self.arena.semantics(),
         )) {
-            Ok(Some(contract)) if list && list::supports(&contract) => contract,
+            Ok(Some(contract)) if collection && collection::supports(&contract) => contract,
             Ok(Some(contract))
-                if !list
+                if !collection
                     && (contract.events.is_empty()
                         || ((text || prepared)
                             && contract.events.iter().all(|event| {
@@ -188,7 +191,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             (Some(Direct::Member(_)), _) => self.membership(site, args),
             _ => None,
         });
-        if answer.is_none() && !text && !list {
+        if answer.is_none() && !text && !collection {
             return Ok(ValuePublication::Unavailable);
         }
         let scratch = contract
@@ -406,14 +409,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     *result = storage.value;
                 },
             )?
-        } else if list {
+        } else if collection {
             let room = self.memory.then(|| {
                 self.ceiling
                     .saturating_sub(self.register_bytes)
                     .saturating_sub(self.arena.held())
                     .saturating_sub(self.transient)
             });
-            let prepare = list::ListNative {
+            let prepare = collection::CollectionNative {
                 function,
                 args: args.to_vec(),
                 output,
@@ -447,8 +450,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if published {
             if prepared {
                 crate::machine::islands::witness::prepared_native_published();
-            } else if list {
-                crate::machine::islands::witness::native_list_published();
+            } else if collection {
+                crate::machine::islands::witness::native_collection_published(
+                    frame.regs[site.reg as usize],
+                );
             } else if text {
                 crate::machine::islands::witness::native_text_published();
             } else {

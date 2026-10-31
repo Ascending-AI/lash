@@ -108,6 +108,21 @@ pub(in crate::laws) fn helper_probes(
             .register(copy, lash_kernel_lib::native("list.copy"))
             .unwrap(),
     ));
+    for (name, native, ty) in [
+        ("resident.copy_map", "map.copy", "Map(Any, Any)"),
+        ("resident.copy_set", "set.copy", "Set(Any)"),
+        ("resident.copy_record", "record.copy", "Record{..Any}"),
+    ] {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}(xs: {ty}) -> {ty}\nkernel 1\ncharge sum(1, size(xs), size(result))\nnative\n"
+        )).unwrap();
+        out.push((
+            name,
+            registry
+                .register(definition, lash_kernel_lib::native(native))
+                .unwrap(),
+        ));
+    }
     let add = out.iter().find(|(name, _)| *name == "flat.add").unwrap().1;
     let kind = out.iter().find(|(name, _)| *name == "kind").unwrap().1;
     let same = out.iter().find(|(name, _)| *name == "same").unwrap().1;

@@ -1,4 +1,4 @@
-//! A native's fresh shallow list installs with its canonical source graph.
+//! A native's fresh shallow collection installs with its canonical source graph.
 use super::*;
 use lash_kernel_state::{
     arena::PreparedBatch,
@@ -18,7 +18,11 @@ pub(super) fn supports(contract: &doc::NativeResourceContract) -> bool {
         match event {
             doc::NativeResourceEvent::Entity {
                 owner,
-                kind: doc::NativeResourceEntity::List,
+                kind:
+                    doc::NativeResourceEntity::List
+                    | doc::NativeResourceEntity::Map
+                    | doc::NativeResourceEntity::Set
+                    | doc::NativeResourceEntity::Record { .. },
                 release: None,
                 members,
             } if !entity
@@ -39,7 +43,7 @@ pub(super) fn supports(contract: &doc::NativeResourceContract) -> bool {
     entity
 }
 
-pub(super) struct ListNative<'a> {
+pub(super) struct CollectionNative<'a> {
     pub(super) function: &'a crate::compile::Lib,
     pub(super) args: Vec<Value>,
     pub(super) output: Owner,
@@ -52,7 +56,7 @@ pub(super) struct ListNative<'a> {
     pub(super) room: Option<u64>,
 }
 
-pub(super) struct PreparedList {
+pub(super) struct PreparedCollection {
     pub(super) batch: PreparedBatch,
     pub(super) value: Value,
     units: u64,
@@ -61,8 +65,8 @@ pub(super) struct PreparedList {
     release: Box<[room::Owner]>,
 }
 
-impl StoragePreparation for ListNative<'_> {
-    type Prepared = PreparedList;
+impl StoragePreparation for CollectionNative<'_> {
+    type Prepared = PreparedCollection;
     const MATERIALIZES: bool = true;
 
     fn prepare<'a>(
@@ -116,11 +120,22 @@ impl StoragePreparation for ListNative<'_> {
             nursery.discard();
             return Ok(None);
         }
-        let values = match (value, nursery.built()) {
+        let (body, len) = match (value, nursery.built()) {
             (Value::List(handle), [(target, doc::NewObject::List(values))])
                 if handle == *target =>
             {
-                values.clone()
+                (VirtualBody::NativeList(values.clone()), values.len())
+            }
+            (Value::Map(handle), [(target, doc::NewObject::Map(values))]) if handle == *target => {
+                (VirtualBody::NativeMap(values.clone()), values.len())
+            }
+            (Value::Set(handle), [(target, doc::NewObject::Set(values))]) if handle == *target => {
+                (VirtualBody::NativeSet(values.clone()), values.len())
+            }
+            (Value::Record(handle), [(target, doc::NewObject::Record(values))])
+                if handle == *target =>
+            {
+                (VirtualBody::NativeRecord(values.clone()), values.len())
             }
             _ => {
                 nursery.discard();
@@ -128,11 +143,12 @@ impl StoragePreparation for ListNative<'_> {
             }
         };
         let units = if self.charging {
-            let Some(units) = crate::machine::islands::cx::measured_sequence_formula(
+            let Some(units) = crate::machine::islands::cx::measured_collection_formula(
                 arena,
                 &self.function.charge,
                 &self.args,
-                values.len() as u64,
+                value,
+                len as u64,
             ) else {
                 nursery.discard();
                 return Ok(None);
@@ -145,7 +161,6 @@ impl StoragePreparation for ListNative<'_> {
             family: doc::heap::FamilyId::PRIMARY,
             ordinal: arena.next_ordinal(),
         };
-        let body = VirtualBody::NativeList(values);
         let mut installation = arena
             .prepare_install(nursery.into_new())
             .map_err(native_fault)?;
@@ -153,7 +168,7 @@ impl StoragePreparation for ListNative<'_> {
             .bind_entity(
                 value
                     .handle()
-                    .ok_or_else(|| malformed("native list lost its handle"))?,
+                    .ok_or_else(|| malformed("native collection lost its handle"))?,
                 entity,
             )
             .map_err(native_fault)?;
@@ -165,13 +180,18 @@ impl StoragePreparation for ListNative<'_> {
             &body,
         )?;
         let mut event = event.clone();
-        event
-            .outputs
-            .push((self.output, PV::Page(doc::heap::PageValue::List(entity))));
+        let page = match value {
+            Value::List(_) => doc::heap::PageValue::List(entity),
+            Value::Map(_) => doc::heap::PageValue::Map(entity),
+            Value::Set(_) => doc::heap::PageValue::Set(entity),
+            Value::Record(_) => doc::heap::PageValue::Record(entity),
+            _ => return Err(malformed("native collection lost its kind")),
+        };
+        event.outputs.push((self.output, PV::Page(page)));
         event.entities.push(VirtualEntity { entity, body });
         Ok(Some(PreparedStorage {
             registration,
-            storage: PreparedList {
+            storage: PreparedCollection {
                 batch,
                 value,
                 units,
@@ -183,15 +203,15 @@ impl StoragePreparation for ListNative<'_> {
         }))
     }
 
-    fn allowance(storage: &PreparedList, allowance: &mut Allowance) {
+    fn allowance(storage: &PreparedCollection, allowance: &mut Allowance) {
         allowance.units = storage.units;
     }
 
-    fn facts(storage: &PreparedList, facts: &mut LeafExecution) -> Result<(), HeapFault> {
+    fn facts(storage: &PreparedCollection, facts: &mut LeafExecution) -> Result<(), HeapFault> {
         let facts = facts
             .0
             .get_mut(&storage.at)
-            .ok_or_else(|| malformed("native list lost its release event"))?;
+            .ok_or_else(|| malformed("native collection lost its release event"))?;
         facts.values.insert(
             Measure::Release(storage.release.clone()),
             i128::from(storage.released),
