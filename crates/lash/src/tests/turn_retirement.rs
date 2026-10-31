@@ -300,7 +300,7 @@ fn tools(calls: &[crate::tools::ToolCallRecord]) -> Vec<String> {
     calls.iter().map(|call| call.tool.clone()).collect()
 }
 
-/// A turn cancelled while its cell parks on an approval retires, in its
+/// A turn cancelled after its pending cell's owner stops retires, in its
 /// cancel, the cell it stopped in (root, admissions, the cell's own facts),
 /// its cancel request and its waits' payloads, and its ledger, keeping its
 /// transcript. The report a follower reads after that cleanup, and after a collection, is
@@ -309,6 +309,8 @@ fn tools(calls: &[crate::tools::ToolCallRecord]) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcript() -> Result<()> {
     use lash_core::durable_port::domain::{DurableReads as _, RunFactKind};
+    use lash_core::durable_port::runner::Stopped;
+    use lash_core::durable_port::{ActorKey, DurableStore as _};
 
     let (session_name, run) = ("retire-cancelled", "retire-cancelled-run");
     let mut world = World::new(false).await?;
@@ -332,6 +334,22 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
             {
                 let facts = store.run_facts(&root.exec.owner()).await?;
                 if facts.rows.iter().any(|row| row.kind == RunFactKind::XWait) {
+                    // Pending alone leaves the live cell able to observe a
+                    // terminal cancellation. Join that observer before the
+                    // cancel, so this law reads the still-pending cell's rows.
+                    world.core.node.stop().await;
+                    let stopped = world.core.node.stopped(&world.core).await;
+                    assert!(
+                        matches!(&stopped, Some(Ok(Stopped::Requested))),
+                        "the pending cell's owner stopped and joined: {stopped:?}"
+                    );
+                    let actor = ActorKey::session(session.session_id().as_str())
+                        .expect("the session actor");
+                    let actor = store.actor(&actor).await?.expect("the retained actor");
+                    assert!(
+                        actor.owner.is_none(),
+                        "the cell has no live owner: {actor:?}"
+                    );
                     return Ok::<_, lash_core::durable_port::DurableError>(key);
                 }
             }
@@ -383,12 +401,42 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
             .is_empty(),
         "the parked cell holds its root"
     );
-    handle
+    let cancel = handle
         .cancel()
         .request_id("retire-cancelled-stop")
         .mode(TurnCancelMode::Immediate)
         .await?;
+    let crate::CancelReceipt::Cancelled { receipt, .. } = &cancel else {
+        panic!("the pending turn accepts its cancellation: {cancel:?}");
+    };
+    assert!(
+        matches!(
+            &receipt.outcome,
+            lash_core::facade_support::TurnCancelOutcome::Requested(_)
+        ),
+        "the cancel committed before a successor can resume the cell: {receipt:?}"
+    );
+    let backend = lash_conformance::backend_over(Arc::clone(&world.stores) as Arc<_>);
+    let (keys, unexpected_approval) = tokio::sync::mpsc::unbounded_channel();
+    let successor = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .serve_test_llm_profile(
+            part_provider("turn-retirement", cell(false)),
+            mock_llm_profile_spec(),
+        )
+        .plugin(
+            ApprovalTools {
+                keys,
+                return_gate: None,
+            }
+            .plugin(),
+        )
+        .build(crate::tests::host::runtime_lease_owner())?;
+    let previous = std::mem::replace(&mut world.core, successor);
     let live = handle.output().await?;
+    assert!(
+        unexpected_approval.is_empty(),
+        "the successor honours Immediate cancellation before running the approval"
+    );
     let live_calls = crate::testing::tool_calls_for_activity(&session, &live.activities).await;
     let live = live.outcome;
     assert_eq!(
@@ -398,7 +446,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     assert_eq!(
         tools(&live_calls),
         vec!["tools.app_lookup".to_owned()],
-        "the stopped cell's settled lookup is reported"
+        "the stopped cell's settled lookup is reported: {live_calls:#?}"
     );
 
     assert_retired(&world, session_name, run).await;
@@ -421,6 +469,7 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         "the transcript reads the same calls as the live read"
     );
     drop(session);
+    previous.shutdown().await?;
     world.core.shutdown().await?;
     Ok(())
 }
