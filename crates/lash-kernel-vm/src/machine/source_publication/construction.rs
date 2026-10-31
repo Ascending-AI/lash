@@ -81,6 +81,11 @@ impl KernelMachine {
         {
             return Ok(false);
         }
+        #[cfg(any(test, feature = "testing"))]
+        let output_register = op
+            .writes()
+            .ok_or_else(|| malformed("source construction has no output register"))?
+            .ix();
         let names = if let Op::MakeRecord { fields, .. } = op {
             let Some(names) = running.stream.field_lists[fields.ix()]
                 .iter()
@@ -284,12 +289,7 @@ impl KernelMachine {
         if published {
             self.grown();
             #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::precise_constructed(
-                self.regs[op
-                    .writes()
-                    .expect("a verified constructor has an output")
-                    .ix()],
-            );
+            crate::machine::islands::witness::precise_constructed(self.regs[output_register]);
         }
         Ok(published)
     }

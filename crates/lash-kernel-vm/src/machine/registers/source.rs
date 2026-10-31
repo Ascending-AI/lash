@@ -142,9 +142,9 @@ impl Operands {
         holding: lash_kernel_state::kernel_internals::logical::Holding,
     ) {
         for (reg, owner, _) in construction.inputs {
-            let operand = self
-                .remove_value(reg)
-                .expect("an exclusively prepared source input exists");
+            let Some(operand) = self.remove_value(reg) else {
+                unreachable!("an exclusively prepared source input exists");
+            };
             assert!(operand.held.owner == Some(owner));
         }
         self.publish_leaf(Leaf {
