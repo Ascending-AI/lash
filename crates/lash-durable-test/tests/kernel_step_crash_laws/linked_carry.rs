@@ -451,6 +451,25 @@ impl Fixture {
 async fn an_unmapped_linked_spawn_origin_refuses_without_rewriting_on_sqlite() {
     let fixture = Fixture::new().await;
     fixture.carried().await;
+    let origin = lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, []);
+    let mut missing_origin = fixture.rewritten.clone();
+    assert!(missing_origin.correspondence.successor(&origin).is_some());
+    missing_origin.correspondence = lash_kernel_doc::Correspondence::of(
+        missing_origin.correspondence.base,
+        missing_origin.correspondence.result,
+        missing_origin
+            .correspondence
+            .entries()
+            .iter()
+            .filter(|entry| entry.from != origin)
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    assert!(
+        matches!(fixture.carry(missing_origin, fixture.context()).await, Err(lash_kernel_migrate::CarryFault::Refused(lash_kernel_migrate::ParkedRefusal::SiteNotCarried { held, .. })) if &*held == "frame compilation origin")
+    );
+    fixture.unchanged().await;
     let mut rewritten = fixture.rewritten.clone();
     rewritten.correspondence = lash_kernel_doc::Correspondence::of(
         rewritten.correspondence.base,

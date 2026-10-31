@@ -157,7 +157,7 @@ fn replace(
 
 /// The correspondence of a rewrite that moved no node of `main` or of a
 /// declared function: every node of `base` to the same site of `result`.
-/// A node of a library function's body is not listed.
+/// Blocks survive changes beneath them; their children carry separately.
 pub fn unchanged(base: &Document, result: &Document) -> Result<Correspondence, DocumentRefusal> {
     Correspondence::of(
         base.identity(),
@@ -167,7 +167,9 @@ pub fn unchanged(base: &Document, result: &Document) -> Result<Correspondence, D
             .filter(|survivor| {
                 base.node(&survivor.from)
                     .zip(result.node(&survivor.to))
-                    .is_some_and(|(old, new)| old == new)
+                    .is_some_and(|(old, new)| {
+                        matches!((old, new), (Node::Block(_), Node::Block(_))) || old == new
+                    })
             })
             .collect(),
     )
