@@ -14,7 +14,7 @@ pub fn round3(value: f64) -> f64 {
 
 /// Optional acknowledged perf-stat FIFO control. Separate profiling runs can
 /// count a turn window without counting construction, seeding or validation.
-pub(crate) fn instruction_control(command: &str) -> anyhow::Result<()> {
+pub fn instruction_control(command: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     use std::io::{BufRead as _, Write as _};
     if let Some(path) = std::env::var_os("LASH_OFF_CPU_MARKS") {

@@ -16,6 +16,8 @@ use lash_core_execution::DurableSettings;
 mod cells;
 #[path = "durable_substrate/deploy.rs"]
 mod deploy;
+#[path = "durable_substrate/event_release.rs"]
+mod event_release;
 #[path = "durable_substrate/heap.rs"]
 mod heap;
 #[path = "durable_substrate/operations.rs"]
@@ -133,6 +135,7 @@ enum Kind {
     Parked,
     HotWaits { waits: usize },
     ProcessProbe(process::Mode, usize),
+    EventRelease,
     Idle { actors: usize },
     Store,
     Operations,
@@ -193,6 +196,7 @@ fn case(name: &str) -> Result<Case> {
             )
         }
         "parked-process" => (Kind::Parked, Script::default()),
+        "event-release-2048" => (Kind::EventRelease, Script::default()),
         "process-steps-10" => (
             Kind::ProcessProbe(process::Mode::Steps, 10),
             Script::default(),
@@ -326,6 +330,7 @@ async fn bench_main() -> Result<()> {
                 processes::parked(&run, &case, Duration::from_secs(args.park_seconds)).await?;
             }
             Kind::ProcessProbe(mode, count) => processes::probe(&run, &case, mode, count).await?,
+            Kind::EventRelease => event_release::run(&run).await?,
             Kind::HotWaits { waits } => processes::hot_waits(&run, &case, waits).await?,
             Kind::Idle { actors } => {
                 processes::idle(&run, &case, actors, Duration::from_secs(args.idle_seconds))
