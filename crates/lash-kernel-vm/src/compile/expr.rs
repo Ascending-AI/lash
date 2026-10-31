@@ -257,6 +257,8 @@ pub(crate) enum Kind {
         local: LocalRef,
         value: Box<Expr>,
         body: Box<Expr>,
+        ahead: u64,
+        miss: u32,
     },
 }
 
@@ -638,6 +640,8 @@ impl<'s> Reader<'s> {
                             local: bound,
                             value: Box::new(value),
                             body: Box::new(body),
+                            ahead: units(&self.open),
+                            miss: self.miss(pc),
                         },
                     };
                     self.define(Reg(reg), expr)?;

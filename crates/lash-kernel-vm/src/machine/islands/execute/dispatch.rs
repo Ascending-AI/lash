@@ -14,6 +14,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let code = &frame.state.callee.compiled.code;
         let regs = &mut frame.regs;
         match packet.opcode {
+            Opcode::ScopeClose => {
+                let site = &code.sites.scope_close[packet.x as usize];
+                if !self.fits(site.ahead) {
+                    return Err(self.at(site.miss));
+                }
+            }
             Opcode::Collection => {
                 let (step, tail) = &code.sites.collection[packet.x as usize];
                 if let Some(answer) = self.collection_step(frame, step, *tail) {

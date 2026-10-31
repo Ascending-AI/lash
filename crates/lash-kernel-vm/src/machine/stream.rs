@@ -188,7 +188,7 @@ impl KernelMachine {
                 | Op::MakeMap { .. }
                 | Op::MakeRecord { .. } => {
                     if inside!(self, running, pc, self.in_region(running, source_pc)) {
-                        self.source_complete_joins(running.stream, source_pc)?;
+                        self.source_complete_joins(running, source_pc)?;
                         continue;
                     }
                 }
@@ -328,7 +328,7 @@ impl KernelMachine {
                 }
             }
             if !matches!(op, Op::Region { .. }) {
-                self.source_complete(running.stream, source_pc)?;
+                self.source_complete(running, source_pc)?;
             }
         }
     }
@@ -337,7 +337,7 @@ impl KernelMachine {
         if matches!(&ran, Ran::Step) && running.stream.ops[pc as usize].writes().is_some() {
             return Ok(ran);
         }
-        self.source_complete(running.stream, pc)?;
+        self.source_complete(running, pc)?;
         Ok(ran)
     }
 
@@ -435,13 +435,13 @@ impl KernelMachine {
                     }
                 };
                 if accepted {
-                    self.source_complete_joins(running.stream, op_at as u32)?;
+                    self.source_complete_joins(running, op_at as u32)?;
                     #[cfg(any(test, feature = "testing"))]
                     crate::machine::islands::witness::source_replay_published(
                         running.stream.ops[op_at],
                     );
                 } else {
-                    self.source_complete(running.stream, op_at as u32)?;
+                    self.source_complete(running, op_at as u32)?;
                 }
             }
             pc = stop;
@@ -547,9 +547,7 @@ impl KernelMachine {
                     value,
                 )?;
             }
-            Op::LetEnd { local } => {
-                self.frame(task)?.set_slot(local.at, SlotState::Empty);
-            }
+            Op::LetEnd { .. } => {}
             Op::Session { dst, name } => {
                 let name = &running.stream.names[name.ix()];
                 let value = match self.session_get(name)? {

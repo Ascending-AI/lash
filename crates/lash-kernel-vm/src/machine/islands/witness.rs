@@ -59,6 +59,7 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PRECISE_JOINS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
     static SESSION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static SCOPE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -391,4 +392,17 @@ pub(in crate::machine) fn precise_write_published(value: lash_kernel_doc::Value)
 }
 pub(in crate::machine) fn precise_session_read_published() {
     PRECISE_SESSION_READS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn precise_joins() -> [u64; 2] {
+    PRECISE_JOINS.with(|counts| counts.replace([0; 2]))
+}
+
+pub(in crate::machine) fn precise_join_published(scoped: bool) {
+    PRECISE_JOINS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(scoped)] += 1;
+        counts.set(next);
+    });
 }

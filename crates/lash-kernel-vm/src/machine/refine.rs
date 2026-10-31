@@ -292,7 +292,19 @@ mod laws {
         assert_eq!(normalized_operands(machine), baseline, "unwritten storage");
         let held = machine.arena.borrow_mut().create_list(&[Value::Null]);
         machine.regs.put(19, held);
-        machine.source_complete(&stream, 0).unwrap();
+        fn observe_operand(machine: &mut KernelMachine, stream: &Stream, pc: u32) {
+            assert!(stream.source_joins.is_empty());
+            let projection = crate::machine::logical_held::Projection {
+                arena: &machine.arena,
+                heap: &machine.heap,
+            };
+            machine
+                .regs
+                .source_complete(stream, pc, &projection)
+                .unwrap();
+            machine.logical_flush().unwrap();
+        }
+        observe_operand(machine, &stream, 0);
         // Source ownership survives a cleared physical mirror.
         machine.regs.clear_range(19..20);
         let (bytes, bodies) = normalized_operands(machine);
@@ -300,7 +312,7 @@ mod laws {
         assert_eq!(bodies, baseline.1 + 48, "one list header and one member");
         // A consumed occurrence must disappear even if its mirror is restored.
         machine.regs.put(19, held);
-        machine.source_complete(&stream, 1).unwrap();
+        observe_operand(machine, &stream, 1);
         assert_eq!(normalized_operands(machine), baseline, "consumed storage");
 
         let action_site = Site::new(Unit::Main, vec![0, 0]);
@@ -327,7 +339,7 @@ mod laws {
             ..Default::default()
         };
         machine.regs.put(0, Value::Null);
-        machine.source_complete(&action, 0).unwrap();
+        observe_operand(machine, &action, 0);
         assert_eq!(
             normalized_operands(machine),
             (baseline.0 + 16, baseline.1),

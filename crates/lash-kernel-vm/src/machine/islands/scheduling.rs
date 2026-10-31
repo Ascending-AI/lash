@@ -85,7 +85,7 @@ impl KernelMachine {
                 let ran = if flow == Flow::Step {
                     Ran::Step
                 } else {
-                    self.source_complete(running.stream, pc)?;
+                    self.source_complete(&running, pc)?;
                     match self.register_suffix(host, &running, pc as usize + 1, true)? {
                         Some(ran) => ran,
                         None => self.run(host, &running, pc as usize + 1)?,

@@ -45,6 +45,26 @@ impl Transfer {
         self.value
     }
 }
+pub(super) struct Join {
+    at: usize,
+    reg: Reg,
+    from: Arc<Site>,
+    to: Arc<Site>,
+    input: Owner,
+    output: Owner,
+    value: Value,
+}
+impl Join {
+    pub(super) fn input(&self) -> Owner {
+        self.input
+    }
+    pub(super) fn output(&self) -> Owner {
+        self.output
+    }
+    pub(super) fn value(&self) -> Value {
+        self.value
+    }
+}
 pub(super) struct Leaf {
     operand: Operand,
     owner: Owner,
@@ -84,6 +104,53 @@ impl Construction {
     }
 }
 impl Operands {
+    pub(super) fn prepare_join(
+        &self,
+        join: &crate::compile::SourceJoin,
+    ) -> Result<Option<Join>, HeapFault> {
+        if !self.active {
+            return Err(invalid("source join has no active owner bank"));
+        }
+        let at = *self
+            .positions
+            .get(join.value.ix())
+            .ok_or_else(|| invalid("source join has no register"))?;
+        let operand = self
+            .values
+            .get(at)
+            .ok_or_else(|| invalid("source join has no operand"))?;
+        if operand.site != join.from {
+            return Err(invalid("source join names another operand"));
+        }
+        let Some(roots) = &self.roots else {
+            return Ok(None);
+        };
+        let input = roots.operand(&join.from)?;
+        if operand.reg != join.value || operand.held.owner != Some(input) {
+            return Err(invalid("source join has another owner"));
+        }
+        Ok(Some(Join {
+            at,
+            reg: join.value,
+            from: Arc::clone(&join.from),
+            to: Arc::clone(&join.to),
+            input,
+            output: roots.operand(&join.to)?,
+            value: operand.held.value,
+        }))
+    }
+    pub(super) fn publish_join(&mut self, join: Join) {
+        let operand = &mut self.values[join.at];
+        assert!(
+            operand.reg == join.reg
+                && operand.site == join.from
+                && operand.held.owner == Some(join.input)
+                && operand.held.value.same(&join.value)
+        );
+        operand.site = join.to;
+        operand.held.owner = Some(join.output);
+    }
+
     pub(super) fn prepare_transfer(&self, reg: Reg) -> Result<Option<Transfer>, HeapFault> {
         if !self.active {
             return Ok(None);
@@ -413,7 +480,24 @@ impl Operands {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn complete(
+        &mut self,
+        stream: &Stream,
+        pc: u32,
+        registers: &[Value],
+        projection: &Projection<'_>,
+    ) -> Result<(), HeapFault> {
+        self.complete_value(stream, pc, registers, projection)?;
+        if matches!(
+            stream.ops[pc as usize],
+            Op::Region { .. } | Op::Pin { .. } | Op::End
+        ) {
+            return Ok(());
+        }
+        self.complete_joins(stream, pc)
+    }
+    pub(super) fn complete_value(
         &mut self,
         stream: &Stream,
         pc: u32,
@@ -476,38 +560,47 @@ impl Operands {
                 held: projection.hold(registers[reg.ix()])?,
             })?;
         }
-        self.complete_joins(stream, pc)
+        Ok(())
     }
-    /// Accepted operations install their input/output receipts themselves,
-    /// then run the same checked source-role joins as ordinary operations.
+    #[cfg(test)]
     pub(super) fn complete_joins(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
         if !self.active {
             return Err(invalid("source join has no active owner bank"));
         }
         if let Some(joins) = stream.source_joins.get(&pc) {
             for join in joins {
-                let at = *self
-                    .positions
-                    .get(join.value.ix())
-                    .ok_or_else(|| invalid("source join has no register"))?;
-                let operand = self
-                    .values
-                    .get_mut(at)
-                    .ok_or_else(|| invalid("source join has no operand"))?;
-                if operand.site != join.from {
-                    return Err(invalid("source join names another operand"));
-                }
-                if let Some(roots) = &self.roots {
-                    if let Some(owner) = operand.held.owner {
-                        roots.release(owner);
-                    }
-                    let owner = roots.operand(&join.to)?;
-                    roots.acquire(owner, operand.held.value);
-                    operand.held.owner = Some(owner);
-                }
-                operand.site = Arc::clone(&join.to);
+                self.complete_join(join)?;
             }
         }
+        Ok(())
+    }
+    pub(super) fn complete_join(
+        &mut self,
+        join: &crate::compile::SourceJoin,
+    ) -> Result<(), HeapFault> {
+        if !self.active {
+            return Err(invalid("source join has no active owner bank"));
+        }
+        let at = *self
+            .positions
+            .get(join.value.ix())
+            .ok_or_else(|| invalid("source join has no register"))?;
+        let operand = self
+            .values
+            .get_mut(at)
+            .ok_or_else(|| invalid("source join has no operand"))?;
+        if operand.site != join.from {
+            return Err(invalid("source join names another operand"));
+        }
+        if let Some(roots) = &self.roots {
+            if let Some(owner) = operand.held.owner {
+                roots.release(owner);
+            }
+            let owner = roots.operand(&join.to)?;
+            roots.acquire(owner, operand.held.value);
+            operand.held.owner = Some(owner);
+        }
+        operand.site = Arc::clone(&join.to);
         Ok(())
     }
     fn consume(&mut self, reg: Reg, stream: &Stream, pc: u32) -> Result<(), HeapFault> {

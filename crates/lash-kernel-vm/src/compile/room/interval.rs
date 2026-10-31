@@ -10,6 +10,7 @@ pub(crate) enum Selection {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Key {
     event: bool,
+    join: Option<Site>,
     at: Site,
     bounds: Option<(Point, Point)>,
     selected: Box<[Selection]>,
@@ -163,6 +164,7 @@ impl Source {
         .into();
         let key = Key {
             event: true,
+            join: None,
             at: at.site.clone(),
             bounds: Some((at.clone(), leave)),
             selected: route.clone(),
@@ -262,6 +264,7 @@ impl Source {
         }
         let key = Key {
             event: false,
+            join: None,
             at: from.site.clone(),
             bounds: Some((from.clone(), through.clone())),
             selected: selected.into(),
@@ -329,7 +332,44 @@ impl Source {
         at: &Point,
         selected: ExitKind,
     ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.compile_event_input(at, selected, None)
+    }
+
+    /// Exact execution supplies the selected child's authenticated operand.
+    /// This is the source expression's Commit, with its unchanged algebra.
+    pub(crate) fn compile_join(
+        &self,
+        from: &Site,
+        to: &Site,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
+        self.compile_event_input(&point(to, Phase::Commit), ExitKind::Normal, Some(from))
+    }
+
+    fn compile_event_input(
+        &self,
+        at: &Point,
+        selected: ExitKind,
+        from: Option<&Site>,
+    ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
+        if let Some(from) = from {
+            if at.phase != Phase::Commit
+                || at.site.unit != self.site.unit
+                || !at.site.path.starts_with(&self.site.path)
+            {
+                return Err(Refused::Path);
+            }
+            let mut node = doc::Node::Block(&self.body);
+            for index in &at.site.path[self.site.path.len()..] {
+                node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+            }
+            match node {
+                doc::Node::Expr(doc::Expr::If { .. })
+                    if *from == child(&at.site, 1) || *from == child(&at.site, 2) => {}
+                doc::Node::Expr(doc::Expr::Let { .. }) if *from == child(&at.site, 1) => {}
+                _ => return Err(Refused::Path),
+            }
+        }
         if !self
             .room
             .exits
@@ -340,6 +380,7 @@ impl Source {
         }
         let key = Key {
             event: true,
+            join: from.cloned(),
             at: at.site.clone(),
             bounds: None,
             selected: vec![Selection::Event {
@@ -352,7 +393,10 @@ impl Source {
         if let Some(interval) = cache.get(&key) {
             return Ok(Arc::clone(interval));
         }
-        let event = self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone();
+        let mut event = self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone();
+        if let Some(from) = from {
+            event.inputs = vec![operand(from)].into();
+        }
         let mut variables = 0;
         let step = Step::compile(self, event, selected, &mut variables)?;
         let interval = Arc::new(CompiledInterval {
@@ -380,6 +424,7 @@ impl Source {
         }
         let key = Key {
             event: false,
+            join: None,
             at: at.clone(),
             bounds: None,
             selected: selected.into(),

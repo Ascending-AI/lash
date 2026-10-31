@@ -70,6 +70,16 @@ fn source_operands_follow_consumption_and_ignore_register_mirrors() {
         .unwrap();
     registers[19] = Value::Null;
     assert!(
+        owners
+            .prepare_join(&SourceJoin {
+                from: Arc::clone(&leaf),
+                to: Arc::clone(&result),
+                value: Reg(19)
+            })
+            .is_err(),
+        "an accepted join cannot rename a receipt from its spent child site"
+    );
+    assert!(
         owners.take(Reg(19), &leaf).is_err(),
         "the branch owner was transferred"
     );

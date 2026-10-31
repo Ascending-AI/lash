@@ -5,6 +5,7 @@ mod closure;
 pub(in crate::machine) use cell::{CellConstruction, PreparedObjectConstruction};
 pub(in crate::machine) use closure::ClosureConstruction;
 pub(in crate::machine) mod construction;
+mod join;
 mod leaf;
 mod session;
 use super::session::Session;

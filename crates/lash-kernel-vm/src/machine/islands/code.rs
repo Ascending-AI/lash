@@ -297,6 +297,10 @@ operations! {
             }
         }
         [Native native Heap heap] {
+            ScopeClose scope_close {
+                ahead: u64,
+                miss: u32,
+            }
             Reserve reserve {
                 kind: lash_kernel_doc::ValueKind,
                 members: usize,

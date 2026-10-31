@@ -146,19 +146,22 @@ impl KernelMachine {
     }
     pub(super) fn source_complete_joins(
         &mut self,
-        stream: &Stream,
+        running: &super::stream::Running<'_>,
         pc: u32,
-    ) -> Result<(), HeapFault> {
-        self.regs.source_complete_joins(stream, pc)?;
-        self.logical_flush()
+    ) -> Result<(), super::Halt> {
+        self.publish_source_joins(running, pc)
     }
-    pub(super) fn source_complete(&mut self, stream: &Stream, pc: u32) -> Result<(), HeapFault> {
+    pub(super) fn source_complete(
+        &mut self,
+        running: &super::stream::Running<'_>,
+        pc: u32,
+    ) -> Result<(), super::Halt> {
         let projection = Projection {
             arena: &self.arena,
             heap: &self.heap,
         };
-        self.regs.source_complete(stream, pc, &projection)?;
-        self.logical_flush()
+        self.regs.source_complete(running.stream, pc, &projection)?;
+        self.source_complete_joins(running, pc)
     }
     pub(super) fn source_atom(&mut self, index: usize, value: Value) -> Result<(), HeapFault> {
         let projection = Projection {

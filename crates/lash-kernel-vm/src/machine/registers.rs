@@ -109,6 +109,24 @@ impl PreparedTransfer<'_> {
     }
 }
 
+pub(super) struct PreparedJoin<'a> {
+    registers: &'a mut Registers,
+    join: source::Join,
+}
+impl PreparedJoin<'_> {
+    pub(super) fn input(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.join.input()
+    }
+    pub(super) fn output(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.join.output()
+    }
+    pub(super) fn value(&self) -> Value {
+        self.join.value()
+    }
+    pub(super) fn publish(self) {
+        self.registers.source.publish_join(self.join);
+    }
+}
 pub(super) struct PreparedConstruction<'a> {
     registers: &'a mut Registers,
     construction: source::Construction,
@@ -400,12 +418,23 @@ impl Registers {
         self.source.atom(index, value, projection)
     }
 
-    pub(super) fn source_complete_joins(
+    pub(super) fn prepare_source_join(
         &mut self,
-        stream: &crate::compile::Stream,
-        pc: u32,
+        join: &crate::compile::SourceJoin,
+    ) -> Result<Option<PreparedJoin<'_>>, HeapFault> {
+        let Some(join) = self.source.prepare_join(join)? else {
+            return Ok(None);
+        };
+        Ok(Some(PreparedJoin {
+            registers: self,
+            join,
+        }))
+    }
+    pub(super) fn source_complete_join(
+        &mut self,
+        join: &crate::compile::SourceJoin,
     ) -> Result<(), HeapFault> {
-        self.source.complete_joins(stream, pc)
+        self.source.complete_join(join)
     }
 
     pub(super) fn source_complete(
@@ -414,7 +443,8 @@ impl Registers {
         pc: u32,
         projection: &Projection<'_>,
     ) -> Result<(), HeapFault> {
-        self.source.complete(stream, pc, &self.values, projection)
+        self.source
+            .complete_value(stream, pc, &self.values, projection)
     }
 
     pub(super) fn take_source_role(

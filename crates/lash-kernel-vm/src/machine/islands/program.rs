@@ -1248,7 +1248,11 @@ impl<'e> Build<'e> {
                 self.open = None;
             }
             Kind::Let {
-                local, value, body, ..
+                local,
+                value,
+                body,
+                ahead,
+                miss,
             } => {
                 self.expr(value)?;
                 self.emit(Op::Bind {
@@ -1257,6 +1261,10 @@ impl<'e> Build<'e> {
                 });
                 self.live.retain(|at| *at != value.reg);
                 self.expr(body)?;
+                self.emit(Op::ScopeClose {
+                    ahead: *ahead,
+                    miss: *miss,
+                });
                 self.emit(Op::Unbind(local.at as usize));
             }
             Kind::Make {
