@@ -58,6 +58,12 @@ pub enum RootSource {
     /// `session_runs.terminal_transcript_ref`: the calls a turn answered,
     /// published by its terminal, while the run's row lives (FIG-6601).
     RunTranscript = 18,
+    /// Retained audit text of a composed call.
+    PromptSnapshot = 20,
+    /// Exact request content until settlement.
+    PromptRequestBody = 21,
+    /// Reusable session lowering prefix.
+    PromptPrefix = 22,
 }
 
 /// Where one source's roots live in a backend's schema.
@@ -71,7 +77,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 19] = [
         Self::EnvironmentHead,
         Self::Exec,
         Self::RunFact,
@@ -88,6 +94,9 @@ impl RootSource {
         Self::RetirementHold,
         Self::ModelCall,
         Self::RunTranscript,
+        Self::PromptSnapshot,
+        Self::PromptRequestBody,
+        Self::PromptPrefix,
     ];
 
     /// The `source` column of the root catalog view.
@@ -110,6 +119,9 @@ impl RootSource {
             Self::RetirementHold => "retirement",
             Self::ModelCall => "model_call",
             Self::RunTranscript => "terminal_transcript",
+            Self::PromptSnapshot => "prompt_snapshot",
+            Self::PromptRequestBody => "prompt_request",
+            Self::PromptPrefix => "prompt_prefix",
         }
     }
 
@@ -132,6 +144,17 @@ impl RootSource {
     #[must_use]
     pub const fn postgres_field(self) -> RootField {
         match self {
+            Self::PromptSnapshot => RootField::of(
+                "lash_prompt_snapshot_texts",
+                "hash",
+                Some("part = 'snapshot'"),
+            ),
+            Self::PromptRequestBody => RootField::of(
+                "lash_prompt_snapshot_texts",
+                "hash",
+                Some("part = 'request'"),
+            ),
+            Self::PromptPrefix => RootField::of("lash_prompt_prefixes", "hash", None),
             Self::EnvironmentHead => RootField::of("lash_environment_heads", "root_ref", None),
             Self::RevisionConfig => RootField::of("lash_session_revisions", "config_ref", None),
             Self::Exec => RootField::of("lash_exec_snapshots", "root_ref", None),
@@ -165,6 +188,9 @@ impl RootSource {
 
     const fn unprefixed(self) -> (&'static str, &'static str, Option<&'static str>) {
         match self {
+            Self::PromptSnapshot => ("prompt_snapshot_texts", "hash", Some("part = 'snapshot'")),
+            Self::PromptRequestBody => ("prompt_snapshot_texts", "hash", Some("part = 'request'")),
+            Self::PromptPrefix => ("prompt_prefixes", "hash", None),
             Self::EnvironmentHead => ("environment_heads", "root_ref", None),
             Self::RevisionConfig => ("session_revisions", "config_ref", None),
             Self::Exec => ("exec_snapshots", "root_ref", None),

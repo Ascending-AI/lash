@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS run_records (
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).
-    record_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    record_ref BLOB NOT NULL REFERENCES blobs(hash),
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (owner_key, run_seq, ordinal)
 );

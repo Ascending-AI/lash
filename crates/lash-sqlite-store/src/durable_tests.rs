@@ -704,16 +704,15 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         let nodes: u64 = receipt
             .shapes
             .iter()
-            .filter(|(sql, _)| sql.starts_with("insert into") && sql.contains("prompt_texts "))
-            .map(|(_, shape)| shape.rows_returned)
+            .filter(|(sql, _)| sql.starts_with("insert into") && sql.contains("blobs "))
+            .map(|(_, shape)| shape.rows_affected)
             .sum();
         let edges: u64 = receipt
             .shapes
             .iter()
             .filter(|(sql, _)| {
                 sql.starts_with("insert into")
-                    && (sql.contains("prompt_text_edges ")
-                        || sql.contains("prompt_snapshot_texts "))
+                    && (sql.contains("blob_edges ") || sql.contains("prompt_snapshot_texts "))
             })
             .map(|(_, shape)| shape.rows_affected)
             .sum();
@@ -721,8 +720,11 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             .shapes
             .iter()
             .filter(|(sql, _)| {
-                (sql.starts_with("insert into") && sql.contains("prompt_"))
-                    || (sql.starts_with("select hash from") && sql.contains("prompt_texts "))
+                (sql.starts_with("insert into")
+                    && (sql.contains("prompt_")
+                        || sql.contains("blobs ")
+                        || sql.contains("blob_edges ")))
+                    || (sql.starts_with("select hash from") && sql.contains("blobs "))
             })
             .map(|(_, shape)| shape.bound_bytes)
             .sum();
@@ -977,7 +979,7 @@ mod lo_root_retirement_sql_is_depth_independent {
                 let edge_batches: u64 = receipt
                     .shapes
                     .iter()
-                    .filter(|(sql, _)| sql.starts_with("delete from main.prompt_text_edges"))
+                    .filter(|(sql, _)| sql.starts_with("delete from main.blob_edges"))
                     .map(|(_, shape)| shape.statements)
                     .sum();
                 eprintln!(
@@ -1036,23 +1038,18 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
     let actor = ActorKey::session("sql-work-owner").unwrap();
     let mut texts: Vec<_> = (0..16)
-        .map(|index| PromptText {
-            hash: BlobRef::for_content(format!("text-{index}").as_bytes()).0,
-            text: format!("text {index}").into(),
-            children: Vec::new(),
-        })
+        .map(|index| PromptText::audit(format!("text {index}")))
         .collect();
-    texts.push(PromptText {
-        hash: BlobRef::for_content(b"branch").0,
-        text: "branch".to_owned().into(),
-        children: [b"text-0", b"text-1"]
-            .map(|text| BlobRef::for_content(text).0)
-            .to_vec(),
-    });
-    let mut tx = store
-        .begin(&actor, Epoch(identity.epoch), u64::MAX)
-        .await
-        .unwrap();
+    let branch = PromptText::fragment(
+        "branch",
+        texts[..2]
+            .iter()
+            .map(|text| lash_core_store::checkpoint_graph::NodeId::from_hex(&text.hash).unwrap())
+            .collect(),
+    );
+    let branch_hash = branch.hash.clone();
+    texts.push(branch);
+    let mut tx = store.begin(&actor, Epoch(identity.epoch), u64::MAX).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
             session: lash_kernel_value::identity::SessionId::from("sql-work-owner"),
@@ -1071,9 +1068,24 @@ async fn prompt_text_reads_are_batched_in_request_order() {
         .commit(tx, CommitLabel::new("model.start"))
         .await
         .unwrap();
+    // PROMPT-CONTENT-DOMAIN: another blob kind is absent from prompt reads.
+    let ordinary = BlobRef::for_content(b"ordinary blob");
+    let ordinary_hash = ordinary.0.clone();
+    set.session_store_factory()
+        .conn
+        .call(move |connection| {
+            connection.execute(
+                "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
+                rusqlite::params![crate::codec::SqlHash(ordinary.as_str()), b"ordinary blob"],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let mut hashes: Vec<_> = texts.iter().rev().map(|text| text.hash.clone()).collect();
     hashes.insert(2, "missing".to_owned());
-    hashes.push(BlobRef::for_content(b"branch").0);
+    hashes.push(branch_hash);
+    hashes.push(ordinary_hash);
     let expected: Vec<_> = hashes
         .iter()
         .filter_map(|hash| texts.iter().find(|text| text.hash == *hash).cloned())
@@ -1088,10 +1100,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let reads: u64 = receipt
         .shapes
         .iter()
-        .filter(|(sql, _)| {
-            sql.starts_with("select ")
-                && (sql.contains("prompt_texts") || sql.contains("prompt_text_edges"))
-        })
+        .filter(|(sql, _)| sql.starts_with("with recursive reached") && sql.contains("blobs"))
         .map(|(_, shape)| shape.statements)
         .sum();
     eprintln!(

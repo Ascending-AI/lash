@@ -609,16 +609,11 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     };
     let record_prompt = |tx: &mut ActorTx, ordinal| {
         use lash_durable::domain::{PromptText, PromptWrite};
-        let leaf = PromptText {
-            hash: lash_core_store::store::BlobRef::for_content(b"leaf").0,
-            text: "leaf".into(),
-            children: Vec::new(),
-        };
-        let prefix = PromptText {
-            hash: lash_core_store::store::BlobRef::for_content(b"prefix").0,
-            text: "prefix".into(),
-            children: vec![leaf.hash.clone()],
-        };
+        let leaf = PromptText::audit("leaf");
+        let prefix = PromptText::fragment(
+            "prefix",
+            vec![lash_core_store::checkpoint_graph::NodeId::from_hex(&leaf.hash).unwrap()],
+        );
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: PromptCallKey {
                 session: owned.session.clone(),
@@ -836,14 +831,13 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
     let mut texts: Vec<PromptText> = Vec::new();
     for ordinal in 1..=64 {
         let body = format!("frontier {ordinal}");
-        let text = PromptText {
-            hash: lash_core_store::store::BlobRef::for_content(body.as_bytes()).0,
-            text: body.into(),
-            children: texts
-                .last()
-                .map(|parent| vec![parent.hash.clone()])
-                .unwrap_or_default(),
-        };
+        let children = texts
+            .last()
+            .map(|parent| {
+                vec![lash_core_store::checkpoint_graph::NodeId::from_hex(&parent.hash).unwrap()]
+            })
+            .unwrap_or_default();
+        let text = PromptText::fragment(body, children);
         texts.push(text.clone());
         let mut tx = store
             .begin(&owned.actor, owned.epoch, u64::MAX)

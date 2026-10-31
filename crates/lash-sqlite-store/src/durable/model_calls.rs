@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS model_call_records (
     run TEXT NOT NULL,
     call TEXT NOT NULL,
     call_id TEXT NOT NULL,
-    record_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    record_ref BLOB NOT NULL REFERENCES blobs(hash),
     ended_at_ms INTEGER NOT NULL,
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (session_id, run, call),

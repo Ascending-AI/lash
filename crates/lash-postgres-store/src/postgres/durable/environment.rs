@@ -226,32 +226,6 @@ pub(super) async fn validate_graph(
     Ok(())
 }
 
-/// Before graph locks, skip owner leaves locked by publication/acquisition.
-pub(super) async fn peel_owners(
-    tx: &mut PgConnection,
-    candidates: &BTreeSet<String>,
-) -> Result<BTreeSet<String>, sqlx::Error> {
-    let names: Vec<_> = candidates
-        .iter()
-        .filter_map(|s| GraphNode::from_hex(s))
-        .map(|n| n.0.to_vec())
-        .collect();
-    let rows: Vec<(String, Vec<u8>)> = crate::observed_sql::query_as(PG.owner_nodes.sql())
-        .bind(names)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    let mut skipped = BTreeSet::new();
-    for (id, node) in rows {
-        let locked: Option<String> = crate::observed_sql::query_scalar(PG.peel_owner.sql())
-            .bind(id)
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await?;
-        if locked.is_none() {
-            skipped.insert(node.iter().map(|b| format!("{b:02x}")).collect::<String>());
-        }
-    }
-    Ok(skipped)
-}
 pub(super) async fn peeled(tx: &mut PgConnection, nodes: &[String]) -> Result<(), sqlx::Error> {
     let names: Vec<_> = nodes
         .iter()
@@ -544,6 +518,15 @@ async fn owner_body(
 /// Static statements shared with the generated one-call owner commit.
 pub(super) fn commit_owners() -> &'static lash_store_sql::Rendered {
     &PG.commit_owners
+}
+
+/// Version-owner boundaries a generated graph peel must leave to the explicit owner bridge.
+pub(super) fn retirement_owners() -> &'static lash_store_sql::Rendered {
+    &PG.owner_nodes
+}
+
+pub(super) fn retirement_owner_lock() -> &'static lash_store_sql::Rendered {
+    &PG.peel_owner
 }
 
 pub(super) fn commit_versions_valid() -> &'static lash_store_sql::Rendered {

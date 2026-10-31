@@ -13,11 +13,7 @@ use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
 fn text(name: &str) -> PromptText {
-    PromptText {
-        hash: lash_core_store::store::BlobRef::for_content(format!("text {name}").as_bytes()).0,
-        text: format!("text {name}").into(),
-        children: Vec::new(),
-    }
+    PromptText::audit(format!("text {name}"))
 }
 
 fn sorted_hashes(names: &[&str]) -> Vec<String> {
@@ -29,9 +25,7 @@ fn sorted_hashes(names: &[&str]) -> Vec<String> {
 fn hashes(names: &[&str]) -> Vec<String> {
     names
         .iter()
-        .map(|name| {
-            lash_core_store::store::BlobRef::for_content(format!("text {name}").as_bytes()).0
-        })
+        .map(|name| PromptText::audit(format!("text {name}")).hash)
         .collect()
 }
 

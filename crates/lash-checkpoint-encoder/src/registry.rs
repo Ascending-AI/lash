@@ -152,6 +152,8 @@ registry! {
     CONTENT_CHUNK = 50, "ContentChunk", Enveloped, Node, Integrator;
     PHASE_PREPARATION = 51, "PhasePreparation", Enveloped, Node, Integrator;
     SESSION_METADATA = 52, "SessionMetadata", Enveloped, Node, Cell;
+    PROMPT_TEXT = 53, "PromptText", Enveloped, Node, Stores;
+    PROMPT_FRAGMENT = 54, "PromptFragment", Enveloped, Node, Stores;
 }
 
 registry! {

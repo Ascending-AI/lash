@@ -14,7 +14,6 @@
 //! release that writes nothing else keeps the claim's no-progress mark.
 
 use super::executor::{EXECUTOR_SQL, FUNCTION, LATCH_HORIZON_MS, REGISTRY, entries};
-use super::prompts::HELD_TEXTS_FUNCTION;
 use super::renewal::FUNCTION as RENEW_FUNCTION;
 use super::steps::{Collect, END_LOCAL_PARAMS, Entry, Shape, Ty};
 use super::{SQL, graph, pages, prompts};
@@ -108,8 +107,7 @@ fn gather(collect: Collect) -> String {
         Collect::PhaseEnd(_) => "v_phase_ends",
         Collect::Ancestry(_) => "v_leaves",
         Collect::Wake(_) => "v_wakes",
-        Collect::Text(_) => "v_texts",
-        Collect::Protect(_) => "v_protect",
+        Collect::Peel(_) => "v_texts",
     };
     let ty = match collect {
         Collect::Ancestry(_) | Collect::Wake(_) => "TEXT",
@@ -125,11 +123,9 @@ fn gather(collect: Collect) -> String {
 fn text_reclaim() -> String {
     let reclaim = inline(
         prompts::RECLAIM.statement().sql(),
-        &["v_texts", "v_protect", "4096"],
+        &["v_texts", "4096", "v_now"],
     );
-    format!(
-        "PERFORM * FROM ({reclaim}) AS retired; v_texts := '{{}}'; v_protect := '{{}}'; v_rows := 0;"
-    )
+    format!("PERFORM * FROM ({reclaim}) AS retired; v_texts := '{{}}'; v_rows := 0;")
 }
 
 /// Shared SQL inlining for domain-owned generated functions.
@@ -227,7 +223,7 @@ fn branch(entry: &Entry) -> String {
             )
         }
         Shape::EndLocal => end_local(entry),
-        Shape::TextReclaim => text_reclaim(),
+        Shape::GraphReclaim => text_reclaim(),
     };
     format!("        WHEN '{}' THEN\n            {run}\n", entry.name())
 }
@@ -407,7 +403,6 @@ DECLARE
     v_owner TEXT;
     v_woken BIGINT;
     v_texts BYTEA[] := '{{}}';
-    v_protect BYTEA[] := '{{}}';
     v_tfront BYTEA[];
     v_closure BYTEA[];
     v_tparents BYTEA[];
@@ -609,115 +604,7 @@ $lash_owner_commit$;
 "
     ) + &crate::artifact_store::local_end_function_ddl()
         + &renewal_ddl()
-        + &held_texts_ddl()
-        + &prompts::retirement_function_ddl()
-        + &prompt_record_ddl()
-}
-
-/// The same frontier the explicit record used: share-lock a level, read it
-/// after the locks, stop at held immutable nodes, and install only the absent
-/// reachable texts and their edges. A prefix is replaced after publication,
-/// then its former closure is reclaimed with the held frontier protected.
-fn prompt_record_ddl() -> String {
-    let sql = &*prompts::SQL;
-    let pg = &*prompts::POSTGRES_SQL;
-    let snapshot = inline(
-        sql.insert_snapshot.sql(),
-        &[
-            "p_session",
-            "p_owner",
-            "p_call",
-            "p_snapshot",
-            "p_request",
-            "p_epoch",
-        ],
-    );
-    let held = inline(
-        pg.held_after_lock.sql(),
-        &["v_frontier", &prompts::TEXT_LOCK_SEED.to_string()],
-    );
-    let insert = inline(pg.insert_texts.sql(), &["v_hashes", "v_bodies"]);
-    let index = inline(pg.insert_index_edges.sql(), &["v_parents", "v_children"]);
-    let edges = inline(
-        pg.insert_edges.sql(),
-        &["p_session", "p_owner", "p_call", "p_parts", "p_edges"],
-    );
-    let release = inline(sql.release_prefix.sql(), &["p_session"]);
-    let prefix = inline(sql.set_prefix.sql(), &["p_session", "p_prefix"]);
-    let reclaim = text_reclaim();
-    format!(
-        "CREATE OR REPLACE FUNCTION lash_prompt_record(
-    p_session TEXT, p_owner TEXT, p_call TEXT, p_snapshot TEXT, p_request TEXT, p_epoch BIGINT,
-    p_hashes BYTEA[], p_bodies TEXT[], p_parents BYTEA[], p_children BYTEA[], p_roots BYTEA[],
-    p_parts TEXT[], p_edges BYTEA[], p_prefix BYTEA, p_turn BOOLEAN)
-RETURNS TABLE (accepted BOOLEAN, missing BYTEA)
-LANGUAGE plpgsql VOLATILE
-AS $lash_prompt_record$
-DECLARE
-    v_rows BIGINT;
-    v_frontier BYTEA[] := p_roots;
-    v_held BYTEA[];
-    v_new BYTEA[];
-    v_unheld BYTEA[] := '{{}}';
-    v_hash BYTEA;
-    v_position INTEGER;
-    v_hashes BYTEA[];
-    v_bodies TEXT[];
-    v_parents BYTEA[];
-    v_children BYTEA[];
-    v_texts BYTEA[] := '{{}}';
-    v_protect BYTEA[] := '{{}}';
-    v_tfront BYTEA[];
-    v_closure BYTEA[];
-    v_tparents BYTEA[];
-    v_tchildren BYTEA[];
-BEGIN
-    WITH recorded AS ({snapshot}) SELECT count(*) INTO v_rows FROM recorded;
-    IF v_rows <> 1 THEN
-        RETURN QUERY SELECT FALSE, NULL::BYTEA;
-        RETURN;
-    END IF;
-    WHILE cardinality(v_frontier) > 0 LOOP
-        v_held := ARRAY({held});
-        v_protect := v_protect || v_held;
-        v_new := '{{}}';
-        FOREACH v_hash IN ARRAY v_frontier LOOP
-            IF v_hash = ANY(v_held) OR v_hash = ANY(v_unheld) THEN CONTINUE; END IF;
-            v_position := array_position(p_hashes, v_hash);
-            IF v_position IS NULL OR p_bodies[v_position] IS NULL THEN
-                RETURN QUERY SELECT FALSE, v_hash;
-                RETURN;
-            END IF;
-            v_new := v_new || v_hash;
-            v_unheld := v_unheld || v_hash;
-        END LOOP;
-        v_frontier := ARRAY(SELECT DISTINCT edge.child
-            FROM unnest(p_parents, p_children) AS edge(parent, child)
-            WHERE edge.parent = ANY(v_new) ORDER BY edge.child);
-    END LOOP;
-    IF cardinality(v_unheld) > 0 THEN
-        SELECT array_agg(supplied.hash ORDER BY supplied.hash), array_agg(supplied.body ORDER BY supplied.hash)
-        INTO v_hashes, v_bodies FROM unnest(p_hashes, p_bodies) AS supplied(hash, body)
-        WHERE supplied.hash = ANY(v_unheld);
-        {insert};
-        SELECT COALESCE(array_agg(edge.parent ORDER BY edge.parent, edge.child), '{{}}'),
-               COALESCE(array_agg(edge.child ORDER BY edge.parent, edge.child), '{{}}')
-        INTO v_parents, v_children FROM unnest(p_parents, p_children) AS edge(parent, child)
-        WHERE edge.parent = ANY(v_unheld);
-        {index};
-    END IF;
-    {edges};
-    IF p_turn THEN
-        WITH released AS ({release})
-        SELECT COALESCE(array_agg(hash), '{{}}') INTO v_texts FROM released;
-        IF p_prefix IS NOT NULL THEN {prefix}; END IF;
-        {reclaim}
-    END IF;
-    RETURN QUERY SELECT TRUE, NULL::BYTEA;
-END
-$lash_prompt_record$;
-"
-    )
+        + &super::graph::retirement_function_ddl()
 }
 
 /// The guarded renewal of a node's lease as one server request (FIG-7049):
@@ -776,32 +663,6 @@ BEGIN
     RETURN QUERY SELECT v_fleet, v_expires;
 END
 ${RENEW_FUNCTION}$;
-"
-    )
-}
-
-/// One level of a prompt record's text frontier as one server request
-/// (FIG-7049): the texts `p_keys` share-locked in key order, then which of
-/// them are stored, read by its own statement once every lock is held. A
-/// volatile function's statements each read a fresh snapshot under read
-/// committed, so a text a concurrent reclaim deleted before this lock is
-/// not answered held.
-fn held_texts_ddl() -> String {
-    let lock = perform(&inline(
-        connection_sql().lock_xact_shared_by_keys_seeded.sql(),
-        &["p_keys", "p_seed"],
-    ));
-    let held = inline(prompts::held_texts().sql(), &["p_keys"]);
-    format!(
-        "CREATE OR REPLACE FUNCTION {HELD_TEXTS_FUNCTION}(p_keys BYTEA[], p_seed BIGINT)
-RETURNS SETOF BYTEA
-LANGUAGE plpgsql VOLATILE
-AS ${HELD_TEXTS_FUNCTION}$
-BEGIN
-    {lock};
-    RETURN QUERY {held};
-END
-${HELD_TEXTS_FUNCTION}$;
 "
     )
 }

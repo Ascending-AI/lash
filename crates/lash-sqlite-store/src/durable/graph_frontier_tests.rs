@@ -7,42 +7,22 @@ async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
     let reprepares = store
         .conn
         .call(|connection| {
-            let mut all = Vec::new();
-            for (name, sql, graph) in [
-                ("graph", super::SQL.sqlite.retirement_candidates.sql(), true),
-                (
-                    "prompt",
-                    super::super::prompts::retirement_sql_for_testing(),
-                    false,
-                ),
-            ] {
-                let mut reparses = Vec::new();
-                for _ in 0..3 {
-                    let mut statement = connection.prepare_cached(sql)?;
-                    let rows = if graph {
-                        statement
-                            .query_map(rusqlite::params!["[]", 256], |_| Ok(()))?
-                            .collect::<rusqlite::Result<Vec<_>>>()?
-                    } else {
-                        statement
-                            .query_map([256], |_| Ok(()))?
-                            .collect::<rusqlite::Result<Vec<_>>>()?
-                    };
-                    assert!(rows.is_empty());
-                    reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
-                }
-                eprintln!("LO-ROOT-PREPARE {name} reparses={reparses:?}");
-                all.extend_from_slice(&reparses[1..]);
+            let mut reparses = Vec::new();
+            for _ in 0..3 {
+                let mut statement =
+                    connection.prepare_cached(super::SQL.sqlite.retirement_candidates.sql())?;
+                let rows = statement
+                    .query_map(rusqlite::params!["[]", 256], |_| Ok(()))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert!(rows.is_empty());
+                reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
             }
-            Ok(all)
+            eprintln!("LO-ROOT-PREPARE graph reparses={reparses:?}");
+            Ok(reparses[1..].to_vec())
         })
         .await
         .unwrap();
-    assert_eq!(
-        reprepares,
-        [0, 0, 0, 0],
-        "a cached batch must reuse its program"
-    );
+    assert_eq!(reprepares, [0, 0], "a cached batch must reuse its program");
 }
 
 /// LO-ROOT-WORK: retiring one leaf must not scan unrelated graph edges.

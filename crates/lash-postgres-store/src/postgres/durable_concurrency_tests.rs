@@ -734,11 +734,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             ordinal: call,
         },
     };
-    let text = |hash: &str| PromptText {
-        hash: lash_core_store::store::BlobRef::for_content(hash.as_bytes()).0,
-        text: format!("text of {hash}").into(),
-        children: Vec::new(),
-    };
+    let text = |hash: &str| PromptText::audit(format!("text of {hash}"));
     let record = |call: PromptCallKey, hashes: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
             snapshot: Some(format!("snapshot of call {}", call.call)),
@@ -772,7 +768,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             let mut held = pool.begin().await.expect("open the holding transaction");
             sqlx::query(super::prompts::LAW_SQL.hold_text.sql())
                 .bind(crate::keys::key(
-                    lash_core_store::store::BlobRef::for_content(hash.as_bytes()).as_str(),
+                    PromptText::audit(format!("text of {hash}")).hash.as_str(),
                 ))
                 .fetch_one(&mut *held)
                 .await

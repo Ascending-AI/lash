@@ -65,7 +65,7 @@ pub(crate) const TABLES: &str = "
 -- edges (FIG-6939); a child cannot go while an edge names it.
 CREATE TABLE IF NOT EXISTS blob_edges (
     parent_hash BLOB NOT NULL,
-    child_hash BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    child_hash BLOB NOT NULL REFERENCES blobs(hash),
     PRIMARY KEY (child_hash, parent_hash)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_blob_edges_parent ON blob_edges(parent_hash);
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
     owner_key TEXT,
     run_seq INTEGER,
     member_ordinal INTEGER,
-    admission_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    admission_ref BLOB NOT NULL REFERENCES blobs(hash),
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
 CREATE TABLE IF NOT EXISTS root_leases (
     lease_id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_key BLOB NOT NULL,
-    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB NOT NULL REFERENCES blobs(hash),
     actor_key TEXT,
     epoch INTEGER,
     ttl_ms INTEGER NOT NULL CONSTRAINT ck_root_leases_ttl CHECK (ttl_ms > 0),
@@ -113,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_root_leases_expiry ON root_leases (expires_at_ms)
 -- lease released. A root of the catalog until a step takes it; `closure` 0
 -- peels the node alone.
 CREATE TABLE IF NOT EXISTS retirement_holds (
-    root_ref BLOB PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB PRIMARY KEY REFERENCES blobs(hash),
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS environment_owners (
 );
 CREATE TABLE IF NOT EXISTS environment_heads (
     session_id TEXT PRIMARY KEY,
-    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB NOT NULL REFERENCES blobs(hash),
     written_epoch INTEGER NOT NULL
 );
 
@@ -173,7 +173,10 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     UNION ALL SELECT 'lease', root_ref FROM root_leases
     UNION ALL SELECT 'retirement', root_ref FROM retirement_holds
     UNION ALL SELECT 'terminal_transcript', terminal_transcript_ref FROM session_runs
-        WHERE terminal_transcript_ref IS NOT NULL;
+        WHERE terminal_transcript_ref IS NOT NULL
+    UNION ALL SELECT 'prompt_snapshot', hash FROM prompt_snapshot_texts WHERE part = 'snapshot'
+    UNION ALL SELECT 'prompt_request', hash FROM prompt_snapshot_texts WHERE part = 'request'
+    UNION ALL SELECT 'prompt_prefix', hash FROM prompt_prefixes;
 ";
 
 lash_store_sql::statements! {
@@ -226,6 +229,16 @@ lash_store_sql::statements! {
         insert_blobs = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)
              ON CONFLICT (hash) DO NOTHING";
 
+        /// Checked graph bodies packed as digest followed by canonical bytes
+        /// in blob `?1`; JSON blob `?2` holds `[one_based_offset, body_length]`.
+        /// Two bindings install the whole changed frontier without a variable
+        /// limit or a statement per fixed-size VALUES chunk.
+        insert_graph = "INSERT INTO blobs (hash, content, encoding)
+             SELECT substr(packed.body, value ->> 0, 32),
+                    substr(packed.body, (value ->> 0) + 32, value ->> 1), 1
+               FROM (SELECT ?1 AS body) AS packed, json_each(CAST(?2 AS TEXT)) WHERE true
+             ON CONFLICT (hash) DO NOTHING";
+
         /// Every edge of JSON `?1`, an array of `[parent, child]` digests
         /// of freshly installed parents.
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
@@ -241,6 +254,8 @@ lash_store_sql::statements! {
              SELECT edge.child_hash AS hash FROM candidates
                JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
               WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                AND (candidates.hash NOT IN (SELECT unhex(value) FROM json_each(?1))
+                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash))
                 AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2)) <= 1
              LIMIT CAST(?2 AS INTEGER)
          ), protected AS (
@@ -894,6 +909,11 @@ pub(super) fn json_array(values: &impl serde::Serialize) -> String {
     serde_json::to_string(values).expect("a list of digests encodes")
 }
 
+#[cfg(test)]
+pub(super) fn retirement_sql_for_testing() -> &'static str {
+    SQL.sqlite.retirement_candidates.sql()
+}
+
 /// Set-based closure retirement. Candidate hints never authorize deletion:
 /// live roots and all outside incoming edges are checked under this writer.
 pub(super) fn peel_batch(
@@ -1289,67 +1309,57 @@ pub(super) fn install(
     if absent == 0 {
         return Ok(Ok(installed));
     }
-    let chunk_rows = absent.min(BLOB_BATCH_ROWS);
-    let mut fresh = staged
-        .iter()
-        .zip(state)
-        .filter_map(|(node, state)| (state == Staged::Absent).then_some(node));
-    let mut chunk: Vec<&CheckedNode> = Vec::with_capacity(chunk_rows);
-    let mut full = tx.prepare_cached(&SQL.blob_batches[chunk_rows - 1])?;
-    let mut tail = None;
+    let mut bodies = Vec::new();
+    let mut offsets = Vec::with_capacity(absent);
     let mut edges = String::from("[");
-    loop {
-        chunk.extend(fresh.by_ref().take(chunk_rows));
-        if chunk.is_empty() {
-            break;
+    for (node, state) in staged.iter().zip(state) {
+        if state != Staged::Absent {
+            continue;
         }
-        // The same cached VALUES implementation serves one row and a full
-        // chunk; no graph-sized hashes, bodies or bind list is allocated.
-        let insert = if chunk.len() == chunk_rows {
-            &mut full
-        } else {
-            tail.insert(tx.prepare_cached(&SQL.blob_batches[chunk.len() - 1])?)
-        };
-        for (index, node) in chunk.iter().enumerate() {
-            insert.raw_bind_parameter(index * 2 + 1, node.id.0.as_slice())?;
-            insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
-            if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current()
-                .filter(|w| w.turn_context().is_some())
-                && let Ok(envelope) =
-                    lash_core_store::checkpoint_graph::parse_envelope(&node.bytes, Some(node.id))
-            {
-                let kind = envelope.kind.spec().map_or("unknown", |s| s.name);
-                lash_core_ids::operational_metrics::turn::installed_kind(
-                    Some(&window),
-                    kind,
-                    node.bytes.len() as u64,
-                );
-            }
-            installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
-            installed.new_nodes += 1;
-            installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
-            for child in &node.children {
-                if edges.len() > 1 {
-                    edges.push(',');
-                }
-                edges.push_str("[\"");
-                node.id.write_hex(&mut edges);
-                edges.push_str("\",\"");
-                child.write_hex(&mut edges);
-                edges.push_str("\"]");
-                installed.new_edges += 1;
-                installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
-            }
+        offsets.push((bodies.len() + 1, node.bytes.len()));
+        bodies.extend_from_slice(&node.id.0);
+        bodies.extend_from_slice(&node.bytes);
+        if let Some(window) = lash_core_ids::operational_metrics::sql::Window::current()
+            .filter(|w| w.turn_context().is_some())
+            && let Ok(envelope) =
+                lash_core_store::checkpoint_graph::parse_envelope(&node.bytes, Some(node.id))
+        {
+            let kind = envelope.kind.spec().map_or("unknown", |s| s.name);
+            lash_core_ids::operational_metrics::turn::installed_kind(
+                Some(&window),
+                kind,
+                node.bytes.len() as u64,
+            );
         }
-        crate::observed_sql::with_blob_bindings(
-            &SQL.blob_batches[chunk.len() - 1],
-            chunk
-                .iter()
-                .flat_map(|node| [node.id.0.len(), node.bytes.len()]),
-            || insert.raw_execute(),
-        )?;
-        chunk.clear();
+        installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
+        installed.new_nodes += 1;
+        installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
+        for child in &node.children {
+            if edges.len() > 1 {
+                edges.push(',');
+            }
+            edges.push_str("[\"");
+            node.id.write_hex(&mut edges);
+            edges.push_str("\",\"");
+            child.write_hex(&mut edges);
+            edges.push_str("\"]");
+            installed.new_edges += 1;
+            installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
+        }
     }
+    let offsets = serde_json::to_vec(&offsets)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    crate::observed_sql::with_blob_bindings(
+        SQL.sqlite.insert_graph.sql(),
+        [bodies.len(), offsets.len()],
+        || {
+            cached_execute(
+                tx,
+                SQL.sqlite.insert_graph.sql(),
+                rusqlite::params![bodies, offsets],
+            )
+        },
+    )?;
     if edges.len() > 1 {
         edges.push(']');
         let _bindings =

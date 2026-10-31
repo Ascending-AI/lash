@@ -6,45 +6,27 @@
 //! file in each dialect are the only places its SQL may appear
 //! (`scripts/check-durable-sql.py`).
 //!
-//! A root row holds a call's snapshot (its audit part) and its request (the
-//! part a send reads); each names the texts it references through an edge
-//! row tagged with that part, and a text is stored once however many edges
-//! share it. Settling a call releases its request part (FIG-5946); only a
-//! release removes a root, and a text is reclaimed only when no edge names
-//! it.
-//!
-//! The batch statements over texts and edges fork: each dialect binds a
-//! call's texts as one list, `json_each` on SQLite and `unnest` on
-//! PostgreSQL, so its own module declares them. So does a settlement:
-//! PostgreSQL releases a request in one statement, SQLite in three.
+//! A call retains independent snapshot and request roots in the shared
+//! graph. Settlement releases request roots; audit retention releases
+//! snapshot roots. The session separately retains its reusable prefix.
+//! Graph installation, immutable child edges and collection belong to the
+//! graph domain. Each backend binds root lists using its native mechanism.
 
 /// The table of admitted-call roots, one row per admitted model call, keyed
 /// by session, owner and call.
 pub const TABLE: &str = "prompt_snapshots";
 
-/// The table of section texts and body chunks, one row per content address.
-pub const TEXTS_TABLE: &str = "prompt_texts";
-
 /// The table of edges from a root's part to each text it references.
 pub const EDGES_TABLE: &str = "prompt_snapshot_texts";
-/// Immutable fragment-to-fragment edges.
-pub const INDEX_EDGES_TABLE: &str = "prompt_text_edges";
 /// The one reusable lowered history root owned by each session.
-pub const RETIREMENT_TABLE: &str = "prompt_retirement_frontier";
 pub const PREFIXES_TABLE: &str = "prompt_prefixes";
-
-/// The edge part of a text a call's snapshot references.
-pub const SNAPSHOT_PART: &str = "snapshot";
 
 /// The edge part of a text a call's request references.
 pub const REQUEST_PART: &str = "request";
 
 crate::statements! {
-    /// `prompt_snapshots`, `prompt_texts` and `prompt_snapshot_texts`
-    /// statements both backends issue verbatim.
+    /// Prompt call identities and graph ownership statements shared by both backends.
     pub struct PromptStatements @ "durable_prompt" {
-        /// Durable prompt cleanup still queued.
-        retirement_count = "SELECT count(*) FROM prompt_retirement_frontier";
         /// Record call `?3` of owner `?2` in session `?1` with snapshot `?4`
         /// and request `?5`, written at epoch `?6`. No row when the call
         /// already has one.
@@ -98,28 +80,12 @@ crate::statements! {
         expire_audit = "UPDATE prompt_snapshots SET snapshot = NULL
              WHERE session_id = ?1 AND owner = ?2 AND call = ?3 AND request IS NULL";
 
-        /// The texts call `?3` of owner `?2` in session `?1` references,
-        /// each with the part that references it.
-        read_edges = "WITH RECURSIVE closure AS (
-                 SELECT part, hash FROM prompt_snapshot_texts
-                  WHERE session_id = ?1 AND owner = ?2 AND call = ?3
-                 UNION
-                 SELECT closure.part, edge.child FROM closure
-                   JOIN prompt_text_edges AS edge ON edge.parent = closure.hash
-             ) SELECT part, hash FROM closure ORDER BY part, hash";
-
-        /// Outgoing immutable index edges.
-        read_children = "SELECT child FROM prompt_text_edges WHERE parent = ?1 ORDER BY child";
-
         /// Sever the session's reusable prefix, returning its former root.
         release_prefix = "DELETE FROM prompt_prefixes WHERE session_id = ?1 RETURNING hash";
 
         /// Replace the one reusable prefix of a session.
         set_prefix = "INSERT INTO prompt_prefixes (session_id, hash) VALUES (?1, ?2)
              ON CONFLICT (session_id) DO UPDATE SET hash = excluded.hash";
-
-        /// The text at content address `?1`.
-        read_text = "SELECT text FROM prompt_texts WHERE hash = ?1";
 
         /// Release every edge of session `?1`, returning each text it named.
         release_session_edges = "DELETE FROM prompt_snapshot_texts WHERE session_id = ?1

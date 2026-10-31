@@ -6,21 +6,9 @@
 //! commit back. Session deletion releases through [`release`] inside its own
 //! transaction (FIG-5272). The DDL is in `schema.sql`.
 //!
-//! A record and a release that share a text are serialized on that text
-//! (FIG-5272). Under READ COMMITTED neither sees the other's uncommitted
-//! edge, and the edge's foreign key alone does not order them: a release
-//! that reclaims a text a concurrent record found stored fails that record's
-//! edge, and a release whose reclaim waits behind a record's edge then fails
-//! its own delete. So a record takes each text's advisory lock shared before
-//! it looks for the text, and a release (or a settlement) takes it exclusive
-//! before it reclaims, with each lock batch in text order. A reclaim waits for open
-//! publications of its candidates and, in a
-//! statement after the lock, sees their edges, while a record behind a
-//! reclaim finds the text gone in a statement after its lock and binds its
-//! body again. Under the lock a record binds the bodies of only the texts
-//! it does not find (FIG-5946): what it finds stays until it commits. The
-//! lock lives in memory, not in the hot shared text rows, which is why it is
-//! preferred over locking those rows.
+//! Publications use the shared graph installer's digest-ordered key-share
+//! locks. The graph collector skips locked nodes and rechecks the catalog
+//! and incoming edges under its delete locks before reclaiming content.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -43,62 +31,35 @@ pub(super) static SQL: LazyLock<PromptStatements> =
     LazyLock::new(|| PromptStatements::render(Dialect::postgres()));
 
 lash_store_sql::statements! {
-    /// The `prompt_texts` and `prompt_snapshot_texts` statements only
-    /// PostgreSQL issues: `unnest` is how it binds a call's texts as one
-    /// list.
+    /// PostgreSQL's prompt root writes and bounded content reads.
     pub(super) struct PostgresPromptStatements @ "durable_prompt_postgres" {
-        /// Every content address in `?1` already stored.
-        held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::BYTEA[])";
-
-        /// Share-lock the texts `?1` under seed `?2`, then answer which of
-        /// them are stored, read once every lock is held
-        /// (`lash_prompt_held_texts`).
-        held_after_lock = "SELECT lash_prompt_held_texts(?1, ?2)";
-
-        /// Store each text `?2[i]` at content address `?1[i]`, skipping every
-        /// address a concurrent record stored first: the address names the
-        /// bytes, so a conflict is the same text.
-        insert_texts = "INSERT INTO prompt_texts (hash, text)
-             SELECT hash, text FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
-             ON CONFLICT (hash) DO NOTHING";
-
-        /// Publish a prompt's immutable forest and prefix under its text
-        /// locks. The routine returns the first typed refusal's facts.
-        record = "SELECT * FROM lash_prompt_record(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
-
-        /// Root text `?5[i]` under part `?4[i]` of call `?3` of owner `?2`
-        /// in session `?1`, for every `i`.
+        record = "INSERT INTO prompt_snapshots (session_id, owner, call, snapshot, request, written_epoch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT DO NOTHING RETURNING call";
+        read_texts = "WITH RECURSIVE reached AS (
+                 SELECT hash, TRUE AS follow FROM blobs WHERE hash = ANY(?1::bytea[])
+                 AND CASE WHEN encoding = 1 AND octet_length(content) >= 5
+                     THEN get_byte(content, 4) IN (53, 54) ELSE FALSE END
+                 UNION SELECT edge.child_hash,
+                     CASE WHEN child.encoding = 1 AND octet_length(child.content) >= 5
+                         THEN get_byte(child.content, 4) BETWEEN 1 AND 7 ELSE FALSE END
+                 FROM reached JOIN blob_edges edge ON edge.parent_hash = reached.hash
+                 JOIN blobs child ON child.hash = edge.child_hash
+                 WHERE reached.follow
+             ) SELECT blobs.hash, blobs.content,
+                 CASE WHEN blobs.encoding = 1 AND octet_length(blobs.content) >= 5
+                     THEN get_byte(blobs.content, 4) IN (53, 54) ELSE FALSE END
+             FROM reached JOIN blobs ON blobs.hash = reached.hash";
+        read_edges = "WITH RECURSIVE closure AS (
+                 SELECT part, hash FROM prompt_snapshot_texts
+                 WHERE session_id = ?1 AND owner = ?2 AND call = ?3
+                 UNION SELECT closure.part, edge.child_hash FROM closure
+                 JOIN blob_edges edge ON edge.parent_hash = closure.hash
+             ) SELECT closure.part, closure.hash FROM closure JOIN blobs ON blobs.hash = closure.hash
+               WHERE CASE WHEN blobs.encoding = 1 AND octet_length(blobs.content) >= 5 THEN get_byte(blobs.content, 4) IN (53, 54) ELSE FALSE END ORDER BY closure.part, closure.hash";
+        reclaim = "SELECT lash_graph_retire(?1, ?2, ?3)";
         insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
              SELECT ?1, ?2, ?3, part, hash
                FROM unnest(?4::TEXT[], ?5::BYTEA[]) AS batch(part, hash)";
-
-        /// Install each new immutable node's child edges once.
-        insert_index_edges = "INSERT INTO prompt_text_edges (parent, child)
-             SELECT parent, child FROM unnest(?1::BYTEA[], ?2::BYTEA[]) AS batch(parent, child)
-             ON CONFLICT (parent, child) DO NOTHING";
-
-        /// Anchor the session's current prefix until settlement commits.
-        /// A concurrent invalidation cannot remove this row while its
-        /// immutable closure is excluded from reclamation.
-        hold_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1 FOR SHARE";
-
-        /// Lock the candidate closure before a sorted, atomic peel. Nodes
-        /// this publication protects stop traversal; a concurrent prefix
-        /// release cannot invalidate that protection.
-        closure = "WITH RECURSIVE closure AS (
-                 SELECT unnest(?1::BYTEA[]) AS hash
-                 UNION
-                 SELECT edge.child FROM closure
-                   JOIN prompt_text_edges AS edge ON edge.parent = closure.hash
-                  WHERE NOT (closure.hash = ANY(?2::BYTEA[]))
-             ) SELECT hash FROM closure WHERE NOT (hash = ANY(?2::BYTEA[])) ORDER BY hash";
-
-        /// Settle every call of owner `?2` in session `?1` but call `?3`
-        /// (none when `?3` is null): release its request edges, its root
-        /// when the request was all it held, and otherwise its request,
-        /// returning each distinct text a released edge named. The two root
-        /// writes touch disjoint rows, and a bare root's request edges go in
-        /// the same statement, before its foreign key is checked.
         settle = "WITH released AS (
                  DELETE FROM prompt_snapshot_texts
                   WHERE session_id = ?1 AND owner = ?2 AND part = 'request'
@@ -115,9 +76,6 @@ lash_store_sql::statements! {
                     AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
              )
              SELECT DISTINCT hash FROM released";
-
-        /// Release one bounded page of expired settled audits atomically, retaining
-        /// compose-once identities and returning their former text roots.
         expire_audits = "WITH candidates AS MATERIALIZED (
                  SELECT audit.session_id, audit.owner, audit.call
                  FROM prompt_snapshots AS audit
@@ -146,47 +104,6 @@ lash_store_sql::statements! {
              ) SELECT (SELECT COUNT(*) FROM expired) AS released_count, released.hash
                FROM (SELECT 1) AS singleton LEFT JOIN released ON TRUE";
 
-        /// Persist released prompt roots as cleanup obligations.
-        retirement_put = "INSERT INTO prompt_retirement_frontier(hash) SELECT unnest(?1::BYTEA[]) ON CONFLICT DO NOTHING";
-
-        /// Bounded durable frontier, claimed in digest order.
-        retirement_seeds = "SELECT hash FROM prompt_retirement_frontier ORDER BY hash LIMIT ?1 FOR UPDATE SKIP LOCKED";
-
-        /// Shared or rooted boundaries stop discovery. The outer LIMIT
-        /// bounds the lazy recursive evaluation before any sort or join.
-        retirement_candidates = "WITH RECURSIVE candidates AS (
-             SELECT unnest(?1::BYTEA[]) AS hash
-             UNION
-             SELECT edge.child AS hash FROM candidates JOIN prompt_text_edges AS edge ON edge.parent = candidates.hash
-              WHERE NOT (candidates.hash = ANY(?2::BYTEA[]))
-                AND NOT EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
-                AND NOT EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
-                AND (NOT (candidates.hash = ANY(?1::BYTEA[]))
-                     OR NOT EXISTS (SELECT 1 FROM prompt_text_edges WHERE child = candidates.hash))
-                AND (SELECT count(*) FROM (SELECT 1 FROM prompt_text_edges WHERE child = candidates.hash LIMIT 2) AS incoming) <= 1
-         ) SELECT hash FROM candidates LIMIT ?3";
-
-        /// Liveness is recomputed after candidate locks. A skipped external
-        /// parent protects all candidate descendants, including diamonds.
-        retirement_unprotected = "WITH RECURSIVE candidates AS (SELECT unnest(?1::BYTEA[]) AS hash), protected AS (
-             SELECT hash FROM candidates
-              WHERE hash = ANY(?2::BYTEA[])
-                 OR EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
-                 OR EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
-                 OR EXISTS (SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = candidates.hash AND NOT (edge.parent = ANY(?1::BYTEA[])))
-             UNION
-             SELECT edge.child AS hash FROM protected JOIN prompt_text_edges AS edge ON edge.parent = protected.hash WHERE edge.child = ANY(?1::BYTEA[])
-         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)";
-
-        /// Retirement never waits behind a publisher; skipped candidates
-        /// keep their durable queue entries and protect their descendants.
-        retirement_try_lock = "WITH ordered AS MATERIALIZED (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key)
-             SELECT key FROM ordered WHERE pg_try_advisory_xact_lock(hashtextextended(encode(key, 'hex'), 2))";
-
-        retirement_take = "DELETE FROM prompt_retirement_frontier WHERE hash = ANY(?1::BYTEA[])";
-        retirement_edges = "DELETE FROM prompt_text_edges WHERE parent = ANY(?1::BYTEA[]) RETURNING child";
-        retirement_nodes = "DELETE FROM prompt_texts WHERE hash = ANY(?1::BYTEA[]) RETURNING octet_length(text) AS bytes";
-        reclaim_texts = "SELECT * FROM lash_prompt_retire(?1, ?2, ?3)";
 
     }
 }
@@ -195,46 +112,11 @@ pub(super) static POSTGRES_SQL: LazyLock<PostgresPromptStatements> =
     LazyLock::new(|| PostgresPromptStatements::render(Dialect::postgres()));
 
 #[cfg(test)]
-pub(super) const TEXT_LOCK_SEED: i64 = 2;
-
-/// Statements the generated retirement routine executes, in program order.
-pub(super) fn retirement_mechanics() -> Vec<&'static str> {
-    let pg = &*POSTGRES_SQL;
-    vec![
-        pg.retirement_put.sql(),
-        pg.retirement_seeds.sql(),
-        pg.retirement_candidates.sql(),
-        pg.retirement_try_lock.sql(),
-        pg.retirement_unprotected.sql(),
-        pg.retirement_take.sql(),
-        pg.retirement_edges.sql(),
-        pg.retirement_nodes.sql(),
-        pg.retirement_put.sql(),
-    ]
-}
-
-/// The server function that runs one level of a record's text frontier:
-/// its lock, then its held read (FIG-7049).
-#[cfg(test)]
-pub(super) const HELD_TEXTS_FUNCTION: &str = "lash_prompt_held_texts";
-
-/// The held read [`HELD_TEXTS_FUNCTION`] runs after its lock.
-#[cfg(test)]
-pub(super) fn held_texts() -> &'static lash_store_sql::Rendered {
-    &POSTGRES_SQL.held_texts
-}
-
-#[cfg(test)]
 lash_store_sql::statements! {
-    /// The `prompt_texts` statements only PostgreSQL's laws issue.
     pub(crate) struct PromptLawStatements @ "durable_prompt_postgres_law" {
-        /// Hold the text at `?1` against every edge to it until this
-        /// transaction ends: an edge's foreign key check waits behind it.
-        hold_text = "SELECT hash FROM prompt_texts WHERE hash = ?1 FOR UPDATE";
+        hold_text = "SELECT hash FROM blobs WHERE hash = ?1 FOR UPDATE";
     }
 }
-
-/// The statements PostgreSQL's prompt laws issue, rendered once.
 #[cfg(test)]
 pub(crate) static LAW_SQL: LazyLock<PromptLawStatements> =
     LazyLock::new(|| PromptLawStatements::render(Dialect::postgres()));
@@ -242,57 +124,26 @@ pub(crate) static LAW_SQL: LazyLock<PromptLawStatements> =
 /// The prompt statements an owner commit runs as steps.
 pub(super) static RECORD: Entry = Entry::new(
     || &POSTGRES_SQL.record,
-    &[
-        Ty::Text,
-        Ty::Text,
-        Ty::Text,
-        Ty::Text,
-        Ty::Text,
-        Ty::Int,
-        Ty::Keys,
-        Ty::Texts,
-        Ty::Keys,
-        Ty::Keys,
-        Ty::Keys,
-        Ty::Texts,
-        Ty::Keys,
-        Ty::Key,
-        Ty::Bool,
-    ],
-    Shape::Select,
-)
-.flagged("accepted");
-
-/// Statements of the prompt-record routine, included in the owner registry.
-pub(super) fn record_mechanics() -> Vec<&'static str> {
-    vec![
-        SQL.insert_snapshot.sql(),
-        POSTGRES_SQL.held_after_lock.sql(),
-        POSTGRES_SQL.insert_texts.sql(),
-        POSTGRES_SQL.insert_index_edges.sql(),
-        POSTGRES_SQL.insert_edges.sql(),
-        SQL.release_prefix.sql(),
-        SQL.set_prefix.sql(),
-    ]
-}
-
-/// A settlement's and a prefix reset's statements (FIG-5942): each answers
-/// the texts it released, a settlement keeps the session's prefix, and the
-/// reclaim peels what no root references any more.
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    Shape::Returning,
+);
+pub(super) static ROOT_EDGES: Entry = Entry::new(
+    || &POSTGRES_SQL.insert_edges,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Texts, Ty::Keys],
+    Shape::Exec,
+);
+pub(super) static SET_PREFIX: Entry =
+    Entry::new(|| &SQL.set_prefix, &[Ty::Text, Ty::Key], Shape::Exec);
 pub(super) static SETTLE: Entry = Entry::new(
     || &POSTGRES_SQL.settle,
     &[Ty::Text, Ty::Text, Ty::Text],
     Shape::Select,
 )
-.collecting(Collect::Text("hash"));
-pub(super) static HOLD_PREFIX: Entry =
-    Entry::new(|| &POSTGRES_SQL.hold_prefix, &[Ty::Text], Shape::Select)
-        .collecting(Collect::Protect("hash"));
+.collecting(Collect::Peel("hash"));
 pub(super) static RELEASE_PREFIX: Entry =
     Entry::new(|| &SQL.release_prefix, &[Ty::Text], Shape::Returning)
-        .collecting(Collect::Text("hash"));
-pub(super) static RECLAIM: Entry =
-    Entry::new(|| &POSTGRES_SQL.reclaim_texts, &[], Shape::TextReclaim);
+        .collecting(Collect::Peel("hash"));
+pub(super) static RECLAIM: Entry = Entry::new(|| &POSTGRES_SQL.reclaim, &[], Shape::GraphReclaim);
 
 /// The shared revision-material program collects former audit roots before
 /// reclaiming their last-reference texts in the same transaction.
@@ -301,7 +152,7 @@ pub(super) static EXPIRE_AUDITS: Entry = Entry::new(
     &[Ty::Text, Ty::Int],
     Shape::Select,
 )
-.collecting(Collect::Text("hash"));
+.collecting(Collect::Peel("hash"));
 
 /// Release one bounded page, answering its audit count for GC's drain loop.
 pub(crate) async fn release_unretained(
@@ -330,9 +181,6 @@ pub(crate) async fn release_unretained(
     Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
-/// The capture slot of a settlement's released texts.
-const SETTLED: u8 = 4;
-
 /// Release the request of every call of turn `run` in `session` but `open`,
 /// and reclaim every text no remaining edge references: the session's
 /// prefix is held, and kept, only when the settlement released a text.
@@ -345,9 +193,7 @@ fn settle_steps(session: &SessionId, run: &TurnId, open: Option<u32>) -> Vec<Ste
                 Value::text(ModelCallId::turn_owner(run)),
                 Value::Text(open.map(|call| call.to_string())),
             ],
-        )
-        .capturing(SETTLED),
-        Step::any(&HOLD_PREFIX, vec![Value::text(session.as_str())]).when_row(SETTLED, true),
+        ),
         Step::any(&RECLAIM, Vec::new()),
     ]
 }
@@ -359,7 +205,7 @@ fn settle_steps(session: &SessionId, run: &TurnId, open: Option<u32>) -> Vec<Ste
 /// the record runs in the explicit form, which reads what the store holds.
 /// A settlement or a prefix reset releases what its statement answers and
 /// reclaims it in the commit's reclaim step. A release has none.
-pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Option<Vec<Step>> {
+pub(super) fn steps(epoch: Epoch, write: &PromptWrite, _held: &HeldTexts) -> Option<Vec<Step>> {
     match write {
         PromptWrite::Settle { session, run, open } => {
             return Some(settle_steps(session, run, *open));
@@ -383,6 +229,80 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     else {
         return None;
     };
+    let prepared = PreparedPromptRecord::new(snapshot_texts, request_texts, prefix.as_deref());
+    let (parts, edges): (Vec<_>, Vec<_>) = prepared
+        .edges()
+        .into_iter()
+        .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
+        .unzip();
+    let mut steps = vec![
+        Step::one(
+            &RECORD,
+            vec![
+                Value::text(call.session.as_str()),
+                Value::text(call.call.owner_column()),
+                Value::text(call.call.call_column()),
+                Value::Text(snapshot.clone()),
+                Value::text(request),
+                Value::int(epoch.0),
+            ],
+        ),
+        Step::any(
+            &ROOT_EDGES,
+            vec![
+                Value::text(call.session.as_str()),
+                Value::text(call.call.owner_column()),
+                Value::text(call.call.call_column()),
+                Value::Texts(parts),
+                Value::Keys(edges),
+            ],
+        ),
+    ];
+    if matches!(call.call, ModelCallId::Turn { .. }) {
+        steps.push(Step::any(
+            &RELEASE_PREFIX,
+            vec![Value::text(call.session.as_str())],
+        ));
+        if prefix.is_some() {
+            steps.push(Step::any(
+                &SET_PREFIX,
+                vec![
+                    Value::text(call.session.as_str()),
+                    Value::Key(prefix.clone()),
+                ],
+            ));
+        }
+        steps.push(Step::any(&RECLAIM, Vec::new()));
+    }
+    Some(steps)
+}
+
+/// Encode only the changed frontier; held hashes are hints and the shared
+/// graph installer validates every external reference under its row locks.
+pub(super) struct PromptGraph {
+    pub nodes: BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_core_store::checkpoint_graph::EncodedNode,
+    >,
+    pub reads: BTreeSet<lash_core_store::checkpoint_graph::NodeId>,
+}
+
+pub(super) fn graph_plan(
+    write: &PromptWrite,
+    held: &HeldTexts,
+) -> Result<PromptGraph, DurableError> {
+    let PromptWrite::Record {
+        snapshot_texts,
+        request_texts,
+        prefix,
+        ..
+    } = write
+    else {
+        return Ok(PromptGraph {
+            nodes: BTreeMap::new(),
+            reads: BTreeSet::new(),
+        });
+    };
     // Keep the request's root list intact. A held immutable root stops the
     // server frontier, even when its descendants were not supplied.
     let prepared = PreparedPromptRecord::new(snapshot_texts, request_texts, prefix.as_deref());
@@ -392,7 +312,6 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
         .iter()
         .map(|hash| (*hash).to_owned())
         .collect();
-    let mut validation = Vec::new();
     // Preserve the server's root-first refusal order while batching the
     // complete direct frontier into its first lock/read, even on a cold chain.
     while !frontier.is_empty() {
@@ -412,45 +331,24 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
             if let Some(text) = text {
                 next.extend(text.children.iter().cloned());
             }
-            validation.push(Some(hash.clone()));
             texts.insert(hash, text);
         }
         frontier = next;
     }
-    let (hashes, bodies): (Vec<_>, Vec<_>) = texts
-        .iter()
-        .map(|(hash, text)| (Some(hash.clone()), text.map(|text| text.text.to_string())))
-        .unzip();
-    let paths = PreparedPromptRecord::paths(texts.values().filter_map(|text| *text));
-    let (parents, children): (Vec<_>, Vec<_>) = paths
-        .into_iter()
-        .map(|(parent, child)| (Some(parent.to_owned()), Some(child.to_owned())))
-        .unzip();
-    let (parts, edges): (Vec<_>, Vec<_>) = prepared
-        .edges()
-        .into_iter()
-        .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
-        .unzip();
-    Some(vec![Step::one(
-        &RECORD,
-        vec![
-            Value::text(call.session.as_str()),
-            Value::text(call.call.owner_column()),
-            Value::text(call.call.call_column()),
-            Value::Text(snapshot.clone()),
-            Value::text(request),
-            Value::int(epoch.0),
-            Value::Keys(hashes),
-            Value::Texts(bodies),
-            Value::Keys(parents),
-            Value::Keys(children),
-            Value::Keys(validation),
-            Value::Texts(parts),
-            Value::Keys(edges),
-            Value::Key(prefix.clone()),
-            Value::Bool(matches!(call.call, ModelCallId::Turn { .. })),
-        ],
-    )])
+    let mut nodes = BTreeMap::new();
+    let mut reads = BTreeSet::new();
+    for (hash, text) in texts {
+        if let Some(text) = text {
+            nodes.extend(text.graph_nodes().map_err(DurableError::Graph)?);
+        } else {
+            reads.insert(
+                lash_core_store::checkpoint_graph::NodeId::from_hex(&hash).ok_or_else(|| {
+                    DurableError::Domain(DomainRefusal::PromptFragmentMissing { hash })
+                })?,
+            );
+        }
+    }
+    Ok(PromptGraph { nodes, reads })
 }
 
 pub(super) async fn apply(
@@ -460,22 +358,29 @@ pub(super) async fn apply(
 ) -> Result<(), DurableError> {
     match write {
         PromptWrite::Record { call, .. } => {
-            // The direct form supplies every body. A stale held-text hint in
-            // the owner call rolls back before this path names the refusal.
             let program = steps(commit.epoch, write, &HeldTexts::default()).unwrap_or_default();
-            if let Some(refused) = super::steps::run(tx, &program, &commit.steps()).await? {
-                let missing = refused
-                    .rows
-                    .first()
-                    .map(|row| crate::keys::get::<Option<String>>(row, "missing"))
-                    .transpose()
-                    .map_err(sqlx_failure)?
-                    .flatten();
-                return Err(DurableError::Domain(match missing {
-                    Some(hash) => DomainRefusal::PromptFragmentMissing { hash },
-                    None => DomainRefusal::PromptCallRecorded { call: call.clone() },
+            if super::steps::run(tx, &program[..1], &commit.steps())
+                .await?
+                .is_some()
+            {
+                return Err(DurableError::Domain(DomainRefusal::PromptCallRecorded {
+                    call: call.clone(),
                 }));
             }
+            let PromptGraph { nodes, reads } = graph_plan(write, &HeldTexts::default())?;
+            let checked = lash_durable::domain::graph_commit::check_graph(&nodes, &reads, &[])
+                .map_err(DurableError::Graph)?;
+            if let Err(refusal) = super::graph::install(tx, &checked).await {
+                return Err(match refusal {
+                    lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(id) => {
+                        DurableError::Domain(DomainRefusal::PromptFragmentMissing {
+                            hash: id.to_hex(),
+                        })
+                    }
+                    other => DurableError::Graph(other),
+                });
+            }
+            super::steps::run(tx, &program[1..], &commit.steps()).await?;
             Ok(())
         }
         PromptWrite::ResetPrefix { .. } | PromptWrite::Settle { .. } => {
@@ -539,82 +444,13 @@ pub(crate) async fn release(
     reclaim(tx, released).await
 }
 
-/// Reclaim every text among `released` no remaining edge references.
 async fn reclaim(tx: &mut PgConnection, released: Vec<String>) -> Result<(), sqlx::Error> {
-    reclaim_with_protection(tx, released, &BTreeSet::new()).await
-}
-
-pub(super) async fn reclaim_with_protection(
-    tx: &mut PgConnection,
-    released: Vec<String>,
-    protected: &BTreeSet<String>,
-) -> Result<(), sqlx::Error> {
-    if released.is_empty() {
-        return Ok(());
-    }
-    crate::observed_sql::query(POSTGRES_SQL.reclaim_texts.sql())
-        .bind(crate::keys::keys(&released))
-        .bind(crate::keys::keys(protected))
-        .bind(4096_i64)
-        .execute(crate::observed_sql::executor(tx))
-        .await?;
-    Ok(())
-}
-
-pub(super) async fn drain_retired(
-    tx: &mut PgConnection,
-    limit: u64,
-) -> Result<(i64, i64, i64), sqlx::Error> {
-    crate::observed_sql::query_as(POSTGRES_SQL.reclaim_texts.sql())
-        .bind(Vec::<Vec<u8>>::new())
-        .bind(Vec::<Vec<u8>>::new())
-        .bind(i64::try_from(limit.max(1)).unwrap_or(i64::MAX))
-        .fetch_one(crate::observed_sql::executor(tx))
-        .await
-}
-
-/// The single set-based retirement program used by explicit and generated
-/// owner commits. Allocation hints do not authorize any delete.
-#[cfg(test)]
-pub(super) fn retirement_function_ddl() -> String {
-    let pg = &*POSTGRES_SQL;
-    let inline = |sql: &str, args: &[&str]| super::generator::inline_statement(sql, args);
-    let put = inline(pg.retirement_put.sql(), &["p_roots"]);
-    let seeds = inline(pg.retirement_seeds.sql(), &["p_limit"]);
-    let candidates = inline(
-        pg.retirement_candidates.sql(),
-        &["v_seeds", "p_protect", "p_limit"],
-    );
-    let lock = inline(pg.retirement_try_lock.sql(), &["v_candidates"]);
-    let unprotected = inline(
-        pg.retirement_unprotected.sql(),
-        &["v_candidates", "p_protect"],
-    );
-    let take = inline(pg.retirement_take.sql(), &["v_candidates"]);
-    let edges = inline(pg.retirement_edges.sql(), &["v_gone"]);
-    let nodes = inline(pg.retirement_nodes.sql(), &["v_gone"]);
-    let follow = inline(pg.retirement_put.sql(), &["v_next"]);
-    format!("CREATE OR REPLACE FUNCTION lash_prompt_retire(p_roots BYTEA[], p_protect BYTEA[], p_limit BIGINT)
-RETURNS TABLE(examined BIGINT, deleted BIGINT, bytes BIGINT)
-LANGUAGE plpgsql VOLATILE AS $lash_prompt_retire$
-DECLARE v_seeds BYTEA[]; v_candidates BYTEA[]; v_gone BYTEA[]; v_next BYTEA[];
-        v_count BIGINT := 0; v_bytes BIGINT := 0;
-BEGIN
-    {put};
-    v_seeds := ARRAY({seeds});
-    IF cardinality(v_seeds) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
-    v_candidates := ARRAY({candidates});
-    v_candidates := ARRAY({lock});
-    IF cardinality(v_candidates) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
-    v_gone := ARRAY({unprotected});
-    {take};
-    WITH removed AS ({edges}) SELECT COALESCE(array_agg(DISTINCT child), '{{}}') INTO v_next FROM removed WHERE NOT (child = ANY(v_candidates));
-    WITH removed AS ({nodes}) SELECT count(*), COALESCE(sum(removed.bytes),0) INTO v_count,v_bytes FROM removed;
-    {follow};
-    RETURN QUERY SELECT cardinality(v_candidates)::BIGINT,v_count,v_bytes;
-END
-$lash_prompt_retire$;
-")
+    super::graph::reclaim(
+        tx,
+        released.into_iter().collect(),
+        lash_durable::DurableInstant(0),
+    )
+    .await
 }
 
 pub(super) async fn snapshot(
@@ -637,7 +473,7 @@ pub(super) async fn snapshot(
         }));
     }
     let edges: Vec<(String, crate::keys::Key)> =
-        crate::observed_sql::query_as(SQL.read_edges.sql())
+        crate::observed_sql::query_as(POSTGRES_SQL.read_edges.sql())
             .bind(call.session.as_str())
             .bind(call.call.owner_column())
             .bind(call.call.call_column())
@@ -664,23 +500,45 @@ pub(super) async fn texts(
     tx: &mut PgConnection,
     hashes: &[String],
 ) -> Result<Vec<PromptText>, DurableError> {
-    let mut found = Vec::with_capacity(hashes.len());
-    for hash in hashes {
-        let text: Option<String> = crate::observed_sql::query_scalar(SQL.read_text.sql())
-            .bind(crate::keys::lookup(hash))
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<(crate::keys::Key, Vec<u8>, bool)> =
+        crate::observed_sql::query_as(POSTGRES_SQL.read_texts.sql())
+            .bind(
+                hashes
+                    .iter()
+                    .filter_map(crate::keys::lookup)
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(crate::observed_sql::executor(tx))
             .await
             .map_err(sqlx_failure)?;
-        if let Some(text) = text {
-            found.push(PromptText {
-                hash: hash.clone(),
-                children: crate::keys::query_scalar(SQL.read_children.sql())
-                    .bind(crate::keys::key(hash))
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?,
-                text: text.into(),
-            });
+    let mut nodes = BTreeMap::new();
+    let mut roots = BTreeSet::new();
+    for (hash, bytes, requested) in rows {
+        let id = super::graph::node_of(&hash.0).map_err(DurableError::Graph)?;
+        if requested {
+            roots.insert(id);
+        }
+        nodes.insert(
+            id,
+            EncodedNode {
+                id,
+                bytes: bytes.into(),
+            },
+        );
+    }
+    let mut found = Vec::new();
+    for hash in hashes {
+        if let Some(id) = NodeId::from_hex(hash)
+            && roots.contains(&id)
+        {
+            found.push(
+                PromptText::from_graph(&nodes, id, lash_durable::domain::graph::OWNER_READ_LIMITS)
+                    .map_err(DurableError::Graph)?,
+            );
         }
     }
     Ok(found)
@@ -717,15 +575,8 @@ mod tests {
                 ordinal,
             },
         };
-        let text = |hash: &str| PromptText {
-            hash: lash_core_store::store::BlobRef::for_content(hash.as_bytes()).0,
-            text: hash.to_owned().into(),
-            children: Vec::new(),
-        };
-        let mut tx = store
-            .begin(&actor, Epoch(identity.epoch), u64::MAX)
-            .await
-            .unwrap();
+        let text = |body: &str| PromptText::audit(body);
+        let mut tx = store.begin(&actor, Epoch(identity.epoch), u64::MAX).await.unwrap();
         for ordinal in 1..=131 {
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: call(ordinal),

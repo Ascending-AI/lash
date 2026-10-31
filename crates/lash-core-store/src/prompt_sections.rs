@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::BlobRef;
 
+mod graph;
+
 /// The longest local section or wrapper key, in bytes.
 pub const PROMPT_KEY_MAX_BYTES: usize = 64;
 
@@ -425,7 +427,7 @@ impl PromptTextRef {
     /// The reference `text` is stored under.
     pub fn of(text: &str) -> Self {
         Self {
-            blob: BlobRef::for_content(text.as_bytes()),
+            blob: graph::text_reference(text),
             bytes: u32::try_from(text.len()).unwrap_or(u32::MAX),
         }
     }
@@ -604,11 +606,15 @@ impl RequestFragment {
     /// Index bodies have a separate content domain from arbitrary audit
     /// text, whose equal spelling must never stand for an installed tree.
     pub fn reference(body: &str) -> PromptTextRef {
+        let children = serde_json::from_str::<Self>(body)
+            .map(|fragment| fragment.children())
+            .unwrap_or_default();
+        Self::reference_with_children(body, &children)
+    }
+
+    fn reference_with_children(body: &str, children: &[String]) -> PromptTextRef {
         PromptTextRef {
-            blob: BlobRef::for_content_parts([
-                b"lash.request-fragment/1\0".as_slice(),
-                body.as_bytes(),
-            ]),
+            blob: graph::fragment_reference(body, children),
             bytes: u32::try_from(body.len()).unwrap_or(u32::MAX),
         }
     }
@@ -824,11 +830,12 @@ fn encode_fragment(
     fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
 ) -> Leaf {
     let body = serde_json::to_string(fragment).expect("wire fragments encode");
-    let reference = RequestFragment::reference(&body);
+    let children = fragment.children();
+    let reference = RequestFragment::reference_with_children(&body, &children);
     let text = PromptText {
         hash: reference.blob.as_str().to_owned(),
         text: body.into(),
-        children: fragment.children(),
+        children,
     };
     (reference, std::sync::Arc::new(text))
 }
@@ -864,11 +871,14 @@ fn encode_branch_owned(left: &PromptText, right: &PromptText) -> std::sync::Arc<
     serde_json::to_writer(&mut writer, &branch).expect("fixed-size branch references encode");
     let len = writer.position() as usize;
     let body = std::str::from_utf8(&scratch[..len]).expect("JSON encoding is UTF-8");
-    let hash = RequestFragment::reference(body).blob.0;
+    let children = vec![left.hash.clone(), right.hash.clone()];
+    let hash = RequestFragment::reference_with_children(body, &children)
+        .blob
+        .0;
     let body = PromptText {
         hash,
         text: body.into(),
-        children: vec![left.hash.clone(), right.hash.clone()],
+        children,
     };
     std::sync::Arc::new(body)
 }

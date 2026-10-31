@@ -166,20 +166,6 @@ impl<'a> PreparedPromptRecord<'a> {
             )
             .collect()
     }
-
-    /// Immutable child paths of the bodies an adapter chose to install.
-    pub fn paths<'b>(
-        texts: impl IntoIterator<Item = &'b PromptText>,
-    ) -> BTreeSet<(&'b str, &'b str)> {
-        texts
-            .into_iter()
-            .flat_map(|text| {
-                text.children
-                    .iter()
-                    .map(move |child| (text.hash.as_str(), child.as_str()))
-            })
-            .collect()
-    }
 }
 
 /// One call's root, as its admission recorded it, while it is retained.

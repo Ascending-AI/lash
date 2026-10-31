@@ -20,6 +20,9 @@ pub(crate) const SCHEMA: &str = "
 -- A blob's encoding is stored, never sniffed from its bytes (FIG-5887 §7):
 -- 0 is opaque bytes an adapter's codec owns, with no edges; 1 is a canonical
 -- checkpoint graph node, whose edges are exactly its child table.
+-- Blob references use the default nondeferrable NO ACTION check. A batch
+-- delete still refuses a referenced node before the statement succeeds,
+-- without RESTRICT's per-row trigger subprograms for every root source.
 CREATE TABLE IF NOT EXISTS blobs (
     hash     BLOB PRIMARY KEY,
     content  BLOB NOT NULL,
@@ -35,8 +38,8 @@ CREATE TABLE IF NOT EXISTS session_revisions (
     session_id     TEXT NOT NULL,
     head_revision  INTEGER NOT NULL,
     leaf_node_id   TEXT,
-    checkpoint_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
-    config_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    checkpoint_ref BLOB REFERENCES blobs(hash),
+    config_ref BLOB NOT NULL REFERENCES blobs(hash),
     terminal_ordinal INTEGER CONSTRAINT ck_session_revisions_terminal_ordinal CHECK (terminal_ordinal > 0),
     PRIMARY KEY (session_id, head_revision)
 ) WITHOUT ROWID;
@@ -122,7 +125,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    admission_base_checkpoint_ref     BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    admission_base_checkpoint_ref     BLOB REFERENCES blobs(hash),
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
     retention_kind                    TEXT NOT NULL,
@@ -448,7 +451,7 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    blob_ref     BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    blob_ref     BLOB NOT NULL REFERENCES blobs(hash),
     PRIMARY KEY (namespace, artifact_ref)
 );
 
@@ -928,8 +931,7 @@ mod compat_tests {
             "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
              WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref', 'attachment_id')
                OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
-                          WHERE f.\"from\" = p.name AND f.\"table\" IN ('blobs', 'prompt_texts'))
-               OR (m.name = 'prompt_text_edges' AND p.name IN ('parent', 'child')))"
+                          WHERE f.\"from\" = p.name AND f.\"table\" = 'blobs'))"
         ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
         assert!(!columns.is_empty());

@@ -45,9 +45,9 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     -- The phase's PhaseRoot node and the post-cell working SessionExecution
     -- (FIG-5887 §6, §7), and the pinned call's receipt: its placed text,
     -- from model.answer until the next phase.
-    checkpoint_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
-    working_execution_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
-    answer_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    checkpoint_ref BLOB REFERENCES blobs(hash),
+    working_execution_ref BLOB REFERENCES blobs(hash),
+    answer_ref BLOB REFERENCES blobs(hash),
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
     entry TEXT NOT NULL,
     -- The namespace's NamespaceValue node; NULL exactly for base values
     -- (FIG-5887 §7).
-    graph_root_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    graph_root_ref BLOB REFERENCES blobs(hash),
     PRIMARY KEY (session_id, run, plugin)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);

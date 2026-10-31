@@ -100,7 +100,7 @@ pub(super) enum Shape {
     EndLocal,
     /// The reclaim of the prompt texts the earlier steps released, keeping
     /// those they protected. It answers no rows.
-    TextReclaim,
+    GraphReclaim,
 }
 
 /// What an answered column names for the commit's mechanics.
@@ -116,10 +116,8 @@ pub(super) enum Collect {
     Ancestry(&'static str),
     /// An actor the row woke, unless it is the committing one.
     Wake(&'static str),
-    /// A prompt text the row released.
-    Text(&'static str),
-    /// A prompt text the reclaim keeps.
-    Protect(&'static str),
+    /// A graph root the row released for bounded inline reclamation.
+    Peel(&'static str),
 }
 
 impl Collect {
@@ -130,8 +128,7 @@ impl Collect {
             | Self::PhaseEnd(column)
             | Self::Ancestry(column)
             | Self::Wake(column)
-            | Self::Text(column)
-            | Self::Protect(column) => column,
+            | Self::Peel(column) => column,
         }
     }
 }
@@ -455,7 +452,7 @@ impl Step {
                 }
                 Ok((truths, rows))
             }),
-            Shape::TextReclaim => unreachable!("a reclaim runs no statement of its own"),
+            Shape::GraphReclaim => unreachable!("a reclaim runs no statement of its own"),
         }?)
     }
 }
@@ -528,18 +525,15 @@ pub(super) async fn run_capturing(
     }
     let mut slots = Slots::new();
     let mut texts = BTreeSet::new();
-    let mut protected = BTreeSet::new();
     for (index, step) in steps.iter().enumerate() {
         if let Some(when) = &step.when
             && !holds(&slots, when)
         {
             continue;
         }
-        if step.entry.shape == Shape::TextReclaim {
+        if step.entry.shape == Shape::GraphReclaim {
             let released = std::mem::take(&mut texts);
-            let kept = std::mem::take(&mut protected);
-            super::prompts::reclaim_with_protection(tx, released.into_iter().collect(), &kept)
-                .await?;
+            super::graph::reclaim(tx, released, context.now).await?;
             continue;
         }
         let (count, rows) = step.run(tx, context.now).await?;
@@ -587,11 +581,8 @@ pub(super) async fn run_capturing(
                         leaves.insert(value);
                     }
                     Collect::Wake(_) => owners.push(value),
-                    Collect::Text(_) => {
+                    Collect::Peel(_) => {
                         texts.insert(value);
-                    }
-                    Collect::Protect(_) => {
-                        protected.insert(value);
                     }
                     Collect::Closures(_) => {}
                 }

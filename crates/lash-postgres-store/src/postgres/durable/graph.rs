@@ -71,7 +71,10 @@ use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
 
 mod reclaim;
 pub(super) use reclaim::peel_set;
+#[cfg(test)]
+pub(super) use reclaim::retirement_function_ddl;
 pub(crate) use reclaim::{audit_page, graph_counts, peel};
+pub(super) use reclaim::{reclaim, retirement_mechanics};
 
 lash_store_sql::statements! {
     /// Graph statements only PostgreSQL issues: the artifact bridge's
@@ -177,6 +180,8 @@ lash_store_sql::statements! {
              SELECT unnest(?1::BYTEA[]) AS hash UNION
              SELECT edge.child_hash AS hash FROM candidates JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
               WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                AND (NOT (candidates.hash = ANY(?1::BYTEA[]))
+                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash))
                 AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
          ) SELECT hash FROM candidates LIMIT ?2";
         /// Reclassify liveness under the exact set of row locks acquired.
@@ -187,6 +192,15 @@ lash_store_sql::statements! {
          ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)";
         retirement_edges = "DELETE FROM blob_edges WHERE parent_hash = ANY(?1::BYTEA[]) RETURNING child_hash";
         retirement_nodes = "DELETE FROM blobs WHERE hash = ANY(?1::BYTEA[]) RETURNING hash";
+
+        /// A repeated inline retirement takes its own queued holds before
+        /// reclassifying liveness. A hold owned by a step is left to that step.
+        retirement_released_holds = "DELETE FROM retirement_holds WHERE root_ref IN (
+             SELECT root_ref FROM retirement_holds WHERE root_ref = ANY(?1::bytea[])
+             ORDER BY root_ref FOR UPDATE SKIP LOCKED)";
+
+        peel_plan = "SELECT * FROM lash_graph_peel_plan(?1, ?2)";
+        peel_delete = "SELECT lash_graph_peel_delete(?1)";
 
         /// One level of a peel: delete every blob in `?1` no root names and
         /// no edge reaches, and answer how many it deleted with the

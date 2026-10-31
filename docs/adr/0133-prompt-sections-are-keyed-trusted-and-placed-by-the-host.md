@@ -210,13 +210,14 @@ omission, and any other text is kept byte for byte. A placement with no text
 carries nothing.
 
 The snapshot is stored as an audit root, one per admitted call
-(`PromptWrite::Record`, tables `prompt_snapshots`, `prompt_texts` and
-`prompt_snapshot_texts` in both dialects' baseline). Each text is stored once
-by content address, however many calls share it, and a record binds the
-bodies of only the texts the store does not already hold: it looks for them
-under the same text locks a release takes, so a text it finds cannot be
-reclaimed before it commits, and a text reclaimed before it looked is stored
-again from the body the record carries. A call records once; a second record
+(`PromptWrite::Record`, tables `prompt_snapshots` and
+`prompt_snapshot_texts` in both dialects' baseline). Its text and fragment
+nodes use the shared immutable graph, `blobs` and `blob_edges`.
+`PromptText` and `PromptFragment` are distinct graph kinds, with canonical
+codecs and content addresses. The graph installer validates external
+references under the writer or blob locks and stores only missing nodes.
+Snapshot, request and prefix roots are registered separately in the graph
+root catalog. A call records once; a second record
 is refused (`DomainRefusal::PromptCallRecorded`).
 
 The root has two parts with two lifetimes (FIG-5946). Its request (§6: the
@@ -227,8 +228,9 @@ requests (`PromptWrite::Settle`): the commit that leaves the turn's model
 phase (`model.done`, `turn.commit`, `turn.cancel`, a refusal or a close's
 cancel), and the `model.start` that admits a call while the previous one is
 still unsettled, which keeps the new call's request. Settling a request
-removes its edges and every text no other edge names, under the same sorted
-text locks a release takes; a root that held only its request goes with it.
+removes its root edges and reclaims unreachable content through the shared
+bounded graph collector. Unfinished paths become ordinary graph retirement
+holds. A root that held only its request goes with it.
 The snapshot part, the audit record the host reads through
 `SessionPromptAdmin::snapshot`, follows its turn's terminal revision under
 its session's recorded `Retention`: `HeadOnly`, `LastTurns(n)`, or `UntilGc`.
@@ -242,10 +244,11 @@ its text edges and reclaims only last-reference texts, leaving the compact call
 identity so an expired call still cannot be recorded twice. Explicit
 `PromptWrite::Release` also releases a turn or a whole session; deleting a
 session releases all its roots in its own transaction (FIG-5272).
-On PostgreSQL a record, a settlement and a
-release that share a text serialize on that text's advisory lock, shared for
-the record and exclusive for the others, so none fails the text's foreign key
-and no recorded call loses its text. An owned call's (§8) request stays until
+On PostgreSQL publications key-share lock stored graph nodes in digest
+order. Collection locks candidate blobs with `FOR UPDATE SKIP LOCKED` and
+rechecks catalog roots and incoming edges before deletion. A candidate held
+by another publisher remains queued, so collection never waits for a
+publication and no recorded call loses its content. An owned call's (§8) request stays until
 its session's release.
 
 A root is keyed by the call's owner-scoped identity (`ModelCallId`): a turn's
@@ -292,10 +295,10 @@ own commits; session deletion releases it. A changed lowerer or wire contract
 publishes its new exact prefix and retires the previous one at admission.
 Owned calls have no reusable session prefix. Settlement still releases each
 call's own admission record and history root edges. Immutable index edges
-(`prompt_text_edges`) retain only reachable fragments; severing the last root
-peels unreferenced nodes and their edges in the same transaction. PostgreSQL
-settlement locks the session prefix row until commit, excluding its immutable
-closure from reclamation without submitting the retained history's metadata.
+(`blob_edges`) retain reachable fragments and their generic placement leaves.
+Severing the last root peels one bounded batch and queues unfinished graph
+paths. The catalog protects the session prefix independently of request
+settlement, without submitting retained history metadata.
 Snapshots remain independent audit roots with the lifetime described above. `load_admitted_call` reads an unsettled
 call's request back with each fragment and contract chunk verified against its address,
 assembles the template byte for byte, decodes the response contract, and

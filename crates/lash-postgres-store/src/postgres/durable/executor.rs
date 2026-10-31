@@ -242,7 +242,8 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &session_close::SCOPE_ENDING,
         &prompts::SETTLE,
         &prompts::EXPIRE_AUDITS,
-        &prompts::HOLD_PREFIX,
+        &prompts::ROOT_EDGES,
+        &prompts::SET_PREFIX,
         &prompts::RELEASE_PREFIX,
         &prompts::RECLAIM,
         // A session head commit.
@@ -332,7 +333,7 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
         }
     };
     feed("owner-envelope-session-head-receipts-v1");
-    for text in mechanics().into_iter().chain(prompts::record_mechanics()) {
+    for text in mechanics() {
         feed(text);
     }
     for entry in entries() {
@@ -374,7 +375,7 @@ fn mechanics() -> Vec<&'static str> {
         executor.latch_record.sql(),
         executor.latch_sweep.sql(),
     ];
-    mechanics.extend(prompts::retirement_mechanics());
+    mechanics.extend(graph::retirement_mechanics());
     mechanics
 }
 
@@ -472,6 +473,7 @@ impl Call {
             .collect();
         // A head commit's checkpoint graph is installed with the commit's.
         let mut checkpoint_nodes = std::collections::BTreeMap::new();
+        let mut prompt_reads = tx.reads().clone();
         let mut remaining = tx.domain();
         while let Some((write, rest)) = remaining.split_first() {
             remaining = rest;
@@ -493,6 +495,12 @@ impl Call {
                 ));
                 continue;
             }
+            if let DomainWrite::Prompt(prompt) = write {
+                let prompts::PromptGraph { nodes, reads } =
+                    prompts::graph_plan(prompt, held).ok()?;
+                checkpoint_nodes.extend(nodes);
+                prompt_reads.extend(reads);
+            }
             let program = match write {
                 DomainWrite::SessionCommit(write) => {
                     // One head commit a call, by the session's own actor,
@@ -513,7 +521,7 @@ impl Call {
                         call.body_hashes.push(crate::keys::key(hash));
                         call.bodies.push(body.to_vec());
                     }
-                    checkpoint_nodes = program.checkpoint.nodes;
+                    checkpoint_nodes.extend(program.checkpoint.nodes);
                     call.planned_fleet = Some(fleet);
                     call.hint = Some((
                         key,
@@ -536,7 +544,7 @@ impl Call {
             .flat_map(DomainWrite::publications)
             .collect();
         if !tx.graph().is_empty()
-            || !tx.reads().is_empty()
+            || !prompt_reads.is_empty()
             || !publications.is_empty()
             || !checkpoint_nodes.is_empty()
         {
@@ -553,9 +561,12 @@ impl Call {
                 staged = checkpoint_nodes;
                 &staged
             };
-            let checked =
-                lash_durable::domain::graph_commit::check_graph(graph, tx.reads(), &publications)
-                    .ok()?;
+            let checked = lash_durable::domain::graph_commit::check_graph(
+                graph,
+                &prompt_reads,
+                &publications,
+            )
+            .ok()?;
             // The server locks every named or supplied version owner before
             // graph locks, as the explicit transaction does. Refusals fall
             // back there for their typed classification.

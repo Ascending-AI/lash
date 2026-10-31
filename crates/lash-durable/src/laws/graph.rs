@@ -860,10 +860,71 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         }
         let mut nodes = staging();
         let unique = big(source.catalog_name());
-        let root = value(&mut nodes, &[&shared, &unique], &[]);
+        let mut root = value(&mut nodes, &[&shared, &unique], &[]);
         let unique_leaf = leaf(&unique);
-        let nodes = nodes.into_nodes();
+        let mut nodes = nodes.into_nodes();
+        let prompt = if matches!(
+            source,
+            RootSource::PromptSnapshot | RootSource::PromptRequestBody | RootSource::PromptPrefix
+        ) {
+            let text = crate::domain::PromptText::fragment(
+                unique.clone(),
+                vec![leaf(&shared), unique_leaf],
+            );
+            nodes.remove(&root);
+            nodes.extend(
+                text.graph_nodes()
+                    .map_err(|error| refused("prompt codec", error))?,
+            );
+            root = NodeId::from_hex(&text.hash).expect("the graph codec minted the address");
+            Some(text)
+        } else {
+            None
+        };
         let (publish, retire): (Option<DomainWrite>, Option<DomainWrite>) = match source {
+            RootSource::PromptSnapshot
+            | RootSource::PromptRequestBody
+            | RootSource::PromptPrefix => {
+                use crate::domain::{ModelCallId, PromptCallKey, PromptWrite, RequestTexts};
+                let text = prompt
+                    .clone()
+                    .expect("a prompt source prepared its content");
+                let audit = source == RootSource::PromptSnapshot;
+                (
+                    Some(DomainWrite::Prompt(PromptWrite::Record {
+                        call: PromptCallKey {
+                            session: owner.session.clone(),
+                            call: ModelCallId::Turn {
+                                run: run.clone(),
+                                ordinal: source as u32,
+                            },
+                        },
+                        snapshot: audit.then(|| "root audit".into()),
+                        request: "root request".into(),
+                        snapshot_texts: if audit {
+                            vec![text.clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        request_texts: if audit {
+                            RequestTexts::default()
+                        } else {
+                            vec![text.clone()].into()
+                        },
+                        prefix: (source == RootSource::PromptPrefix).then(|| text.hash.clone()),
+                    })),
+                    Some(DomainWrite::Prompt(if source == RootSource::PromptPrefix {
+                        PromptWrite::ResetPrefix {
+                            session: owner.session.clone(),
+                        }
+                    } else {
+                        PromptWrite::Release {
+                            session: owner.session.clone(),
+                            run: Some(run.clone()),
+                        }
+                    })),
+                )
+            }
             RootSource::Exec => (
                 Some(put_exec(&exec, None, root)),
                 Some(DomainWrite::ExecRoot(ExecRootWrite::Retire {
@@ -974,6 +1035,13 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             RootSource::ReadLease | RootSource::RetirementHold => continue,
         };
         let mut writes: Vec<DomainWrite> = publish.into_iter().collect();
+        if source == RootSource::PromptPrefix {
+            writes.push(DomainWrite::Prompt(crate::domain::PromptWrite::Settle {
+                session: owner.session.clone(),
+                run: run.clone(),
+                open: None,
+            }));
+        }
         if source == RootSource::ModelCall {
             writes.push(DomainWrite::ModelCallPin(
                 crate::domain::ModelCallPinWrite::Reserve {
