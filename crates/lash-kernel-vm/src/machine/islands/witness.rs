@@ -177,7 +177,7 @@ pub(in crate::machine::islands) fn cell_published() {
 pub(crate) fn cell_constructions() -> u64 {
     CELL_CONSTRUCTIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn cell_constructed() {
+pub(in crate::machine) fn cell_constructed() {
     CELL_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
 }
 

@@ -285,6 +285,18 @@ fn observe_source_or_register(
             "both persistent session writes must publish: {sessions}"
         );
     }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CELL)
+    {
+        assert!(
+            cell_constructions > 0,
+            "the precise shared binding must publish its prepared cell with the actual RHS transfer"
+        );
+    }
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
@@ -653,7 +665,7 @@ fn direct_call_entry_agrees() {
                 Mode::Source,
             );
             assert_eq!(plain, source_only, "source oracle: {body}");
-            if body == SOURCE_CONSTRUCTION {
+            if body == SOURCE_CONSTRUCTION || body == SOURCE_CELL {
                 assert_eq!(
                     observe_source_or_register(
                         &source,

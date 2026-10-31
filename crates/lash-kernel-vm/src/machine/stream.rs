@@ -315,13 +315,13 @@ impl KernelMachine {
                         _ => return raise("type_error", "an `if` condition must be a bool"),
                     }
                 }
-                Op::Bind { local, src } => {
+                Op::Bind { local, src } | Op::BindShared { local, src } => {
                     self.close_region(running.stream);
                     if self.publish_source_binding(running, source_pc)? {
                         return Ok(Ran::Done);
                     }
                     let value = self.take(at(src));
-                    self.bind(task, local.at, false, value)?;
+                    self.bind(task, local.at, matches!(op, Op::BindShared { .. }), value)?;
                     return self.source_done(running, source_pc, Ran::Done);
                 }
                 Op::WriteLocal { local, src } => {
@@ -636,11 +636,6 @@ impl KernelMachine {
                 }
                 return Ok(None);
             }
-            Op::BindShared { local, src } => {
-                let value = self.take(at(src));
-                self.bind(task, local.at, true, value)?;
-                Ran::Done
-            }
             Op::BindSession { name, src } => {
                 let value = self.take(at(src));
                 self.session_write(&stream.names[name.ix()], value, false)?;
@@ -734,6 +729,7 @@ impl KernelMachine {
             | Op::Call { .. }
             | Op::Operator { .. }
             | Op::Bind { .. }
+            | Op::BindShared { .. }
             | Op::WriteLocal { .. }
             | Op::Branch { .. }
             | Op::Test { .. }

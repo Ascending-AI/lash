@@ -2,10 +2,7 @@
 use super::*;
 use crate::admission::SourceResources;
 use doc::heap::EntityId;
-use lash_kernel_state::{
-    arena::PreparedBatch,
-    kernel_internals::logical::{MemberEdit, Program, VirtualBody},
-};
+use lash_kernel_state::kernel_internals::logical::{MemberEdit, Program, VirtualBody};
 use std::sync::Arc;
 
 use crate::machine::source_publication::{Admission, Context};
@@ -13,53 +10,7 @@ pub(super) use crate::machine::source_publication::{
     Prefix, PreparedStorage, Reserve, StoragePreparation, native_fault,
 };
 
-pub(super) struct CellConstruction {
-    pub(super) entity: EntityId,
-    pub(super) value: Value,
-}
-pub(super) struct PreparedObjectConstruction {
-    pub(super) batch: PreparedBatch,
-    pub(super) handle: ArenaHandle,
-}
-impl StoragePreparation for CellConstruction {
-    type Prepared = PreparedObjectConstruction;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        let [entity] = event.entities.as_slice() else {
-            return Ok(None);
-        };
-        if !matches!(&entity.body, VirtualBody::NativeVariable(value) if value.same(&self.value))
-            || entity.entity != self.entity
-            || !matches!(event.outputs.as_slice(), [(_, PV::Page(doc::heap::PageValue::Ref(doc::heap::Identity::Object(id))))] if *id == self.entity)
-            || event.member.is_some()
-            || event.frame.is_some()
-            || !event.scratch.is_empty()
-        {
-            return Ok(None);
-        }
-        let (cell, mut installation) = arena.prepare_cell(self.value).map_err(native_fault)?;
-        installation
-            .bind_entity(cell, self.entity)
-            .map_err(native_fault)?;
-        let (registration, batch) = installation.into_parts();
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedObjectConstruction {
-                batch,
-                handle: cell,
-            },
-            actual,
-        }))
-    }
-}
+pub(super) use crate::machine::source_publication::{CellConstruction, PreparedObjectConstruction};
 pub(super) struct ClosureConstruction {
     pub(super) entity: EntityId,
     pub(super) identity: Arc<doc::arena::ClosureIdentity>,

@@ -3,10 +3,52 @@ use super::*;
 use crate::compile::room::publication::Occurrence;
 use crate::compile::room::{ExitKind, Phase, Point};
 use crate::machine::stream::Running;
-use crate::machine::{Control, Halt, KernelMachine, SlotState, fault};
+use crate::machine::{
+    Control, Halt, KernelMachine, SlotState, fault, frames::PreparedBinding,
+    registers::PreparedTransfer,
+};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::{
+    JournalEvent, PublicationValue, VirtualBody, VirtualEntity,
+};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+
+struct BindingPreparation<'bank, 'slot> {
+    bank: PreparedTransfer<'bank>,
+    slot: PreparedBinding<'slot>,
+    cell: Option<CellConstruction>,
+}
+impl<'bank, 'slot> StoragePreparation for BindingPreparation<'bank, 'slot> {
+    type Prepared = (
+        PreparedTransfer<'bank>,
+        PreparedBinding<'slot>,
+        Option<PreparedObjectConstruction>,
+    );
+    const MATERIALIZES: bool = true;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        actual: Program,
+    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
+        let (registration, storage, actual) = if let Some(cell) = self.cell {
+            let Some(prepared) = cell.prepare(arena, actual)? else {
+                return Ok(None);
+            };
+            (
+                prepared.registration,
+                Some(prepared.storage),
+                prepared.actual,
+            )
+        } else {
+            (arena.registration().map_err(native_fault)?, None, actual)
+        };
+        Ok(Some(PreparedStorage {
+            registration,
+            storage: (self.bank, self.slot, storage),
+            actual,
+        }))
+    }
+}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_binding(
@@ -14,9 +56,16 @@ impl KernelMachine {
         running: &Running<'_>,
         pc: u32,
     ) -> Result<bool, Halt> {
-        let Op::Bind { local, src } = running.stream.ops[pc as usize] else {
+        let op = running.stream.ops[pc as usize];
+        let (Op::Bind { local, src } | Op::BindShared { local, src }) = op else {
             return Ok(false);
         };
+        let shared = matches!(op, Op::BindShared { .. });
+        // Compatibility eligibility until guest admission uses logical authority
+        // on every path. This estimate never supplies a logical price.
+        if shared && self.arena.borrow().sequence_bound(1) > self.capacity_headroom() {
+            return Ok(false);
+        }
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
@@ -93,10 +142,7 @@ impl KernelMachine {
         let output = source
             .binding_root(local.slot, running.task, roots.invocation().id())
             .ok_or_else(|| malformed("source binding has no canonical owner"))?;
-        let Some(slot) = frame
-            .slots
-            .prepare_binding(local.at, SlotState::Value(value))?
-        else {
+        let Some(slot) = frame.slots.prepare_binding(local.at)? else {
             return Ok(false);
         };
         let start = Position {
@@ -116,6 +162,10 @@ impl KernelMachine {
             unpaid: Some(unpaid),
             ..start.clone()
         };
+        let entity = shared.then(|| doc::heap::EntityId {
+            family: doc::heap::FamilyId::PRIMARY,
+            ordinal: arena.next_ordinal(),
+        });
         let safe_point = self.charged;
         let published = Context {
             admission: Admission::Exact,
@@ -172,17 +222,47 @@ impl KernelMachine {
             || {
                 Program::new(vec![JournalEvent {
                     inputs: vec![input],
-                    outputs: vec![(output, PublicationValue::Existing(input))],
+                    outputs: vec![(
+                        output,
+                        entity.map_or(PublicationValue::Existing(input), |entity| {
+                            PublicationValue::Page(doc::heap::PageValue::Ref(
+                                doc::heap::Identity::Object(entity),
+                            ))
+                        }),
+                    )],
+                    entities: entity
+                        .into_iter()
+                        .map(|entity| VirtualEntity {
+                            entity,
+                            body: VirtualBody::NativeVariable(value),
+                        })
+                        .collect(),
                     ..Default::default()
                 }])
             },
-            Reserve(move |_: &mut Arena| Ok(Some((bank, slot)))),
-            |_, _, edits, (bank, slot)| {
+            BindingPreparation {
+                bank,
+                slot,
+                cell: entity.map(|entity| CellConstruction { entity, value }),
+            },
+            |arena, _, edits, (bank, slot, cell)| {
                 debug_assert!(edits.is_empty());
+                let state = if let Some(cell) = cell {
+                    cell.batch.publish(arena);
+                    SlotState::Cell(cell.handle)
+                } else {
+                    SlotState::Value(value)
+                };
                 bank.publish();
-                slot.publish();
+                slot.publish(state);
             },
         )?;
+        drop(arena);
+        if published && shared {
+            self.grown();
+            #[cfg(any(test, feature = "testing"))]
+            crate::machine::islands::witness::cell_constructed();
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             #[cfg(test)]

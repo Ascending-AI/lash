@@ -193,11 +193,10 @@ pub(super) struct Slots {
 pub(super) struct PreparedBinding<'a> {
     slots: &'a mut Slots,
     at: usize,
-    value: SlotState,
 }
 impl PreparedBinding<'_> {
-    pub(super) fn publish(self) {
-        self.slots.values[self.at] = self.value;
+    pub(super) fn publish(self, value: SlotState) {
+        self.slots.values[self.at] = value;
         if !self.slots.changed[self.at] {
             self.slots.changed[self.at] = true;
             self.slots.edits.push(self.at);
@@ -209,7 +208,6 @@ impl Slots {
     pub(super) fn prepare_binding(
         &mut self,
         at: u32,
-        value: SlotState,
     ) -> Result<Option<PreparedBinding<'_>>, HeapFault> {
         let at = at as usize;
         if !matches!(self.values.get(at), Some(SlotState::Empty)) {
@@ -222,11 +220,7 @@ impl Slots {
                     resource: lash_kernel_doc::heap::HostResource::StagingBytes,
                 })?;
         }
-        Ok(Some(PreparedBinding {
-            slots: self,
-            at,
-            value,
-        }))
+        Ok(Some(PreparedBinding { slots: self, at }))
     }
     pub(super) fn fresh(&mut self, len: usize) {
         self.clear();
