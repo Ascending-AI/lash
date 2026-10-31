@@ -243,7 +243,10 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
         bound: Bound::Memory,
         limit: 64 << 20,
         function: None,
-        site: None,
+        site: Some(Box::new(lash_kernel_value::sites::Site::new(
+            lash_kernel_value::sites::Unit::Main,
+            vec![0],
+        ))),
     }));
     let held = "main { let n = list.len([probe.hold(100), 1]) return n }";
     let verdict = |slice: u64, collect: bool| {

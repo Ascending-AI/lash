@@ -59,6 +59,43 @@ pub struct CellEnvelope {
 }
 
 impl CellEnvelope {
+    /// Authored names are retained in written metadata even when an adapter's
+    /// executable definition has a generic name. Resolve only on a bound stop.
+    pub(super) fn bound_function(
+        &self,
+        exceeded: &lash_kernel_vm::BoundExceeded,
+    ) -> Option<lash_kernel_value::FunctionName> {
+        use lash_kernel_doc::{Expr, Node};
+        use lash_kernel_value::sites::Unit;
+        if !matches!(
+            exceeded.bound,
+            lash_kernel_vm::Bound::Charge | lash_kernel_vm::Bound::Memory
+        ) {
+            return None;
+        }
+        let Unit::Library(function) = &exceeded.site.as_ref()?.unit else {
+            return None;
+        };
+        let definition = self.document.functions.get(function)?;
+        if exceeded.function.as_ref() != Some(&definition.name) {
+            return None;
+        }
+        let mut names = self.written.iter().filter_map(|(site, written)| {
+            let Node::Expr(Expr::Closure(closure)) = self.document.node(site)? else {
+                return None;
+            };
+            if closure.function != *function {
+                return None;
+            }
+            lash_kernel_value::FunctionName::new(
+                written.signature_origin.as_ref()?.name.as_deref()?,
+            )
+            .ok()
+        });
+        let name = names.next()?;
+        names.all(|other| other == name).then_some(name)
+    }
+
     pub(super) fn code_digest(code: &str) -> String {
         lash_protocol_types::core_support::blake3_domain_hash_hex(
             LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION,

@@ -5,7 +5,7 @@
 use lash_kernel_doc::Datum;
 use lash_kernel_value::names::FunctionName;
 
-use super::embedder::{Embedder, ROOMY, Setup, text};
+use super::embedder::{Embedder, ROOMY, Setup, document, library, text};
 use crate::machine::Boundary;
 use crate::{Bound, BoundExceeded, Bounds, End, RunError};
 
@@ -46,7 +46,17 @@ main {
         bound: Bound::Memory,
         limit: 64 << 20,
         function: Some(FunctionName::new("work.repeat").unwrap()),
-        site: None,
+        site: Some(Box::new(lash_kernel_value::sites::Site::new(
+            lash_kernel_value::sites::Unit::Library(
+                *document(program, &library(true).registry)
+                    .functions
+                    .iter()
+                    .find(|(_, definition)| definition.name.as_str() == "local")
+                    .unwrap()
+                    .0,
+            ),
+            vec![6],
+        ))),
     }));
     for slice in [u64::MAX, 1] {
         for collect in [false, true] {
@@ -82,8 +92,18 @@ main {
     let memory = End::Error(RunError::Bound(BoundExceeded {
         bound: Bound::Memory,
         limit: 64 << 10,
-        function: None,
-        site: None,
+        function: Some(FunctionName::new("deep").unwrap()),
+        site: Some(Box::new(lash_kernel_value::sites::Site::new(
+            lash_kernel_value::sites::Unit::Library(
+                *document(program, &library(true).registry)
+                    .functions
+                    .iter()
+                    .find(|(_, definition)| definition.name.as_str() == "deep")
+                    .unwrap()
+                    .0,
+            ),
+            vec![0, 1, 0],
+        ))),
     }));
     for slice in [u64::MAX, 1] {
         for collect in [false, true] {

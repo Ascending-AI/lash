@@ -967,9 +967,11 @@ async fn run_linked_cell(
                         memory: meters.memory,
                         live_tasks: meters.live_tasks,
                     });
-                Some(Box::new(lash_core::facade_support::bound_fact(
-                    exceeded, meters,
-                )))
+                let mut fact = lash_core::facade_support::bound_fact(exceeded, meters);
+                if let Some(function) = host.envelope.bound_function(exceeded) {
+                    fact.function = Some(function);
+                }
+                Some(Box::new(fact))
             }
             _ => None,
         }

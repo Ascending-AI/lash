@@ -594,11 +594,11 @@ pub enum Bound {
 pub struct BoundExceeded {
     pub bound: Bound,
     pub limit: u64,
-    /// The definition name of the library call that passed the bound, when
-    /// it arose in a library call rather than in the program itself.
+    /// The library call that passed the bound, or the authored function
+    /// containing a charge or memory stop. `main` names the entry body.
     pub function: Option<FunctionName>,
-    /// The nearest authored statement for a call-depth refusal. Library
-    /// helpers do not replace this guest coordinate.
+    /// The nearest authored statement for a charge, memory or call-depth
+    /// refusal. Library helpers do not replace this guest coordinate.
     pub site: Option<Box<lash_kernel_value::sites::Site>>,
 }
 

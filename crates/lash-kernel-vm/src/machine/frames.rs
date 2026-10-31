@@ -1095,8 +1095,27 @@ impl Frames {
     /// code. Asked from inside a statement, where each frame stands within
     /// one: below the top it waits in its call, and the top runs or waits
     /// in its own. Derived from where the frames stand, and never saved.
+    #[inline(always)]
     pub(super) fn authored(&self) -> Result<Option<Site>, HeapFault> {
-        for index in (0..self.len).rev() {
+        self.authored_before(self.len)
+    }
+
+    /// A frame allocation can be refused before its first statement. The
+    /// caller's statement caused that allocation, not the new body's entry.
+    pub(super) fn bound_site(&self) -> Result<Option<Site>, HeapFault> {
+        let end = match self.cache.iter().find(|(at, _)| *at + 1 == self.len) {
+            Some((_, frame))
+                if matches!(frame.control.as_slice(), [Control::Block { next: 0, .. }]) =>
+            {
+                self.len - 1
+            }
+            _ => self.len,
+        };
+        self.authored_before(end)
+    }
+
+    fn authored_before(&self, end: u64) -> Result<Option<Site>, HeapFault> {
+        for index in (0..end).rev() {
             let statement = match self.cache.iter().find(|(at, _)| *at == index) {
                 Some((_, frame)) => {
                     if !self.exe.code(frame.code).charged {

@@ -1034,6 +1034,42 @@ impl KernelMachine {
         self.reconcile_sweep().map_err(MachineError::Heap)
     }
 
+    /// Resolves a refused charge or allocation from retained frame coordinates.
+    #[cold]
+    #[inline(never)]
+    fn locate_bound(
+        &mut self,
+        task: TaskId,
+        exceeded: &mut BoundExceeded,
+    ) -> Result<(), MachineError> {
+        let site = self
+            .task(task)
+            .map_err(machine_error)?
+            .frames
+            .bound_site()
+            .map_err(MachineError::Heap)?;
+        if exceeded.function.is_none() {
+            exceeded.function = site.as_ref().and_then(|site| {
+                use lash_kernel_value::sites::Unit;
+                match &site.unit {
+                    Unit::Main => lash_kernel_value::FunctionName::new("main").ok(),
+                    Unit::Function(name) => {
+                        lash_kernel_value::FunctionName::new(name.as_str()).ok()
+                    }
+                    Unit::Library(function) => self
+                        .exe
+                        .instances
+                        .values()
+                        .find_map(|document| document.functions.get(function))
+                        .map(|definition| definition.name.clone())
+                        .or_else(|| self.exe.library_name(function).cloned()),
+                }
+            });
+        }
+        exceeded.site = site.map(Box::new);
+        Ok(())
+    }
+
     /// The end a halt outside a step gives the run: a bound ends it as the
     /// guest's own error, anything else is the machine's.
     fn ended_by(&mut self, halt: Halt) -> Result<Step, MachineError> {
@@ -1274,6 +1310,9 @@ impl KernelMachine {
                     {
                         exceeded.function = Some(self.exe.lib(lib).header.name.clone());
                     }
+                    if matches!(exceeded.bound, Bound::Charge | Bound::Memory) {
+                        self.locate_bound(task, &mut exceeded)?;
+                    }
                     return Ok(self.finish_with(End::Error(RunError::Bound(*exceeded))));
                 }
                 Err(Halt::Heap(error)) => return Err(MachineError::Heap(*error)),
@@ -1296,7 +1335,10 @@ impl KernelMachine {
             // (FIG-6791): what the run holds is in its tasks and session,
             // so a crossing the statement made is decided before the next
             // statement's effect.
-            if let Err(halt) = self.capacity_check() {
+            if let Err(mut halt) = self.capacity_check() {
+                if let Halt::Bound(exceeded) = &mut halt {
+                    self.locate_bound(task, exceeded)?;
+                }
                 return self.ended_by(halt);
             }
             #[cfg(test)]

@@ -1236,21 +1236,28 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
         first.error().and_then(|f| f.worker_limit),
         Some(lash_vm_client::WorkerLimit::Fuel)
     );
-    let expected = lash_core::ExecutionBoundFact {
-        resource: lash_core::CellResource::Charges,
-        limit: instruction_limit,
-        observed: Some(instruction_limit + 1),
-        consumed: Some(instruction_limit),
-        function: None,
-        site: None,
-    };
+    let fact = first
+        .error()
+        .and_then(|failure| failure.bound.as_deref())
+        .expect("a charge stop retains its structured bound");
+    assert_eq!(fact.resource, lash_core::CellResource::Charges);
+    assert_eq!(fact.limit, instruction_limit);
+    assert_eq!(fact.observed, Some(instruction_limit + 1));
+    assert_eq!(fact.consumed, Some(instruction_limit));
     assert_eq!(
-        first.error().and_then(|failure| failure.bound.as_deref()),
-        Some(&expected)
+        fact.function.as_ref().map(|name| name.as_str()),
+        Some("main")
     );
+    assert!(matches!(
+        fact.site.as_deref(),
+        Some(lash_kernel_value::sites::Site {
+            unit: lash_kernel_value::sites::Unit::Main,
+            ..
+        })
+    ));
     assert_eq!(
         again.error().and_then(|failure| failure.bound.as_deref()),
-        Some(&expected),
+        Some(fact),
         "a saved instruction end retains its fact"
     );
     let encoded = serde_json::to_value(&first).expect("encode result");
@@ -1331,6 +1338,101 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
     assert_eq!(fact.limit, cpu_bound);
     assert_eq!(fact.observed, cpu.observed);
     assert_eq!(fact.consumed, cpu.consumed);
+    assert_eq!(fact.function, None);
+    assert_eq!(
+        fact.site, None,
+        "a supervisor CPU stop has no causal statement"
+    );
+}
+
+/// FIG-7573: charge and memory stops retain the function and the authored
+/// statement that hit the bound, through the worker and the saved fact.
+#[tokio::test(flavor = "multi_thread")]
+async fn charge_and_memory_facts_locate_the_statement_that_stopped() {
+    let mut failures = Vec::new();
+    for python in [false, true] {
+        for memory in [false, true] {
+            let dialect = if python {
+                CellDialect::python()
+            } else {
+                CellDialect::typescript()
+            };
+            let workers = if python {
+                python_workers()
+            } else {
+                lash_vm_client::service::Service::default()
+            };
+            let mut services = cell_services(&dialect, workers);
+            services.execution_bounds = crate::plugin::ExecutionBounds::new(
+                crate::plugin::InstructionBound::instructions(if memory {
+                    10_000_000
+                } else {
+                    10_000
+                }),
+                crate::plugin::MemoryBound::mebibytes(if memory { 1 } else { 64 }),
+            );
+            let code = match (python, memory) {
+                (false, false) => "function burn() {\n  while (true) {}\n}\nburn();",
+                (true, false) => "def burn():\n    while True:\n        pass\nburn()",
+                (false, true) => {
+                    "function inflate() {\n  let text = \"a\";\n  while (true) {\n    text = text + text;\n  }\n}\ninflate();"
+                }
+                (true, true) => {
+                    "def inflate():\n    text = 'a'\n    while True:\n        text = text + text\ninflate()"
+                }
+            };
+            let mut host = open_host().await;
+            let tools = Arc::new(CellTools::default());
+            let first = run_cell(
+                &mut crate::testing::session_state(&dialect),
+                cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+                &services,
+                code,
+            )
+            .await;
+            let failure = first.error().expect("the program hits its bound");
+            let Some(fact) = failure.bound.as_deref() else {
+                panic!("python={python}, memory={memory}: {failure:?}");
+            };
+            assert_eq!(
+                fact.resource,
+                if memory {
+                    lash_core::CellResource::MemoryBytes
+                } else {
+                    lash_core::CellResource::Charges
+                },
+                "{failure:?}"
+            );
+            // Lines and function names are read directly from the source above.
+            let function = if memory { "text.concat" } else { "burn" };
+            let line = if memory { 4 } else { 2 };
+            if fact.function.as_ref().map(|name| name.as_str()) != Some(function)
+                || fact.site.is_none()
+                || !failure.message.contains(&format!("at line {line},"))
+                || !failure
+                    .message
+                    .contains(if memory { "inflate()" } else { "burn()" })
+            {
+                failures.push(format!("python={python}, memory={memory}: {failure:?}"));
+            }
+            host.kill_and_resume().await;
+            let restored = run_cell(
+                &mut crate::testing::session_state(&dialect),
+                cell_context(&host, SESSION, TURN, "exec-code:0", tools),
+                &services,
+                code,
+            )
+            .await;
+            assert_eq!(
+                restored
+                    .error()
+                    .and_then(|failure| failure.bound.as_deref()),
+                Some(fact),
+                "the saved fact keeps its exact function and site"
+            );
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// FIG-7557: a memory stop keeps its own bound when no parked end supplied one.

@@ -62,6 +62,10 @@ fn the_memory_bound_holds_inside_a_native_call() {
         passes("let big = work.fill(100000)", bounds),
         BoundExceeded {
             function: Some(lash_kernel_value::names::FunctionName::new("work.fill").unwrap()),
+            site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                vec![0, 0, 0],
+            ))),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -98,6 +102,10 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
         passes("let big = work.repeat(100000)", bounds),
         BoundExceeded {
             function: Some(lash_kernel_value::names::FunctionName::new("work.repeat").unwrap()),
+            site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                vec![0, 0, 0],
+            ))),
             ..exceeded(Bound::Memory, 64 << 10)
         }
     );
@@ -128,6 +136,10 @@ main {
         warm.run_to_end(&[]),
         End::Error(RunError::Bound(BoundExceeded {
             function: Some(lash_kernel_value::names::FunctionName::new("work.repeat").unwrap()),
+            site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                lash_kernel_value::sites::Unit::Main,
+                vec![5],
+            ))),
             ..exceeded(Bound::Memory, 64 << 10)
         }))
     );
