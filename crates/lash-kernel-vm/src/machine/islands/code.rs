@@ -313,6 +313,7 @@ operations! {
                 miss: u32,
             }
             Record record {
+                pc: u32,
                 ahead: u64,
                 names: Box<[Value]>,
                 values: Box<[u32]>,

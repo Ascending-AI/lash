@@ -457,27 +457,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 return self.format(frame, &code.sites.format[packet.x as usize].value);
             }
             Opcode::Record => {
-                let sites::Record {
-                    ahead,
-                    names,
-                    values,
-                    reg,
-                    members,
-                    miss,
-                } = &code.sites.record[packet.x as usize];
-
-                if !self.fits(*ahead) {
-                    return Err(self.at(*miss));
-                }
-                let before = self.transient;
-                let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, *members);
-                self.transient = self.transient.saturating_sub(floor);
-                frame.state.transient = frame.state.transient.saturating_sub(floor);
-                let values = values.iter().map(|reg| regs[*reg as usize]);
-                let answer = self.record(names, values);
-                frame.state.transient += self.transient.saturating_sub(before);
-                let value = answer.ok_or_else(|| self.at(*miss))?;
-                regs[*reg as usize] = self.source_result(value)?;
+                return self.construct_record(frame, &code.sites.record[packet.x as usize]);
             }
             Opcode::Closure => {
                 return self.construct_closure(frame, &code.sites.closure[packet.x as usize]);

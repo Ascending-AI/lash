@@ -151,8 +151,36 @@ impl sites::Make {
     }
 }
 
+impl sites::Record {
+    fn verify_source(&self, stream: &Stream) -> Result<(), Refused> {
+        use lash_kernel_exec::Op;
+        let error = || Refused::Region { region: self.pc };
+        let Some(Op::MakeRecord { fields, values }) = stream.ops.get(self.pc as usize) else {
+            return Err(error());
+        };
+        let names = stream.field_lists.get(fields.ix()).ok_or_else(error)?;
+        let end = values.start.0.checked_add(values.len).ok_or_else(error)?;
+        if self.reg != values.start.0
+            || self.values.len() != values.len as usize
+            || !self.values.iter().copied().eq(values.start.0..end)
+            || self.members != names.len()
+            || self.names.len() != names.len()
+            || !self.names.iter().zip(names.iter()).all(|(value, name)| {
+                lash_kernel_doc::arena::ShortText::new(name)
+                    .is_some_and(|name| value.same(&Value::Text(name)))
+            })
+        {
+            return Err(error());
+        }
+        Ok(())
+    }
+}
+
 impl Code {
     pub(super) fn verify_constructions(&self, stream: &Stream) -> Result<(), Refused> {
+        for record in &self.sites.record {
+            record.verify_source(stream)?;
+        }
         for make in &self.sites.make {
             make.verify_source(stream)?;
         }

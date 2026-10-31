@@ -1330,6 +1330,7 @@ impl<'e> Build<'e> {
                 }
                 let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
                 self.emit(Op::Record {
+                    pc,
                     ahead: *ahead,
                     members: names.len(),
                     names,

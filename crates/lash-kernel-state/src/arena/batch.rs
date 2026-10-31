@@ -57,6 +57,50 @@ pub struct PreparedInstallation<'a> {
     batch: PreparedBatch,
 }
 impl<'a> PreparedInstallation<'a> {
+    /// Copies the normalized collection recipe from detached storage. Tables
+    /// retain canonical key spelling, insertion order and last-write values.
+    pub fn collection(&self, handle: ArenaHandle) -> Result<NewObject, NativeError> {
+        let entry = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+            .ok_or_else(|| malformed("a collection target is absent from the batch"))?;
+        match &entry.body {
+            Body::List(sequence) => Ok(NewObject::List(
+                sequence
+                    .chunks
+                    .values()
+                    .ok_or_else(|| malformed("a prepared list is not resident"))?
+                    .to_vec(),
+            )),
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                let values = tables::pairs(handle, table)?;
+                if matches!(entry.body, Body::Set(_)) {
+                    return Ok(NewObject::Set(
+                        values
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|[key, _]| *key)
+                            .collect(),
+                    ));
+                }
+                let entries = values
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|[key, value]| (*key, *value))
+                    .collect();
+                Ok(if matches!(entry.body, Body::Record(_)) {
+                    NewObject::Record(entries)
+                } else {
+                    NewObject::Map(entries)
+                })
+            }
+            _ => Err(malformed("a prepared body is not a collection")),
+        }
+    }
     /// Binds storage to a prospective identity in the canonical journal. The
     /// journal must grant it before publication; this method grants nothing.
     pub fn bind_entity(

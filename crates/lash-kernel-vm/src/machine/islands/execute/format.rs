@@ -18,7 +18,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.transient = self.transient.saturating_sub(floor);
         frame.state.transient = frame.state.transient.saturating_sub(floor);
         match self
-            .publish_list_construction(frame, site)
+            .publish_construction(frame, site)
             .map_err(|error| self.halt(error.into()))?
         {
             source::ValuePublication::Published(_) => return Ok(Next::Continue),
@@ -27,6 +27,34 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         let values = site.items.iter().map(|reg| frame.regs[*reg as usize]);
         let answer = self.make(site.make, values);
+        frame.state.transient += self.transient.saturating_sub(before);
+        let value = answer.ok_or_else(|| self.at(site.miss))?;
+        frame.regs[site.reg as usize] = self.source_result(value)?;
+        Ok(Next::Continue)
+    }
+
+    pub(super) fn construct_record(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        site: &sites::Record,
+    ) -> Result<Next, Stop> {
+        if !self.fits(site.ahead) {
+            return Err(self.at(site.miss));
+        }
+        let before = self.transient;
+        let floor = self.construction_floor(lash_kernel_doc::ValueKind::Record, site.members);
+        self.transient = self.transient.saturating_sub(floor);
+        frame.state.transient = frame.state.transient.saturating_sub(floor);
+        match self
+            .publish_record_construction(frame, site)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            source::ValuePublication::Published(_) => return Ok(Next::Continue),
+            source::ValuePublication::Declined => return Err(self.at(site.miss)),
+            source::ValuePublication::Unavailable => {}
+        }
+        let values = site.values.iter().map(|reg| frame.regs[*reg as usize]);
+        let answer = self.record(&site.names, values);
         frame.state.transient += self.transient.saturating_sub(before);
         let value = answer.ok_or_else(|| self.at(site.miss))?;
         frame.regs[site.reg as usize] = self.source_result(value)?;

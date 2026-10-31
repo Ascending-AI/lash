@@ -1,8 +1,9 @@
-//! A source list owns its canonical graph before detached storage is installed.
+//! Source collections own their normalized graph before storage is installed.
+mod storage;
 use super::*;
 use crate::admission::Allowance;
 use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
+    JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
@@ -11,24 +12,65 @@ use room::{
 };
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    pub(in crate::machine::islands::execute) fn publish_list_construction(
+    pub(in crate::machine::islands::execute) fn publish_construction(
         &mut self,
         frame: &mut Values<'_, '_>,
         site: &sites::Make,
     ) -> Result<ValuePublication, HeapFault> {
-        if site.make != crate::compile::expr::Make::List
-            || self.arena.any_cold()
-            || !self.resident_room(self.arena.sequence_bound(site.members))
-        {
+        use crate::compile::expr::Make;
+        let bound = match site.make {
+            Make::List => self.arena.sequence_bound(site.members),
+            Make::Map | Make::Set => self.arena.table_bound(site.members),
+            Make::Tuple => return Ok(ValuePublication::Unavailable),
+        };
+        if self.arena.any_cold() || !self.resident_room(bound) {
             return Ok(ValuePublication::Unavailable);
         }
+        self.publish_collection_construction(frame, site.pc, &site.items, site.reg, |values| {
+            match site.make {
+                Make::List => doc::NewObject::List(values),
+                Make::Set => doc::NewObject::Set(values),
+                Make::Map => doc::NewObject::Map(
+                    values
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|[key, value]| (*key, *value))
+                        .collect(),
+                ),
+                Make::Tuple => unreachable!(),
+            }
+        })
+    }
+
+    pub(in crate::machine::islands::execute) fn publish_record_construction(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        site: &sites::Record,
+    ) -> Result<ValuePublication, HeapFault> {
+        if self.arena.any_cold() || !self.resident_room(self.arena.table_bound(site.members)) {
+            return Ok(ValuePublication::Unavailable);
+        }
+        self.publish_collection_construction(frame, site.pc, &site.values, site.reg, |values| {
+            doc::NewObject::Record(site.names.iter().copied().zip(values).collect())
+        })
+    }
+
+    fn publish_collection_construction(
+        &mut self,
+        frame: &mut Values<'_, '_>,
+        pc: u32,
+        items: &[u32],
+        reg: u32,
+        make: impl FnOnce(Vec<Value>) -> doc::NewObject,
+    ) -> Result<ValuePublication, HeapFault> {
         let Some(statement) = frame.state.statement else {
             return Ok(ValuePublication::Unavailable);
         };
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
             .source_sites
-            .get(site.pc as usize)
+            .get(pc as usize)
             .and_then(Option::as_ref)
         else {
             return Ok(ValuePublication::Unavailable);
@@ -40,7 +82,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(unpaid) = source.next_after_commit(at) else {
             return Ok(ValuePublication::Unavailable);
         };
-        let Some(roles) = statement.source_roles_at(stream, site.pc) else {
+        let Some(roles) = statement.source_roles_at(stream, pc) else {
             return Ok(ValuePublication::Unavailable);
         };
         let at = Point {
@@ -66,7 +108,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let mut inputs = Vec::new();
         let mut values = Vec::new();
-        for reg in &site.items {
+        for reg in items {
             let Some((_, operand)) = roles.iter().find(|(input, _)| input.0 == *reg) else {
                 return Ok(ValuePublication::Unavailable);
             };
@@ -81,22 +123,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             );
         }
         self.logical.flush(self.arena, self.heap)?;
-        // Canonical occurrences register all child identities before selecting
-        // the next fresh identity. No body or price is inferred from capacity.
-        let members = values.iter().try_fold(0u64, |sum, value| {
-            sum.checked_add(Holding::from_native(self.arena, self.heap.pages(), value)?.bytes())
-                .ok_or_else(|| malformed("construction members overflow"))
-        })?;
-        let entity = doc::heap::EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: self.arena.next_ordinal(),
-        };
         let event = JournalEvent {
-            outputs: vec![(output, PV::Page(doc::heap::PageValue::List(entity)))],
-            entities: vec![VirtualEntity {
-                entity,
-                body: VirtualBody::NativeList(values.clone()),
-            }],
+            inputs,
             ..Default::default()
         };
         let store = self.logical.ledger();
@@ -104,53 +132,26 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
         }
-        // Keep inputs while introducing the new body in an unpublished graph.
-        // Its release excludes children retained by the new list, including aliases.
-        let preview = Program::new(vec![event.clone()]);
-        let Some(preview) = preview.evaluate(&ledger, self.arena) else {
-            return Ok(ValuePublication::Declined);
-        };
-        let preview = preview
-            .prepare(
-                &ledger,
-                self.arena
-                    .registration()
-                    .map_err(publication::native_fault)?,
-                self.heap,
-                Program::new(vec![event.clone()]),
-            )
-            .map_err(super::unit::member_fault)?;
-        let released = preview.release_cost(&inputs, self.heap.pages())?;
-        drop(preview);
-        let event = JournalEvent { inputs, ..event };
+        let release = interval
+            .events()
+            .next()
+            .ok_or_else(|| malformed("construction event disappeared"))?
+            .inputs
+            .clone();
         let facts = LeafExecution(
             [(
                 at.clone(),
                 LeafFacts {
                     dependencies: values.iter().filter_map(Value::handle).collect(),
-                    values: [
-                        (Measure::Members(at.site.clone()), i128::from(members)),
-                        (
-                            Measure::Release(
-                                interval
-                                    .events()
-                                    .next()
-                                    .ok_or_else(|| malformed("construction event disappeared"))?
-                                    .inputs
-                                    .clone(),
-                            ),
-                            i128::from(released),
-                        ),
-                    ]
-                    .into(),
                     ..Default::default()
                 },
             )]
             .into(),
         );
+        let object = make(values);
         let mut encoding = TokenWriter::new();
         encoding.seq(3);
-        encoding.text("lash.source.list-construction");
+        encoding.text("lash.source.collection-construction");
         at.site.encode(&mut encoding);
         output.encode(&mut encoding);
         let start = SourcePosition {
@@ -190,7 +191,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             safe_point: self.charged,
         };
         drop(ledger);
-        let result = &mut frame.regs[site.reg as usize];
+        let publication_at = start.at.clone();
+        let result = &mut frame.regs[reg as usize];
         let published = self.publish_source_prepared(
             frame.state.callee,
             activation,
@@ -202,7 +204,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             || Program::new(vec![event.clone()]),
-            publication::ListConstruction { entity, values },
+            storage::Construction {
+                object,
+                output,
+                at: publication_at,
+                release,
+                ledger: store.clone(),
+                heap: self.heap,
+            },
             |arena, _, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.batch.publish(arena);
@@ -211,10 +220,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         )?;
         #[cfg(any(test, feature = "testing"))]
         if published {
-            crate::machine::islands::witness::construction_published();
+            crate::machine::islands::witness::collection_constructed(frame.regs[reg as usize]);
         }
         Ok(if published {
-            ValuePublication::Published(frame.regs[site.reg as usize])
+            ValuePublication::Published(frame.regs[reg as usize])
         } else {
             ValuePublication::Declined
         })

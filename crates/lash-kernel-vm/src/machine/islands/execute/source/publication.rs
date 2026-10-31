@@ -48,63 +48,6 @@ where
         }))
     }
 }
-pub(super) struct ListConstruction {
-    pub(super) entity: EntityId,
-    pub(super) values: Vec<Value>,
-}
-pub(super) struct PreparedListConstruction {
-    pub(super) batch: PreparedBatch,
-    pub(super) value: Value,
-}
-impl StoragePreparation for ListConstruction {
-    type Prepared = PreparedListConstruction;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        let [entity] = event.entities.as_slice() else {
-            return Ok(None);
-        };
-        let VirtualBody::NativeList(values) = &entity.body else {
-            return Ok(None);
-        };
-        if !matches!(event.outputs.as_slice(), [(_, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(doc::heap::PageValue::List(id)))] if *id == self.entity)
-            || event.member.is_some()
-            || event.frame.is_some()
-            || !event.scratch.is_empty()
-            || entity.entity != self.entity
-            || values.len() != self.values.len()
-            || !values.iter().zip(&self.values).all(|(a, b)| a.same(b))
-        {
-            return Ok(None);
-        }
-        // No handle reservation survives a declined logical admission.
-        let mut nursery = doc::Nursery::unaccounted(arena.objects());
-        let value = nursery.allocate(doc::NewObject::List(self.values));
-        let mut installation = arena
-            .prepare_install(nursery.into_new())
-            .map_err(native_fault)?;
-        installation
-            .bind_entity(
-                value
-                    .handle()
-                    .ok_or_else(|| malformed("list construction lost its handle"))?,
-                self.entity,
-            )
-            .map_err(native_fault)?;
-        let (registration, batch) = installation.into_parts();
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedListConstruction { batch, value },
-            actual,
-        }))
-    }
-}
 pub(super) struct CellConstruction {
     pub(super) entity: EntityId,
     pub(super) value: Value,

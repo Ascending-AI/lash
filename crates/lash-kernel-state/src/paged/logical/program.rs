@@ -65,6 +65,13 @@ pub enum VirtualBody {
     Record(Vec<(PageValue, PageValue)>),
 }
 impl VirtualBody {
+    /// Canonical direct member obligations, excluding the entity header.
+    pub fn member_bytes(&self, heap: &PagedHeap, arena: &mut Arena) -> Result<u64, HeapFault> {
+        self.holding(heap, arena)?
+            .bytes
+            .checked_sub(Cost::OBJECT)
+            .ok_or_else(|| invalid("virtual member price underflow"))
+    }
     pub(super) fn holding(
         &self,
         heap: &PagedHeap,
