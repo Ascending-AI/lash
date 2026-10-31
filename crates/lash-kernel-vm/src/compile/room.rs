@@ -853,6 +853,45 @@ impl Source {
         }
     }
 
+    /// The next event after a resident, non-protocol cursor has selected its branch.
+    pub(crate) fn next_after_for_cursor(
+        &self,
+        at: &Site,
+        continued: bool,
+    ) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        let doc::Node::Stmt(doc::Stmt::For {
+            via: None,
+            else_block,
+            ..
+        }) = node
+        else {
+            return Err(Refused::Path);
+        };
+        if !continued && !else_block.is_empty() {
+            return self.first_event(&child(at, 2));
+        }
+        self.room
+            .peak_extra
+            .get(&point(
+                at,
+                if continued {
+                    Phase::Test
+                } else {
+                    Phase::Commit
+                },
+            ))
+            .map(|event| event.point.clone())
+            .ok_or(Refused::Path)
+    }
+
     /// The first unpaid event after an expression, binding or variable assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.

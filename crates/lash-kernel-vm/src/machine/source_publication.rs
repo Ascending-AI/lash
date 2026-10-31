@@ -32,6 +32,12 @@ use std::{cell::Cell, sync::Arc};
 fn malformed(message: &str) -> HeapFault {
     HeapFault::Malformed(message.into())
 }
+#[derive(Clone, Copy)]
+pub(in crate::machine) enum ScopeLoop {
+    While,
+    For { continued: bool },
+}
+
 #[derive(Default)]
 pub(in crate::machine) struct LeafFacts {
     pub(in crate::machine) dependencies: Vec<ArenaHandle>,

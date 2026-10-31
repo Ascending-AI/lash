@@ -16,7 +16,7 @@ mod session;
 mod unit;
 use super::*;
 use crate::compile::room::{self, publication::Frontier};
-use crate::machine::source_publication::{LeafExecution, LeafFacts};
+use crate::machine::source_publication::{LeafExecution, LeafFacts, ScopeLoop};
 use lash_kernel_doc::{self as doc, heap::HeapFault};
 use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, SourceValue};
 

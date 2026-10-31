@@ -19,7 +19,7 @@ const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empt
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 // K-CHG-001: an unpaid source region cannot publish a captured closure.
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
-const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { do \"a deferred source payload beyond the inline representation\" do 1000000000000000000000000 do b\"0011ff\" let callback = &literal do apply callback(value) let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
+const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { do \"a deferred source payload beyond the inline representation\" do 1000000000000000000000000 do b\"0011ff\" let callback = &literal do apply callback(value) let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } else { do value } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
@@ -252,6 +252,7 @@ fn observe_source_or_register(
     let precise_literals = crate::machine::islands::witness::precise_literals();
     let precise_scopes = crate::machine::islands::witness::precise_scopes();
     let while_scopes = crate::machine::islands::witness::while_scopes();
+    let for_scopes = crate::machine::islands::witness::for_scopes();
     let condition_iterations = crate::machine::islands::witness::precise_condition_iterations();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
@@ -387,6 +388,19 @@ fn observe_source_or_register(
         assert!(
             while_scopes[usize::from(mode == Mode::Source)] > 0,
             "the actual while body must publish its scope release before the next condition: {mode:?} {while_scopes:?}"
+        );
+    }
+    if layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && (source.contains(SOURCE_SCOPED_BINDINGS) || source.contains(SOURCE_SESSION))
+    {
+        assert!(
+            for_scopes[usize::from(mode == Mode::Source)]
+                .iter()
+                .all(|count| *count > 0),
+            "for-body release must publish its actual continued and exhausted cursor successors: {mode:?} {for_scopes:?}"
         );
     }
     if mode == Mode::Source

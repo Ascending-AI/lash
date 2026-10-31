@@ -42,7 +42,7 @@ impl Cursor {
     #[inline(always)]
     pub(super) fn resident_step(
         &self,
-        arena: &mut Arena,
+        arena: &Arena,
     ) -> Option<Result<(Self, Option<Value>), NativeError>> {
         Some(match self {
             Self::List(items, position) => arena.item(*items, *position as u64).map(|value| {

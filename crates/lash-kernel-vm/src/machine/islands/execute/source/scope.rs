@@ -23,7 +23,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if closing == &source.site {
             return Ok(false);
         }
-        let (unpaid, while_body) = match frame.state.control.iter().rev().nth(1) {
+        let (unpaid, loop_body, dependency) = match frame.state.control.iter().rev().nth(1) {
             Some(Position::Block(parent, next)) => {
                 let parent = self
                     .exe
@@ -43,7 +43,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         },
                     }
                 };
-                (unpaid, false)
+                (unpaid, None, None)
             }
             Some(Position::Loop {
                 id,
@@ -61,11 +61,44 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 let Ok(unpaid) = source.first_event(&site.child(0)) else {
                     return Ok(false);
                 };
-                (unpaid, true)
+                (unpaid, Some(ScopeLoop::While), None)
+            }
+            Some(Position::Loop {
+                id,
+                started,
+                cursor: Some(cursor),
+                guard: None,
+                ..
+            }) => {
+                let crate::compile::Form::For {
+                    site,
+                    body,
+                    via: None,
+                    ..
+                } = &self.exe.stmt(*id).form
+                else {
+                    return Ok(false);
+                };
+                if *body != frame.state.callee.compiled.blocks[block].id || *started == 0 {
+                    return Err(malformed("scope is not an entered for body"));
+                }
+                let Some(Ok((_, next))) = cursor.resident_step(self.arena) else {
+                    return Ok(false);
+                };
+                let continued = next.is_some();
+                let Ok(unpaid) = source.next_after_for_cursor(site, continued) else {
+                    return Ok(false);
+                };
+                (
+                    unpaid,
+                    Some(ScopeLoop::For { continued }),
+                    cursor.walked().and_then(|value| value.handle()),
+                )
             }
             _ => return Ok(false),
         };
-        debug_assert!(!while_body || frame.state.control.len() >= 2);
+        debug_assert!(loop_body.is_none() || frame.state.control.len() >= 2);
+        debug_assert!(!matches!(loop_body, Some(ScopeLoop::For { .. })) || dependency.is_some());
         let leave = Point {
             site: closing.clone(),
             phase: SourcePhase::Leave,
@@ -106,6 +139,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             [(
                 leave.clone(),
                 LeafFacts {
+                    dependencies: dependency.into_iter().collect(),
                     values: [(Measure::Release(groups.into()), i128::from(released))].into(),
                     ..Default::default()
                 },
@@ -182,8 +216,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::scope_published();
-            if while_body {
-                crate::machine::islands::witness::while_scope_published(false);
+            match loop_body {
+                Some(ScopeLoop::While) => {
+                    crate::machine::islands::witness::while_scope_published(false)
+                }
+                Some(ScopeLoop::For { continued }) => {
+                    crate::machine::islands::witness::for_scope_published(false, continued)
+                }
+                None => {}
             }
         }
         Ok(published)

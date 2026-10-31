@@ -15,7 +15,8 @@ impl KernelMachine {
         task_id: doc::TaskId,
         exe: &Executable,
     ) -> Result<bool, Halt> {
-        let (source, link, loops, block, invocation, unpaid, while_body) = {
+        let arena = std::rc::Rc::clone(&self.arena);
+        let (source, link, loops, block, invocation, unpaid, loop_body, dependency) = {
             let frame = self.frame(task_id)?;
             let Some(roots) = &frame.logical else {
                 return Ok(false);
@@ -37,7 +38,7 @@ impl KernelMachine {
             if exe.block(*block).site == source.site {
                 return Ok(false);
             }
-            let (unpaid, while_body) = match frame.control.iter().rev().nth(1) {
+            let (unpaid, loop_body, dependency) = match frame.control.iter().rev().nth(1) {
                 Some(Control::Block {
                     block: parent,
                     next,
@@ -61,7 +62,7 @@ impl KernelMachine {
                             },
                         }
                     };
-                    (unpaid, false)
+                    (unpaid, None, None)
                 }
                 Some(Control::While { stmt, started }) => {
                     let crate::compile::Form::While { site, body, .. } = &exe.stmt(*stmt).form
@@ -74,7 +75,39 @@ impl KernelMachine {
                     let Ok(unpaid) = source.first_event(&site.child(0)) else {
                         return Ok(false);
                     };
-                    (unpaid, true)
+                    (unpaid, Some(ScopeLoop::While), None)
+                }
+                Some(Control::For {
+                    stmt,
+                    cursor,
+                    started,
+                    header: crate::machine::loops::Header::Body,
+                    guard: None,
+                }) => {
+                    let crate::compile::Form::For {
+                        site,
+                        body,
+                        via: None,
+                        ..
+                    } = &exe.stmt(*stmt).form
+                    else {
+                        return Ok(false);
+                    };
+                    if body != block || *started == 0 {
+                        return Err(malformed("scope is not an entered for body").into());
+                    }
+                    let Some(Ok((_, next))) = cursor.resident_step(&arena.borrow()) else {
+                        return Ok(false);
+                    };
+                    let continued = next.is_some();
+                    let Ok(unpaid) = source.next_after_for_cursor(site, continued) else {
+                        return Ok(false);
+                    };
+                    (
+                        unpaid,
+                        Some(ScopeLoop::For { continued }),
+                        cursor.walked().and_then(|value| value.handle()),
+                    )
                 }
                 _ => return Ok(false),
             };
@@ -85,10 +118,12 @@ impl KernelMachine {
                 *block,
                 roots.invocation().id(),
                 unpaid,
-                while_body,
+                loop_body,
+                dependency,
             )
         };
-        debug_assert!(!while_body || !loops.is_empty());
+        debug_assert!(loop_body.is_none() || !loops.is_empty());
+        debug_assert!(!matches!(loop_body, Some(ScopeLoop::For { .. })) || dependency.is_some());
         let at = Point {
             site: exe.block(block).site.clone(),
             phase: Phase::Leave,
@@ -205,6 +240,7 @@ impl KernelMachine {
                     [(
                         at,
                         LeafFacts {
+                            dependencies: dependency.into_iter().collect(),
                             values: [(Measure::Release(groups.into()), i128::from(released))]
                                 .into(),
                             ..Default::default()
@@ -244,8 +280,14 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_scope_published();
-            if while_body {
-                crate::machine::islands::witness::while_scope_published(true);
+            match loop_body {
+                Some(ScopeLoop::While) => {
+                    crate::machine::islands::witness::while_scope_published(true)
+                }
+                Some(ScopeLoop::For { continued }) => {
+                    crate::machine::islands::witness::for_scope_published(true, continued)
+                }
+                None => {}
             }
         }
         Ok(published)
