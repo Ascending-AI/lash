@@ -77,6 +77,15 @@ impl PreparedNative {
     pub(in crate::machine) fn known(&self) -> bool {
         matches!(self, Self::Value(value::PreparedValue { known: true, .. }))
     }
+    pub(in crate::machine) fn allocated_immutable(&self) -> bool {
+        matches!(
+            self,
+            Self::Value(value::PreparedValue {
+                allocated: true,
+                ..
+            })
+        )
+    }
     pub(in crate::machine) fn value(&self) -> Value {
         match self {
             Self::Text(p) => p.value,
@@ -102,7 +111,7 @@ impl PreparedNative {
         match self {
             Self::Text(p) => p.batch.publish(arena),
             Self::Collection(p) => p.batch.publish(arena),
-            Self::Value(_) => {}
+            Self::Value(p) => p.batch.publish(arena),
         }
     }
 }

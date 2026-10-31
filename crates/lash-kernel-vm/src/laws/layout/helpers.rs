@@ -74,10 +74,20 @@ pub(in crate::laws) fn helper_probes(
             "a: Number, b: Number) -> Number",
         ),
         ("resident.add", "num.add", "a: Number, b: Number) -> Number"),
+        (
+            "resident.large_add",
+            "num.add",
+            "a: Number, b: Number) -> Number",
+        ),
         ("resident.negate", "num.neg", "value: Number) -> Number"),
     ] {
+        let charge = if name == "resident.large_add" {
+            "sum(1, size(a), size(b), size(result))"
+        } else {
+            "1"
+        };
         let definition = lash_kernel_doc::parse_definition(&format!(
-            "function {name}({signature}\nkernel 1\ncharge 1\nnative\n"
+            "function {name}({signature}\nkernel 1\ncharge {charge}\nnative\n"
         ))
         .unwrap();
         out.push((

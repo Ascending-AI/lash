@@ -57,7 +57,131 @@ pub struct PreparedInstallation<'a> {
     registration: Registration<'a>,
     batch: PreparedBatch,
 }
+impl Bodies for PreparedInstallation<'_> {
+    fn get(&self, handle: ArenaHandle) -> Option<&Body> {
+        self.batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+            .map(|entry| &entry.body)
+            .or_else(|| self.registration.read_arena().objects.get(handle))
+    }
+}
 impl<'a> PreparedInstallation<'a> {
+    /// Reads a detached body or an existing dependency without installing it.
+    /// The exclusive registration keeps every returned generation stable.
+    pub fn body(&self, handle: ArenaHandle) -> Result<&Body, NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return Ok(&entry.body);
+        }
+        self.registration.read_arena().body(handle)
+    }
+
+    /// The canonical immutable descriptor, if projection already produced it.
+    pub fn page(&mut self, handle: ArenaHandle) -> Result<Option<PageValue>, NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return Ok(entry.facts.page.get().cloned());
+        }
+        Ok(self.registration.arena().facts(handle)?.page.get().cloned())
+    }
+
+    /// Keeps a projection with its detached body for the accepted installation.
+    pub fn keep_page(&mut self, handle: ArenaHandle, page: PageValue) -> Result<(), NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            let _ = entry.facts.page.set(page);
+            return Ok(());
+        }
+        // A dependency projection may name a rolled-back identity. Do not
+        // cache that descriptor in live storage before acceptance.
+        Ok(())
+    }
+
+    /// A new mutable body must already be bound to its prospective journal id.
+    /// Existing dependency identities are granted under this registration.
+    pub fn identify(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return entry
+                .facts
+                .entity
+                .ok_or_else(|| malformed("a prepared body has no journal identity"));
+        }
+        self.registration.arena().identify(handle)
+    }
+
+    /// Canonical integer interpretation over detached and existing bodies.
+    pub fn integer(&self, value: &Value) -> Result<Option<lash_kernel_doc::Integer>, NativeError> {
+        keys::integer(self, value)
+    }
+    /// Resident sequence members, using the ordinary chunk reader.
+    pub fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return match &entry.body {
+                Body::List(sequence) | Body::Tuple(sequence) => {
+                    ops::values(handle, &sequence.chunks)
+                }
+                _ => Err(malformed("a sequence handle names another body")),
+            };
+        }
+        self.registration.read_arena().sequence(handle)
+    }
+    /// Normalized table pairs, using the ordinary canonical table reader.
+    pub fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return match &entry.body {
+                Body::Map(table) | Body::Set(table) | Body::Record(table) => {
+                    tables::pairs(handle, table)
+                }
+                _ => Err(malformed("a table handle names another body")),
+            };
+        }
+        self.registration.read_arena().entries(handle)
+    }
+    /// The exact collection extent; existing cold dependencies retain their reader.
+    pub fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
+        if let Some(entry) = self
+            .batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle == handle)
+        {
+            return match &entry.body {
+                Body::List(sequence) | Body::Tuple(sequence) => Ok(sequence.len),
+                Body::Map(table) | Body::Set(table) | Body::Record(table) => Ok(table.len),
+                _ => Err(malformed("a collection handle names another body")),
+            };
+        }
+        self.registration.read_arena().len(handle)
+    }
     /// Copies the normalized collection recipe from detached storage. Tables
     /// retain canonical key spelling, insertion order and last-write values.
     pub fn collection(&self, handle: ArenaHandle) -> Result<NewObject, NativeError> {

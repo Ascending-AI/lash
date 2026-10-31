@@ -62,6 +62,82 @@ fn entity(arena: &mut Arena, handle: ArenaHandle) -> Result<EntityId, HeapFault>
     arena.identify(handle).map_err(arena_fault)
 }
 
+/// Projection reads either installed objects or the exclusive detached batch.
+/// Both paths produce the same canonical page form and use the same prices.
+trait ProjectionArena {
+    fn projection_body(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<&Body, lash_kernel_doc::NativeError>;
+    fn projection_identify(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<EntityId, lash_kernel_doc::NativeError>;
+    fn projection_page(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError>;
+    fn projection_keep_page(
+        &mut self,
+        handle: ArenaHandle,
+        page: PageValue,
+    ) -> Result<(), lash_kernel_doc::NativeError>;
+}
+impl ProjectionArena for Arena {
+    fn projection_body(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<&Body, lash_kernel_doc::NativeError> {
+        Arena::body(self, handle)
+    }
+    fn projection_identify(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<EntityId, lash_kernel_doc::NativeError> {
+        Arena::identify(self, handle)
+    }
+    fn projection_page(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError> {
+        Ok(self.facts(handle)?.page.get().cloned())
+    }
+    fn projection_keep_page(
+        &mut self,
+        handle: ArenaHandle,
+        page: PageValue,
+    ) -> Result<(), lash_kernel_doc::NativeError> {
+        Arena::keep_page(self, handle, page)
+    }
+}
+impl ProjectionArena for lash_kernel_state::arena::PreparedInstallation<'_> {
+    fn projection_body(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<&Body, lash_kernel_doc::NativeError> {
+        self.body(handle)
+    }
+    fn projection_identify(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<EntityId, lash_kernel_doc::NativeError> {
+        self.identify(handle)
+    }
+    fn projection_page(
+        &mut self,
+        handle: ArenaHandle,
+    ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError> {
+        self.page(handle)
+    }
+    fn projection_keep_page(
+        &mut self,
+        handle: ArenaHandle,
+        page: PageValue,
+    ) -> Result<(), lash_kernel_doc::NativeError> {
+        self.keep_page(handle, page)
+    }
+}
+
 /// The page form of `value`, built through `pages`. An immutable's is
 /// built once and kept with it; a mutable object's is its identity, given
 /// now if it has none.
@@ -71,6 +147,23 @@ fn entity(arena: &mut Arena, handle: ArenaHandle) -> Result<EntityId, HeapFault>
 /// The page port's faults, and a value the arena does not hold.
 pub(crate) fn project(
     arena: &mut Arena,
+    pages: &Access<'_>,
+    value: &Value,
+) -> Result<PageValue, HeapFault> {
+    project_in(arena, pages, value)
+}
+
+/// Project the exclusive prepared graph without publishing any guest body.
+pub(in crate::machine) fn project_prepared(
+    arena: &mut lash_kernel_state::arena::PreparedInstallation<'_>,
+    pages: &Access<'_>,
+    value: &Value,
+) -> Result<PageValue, HeapFault> {
+    project_in(arena, pages, value)
+}
+
+fn project_in<A: ProjectionArena>(
+    arena: &mut A,
     pages: &Access<'_>,
     value: &Value,
 ) -> Result<PageValue, HeapFault> {
@@ -89,12 +182,24 @@ pub(crate) fn project(
         }),
         Value::Task(task) => PageValue::Task(task),
         Value::TaskRef(task) => PageValue::Ref(Identity::Task(task)),
-        Value::List(handle) => PageValue::List(entity(arena, handle)?),
-        Value::Map(handle) => PageValue::Map(entity(arena, handle)?),
-        Value::Set(handle) => PageValue::Set(entity(arena, handle)?),
-        Value::Record(handle) => PageValue::Record(entity(arena, handle)?),
-        Value::Closure(handle) => PageValue::Closure(entity(arena, handle)?),
-        Value::ObjectRef(handle) => PageValue::Ref(Identity::Object(entity(arena, handle)?)),
+        Value::List(handle) => {
+            PageValue::List(arena.projection_identify(handle).map_err(arena_fault)?)
+        }
+        Value::Map(handle) => {
+            PageValue::Map(arena.projection_identify(handle).map_err(arena_fault)?)
+        }
+        Value::Set(handle) => {
+            PageValue::Set(arena.projection_identify(handle).map_err(arena_fault)?)
+        }
+        Value::Record(handle) => {
+            PageValue::Record(arena.projection_identify(handle).map_err(arena_fault)?)
+        }
+        Value::Closure(handle) => {
+            PageValue::Closure(arena.projection_identify(handle).map_err(arena_fault)?)
+        }
+        Value::ObjectRef(handle) => PageValue::Ref(Identity::Object(
+            arena.projection_identify(handle).map_err(arena_fault)?,
+        )),
         Value::BigInt(handle)
         | Value::LongText(handle)
         | Value::Bytes(handle)
@@ -103,12 +208,13 @@ pub(crate) fn project(
         | Value::Error(handle)
         | Value::Function(handle)
         | Value::Handle(handle) => {
-            let facts = arena.facts(handle).map_err(arena_fault)?;
-            if let Some(page) = facts.page.get() {
-                return Ok(page.clone());
+            if let Some(page) = arena.projection_page(handle).map_err(arena_fault)? {
+                return Ok(page);
             }
             let page = immutable(arena, pages, handle)?;
-            arena.keep_page(handle, page.clone()).map_err(arena_fault)?;
+            arena
+                .projection_keep_page(handle, page.clone())
+                .map_err(arena_fault)?;
             page
         }
     })
@@ -131,21 +237,25 @@ fn whole_text(text: &LongText) -> Result<&str, HeapFault> {
     }
 }
 
-fn text_of(arena: &mut Arena, pages: &Access<'_>, value: &Value) -> Result<TextRef, HeapFault> {
-    match project(arena, pages, value)? {
+fn text_of<A: ProjectionArena>(
+    arena: &mut A,
+    pages: &Access<'_>,
+    value: &Value,
+) -> Result<TextRef, HeapFault> {
+    match project_in(arena, pages, value)? {
         PageValue::Text(text) => Ok(text),
         _ => Err(malformed("an error's kind or message is not a text")),
     }
 }
 
-fn immutable(
-    arena: &mut Arena,
+fn immutable<A: ProjectionArena>(
+    arena: &mut A,
     pages: &Access<'_>,
     handle: ArenaHandle,
 ) -> Result<PageValue, HeapFault> {
     // A tuple's members and an error's parts are projected through the
     // arena, which may give an object among them its id.
-    let members = match arena.body(handle).map_err(arena_fault)? {
+    let members = match arena.projection_body(handle).map_err(arena_fault)? {
         Body::Tuple(sequence) => {
             let mut members = Vec::with_capacity(sequence.len as usize);
             for chunk in sequence.chunks.iter() {
@@ -167,21 +277,21 @@ fn immutable(
         Some(Ok(members)) => {
             let members = members
                 .iter()
-                .map(|value| project(arena, pages, value))
+                .map(|value| project_in(arena, pages, value))
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(PageValue::Tuple(stored_pages::tuple(pages, members)?));
         }
         Some(Err((kind, message, data))) => {
             let kind = text_of(arena, pages, &kind)?;
             let message = text_of(arena, pages, &message)?;
-            let data = project(arena, pages, &data)?;
+            let data = project_in(arena, pages, &data)?;
             return Ok(PageValue::Error(stored_pages::error(
                 pages, kind, message, data,
             )?));
         }
         None => {}
     }
-    Ok(match arena.body(handle).map_err(arena_fault)? {
+    Ok(match arena.projection_body(handle).map_err(arena_fault)? {
         Body::BigInt(int) => PageValue::Int(stored_pages::int(pages, int.clone())?),
         Body::Timestamp(nanoseconds) => PageValue::Timestamp(Timestamp {
             nanoseconds: nanoseconds.clone(),

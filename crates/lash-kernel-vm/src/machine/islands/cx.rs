@@ -754,8 +754,17 @@ pub(crate) fn measured_formula(
     measured_formula_with_growth(arena, plan, args, result, 0, 0)
 }
 
+pub(in crate::machine) fn measured_prepared_formula(
+    arena: &lash_kernel_state::arena::PreparedInstallation<'_>,
+    plan: &Plan,
+    args: &[Value],
+    result: &Value,
+) -> Option<u64> {
+    measured_formula_with_growth(arena, plan, args, Some(result), 0, 0)
+}
+
 fn measured_formula_with_growth(
-    arena: &Arena,
+    arena: &impl crate::data::ChargeArena,
     plan: &Plan,
     args: &[Value],
     result: Option<&Value>,
@@ -833,7 +842,7 @@ fn measured_formula_by(
 }
 
 fn value_measure(
-    arena: &Arena,
+    arena: &impl crate::data::ChargeArena,
     value: &Value,
     measure: Measure,
     size_growth: u64,
@@ -843,10 +852,10 @@ fn value_measure(
         return Some(units);
     }
     let units = match measure {
-        Measure::Size => crate::data::size(arena, value),
-        Measure::DeepSize => crate::data::deep_size(arena, value),
-        Measure::NestedSize => crate::data::nested_size(arena, value),
-        Measure::Magnitude => Ok(crate::data::magnitude(arena, value)),
+        Measure::Size => crate::data::view_size(arena, value),
+        Measure::DeepSize => crate::data::view_deep_size(arena, value),
+        Measure::NestedSize => crate::data::view_nested_size(arena, value),
+        Measure::Magnitude => Ok(crate::data::view_magnitude(arena, value)),
     }
     .ok()?;
     Some(units.saturating_add(match measure {

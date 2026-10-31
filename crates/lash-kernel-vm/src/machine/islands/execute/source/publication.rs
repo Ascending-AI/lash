@@ -5,7 +5,7 @@ use lash_kernel_state::kernel_internals::logical::{MemberEdit, Program};
 
 use crate::machine::source_publication::{Admission, Context};
 pub(super) use crate::machine::source_publication::{
-    Prefix, PreparedStorage, Reserve, StoragePreparation, native_fault,
+    Prefix, Reserve, StoragePreparation, native_fault,
 };
 
 pub(super) use crate::machine::source_publication::{CellConstruction, ClosureConstruction};

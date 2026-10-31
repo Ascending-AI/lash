@@ -162,6 +162,9 @@ impl Registration<'_> {
             .ok_or_else(|| malformed("identity ordinals overflow"))?;
         Ok(entity)
     }
+    pub(super) fn read_arena(&self) -> &Arena {
+        self.arena
+    }
     pub fn arena(&mut self) -> &mut Arena {
         self.arena
     }

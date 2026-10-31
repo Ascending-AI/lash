@@ -38,18 +38,89 @@ pub(crate) fn raised(kind: &'static str, message: impl Into<String>) -> Raised {
     }
 }
 
+/// Charge algorithms read the same semantic graph before or after installation.
+pub(crate) trait ChargeArena {
+    fn body(&self, handle: ArenaHandle) -> Result<&Body, NativeError>;
+    fn integer(&self, value: &Value) -> Result<Option<Integer>, NativeError>;
+    fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError>;
+    fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError>;
+    fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError>;
+    fn flat_charge_size(&self, _: &Value) -> Result<Option<u64>, NativeError> {
+        Ok(None)
+    }
+}
+impl ChargeArena for Arena {
+    fn body(&self, handle: ArenaHandle) -> Result<&Body, NativeError> {
+        self.body(handle)
+    }
+    fn integer(&self, value: &Value) -> Result<Option<Integer>, NativeError> {
+        self.semantics().integer(value)
+    }
+    fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        self.sequence(handle)
+    }
+    fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        self.entries(handle)
+    }
+    fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
+        self.len(handle)
+    }
+    fn flat_charge_size(&self, value: &Value) -> Result<Option<u64>, NativeError> {
+        self.flat_charge_size(value)
+    }
+}
+impl ChargeArena for lash_kernel_state::arena::PreparedInstallation<'_> {
+    fn body(&self, handle: ArenaHandle) -> Result<&Body, NativeError> {
+        self.body(handle)
+    }
+    fn integer(&self, value: &Value) -> Result<Option<Integer>, NativeError> {
+        self.integer(value)
+    }
+    fn sequence(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        self.sequence(handle)
+    }
+    fn entries(&self, handle: ArenaHandle) -> Result<&[Value], NativeError> {
+        self.entries(handle)
+    }
+    fn len(&self, handle: ArenaHandle) -> Result<u64, NativeError> {
+        self.len(handle)
+    }
+}
+
 fn integer_of(arena: &Arena, value: &Value) -> Result<Option<Integer>, NativeError> {
-    arena.semantics().integer(value)
+    view_integer_of(arena, value)
+}
+pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    view_size(arena, value)
+}
+pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    view_deep_size(arena, value)
+}
+pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    view_graph_deep_size(arena, value)
+}
+pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+    view_nested_size(arena, value)
+}
+pub(crate) fn magnitude(arena: &Arena, value: &Value) -> u64 {
+    view_magnitude(arena, value)
+}
+
+fn view_integer_of(
+    arena: &impl ChargeArena,
+    value: &Value,
+) -> Result<Option<Integer>, NativeError> {
+    arena.integer(value)
 }
 
 /// A value's size (`K-CHG-004`), from what the arena knows of it.
-pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+pub(crate) fn view_size(arena: &impl ChargeArena, value: &Value) -> Result<u64, NativeError> {
     if let Some(size) = immediate_size(value) {
         return Ok(size);
     }
     let extent = match value {
         Value::BigInt(_) => {
-            integer_of(arena, value)?.map_or(0, |integer| integer.bits().div_ceil(64))
+            view_integer_of(arena, value)?.map_or(0, |integer| integer.bits().div_ceil(64))
         }
         Value::Text(short) => short.as_bytes().len() as u64,
         Value::LongText(handle) => match arena.body(*handle)? {
@@ -136,7 +207,7 @@ pub(crate) fn empty_measure(measure: Measure) -> u64 {
     }
 }
 
-fn text_len(arena: &Arena, text: &Value) -> Result<u64, NativeError> {
+fn text_len(arena: &impl ChargeArena, text: &Value) -> Result<u64, NativeError> {
     Ok(match text {
         Value::Text(short) => short.as_bytes().len() as u64,
         Value::LongText(handle) => match arena.body(*handle)? {
@@ -179,7 +250,7 @@ pub(crate) fn size_one(value: &Value) -> bool {
 
 /// The members of an immutable composite: a tuple's, an error's data.
 fn immutable_members(
-    arena: &Arena,
+    arena: &impl ChargeArena,
     value: &Value,
     visitor: &mut dyn FnMut(&Value) -> Result<(), NativeError>,
 ) -> Result<(), NativeError> {
@@ -200,20 +271,23 @@ fn immutable_members(
 
 /// A deep charge size counts each entity once (`K-CHG-005`). Immutable
 /// values still count at each holding location.
-pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+pub(crate) fn view_deep_size(arena: &impl ChargeArena, value: &Value) -> Result<u64, NativeError> {
     if holds_nothing(value) {
-        return size(arena, value);
+        return view_size(arena, value);
     }
     if let Some(total) = arena.flat_charge_size(value)? {
         return Ok(total);
     }
-    graph_deep_size(arena, value)
+    view_graph_deep_size(arena, value)
 }
 
 /// The authoritative seen-set walk for graphs without a flat summary.
-pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+pub(crate) fn view_graph_deep_size(
+    arena: &impl ChargeArena,
+    value: &Value,
+) -> Result<u64, NativeError> {
     fn measure(
-        arena: &Arena,
+        arena: &impl ChargeArena,
         value: &Value,
         seen: &mut BTreeSet<u32>,
         pending: &mut Vec<Value>,
@@ -230,7 +304,7 @@ pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, Nativ
             }
             pending.push(*value);
         }
-        let mut total = size(arena, value)?;
+        let mut total = view_size(arena, value)?;
         immutable_members(arena, value, &mut |member| {
             total = total.saturating_add(measure(arena, member, seen, pending)?);
             Ok(())
@@ -262,7 +336,10 @@ pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, Nativ
     Ok(total)
 }
 
-pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
+pub(crate) fn view_nested_size(
+    arena: &impl ChargeArena,
+    value: &Value,
+) -> Result<u64, NativeError> {
     if !matches!(value, Value::Tuple(_) | Value::Error(_)) {
         return Ok(0);
     }
@@ -270,7 +347,7 @@ pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeErr
     immutable_members(arena, value, &mut |member| {
         let amount = match member {
             Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
-            _ => size(arena, member)?.saturating_add(nested_size(arena, member)?),
+            _ => view_size(arena, member)?.saturating_add(view_nested_size(arena, member)?),
         };
         total = total.saturating_add(amount);
         Ok(())
@@ -278,9 +355,9 @@ pub(crate) fn nested_size(arena: &Arena, value: &Value) -> Result<u64, NativeErr
     Ok(total)
 }
 
-pub(crate) fn magnitude(arena: &Arena, value: &Value) -> u64 {
+pub(crate) fn view_magnitude(arena: &impl ChargeArena, value: &Value) -> u64 {
     match value {
-        Value::BigInt(_) => match integer_of(arena, value) {
+        Value::BigInt(_) => match view_integer_of(arena, value) {
             Ok(Some(integer)) if !integer.is_negative() => integer.to_u64().unwrap_or(u64::MAX),
             _ => 0,
         },

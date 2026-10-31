@@ -262,6 +262,7 @@ impl KernelMachine {
                 charging: self.charging,
                 limits: self.limits,
                 known,
+                room: physical_room,
             })
         };
         let document = running
@@ -399,6 +400,7 @@ impl KernelMachine {
                     prepared.storage.units(),
                     prepared.storage.work(),
                     prepared.storage.known(),
+                    prepared.storage.allocated_immutable(),
                 ));
                 prepared.storage.publish(arena);
                 prepared.bank.publish(value, prepared.holding);
@@ -406,8 +408,14 @@ impl KernelMachine {
         )?;
         drop(arena);
         if published {
-            let (units, work, known) =
+            let (units, work, known, allocated) =
                 completion.ok_or_else(|| malformed("native publication has no completion"))?;
+            #[cfg(any(test, feature = "testing"))]
+            if allocated {
+                crate::machine::islands::witness::immutable_native_published();
+            }
+            #[cfg(not(any(test, feature = "testing")))]
+            let _ = allocated;
             if known {
                 self.observe(crate::observe::Event::NativeFast);
             }
