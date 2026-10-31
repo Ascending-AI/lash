@@ -5,12 +5,34 @@ pub(crate) async fn list_sessions(
     pool: &PgPool,
     filter: &SessionListFilter,
 ) -> Result<Vec<SessionView>, StoreError> {
+    let relation = filter.relation.map(|kind| match kind {
+        SessionRelationKind::Root => "root",
+        SessionRelationKind::Child => "child",
+        SessionRelationKind::Fork => "fork",
+    });
+    let cause =
+        lash_core_store::store_backend_support::CausalColumns::encode(filter.caused_by.as_ref());
     let rows = crate::observed_sql::query(
         crate::session_sql::session_sql()
             .meta_postgres
             .select_catalog
             .sql(),
     )
+    .bind(relation)
+    .bind(filter.deleted)
+    .bind(cause.kind.as_deref())
+    .bind(cause.session_id.as_deref())
+    .bind(
+        cause
+            .turn_id
+            .as_ref()
+            .map(lash_vocabulary::identity::TurnId::as_str),
+    )
+    .bind(cause.effect_id.as_deref())
+    .bind(cause.call_id.as_deref())
+    .bind(cause.process_id.as_deref())
+    .bind(cause.process_event_sequence.as_deref())
+    .bind(cause.node_id.as_deref())
     .fetch_all(crate::observed_sql::executor(pool))
     .await
     .map_err(store_sqlx_error)?;
@@ -56,9 +78,6 @@ pub(crate) async fn list_sessions(
             head_revision: u64_from_sql("SessionView", "head_revision", row.get("head_revision"))?,
             entry,
         };
-        if !filter.matches(&view) {
-            continue;
-        }
         views.push(view);
     }
     Ok(views)

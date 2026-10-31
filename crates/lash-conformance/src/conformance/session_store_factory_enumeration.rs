@@ -201,4 +201,20 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
             .any(|summary| summary.session_id == root_request.session_id),
         "vacuum must not erase permanent session enumeration evidence"
     );
+    factory
+        .delete_session(&child_request.session_id)
+        .await
+        .expect("delete the causally selected child");
+    assert!(
+        factory
+            .list_sessions(&crate::SessionListFilter {
+                deleted: Some(true),
+                caused_by: caused_by.clone(),
+                ..crate::SessionListFilter::default()
+            })
+            .await
+            .expect("filter causal tombstones")
+            .is_empty(),
+        "a tombstone cannot match the causal identity its live relation carried"
+    );
 }

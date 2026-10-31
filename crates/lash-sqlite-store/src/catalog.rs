@@ -374,3 +374,7 @@ impl lash_core_store::attachments::AttachmentRootSet for SqliteStore {
         store.recover_abandoned_attachment_write(id).await
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod tests;

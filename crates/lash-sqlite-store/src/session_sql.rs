@@ -94,6 +94,8 @@ lash_store_sql::statements! {
         /// PostgreSQL's `jsonb_agg`. It stays one statement because a listing assembled
         /// from four reads would report a session as live in one row and
         /// deleted in another.
+        /// Relation `?1`, deletion `?2` and causal columns `?3` through `?10`
+        /// filter each arm before observer-intent aggregation.
         select_catalog = "WITH catalog AS (
              SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
                     meta.caused_by_kind,
@@ -107,12 +109,26 @@ lash_store_sql::statements! {
                     meta.closing_intent IS NOT NULL AS closing
              FROM session_meta AS meta
              LEFT JOIN session_head AS head ON head.session_id = meta.session_id
+             WHERE (?1 IS NULL OR meta.relation_kind = ?1)
+               AND (?2 IS NULL OR ?2 = FALSE)
+               AND (?3 IS NULL OR (meta.relation_kind = 'child'
+                      AND meta.caused_by_kind = ?3
+                      AND meta.caused_by_session_id IS ?4
+                      AND meta.caused_by_turn_id IS ?5
+                      AND meta.caused_by_effect_id IS ?6
+                      AND meta.caused_by_call_id IS ?7
+                      AND meta.caused_by_process_id IS ?8
+                      AND meta.caused_by_process_event_sequence IS ?9
+                      AND meta.caused_by_node_id IS ?10))
              UNION ALL
              SELECT session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL,
                     created_at_ms, last_commit_at_ms, head_revision, 1, 0
              FROM deleted_sessions
+             WHERE (?1 IS NULL OR relation_kind = ?1)
+               AND (?2 IS NULL OR ?2 = TRUE)
+               AND ?3 IS NULL
          )
          SELECT catalog.*,
                 CASE WHEN deleted = 1 THEN '[]' ELSE (
@@ -220,18 +236,16 @@ lash_store_sql::statements! {
 
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
-        artifact_frame_is_retained = "WITH RECURSIVE roots AS (
-            SELECT leaf_node_id AS node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
-            UNION SELECT node.node_id FROM graph_nodes AS node
-                JOIN session_meta AS meta ON meta.session_id = node.session_id
-                WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = 0
-        ), retained AS (
-            SELECT node_id FROM roots
-            UNION SELECT node.parent_node_id FROM graph_nodes AS node
-                JOIN retained ON retained.node_id = node.node_id
-                WHERE node.parent_node_id IS NOT NULL AND node.tombstoned = 0
-        ) SELECT EXISTS(SELECT 1 FROM graph_nodes AS node JOIN retained USING(node_id)
-            WHERE node.session_id = ?1 AND node.node_id = ?2 AND node.tombstoned = 0)";
+        artifact_frame_is_retained = "WITH RECURSIVE descendants AS (
+            SELECT node_id, session_id FROM graph_nodes
+                WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = 0
+            UNION SELECT child.node_id, child.session_id FROM graph_nodes AS child
+                JOIN descendants AS parent ON child.parent_node_id = parent.node_id
+                WHERE child.tombstoned = 0
+        ) SELECT EXISTS(SELECT 1 FROM descendants AS node
+            WHERE EXISTS(SELECT 1 FROM session_revisions WHERE leaf_node_id = node.node_id)
+               OR EXISTS(SELECT 1 FROM session_meta WHERE session_id = node.session_id
+                   AND admission_base_checkpoint_ref IS NOT NULL))";
 
         /// The generation of `?1` and whether it is tombstoned.
         select_leaf_state = "SELECT generation, tombstoned FROM graph_nodes WHERE node_id = ?1";

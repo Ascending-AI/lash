@@ -104,6 +104,8 @@ lash_store_sql::statements! {
         /// the observer-intent rows of each. `closing` is the live row's
         /// `closing_intent`, so a session whose close has begun never lists
         /// as live.
+        /// Relation `?1`, deletion `?2` and causal columns `?3` through `?10`
+        /// filter each arm before observer-intent aggregation.
         select_catalog = "WITH catalog AS (
              SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
                     meta.caused_by_kind,
@@ -119,6 +121,17 @@ lash_store_sql::statements! {
                     meta.closing_intent IS NOT NULL AS closing
              FROM session_meta AS meta
              LEFT JOIN session_head AS session ON session.session_id = meta.session_id
+             WHERE (?1::text IS NULL OR meta.relation_kind = ?1)
+               AND (?2::boolean IS NULL OR ?2 = FALSE)
+               AND (?3::text IS NULL OR (meta.relation_kind = 'child'
+                      AND meta.caused_by_kind = ?3
+                      AND meta.caused_by_session_id IS NOT DISTINCT FROM ?4
+                      AND meta.caused_by_turn_id IS NOT DISTINCT FROM ?5
+                      AND meta.caused_by_effect_id IS NOT DISTINCT FROM ?6
+                      AND meta.caused_by_call_id IS NOT DISTINCT FROM ?7
+                      AND meta.caused_by_process_id IS NOT DISTINCT FROM ?8
+                      AND meta.caused_by_process_event_sequence IS NOT DISTINCT FROM ?9
+                      AND meta.caused_by_node_id IS NOT DISTINCT FROM ?10))
              UNION ALL
              SELECT session_id, relation_kind,
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -126,6 +139,9 @@ lash_store_sql::statements! {
                     created_at_ms, last_commit_at_ms,
                     head_revision, TRUE, FALSE
              FROM deleted_sessions
+             WHERE (?1::text IS NULL OR relation_kind = ?1)
+               AND (?2::boolean IS NULL OR ?2 = TRUE)
+               AND ?3::text IS NULL
          )
          SELECT catalog.*,
                 CASE WHEN deleted THEN '[]' ELSE COALESCE((
@@ -272,18 +288,16 @@ lash_store_sql::statements! {
 
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
-        artifact_frame_is_retained = "WITH RECURSIVE roots AS (
-            SELECT leaf_node_id AS node_id FROM session_revisions WHERE leaf_node_id IS NOT NULL
-            UNION SELECT node.node_id FROM graph_nodes AS node
-                JOIN session_meta AS meta ON meta.session_id = node.session_id
-                WHERE meta.admission_base_checkpoint_ref IS NOT NULL AND node.tombstoned = FALSE
-        ), retained AS (
-            SELECT node_id FROM roots
-            UNION SELECT node.parent_node_id FROM graph_nodes AS node
-                JOIN retained ON retained.node_id = node.node_id
-                WHERE node.parent_node_id IS NOT NULL AND node.tombstoned = FALSE
-        ) SELECT EXISTS(SELECT 1 FROM graph_nodes AS node JOIN retained USING(node_id)
-            WHERE node.session_id = ?1 AND node.node_id = ?2 AND node.tombstoned = FALSE)";
+        artifact_frame_is_retained = "WITH RECURSIVE descendants AS (
+            SELECT node_id, session_id FROM graph_nodes
+                WHERE session_id = ?1 AND node_id = ?2 AND tombstoned = FALSE
+            UNION SELECT child.node_id, child.session_id FROM graph_nodes AS child
+                JOIN descendants AS parent ON child.parent_node_id = parent.node_id
+                WHERE child.tombstoned = FALSE
+        ) SELECT EXISTS(SELECT 1 FROM descendants AS node
+            WHERE EXISTS(SELECT 1 FROM session_revisions WHERE leaf_node_id = node.node_id)
+               OR EXISTS(SELECT 1 FROM session_meta WHERE session_id = node.session_id
+                   AND admission_base_checkpoint_ref IS NOT NULL))";
 
         /// Take the row lock on live node `?1`, reporting whether it is there.
         lock_live = "SELECT TRUE FROM graph_nodes

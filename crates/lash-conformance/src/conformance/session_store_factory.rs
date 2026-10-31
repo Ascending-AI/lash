@@ -974,9 +974,43 @@ async fn session_store_factory_round_trips_every_relation_shape(
                 .load_session_meta()
                 .await
                 .unwrap_or_else(|error| panic!("reload {label} relation: {error}")),
-            Some(expected),
+            Some(expected.clone()),
             "{label} relation must survive reopen"
         );
+        let views = factory
+            .list_sessions(&crate::SessionListFilter::default())
+            .await
+            .expect("catalog relation corpus");
+        let caused_by = match &expected.relation {
+            crate::SessionRelation::Child { caused_by, .. } => caused_by.clone(),
+            _ => None,
+        };
+        for relation in [
+            None,
+            Some(crate::SessionRelationKind::Child),
+            Some(crate::SessionRelationKind::Fork),
+        ] {
+            for deleted in [None, Some(false), Some(true)] {
+                let filter = crate::SessionListFilter {
+                    relation,
+                    deleted,
+                    caused_by: caused_by.clone(),
+                };
+                let filtered = factory
+                    .list_sessions(&filter)
+                    .await
+                    .expect("filter relation corpus");
+                let expected: Vec<_> = views
+                    .iter()
+                    .filter(|view| filter.matches(view))
+                    .cloned()
+                    .collect();
+                assert_eq!(
+                    filtered, expected,
+                    "catalog filters must preserve {label}, {filter:?}"
+                );
+            }
+        }
     }
 }
 

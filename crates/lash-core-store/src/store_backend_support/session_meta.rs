@@ -25,7 +25,8 @@ impl CausalColumns {
         clippy::expect_used,
         reason = "an `EffectAddress` is a struct of validated string identities, whose serialization has no failing case"
     )]
-    fn encode(cause: Option<&CausalRef>) -> Self {
+    /// Encode the causal identity used by session storage and catalog filters.
+    pub fn encode(cause: Option<&CausalRef>) -> Self {
         let mut columns = Self::default();
         match cause {
             None => {}
