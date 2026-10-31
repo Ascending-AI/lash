@@ -178,6 +178,31 @@ pub trait ProcessQuery: Send + Sync {
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError>;
 }
 
+/// Validate and prepare a registration using the registry's read, identity and
+/// time capabilities. Commit-time start-key and closure checks remain in the store.
+pub async fn prepare_registration(
+    query: &dyn ProcessQuery,
+    mint: &super::ProcessIdMint,
+    clock: &dyn crate::Clock,
+    registration: ProcessRegistration,
+    observers: &[SessionId],
+) -> Result<PreparedProcessRegistration, PluginError> {
+    let registration = super::prepare_process_registration(registration)?;
+    let existing = match registration.start_key.as_ref() {
+        Some(key) => query.get_process_by_start_key(key).await?,
+        None => None,
+    };
+    let retained = existing.is_some();
+    let process_id = existing.map_or_else(|| mint.mint(), |record| record.id);
+    Ok(PreparedProcessRegistration::new(
+        registration,
+        observers.to_vec(),
+        process_id,
+        retained,
+        clock.timestamp_ms(),
+    ))
+}
+
 /// Process admission: registration and the durable external backend reference.
 #[async_trait::async_trait]
 pub trait ProcessRegistrar: Send + Sync {

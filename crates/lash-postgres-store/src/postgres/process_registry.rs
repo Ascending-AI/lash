@@ -199,26 +199,14 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
         registration: ProcessRegistration,
         observers: &[SessionId],
     ) -> Result<lash_execution_contracts::process::PreparedProcessRegistration, PluginError> {
-        let registration =
-            lash_execution_contracts::process::prepare_process_registration(registration)?;
-        let existing = match registration.start_key.as_ref() {
-            Some(key) => {
-                lash_execution_contracts::process::ProcessQuery::get_process_by_start_key(self, key)
-                    .await?
-            }
-            None => None,
-        };
-        let retained = existing.is_some();
-        let process_id = existing.map_or_else(|| self.process_id_mint.mint(), |record| record.id);
-        Ok(
-            lash_execution_contracts::process::PreparedProcessRegistration::new(
-                registration,
-                observers.to_vec(),
-                process_id,
-                retained,
-                self.clock.timestamp_ms(),
-            ),
+        lash_execution_contracts::process::registry_concerns::prepare_registration(
+            self,
+            &self.process_id_mint,
+            self.clock.as_ref(),
+            registration,
+            observers,
         )
+        .await
     }
     async fn commit_process_registration(
         &self,
