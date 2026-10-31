@@ -18,10 +18,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
-        if !matches!(
-            site.direct(self.exe),
-            Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_) | Direct::TextJoin)
-        ) || !self.resident_room(0)
+        let function = self.exe.lib(site.lib);
+        let text = matches!(site.direct(self.exe), Some(Direct::TextJoin))
+            || function.header.signature.result == lash_kernel_value::Type::Text;
+        if (!text
+            && !matches!(
+                site.direct(self.exe),
+                Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_))
+            ))
+            || !self.resident_room(0)
             || self.arena.any_cold()
         {
             return Ok(ValuePublication::Unavailable);
@@ -54,14 +59,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if registers.len() != args.len() {
             return Ok(ValuePublication::Unavailable);
         }
-        let function = self.exe.lib(site.lib);
         let LibRun::Native { native, .. } = &function.run else {
             return Ok(ValuePublication::Unavailable);
         };
         let room::CallSource::Native(function_id) = function.specialization.resource else {
             return Ok(ValuePublication::Unavailable);
         };
-        let text = matches!(site.direct(self.exe), Some(Direct::TextJoin));
         let contract = match native.resource_contract(doc::Args::new(
             args,
             self.arena.objects(),
@@ -73,7 +76,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         && contract.events.iter().all(|event| {
                             matches!(event, doc::NativeResourceEvent::Scratch { .. })
                         })))
-                    && contract.exit == doc::NativeResourceExit::Returned =>
+                    && contract.exit == doc::NativeResourceExit::Returned
+                    && (!text
+                        || contract.output.origin == doc::NativeResourceOrigin::Immutable) =>
             {
                 contract
             }

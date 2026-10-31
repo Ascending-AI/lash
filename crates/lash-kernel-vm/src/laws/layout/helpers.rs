@@ -33,14 +33,14 @@ pub(in crate::laws) fn helper_probes(
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
 ) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut out = call_probes(registry, ids);
-    for (definition, native) in lash_kernel_lib::text_json()
-        .into_iter()
-        .filter(|(definition, _)| definition.name.as_str() == "text.join")
-    {
-        out.push((
-            "text.join",
-            registry.register(definition, Some(native)).unwrap(),
-        ));
+    for (definition, native) in lash_kernel_lib::text_json() {
+        let name = match definition.name.as_str() {
+            "text.join" => "text.join",
+            "text.repeat" => "text.repeat",
+            "text.slice" => "text.slice",
+            _ => continue,
+        };
+        out.push((name, registry.register(definition, Some(native)).unwrap()));
     }
     for (definition, native) in lash_kernel_lib::numbers()
         .into_iter()
