@@ -338,9 +338,11 @@ impl<'run> ProductionToolHandlers<'run> {
         {
             return Ok(Some(crate::CancelOrigin::RunClosing));
         }
-        Ok(stop
-            .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
-            .then_some(crate::CancelOrigin::TurnStopped))
+        Ok(
+            (!crate::runtime::actor::round::decision::execution_limited()
+                && stop.is_some_and(tokio_util::sync::CancellationToken::is_cancelled))
+            .then_some(crate::CancelOrigin::TurnStopped),
+        )
     }
     /// The dispatch `input`'s call runs on, presenting under the facts it
     /// recorded at admission.

@@ -1135,6 +1135,9 @@ pub(crate) async fn run_bounded(
             () = cx.cancel().cancelled() => Err(Stop::Activation),
         };
     }
+    if matches!(stopped, Stop::Limit(_)) {
+        decision::mark_execution_limit();
+    }
     token.cancel();
     if stopped == Stop::Activation {
         return Err(stopped);

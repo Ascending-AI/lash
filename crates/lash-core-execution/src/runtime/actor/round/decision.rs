@@ -2,6 +2,7 @@
 use super::AdmittedExecution;
 use crate::{ActorContext, EffectOpener, ToolCallId, ToolCancellation};
 use lash_durable::domain::OwnerKey;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -59,6 +60,7 @@ pub enum SettlementIntent {
 pub(super) struct DecisionScope {
     port: Mutex<Option<BoundDecision>>,
     pub protected: CancellationToken,
+    execution_limited: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -96,12 +98,27 @@ impl DecisionScope {
                 protected: protected.clone(),
             })))),
             protected,
+            execution_limited: AtomicBool::new(false),
         }
     }
 }
 
 tokio::task_local! {
     pub(super) static DECISION_SCOPE: DecisionScope;
+}
+
+// The bounded runner signals its body at a limit so it can finish cleanup.
+// That cooperative signal is not an actor-issued cancellation decision.
+pub(super) fn mark_execution_limit() {
+    let _ = DECISION_SCOPE.try_with(|scope| {
+        scope.execution_limited.store(true, Ordering::Relaxed);
+    });
+}
+
+pub(crate) fn execution_limited() -> bool {
+    DECISION_SCOPE
+        .try_with(|scope| scope.execution_limited.load(Ordering::Relaxed))
+        .unwrap_or(false)
 }
 
 impl BoundDecision {

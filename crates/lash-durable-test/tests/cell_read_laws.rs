@@ -161,6 +161,7 @@ impl Cell {
 #[derive(Debug, Default)]
 struct ExternalWorld {
     pending_read: tokio::sync::Notify,
+    pending_entries: Mutex<Vec<ToolCallId>>,
     presentations: Mutex<BTreeMap<ToolCallId, Vec<String>>>,
     /// Each read's `x` and its answer, in the order they were made.
     reads: Mutex<Vec<(i64, i64)>>,
@@ -259,6 +260,10 @@ impl lash::tools::ToolReads for WorldReads {
             return Ok(json!(-1));
         }
         if x == -12 {
+            self.world
+                .pending_entries
+                .lock_recover()
+                .push(call.call_id.clone());
             self.world.pending_read.notify_one();
             return std::future::pending().await;
         }
@@ -474,6 +479,86 @@ impl ReadTurn {
             clock: Mutex::default(),
             core: Mutex::default(),
         }
+    }
+
+    fn pending_read_laws(
+        &self,
+        nodes: &SimNodes,
+        cell: &lash_core::CellRecord,
+        fact: &lash_core::ReadFact,
+        failure: &lash_core::ToolFailure,
+    ) -> Result<(), String> {
+        use lash_core::{ToolFailureClass, ToolFailureSource};
+        use lash_durable::domain::RunFactKind as Kind;
+
+        let timeout = failure.class == ToolFailureClass::Timeout
+            && failure.source == ToolFailureSource::Runtime
+            && failure.code == "read_timed_out"
+            && failure.cause.is_none();
+        if !timeout {
+            return Err(format!("READ-INJECTED-CLOCK: {failure:?}"));
+        }
+        if self.world.pending_entries.lock_recover().as_slice()
+            != std::slice::from_ref(&fact.call_id)
+            || !self.world.reads().is_empty()
+            || !self.world.other_bodies().is_empty()
+            || !self.world.writes().is_empty()
+        {
+            return Err(
+                "the pending Read must enter its reader exactly once and return no value".into(),
+            );
+        }
+        if fact.execution != lash_core::ToolCallExecution::Recorded
+            || fact.ordinal != 1
+            || fact.tool != format!("reads.{READ}")
+            || written_x(&fact.args) != Some(-12)
+            || !matches!(&fact.caller, lash_core::ToolReadCaller::CodeBlock { graph_key } if !graph_key.is_empty())
+            || serde_json::to_value(&fact.provider).unwrap()
+                != json!({"registry":"session","owner":READER,"key":"reads"})
+            || fact.site.is_empty()
+            || fact.origin.is_empty()
+        {
+            return Err(format!("the timed-out Read lost its admission: {fact:?}"));
+        }
+        let [call] = cell.calls.as_slice() else {
+            return Err(format!("one guest Read result: {:?}", cell.calls));
+        };
+        if call.call_id.as_ref() != Some(&fact.call_id)
+            || !matches!(&call.outcome, lash_core::ExecutedCallOutcome::Failed { code, .. } if code == &failure.code)
+            || !matches!(&cell.result, lash_core::CellOutcome::Failed(error) if error.kind == lash_core::CellFailureKind::Program)
+        {
+            return Err(format!(
+                "the guest did not receive the Read timeout: {cell:?}"
+            ));
+        }
+        let trace = nodes.script().trace();
+        let facts: Vec<_> = trace
+            .iter()
+            .filter(|write| write.committed())
+            .flat_map(|write| {
+                write
+                    .facts
+                    .rows
+                    .iter()
+                    .filter(|row| row.call.as_ref() == Some(&fact.call_id))
+                    .map(move |row| (row.kind, write.at_ms))
+            })
+            .collect();
+        let [
+            (Kind::XStart, admitted),
+            (Kind::XOutcome | Kind::XFinalOutcome, settled),
+        ] = facts.as_slice()
+        else {
+            return Err(format!(
+                "one admission and timeout outcome, without cancellation or retry: {facts:?}"
+            ));
+        };
+        if *settled < admitted + 1_137 {
+            return Err(format!(
+                "the Read settled before its admitted deadline: {facts:?}"
+            ));
+        }
+        Ok(())
     }
 
     fn backend(&self) -> Backend {
@@ -777,7 +862,8 @@ impl Scenario for ReadTurn {
                 .clone()
                 .expect("the database is open");
             let deadline = clock.logical_ms() + 1_137;
-            tokio::time::timeout(Duration::from_secs(2), clock.wait_for_sleep(deadline))
+            // Wake the reader's timer and its admitted execution's timer together.
+            tokio::time::timeout(Duration::from_secs(2), clock.wait_for_sleepers(deadline, 2))
                 .await
                 .map_err(|_| "the tool deadline was not armed on the injected clock")?;
             clock.advance_to(deadline + 1).await;
@@ -1037,13 +1123,19 @@ impl Scenario for ReadTurn {
                 }
                 let cell = transcript.entries().iter().find_map(|entry| match &entry.item { lash::transcript::TranscriptItem::Cell(cell) => Some(cell), _ => None }).ok_or("the failed cell is retained")?;
                 let [fact] = cell.read_facts.as_slice() else { return Err(format!("one failed read fact is retained: {:?}", cell.read_facts)); };
-                let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else { return Err("the refused read succeeded".into()); };
+                let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else { return Err(format!("the refused read did not fail: {fact:?}")); };
                 match self.cell {
                     Cell::InvalidOutput => {
                         if !matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::Declaration { .. })) { return Err(format!("READ-OUTPUT-ADMISSION: {failure:?}")); }
                     }
                     Cell::Pending => {
-                        if failure.code != "read_timed_out" { return Err(format!("READ-INJECTED-CLOCK: {failure:?}")); }
+                        self.pending_read_laws(nodes, cell, fact, failure)?;
+                        let turn = transcript.entries().iter().find_map(|entry| match &entry.item {
+                            lash::transcript::TranscriptItem::Cell(record) if record.id == cell.id => entry.provenance.turn_id.clone(),
+                            _ => None,
+                        }).ok_or("the Read cell's turn is retained")?;
+                        let calls = durable.read_turn_tool_calls(&turn).await.map_err(|error| error.to_string())?;
+                        if calls != [fact.record()] { return Err(format!("READ-INJECTED-CLOCK archival parity for {turn}: {calls:?}; expected {fact:?}")); }
                     }
                     _ => unreachable!(),
                 }

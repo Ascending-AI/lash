@@ -576,7 +576,8 @@ impl<'a> AdmittedToolCall<'a> {
             if matches!(capture, SingletonCapture::Cancelled { .. }) {
                 return Ok((CallDecision::Cancelled, None));
             }
-            if cancel.is_cancelled() {
+            if cancel.is_cancelled() && !crate::runtime::actor::round::decision::execution_limited()
+            {
                 return Ok((CallDecision::Cancelled, None));
             }
             if let SingletonCapture::Done { commands, .. } = &capture
