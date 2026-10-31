@@ -184,7 +184,8 @@ pub(crate) fn immediate_measure(value: &Value, measure: Measure) -> Option<u64> 
 }
 
 /// A detached native text has the same leaf measures as resident text.
-pub(crate) fn text_measure(text: &str, measure: Measure) -> u64 {
+#[cfg(test)]
+fn text_measure(text: &str, measure: Measure) -> u64 {
     leaf_measure((text.len() as u64).saturating_add(1), 0, measure)
 }
 

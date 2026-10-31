@@ -1,3 +1,5 @@
+#[path = "native_construction_tests.rs"]
+mod native_construction;
 use super::heap::{Source, fresh};
 use crate::paged::SealBudget;
 use crate::paged::census_impl::TraceLimits;
@@ -1148,6 +1150,7 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
 }
 
 fn checked_program_and_warm_balance() {
+    native_construction::check();
     crate::arena::Arena::check_prepared_closure_edges();
     // A native batch rejected by a later table key must install no earlier body.
     {

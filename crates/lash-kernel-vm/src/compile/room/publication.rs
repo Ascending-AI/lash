@@ -696,55 +696,12 @@ fn check_native(
     heap: &PagedHeap,
     arena: &Arena,
 ) -> Result<(), Refused> {
-    use doc::NativeResourceEvent as Event;
-    let declarations: Vec<_> = contract
-        .events
-        .iter()
-        .filter_map(|event| {
-            if let Event::Entity {
-                owner,
-                kind,
-                members,
-                ..
-            } = event
-            {
-                Some((*owner, *kind, members))
-            } else {
-                None
-            }
-        })
-        .collect();
-    if declarations.len() != actual.entities.len()
-        || actual.outputs.len() != 1
-        || actual.member.is_some()
-    {
-        return Err(Refused::Facts);
-    }
-    let owners: BTreeMap<_, _> = actual
-        .entities
-        .iter()
-        .zip(&declarations)
-        .map(|(entity, (owner, _, _))| (entity.entity, *owner))
-        .collect();
-    if owners.len() != declarations.len() {
-        return Err(Refused::Facts);
-    }
-    for (entity, (_, kind, members)) in actual.entities.iter().zip(&declarations) {
-        let (actual_kind, actual_members) = entity
-            .body
-            .native_members(heap, arena, &owners)
-            .map_err(|_| Refused::Facts)?;
-        if &actual_kind != kind || &actual_members != *members {
-            return Err(Refused::Facts);
-        }
-    }
-    if actual.outputs[0]
-        .1
-        .native_holding(heap, arena, &owners)
+    if actual
+        .matches_native(contract, heap, arena)
         .map_err(|_| Refused::Facts)?
-        != contract.output
     {
-        return Err(Refused::Facts);
+        Ok(())
+    } else {
+        Err(Refused::Facts)
     }
-    Ok(())
 }

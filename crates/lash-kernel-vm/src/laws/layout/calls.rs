@@ -15,7 +15,7 @@ const NESTED_CALL_STORAGE: &str = "let cleanup = fn(xs) { try { return [7] } fin
 
 const READ_ADD_WRITE: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"a\")) return total } return apply run(map{\"a\": 255})";
 const SOURCE_SESSION: &str = "let saved = [7] set saved = [saved, saved] for ignored in [0, 1] { set saved = saved } let active = true while active { set saved = saved set active = false } return saved";
-const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empty_b = () if same(empty_a, empty_b) { } else { return empty_b } let large = resident.large_add(9223372036854775807, value) let again = resident.negate(large) let negative = resident.negate(value) let restored = resident.add(negative, 14) let minimum = resident.minimum(restored, 9) let pair = [[minimum], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let copied = resident.copy(other) set copied[0] = value let temporary = resident.copy([[value], value]) if same(temporary[0][0], value) { } else { return temporary } let made_tuple = ((pair, pair), value) if same(made_tuple[0][1], pair) { } else { return made_tuple } let made_map = map{\"a\": value, \"a\": pair} let copied_map = resident.copy_map(made_map) if same(copied_map[\"a\"], pair) { } else { return copied_map } let made_set = set{value, value} let copied_set = resident.copy_set(made_set) if copied_set[value] { } else { return copied_set } let made_record = {b: value, a: pair} let copied_record = resident.copy_record(made_record) if same(copied_record.a, pair) { } else { return copied_record } let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") let repeated = text.repeat(joined, 2) let trimmed = text.slice(repeated, 0, 5) if same(trimmed, \"a can\") { } else { return trimmed } if true { let alias = [other, other] } return other } return apply f(7)";
+const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empty_b = () if same(empty_a, empty_b) { } else { return empty_b } let large = resident.large_add(9223372036854775807, value) let again = resident.negate(large) let negative = resident.negate(value) let restored = resident.add(negative, 14) let minimum = resident.minimum(restored, 9) let pair = [[minimum], value] let other = [pair, value] set pair = other let count = resident.len(other) let first = list.get(other, 0) let deep = resident.deep_copy(other) if same(deep[0][0][0], value) { } else { return deep } set deep[0][0][0] = 9 if same(other[0][0][0], value) { } else { return deep } let copied = resident.copy(other) set copied[0] = value let temporary = resident.copy([[value], value]) if same(temporary[0][0], value) { } else { return temporary } let made_tuple = ((pair, pair), value) if same(made_tuple[0][1], pair) { } else { return made_tuple } let made_map = map{\"a\": value, \"a\": pair} let copied_map = resident.copy_map(made_map) if same(copied_map[\"a\"], pair) { } else { return copied_map } let made_set = set{value, value} let copied_set = resident.copy_set(made_set) if copied_set[value] { } else { return copied_set } let made_record = {b: value, a: pair} let copied_record = resident.copy_record(made_record) if same(copied_record.a, pair) { } else { return copied_record } let joined = text.join([\"a canonical long joined value\", \"with an allocated native output\"], \";\") let repeated = text.repeat(joined, 2) let trimmed = text.slice(repeated, 0, 5) if same(trimmed, \"a can\") { } else { return trimmed } if true { let alias = [other, other] } return other } return apply f(7)";
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 // K-CHG-001: an unpaid source region cannot publish a captured closure.
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
     let native_reads = crate::machine::islands::witness::native_read_publications();
+    let native_graphs = crate::machine::islands::witness::native_graph_publications();
     let immutable_natives = crate::machine::islands::witness::immutable_native_publications();
     let prepared_natives = crate::machine::islands::witness::prepared_native_publications();
     let native_lists = crate::machine::islands::witness::native_list_publications();
@@ -405,6 +406,10 @@ fn observe_source_or_register(
         assert!(
             immutable_natives >= 2,
             "allocated immutable native results must publish their detached bodies: {immutable_natives}"
+        );
+        assert!(
+            native_graphs > 0,
+            "complete native graphs must publish all prepared bodies and their real identities: {native_graphs}"
         );
         assert!(
             prepared_natives >= 3,

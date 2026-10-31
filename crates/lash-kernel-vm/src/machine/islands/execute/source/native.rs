@@ -1,9 +1,9 @@
 //! Native results publish their canonical occurrences and logical scratch.
 use super::*;
 use crate::admission::Allowance;
-use crate::machine::source_publication::native_storage::{collection, text};
+use crate::machine::source_publication::native_storage;
 use lash_kernel_state::kernel_internals::logical::{
-    JournalEvent, Program, PublicationValue as PV, RootValue, ScratchEvent, Slot,
+    JournalEvent, Program, RootValue, ScratchEvent, Slot,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
@@ -59,26 +59,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         prepared: bool,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
-        let collection = !prepared
-            && matches!(
-                function.header.signature.result,
-                lash_kernel_value::Type::List(_)
-                    | lash_kernel_value::Type::Map(_)
-                    | lash_kernel_value::Type::Set(_)
-                    | lash_kernel_value::Type::Record(_)
-            );
-        let text = !prepared
-            && (matches!(site.direct(self.exe), Some(Direct::TextJoin))
-                || function.header.signature.result == lash_kernel_value::Type::Text);
-        if (!prepared
-            && !collection
-            && !text
-            && !matches!(
-                site.direct(self.exe),
-                Some(Direct::Length(_, _) | Direct::Item(_) | Direct::Member(_))
-            ))
-            || !self.resident_room(0)
+        let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
+        if !self.resident_room(0)
             || self.arena.any_cold()
+            || function.limit.is_some()
+            || function.shares_params
         {
             return Ok(ValuePublication::Unavailable);
         }
@@ -158,24 +143,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.arena.objects(),
             &self.arena.semantics(),
         )) {
-            Ok(Some(contract)) if collection && collection::supports(&contract) => contract,
-            Ok(Some(contract))
-                if !collection
-                    && (contract.events.is_empty()
-                        || ((text || prepared)
-                            && contract.events.iter().all(|event| {
-                                matches!(event, doc::NativeResourceEvent::Scratch { .. })
-                            })))
-                    && contract.exit == doc::NativeResourceExit::Returned
-                    && (!(text || prepared)
-                        || contract.output.origin == doc::NativeResourceOrigin::Immutable) =>
-            {
-                contract
-            }
+            Ok(Some(contract)) if native_storage::supports(&contract) => contract,
             Err(doc::NativeError::Host(error)) => return Err(error),
             Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
             _ => return Ok(ValuePublication::Unavailable),
         };
+        let collection = contract
+            .events
+            .iter()
+            .any(|event| matches!(event, doc::NativeResourceEvent::Entity { .. }));
         let Some(called) = room::CheckedRoom::native(function.specialization.function, &contract)
         else {
             return Ok(ValuePublication::Unavailable);
@@ -190,9 +166,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             (Some(Direct::Member(_)), _) => self.membership(site, args),
             _ => None,
         });
-        if answer.is_none() && !text && !collection {
-            return Ok(ValuePublication::Unavailable);
-        }
         let scratch = contract
             .peak_scratch_bytes()
             .ok_or_else(|| malformed("native scratch contract is invalid"))?;
@@ -367,10 +340,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let make = || {
             Program::new(vec![JournalEvent {
                 inputs: inputs.clone(),
-                outputs: answer
-                    .map(|(value, _)| (output, PV::Native(value)))
-                    .into_iter()
-                    .collect(),
                 scratch: scratch_events.clone(),
                 ..Default::default()
             }])
@@ -383,70 +352,39 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             next,
             allowance,
         };
-        let published = if text {
-            let room = self.memory.then(|| {
-                self.ceiling
-                    .saturating_sub(self.register_bytes)
-                    .saturating_sub(self.arena.held())
-                    .saturating_sub(self.transient)
-            });
-            let result = &mut frame.regs[site.reg as usize];
-            self.publish_source_prepared(
-                frame.state.callee,
-                activation,
-                prefix,
-                make,
-                text::TextNative {
-                    function,
-                    args: args.to_vec(),
-                    output,
-                    charging: self.charging,
-                    limits: self.limits,
-                    room,
-                },
-                |arena, _, edits, storage| {
-                    debug_assert!(edits.is_empty());
-                    storage.batch.publish(arena);
-                    *result = storage.value;
-                },
-            )?
-        } else if collection {
-            let room = self.memory.then(|| {
-                self.ceiling
-                    .saturating_sub(self.register_bytes)
-                    .saturating_sub(self.arena.held())
-                    .saturating_sub(self.transient)
-            });
-            let prepare = collection::CollectionNative {
-                function,
-                args: args.to_vec(),
-                output,
-                at: prefix.start.at.clone(),
-                release,
-                ledger: std::rc::Rc::clone(&store),
-                heap: self.heap,
-                charging: self.charging,
-                limits: self.limits,
-                room,
-            };
-            let result = &mut frame.regs[site.reg as usize];
-            self.publish_source_prepared(
-                frame.state.callee,
-                activation,
-                prefix,
-                make,
-                prepare,
-                |arena, _, edits, storage| {
-                    debug_assert!(edits.is_empty());
-                    storage.batch.publish(arena);
-                    *result = storage.value;
-                },
-            )?
-        } else {
-            self.publish_source(frame.state.callee, activation, prefix, make, |_, edits| {
-                debug_assert!(edits.is_empty())
-            })?
+        let room = self.memory.then(|| {
+            self.ceiling
+                .saturating_sub(self.register_bytes)
+                .saturating_sub(self.arena.held())
+                .saturating_sub(self.transient)
+        });
+        let prepare = native_storage::NativeStorage {
+            contract: contract.clone(),
+            function,
+            args: args.to_vec(),
+            output,
+            at: prefix.start.at.clone(),
+            release,
+            ledger: std::rc::Rc::clone(&store),
+            heap: self.heap,
+            charging: self.charging,
+            limits: self.limits,
+            room,
+            known: answer.map(|(value, _)| (value, 0)),
         };
+        let result = &mut frame.regs[site.reg as usize];
+        let published = self.publish_source_prepared(
+            frame.state.callee,
+            activation,
+            prefix,
+            make,
+            prepare,
+            |arena, _, edits, storage| {
+                debug_assert!(edits.is_empty());
+                *result = storage.value();
+                storage.publish(arena);
+            },
+        )?;
         #[cfg(any(test, feature = "testing"))]
         if published {
             if prepared {

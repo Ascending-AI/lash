@@ -1,6 +1,7 @@
 //! Itemized source programs. Evaluation borrows facts; preparation owns grants;
 //! publication transfers the canonical storage recipe with the ledger roots.
 use super::*;
+mod native;
 use crate::arena::{Arena, Registration};
 use crate::paged::{FrozenRef, PagedHeap};
 use lash_kernel_doc::{Value, arena::ArenaHandle, heap::PageValue};
@@ -235,6 +236,8 @@ pub enum ScratchEvent {
 }
 #[derive(Clone, Default)]
 pub struct JournalEvent {
+    /// The bound input-evaluated native event schedule, when preparing an exact native exit.
+    pub native: Option<lash_kernel_doc::NativeResourceContract>,
     pub inputs: Vec<Owner>,
     pub outputs: Vec<(Owner, PublicationValue)>,
     pub member: Option<MemberEdit>,
@@ -244,7 +247,8 @@ pub struct JournalEvent {
 }
 impl JournalEvent {
     fn same(&self, other: &Self) -> bool {
-        self.inputs == other.inputs
+        self.native == other.native
+            && self.inputs == other.inputs
             && self.frame == other.frame
             && self.scratch == other.scratch
             && self.outputs.len() == other.outputs.len()
@@ -447,6 +451,14 @@ impl EvaluatedProgram {
         let mut handles = Vec::new();
         let mut scratches = BTreeMap::<Owner, u64>::new();
         for event in actual.events {
+            let construction = event.native_construction_peak(heap, registration.arena())?;
+            peak = peak.max(
+                draft
+                    .balance()?
+                    .total()?
+                    .checked_add(construction)
+                    .ok_or_else(|| invalid("native construction peak overflow"))?,
+            );
             event.handles(&mut handles);
             let mut changes = Vec::new();
             let mut pending = Vec::new();

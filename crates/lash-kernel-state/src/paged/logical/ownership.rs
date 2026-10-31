@@ -225,6 +225,36 @@ impl Ledger {
         })?;
         self.release_cost_protecting(arena, heap, inputs, pending)
     }
+    /// A detached complete graph retains existing aliases through its fresh
+    /// bodies. Fresh ids are supplied by the prospective canonical journal.
+    pub fn release_cost_preserving_graph(
+        &self,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        inputs: &[Owner],
+        entities: &[VirtualEntity],
+        output: &lash_kernel_doc::heap::PageValue,
+    ) -> Result<u64, HeapFault> {
+        let fresh: BTreeSet<_> = entities.iter().map(|entity| entity.entity).collect();
+        let access = heap.pages();
+        let mut pending = Vec::new();
+        let mut preserve = |edge: &Edge| {
+            if let Identity::Object(entity) = edge.target
+                && !fresh.contains(&entity)
+            {
+                pending.push(entity);
+            }
+            Ok(())
+        };
+        Holding::from_page(access, output)?.each_edge(access, &mut preserve)?;
+        for entity in entities {
+            entity
+                .body
+                .holding(heap, arena)?
+                .each_edge(access, &mut preserve)?;
+        }
+        self.release_cost_protecting(arena, heap, inputs, pending)
+    }
     fn release_cost_protecting(
         &self,
         arena: &mut Arena,

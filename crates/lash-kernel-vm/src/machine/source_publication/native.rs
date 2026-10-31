@@ -29,7 +29,7 @@ impl<'bank> StoragePreparation for NativeResult<'bank, '_> {
         actual: Program,
     ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
         let Some(PreparedStorage {
-            mut registration,
+            registration,
             storage,
             actual,
         }) = self.recipe.prepare(arena, actual)?
@@ -39,17 +39,14 @@ impl<'bank> StoragePreparation for NativeResult<'bank, '_> {
         let [event] = actual.events() else {
             return Err(malformed("precise native lost its prepared event"));
         };
-        let [(_, output)] = event.outputs.as_slice() else {
-            return Err(malformed("precise native lost its canonical output"));
+        let [(_, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(page))] =
+            event.outputs.as_slice()
+        else {
+            return Err(malformed(
+                "precise native lost its canonical projected output",
+            ));
         };
-        use lash_kernel_state::kernel_internals::logical::PublicationValue;
-        let holding = match output {
-            PublicationValue::Page(page) => Holding::from_page(self.heap.pages(), page)?,
-            PublicationValue::Native(value) => {
-                Holding::from_native(registration.arena(), self.heap.pages(), value)?
-            }
-            _ => return Err(malformed("precise native has another output recipe")),
-        };
+        let holding = Holding::from_page(self.heap.pages(), page)?;
         Ok(Some(PreparedStorage {
             registration,
             storage: PreparedNativeResult {
@@ -136,24 +133,16 @@ impl KernelMachine {
                 arena.objects(),
                 &arena.semantics(),
             )) {
-                Ok(Some(contract))
-                    if contract.exit == doc::NativeResourceExit::Returned
-                        && (native_storage::collection::supports(&contract)
-                            || (!matches!(
-                                contract.output.origin,
-                                doc::NativeResourceOrigin::Fresh(_)
-                            ) && contract.events.iter().all(|event| {
-                                matches!(event, doc::NativeResourceEvent::Scratch { .. })
-                            }))) =>
-                {
-                    contract
-                }
+                Ok(Some(contract)) if native_storage::supports(&contract) => contract,
                 Err(doc::NativeError::Host(error)) => return Err(error.into()),
                 Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason).into()),
                 _ => return Ok(false),
             }
         };
-        let collection = native_storage::collection::supports(&contract);
+        let collection = contract
+            .events
+            .iter()
+            .any(|event| matches!(event, doc::NativeResourceEvent::Entity { .. }));
         let Some(called) = room::CheckedRoom::native(function.specialization.function, &contract)
         else {
             return Ok(false);
@@ -196,75 +185,51 @@ impl KernelMachine {
                 ScratchEvent::End { owner },
             ]
         };
-        let recipe = if collection {
-            native_storage::NativeStorage::Collection(
-                native_storage::collection::CollectionNative {
-                    function,
-                    args: values.clone(),
-                    output,
-                    at: at.clone(),
-                    release: release.clone(),
-                    ledger: self.logical.ledger(),
-                    heap: &self.heap,
-                    charging: self.charging,
-                    limits: self.limits,
-                    room: physical_room,
-                },
-            )
-        } else if text {
-            native_storage::NativeStorage::Text(native_storage::text::TextNative {
-                function,
-                args: values.clone(),
-                output,
-                charging: self.charging,
-                limits: self.limits,
-                room: physical_room,
-            })
-        } else {
-            let active = self
-                .tasks
-                .get_mut(running.task.0 as usize)?
-                .ok_or_else(|| fault("no task"))?
-                .frames
-                .len()
-                - usize::from(running.task == doc::TaskId::MAIN && self.session_cell);
-            let known = function
-                .specialization
-                .prepared
-                .as_ref()
-                .and_then(|(entry, _)| {
-                    if active as u64 + u64::from(entry.depth()) > u64::from(self.bounds.call_depth)
-                        || !function.header.signature.params.iter().zip(&values).all(
-                            |(param, value)| {
-                                (param.optional && matches!(value, doc::Value::Absent))
-                                    || crate::compile::import_result_fits(&param.ty, *value)
-                            },
-                        )
-                    {
-                        return None;
-                    }
-                    let answer = entry.answer(&values, self.charging)?;
-                    (crate::compile::scalar(&answer.value)
-                        && crate::compile::import_result_fits(
-                            &function.header.signature.result,
-                            answer.value,
-                        ))
-                    .then_some((answer.value, entry.depth()))
-                });
-            native_storage::NativeStorage::Value(native_storage::value::ValueNative {
-                function,
-                args: values.clone(),
-                output,
-                at: at.clone(),
-                release: release.clone(),
-                ledger: self.logical.ledger(),
-                heap: &self.heap,
-                charging: self.charging,
-                limits: self.limits,
-                known,
-                room: physical_room,
-            })
+        let active = self
+            .tasks
+            .get_mut(running.task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?
+            .frames
+            .len()
+            - usize::from(running.task == doc::TaskId::MAIN && self.session_cell);
+        let known = function
+            .specialization
+            .prepared
+            .as_ref()
+            .and_then(|(entry, _)| {
+                if active as u64 + u64::from(entry.depth()) > u64::from(self.bounds.call_depth)
+                    || !function.header.signature.params.iter().zip(&values).all(
+                        |(param, value)| {
+                            (param.optional && matches!(value, doc::Value::Absent))
+                                || crate::compile::import_result_fits(&param.ty, *value)
+                        },
+                    )
+                {
+                    return None;
+                }
+                let answer = entry.answer(&values, self.charging)?;
+                (crate::compile::scalar(&answer.value)
+                    && crate::compile::import_result_fits(
+                        &function.header.signature.result,
+                        answer.value,
+                    ))
+                .then_some((answer.value, entry.depth()))
+            });
+        let recipe = native_storage::NativeStorage {
+            contract: contract.clone(),
+            function,
+            args: values.clone(),
+            output,
+            at: at.clone(),
+            release: release.clone(),
+            ledger: self.logical.ledger(),
+            heap: &self.heap,
+            charging: self.charging,
+            limits: self.limits,
+            known,
+            room: physical_room,
         };
+
         let document = running
             .exe
             .instances

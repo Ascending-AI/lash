@@ -122,6 +122,7 @@ pub(in crate::laws) fn helper_probes(
         ("resident.copy_map", "map.copy", "Map(Any, Any)"),
         ("resident.copy_set", "set.copy", "Set(Any)"),
         ("resident.copy_record", "record.copy", "Record{..Any}"),
+        ("resident.deep_copy", "list.copy_deep", "List(Any)"),
     ] {
         let definition = lash_kernel_doc::parse_definition(&format!(
             "function {name}(xs: {ty}) -> {ty}\nkernel 1\ncharge sum(1, size(xs), size(result))\nnative\n"

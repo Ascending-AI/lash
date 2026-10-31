@@ -783,47 +783,6 @@ fn measured_formula_with_growth(
     })
 }
 
-pub(crate) fn measured_text_formula(
-    arena: &Arena,
-    plan: &Plan,
-    args: &[Value],
-    text: &str,
-) -> Option<u64> {
-    measured_formula_by(plan, |source, measure| match source {
-        Source::Arg(index) => args
-            .get(index)
-            .map_or(Some(0), |value| value_measure(arena, value, measure, 0, 0)),
-        Source::Result => Some(crate::data::text_measure(text, measure)),
-        Source::Nothing => Some(0),
-    })
-}
-
-/// A detached shallow list uses the same sequence extent and Plan evaluator.
-/// Deep-result measurements require the graph view and stay on the precise path.
-pub(crate) fn measured_collection_formula(
-    arena: &Arena,
-    plan: &Plan,
-    args: &[Value],
-    result: Value,
-    len: u64,
-) -> Option<u64> {
-    measured_formula_by(plan, |source, measure| match source {
-        Source::Arg(index) => args
-            .get(index)
-            .map_or(Some(0), |value| value_measure(arena, value, measure, 0, 0)),
-        Source::Result => match measure {
-            Measure::Size => Some(if matches!(result, Value::Map(_)) {
-                crate::data::map_size(len)
-            } else {
-                crate::data::sequence_size(len)
-            }),
-            Measure::NestedSize | Measure::Magnitude => Some(crate::data::empty_measure(measure)),
-            Measure::DeepSize => None,
-        },
-        Source::Nothing => Some(0),
-    })
-}
-
 fn measured_formula_by(
     plan: &Plan,
     mut measure: impl FnMut(Source, Measure) -> Option<u64>,

@@ -93,6 +93,7 @@ thread_local! {
     static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TABLE_CONSTRUCTIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static NATIVE_TEXT_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static NATIVE_GRAPH_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -127,6 +128,7 @@ pub(crate) fn begin() {
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
     TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
     TABLE_CONSTRUCTIONS.with(|counts| counts.set([0; 3]));
+    NATIVE_GRAPH_PUBLICATIONS.with(|count| count.set(0));
     IMMUTABLE_NATIVE_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(0));
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(0));
@@ -178,6 +180,13 @@ pub(in crate::machine::islands) fn construction_published() {
 #[cfg(test)]
 pub(crate) fn native_read_publications() -> u64 {
     NATIVE_READ_PUBLICATIONS.with(|count| count.replace(0))
+}
+#[cfg(test)]
+pub(crate) fn native_graph_publications() -> u64 {
+    NATIVE_GRAPH_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine) fn native_graph_published() {
+    NATIVE_GRAPH_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 #[cfg(test)]
 pub(crate) fn immutable_native_publications() -> u64 {
