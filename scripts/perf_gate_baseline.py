@@ -95,10 +95,16 @@ def references(baseline: dict, candidate: dict, committed: dict) -> dict:
     selected["rows"] = {}
     selected["geometry"] = candidate["geometry"]
     verdicts = {}
-    if set(candidate["rows"]) != set(committed["rows"]) or set(candidate["geometry"]) != set(committed["geometry"]):
+    failed = set(candidate.get("row_failures", {}))
+    if (set(candidate["rows"]) & failed or set(candidate["rows"]) | failed != set(committed["rows"])
+            or set(candidate["geometry"]) | {geometry_key(name) for name in failed} != set(committed["geometry"])):
         raise ValueError("row population changed without a committed baseline update")
-    for name in candidate["rows"]:
+    for name in candidate["rows"].keys() | failed:
         key = geometry_key(name)
+        if name in failed:
+            selected["rows"][name] = baseline["rows"].get(name, committed["rows"][name])
+            verdicts[name] = candidate["row_failures"][name]["reason"]
+            continue
         geometry = candidate["geometry"].get(key)
         if not geometry or committed["geometry"].get(key) != geometry:
             raise ValueError(f"{name}: changed geometry needs a committed baseline update")
@@ -106,7 +112,7 @@ def references(baseline: dict, candidate: dict, committed: dict) -> dict:
         source = baseline if comparable else committed
         selected["rows"][name] = source["rows"][name]
         verdicts[name] = "gated" if comparable else "rebaselined: geometry changed"
-    for name in baseline["rows"].keys() - candidate["rows"].keys():
+    for name in baseline["rows"].keys() - candidate["rows"].keys() - failed:
         verdicts[name] = "rebaselined: row removed"
     selected["row_verdicts"] = verdicts
     return selected

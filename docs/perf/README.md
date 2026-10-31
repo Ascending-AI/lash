@@ -101,6 +101,15 @@ After a workload edit, run `just perf-gate-instructions --calibrate` and commit
 the baseline with it. Calibration checks unchanged rows against their existing
 references and exits with failure if any regress; it updates only changed rows
 and preserves the failing references too.
+Each kernel workload/dialect and replay producer has a fixed 1,200-second
+cap. A capped producer fails its rows with `exceeded cap` and the raw
+`perf stat -e instructions:u` count for its process tree through termination.
+That diagnostic count includes setup and warmups, so it has no per-operation
+ratio. It never substitutes for a qualified completed slope. Remaining rows
+still run, and a capped population cannot calibrate, advance a baseline or
+enter counted history. Kernel sample counts, trip counts and the 1% threshold
+are unchanged.
+
 A baseline from another history is refused. Kernel fits use 1,000
 to 100,000 trips for the small loops; the large object workloads retain their
 10,000 to 100,000 object population. The CPU reference contains all 40 rows from the first complete population,
@@ -126,7 +135,11 @@ just perf-gate-startup
 ```
 
 `just perf-history-record` captures the instruction gate's complete kernel and
-replay populations once on a clean commit landed on main. It fetches main and
+replay populations once on a clean commit landed on main. The scheduled
+runner sets `LASH_PERF_INSTRUCTION_SAMPLE` to the same tick's instruction
+sample so history reuses that population instead of measuring it twice. The
+sample's commit and both producer/worker executable hashes must match; a capped
+sample fails history without appending it. It fetches main and
 requires HEAD to be an ancestor of origin/main, so a newer landing during the
 gates does not refuse the sample. It appends qualified
 instructions per operation, SQL statements/writes, and host/worker allocation

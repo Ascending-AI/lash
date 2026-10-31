@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Local counted performance checks. No shared-host wall duration decides a verdict."""
+"""Local counted performance checks with bounded, independently reported rows."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -15,9 +16,10 @@ import tempfile
 import uuid
 
 from perf_gate_baseline import (calibrate_changed, check_sources, geometry_key,
-                                kernel_workloads, references)
+                                kernel_geometry, kernel_workloads, references)
 
 ROOT = Path(__file__).resolve().parents[1]
+ROW_CAP_SECONDS = 1200
 IDENTITY = ("host", "compiler", "allocator", "build", "build_profile")
 
 
@@ -28,6 +30,28 @@ def execute(command: list[str], log: Path, env: dict[str, str]) -> None:
         raise ValueError(f"producer failed ({result.returncode}); see {log}")
 
 
+def execute_row(command: list[str], log: Path, env: dict[str, str]) -> dict | None:
+    """Bound one producer, retaining whole-process counts if it cannot finish."""
+    counts = log.with_suffix(".instructions.csv")
+    with log.open("w") as output:
+        result = subprocess.run([
+            "perf", "stat", "--no-big-num", "--no-scale", "-x", ";", "-o", str(counts),
+            "-e", "instructions:u", "--", "timeout", "--verbose", "--signal=TERM", "--kill-after=5",
+            str(ROW_CAP_SECONDS), *command,
+        ], cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
+            timeout=ROW_CAP_SECONDS + 30)
+    if result.returncode:
+        exceeded = result.returncode == 124 or (result.returncode == 137 and "timeout: sending signal" in log.read_text())
+        fields = next((line.split(";") for line in counts.read_text().splitlines()
+                       if ";instructions:u;" in line), [])
+        count = int(fields[0]) if fields and fields[0].isdigit() else None
+        return {"reason": "exceeded cap" if exceeded else f"producer failed ({result.returncode}); see {log}",
+                "cap_seconds": ROW_CAP_SECONDS if exceeded else None, "instructions": count,
+                "instruction_scope": "whole producer process tree including setup and warmups; not a slope",
+                "pmu_running_percent": float(fields[4]) if count is not None else None}
+    return None
+
+
 def read(path: Path) -> dict:
     return json.loads(path.read_text())
 
@@ -35,28 +59,33 @@ def read(path: Path) -> dict:
 def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
     workloads_by_name = kernel_workloads(ROOT)
     captures = []
-    for group, minimum, maximum, factor, runs in (
-        ("ordinary", 0, 10000, "100", "5"),
-        ("large-objects", 10000, 20000, "10", "5"),
-        ("large-sort", 20000, math.inf, "10", "1"),
-    ):
-        workloads = ",".join(name for name, (low, _, _) in workloads_by_name.items()
-                             if minimum <= low < maximum)
-        if not workloads:
-            continue
-        compare = directory / f"compare-{group}.json"
-        execute([binary, "compare", "--out", str(compare), "--instructions", "--workload", workloads,
-                 "--runs", runs, "--warmups", "1", "--factor", factor], directory / f"compare-{group}.log", env)
-        capture = read(compare)
-        if capture.get("errors") or not capture.get("rows"):
-            raise ValueError(f"incomplete kernel comparison: {group}")
-        captures.append(capture)
-    kernel = captures[0]
-    if any(c["cpu"] != kernel["cpu"] for c in captures):
-        raise ValueError("kernel CPU affinity changed between populations")
+    row_failures = {}
+    for workload, (low, _, _) in workloads_by_name.items():
+        factor, runs = ("100", "5") if low < 10000 else ("10", "1" if low >= 20000 else "5")
+        for dialect in ("typescript", "python"):
+            name = f"kernel/{dialect}/{workload}"
+            compare = directory / f"compare-{dialect}-{workload}.json"
+            failure = execute_row([binary, "compare", "--out", str(compare), "--instructions",
+                                   "--workload", workload, "--dialect", dialect,
+                                   "--runs", runs, "--warmups", "1", "--factor", factor],
+                                  compare.with_suffix(".log"), env)
+            if failure:
+                row_failures[name] = failure
+                print(f"{name}: FAIL {failure['reason']}; instructions={failure['instructions']}", flush=True)
+                continue
+            capture = read(compare)
+            if capture.get("errors") or len(capture.get("rows", [])) != 1:
+                raise ValueError(f"incomplete kernel comparison: {name}")
+            if captures and capture["cpu"] != captures[0]["cpu"]:
+                raise ValueError("kernel CPU affinity changed between populations")
+            captures.append(capture)
+    kernel = captures[0] if captures else {
+        "cpu": f"pinned:{min(os.sched_getaffinity(0))}", "commit": env.get("GITHUB_SHA", ""),
+        "recorded_at": "", "run_id": env.get("GITHUB_RUN_ID", ""),
+    }
     kernel["rows"] = [row for capture in captures for row in capture["rows"]]
     rows = {}
-    geometry = {}
+    geometry = kernel_geometry(ROOT)
     provenance = {k: kernel[k] for k in ("commit", "recorded_at", "run_id")}
     artifacts = {}
     counts = {}
@@ -80,7 +109,7 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
         artifacts["kernel"] = row["engine_identity"]
     expected_kernel = {f"kernel/{dialect}/{name}" for dialect in ("typescript", "python")
                        for name in workloads_by_name}
-    if set(rows) != expected_kernel:
+    if set(rows) | set(row_failures) != expected_kernel:
         raise ValueError("kernel comparison did not execute the complete row population")
     # Match the counted replay subset and lengths. Each producer is a separate
     # process so its host PMU opens before any runtime thread exists.
@@ -94,7 +123,14 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
             command = [binary, "replay", name, "--out", str(out), "--store-dir", store_dir, "--instructions"]
             if "turns" in spec:
                 command += ["--turns", str(spec["turns"])]
-            execute(command, directory / f"{name}.log", env)
+            failure = execute_row(command, directory / f"{name}.log", env)
+            if failure:
+                source = read(ROOT / f"crates/lash-perf/workloads/replay/{name}.json")
+                processes = ("host",) if source["protocol"] == "standard" else ("host", "worker")
+                for process in processes:
+                    row_failures[f"replay/{name}/{process}"] = failure
+                print(f"replay/{name}: FAIL {failure['reason']}; instructions={failure['instructions']}", flush=True)
+                continue
             receipt = read(out)
             current_identity = {k: receipt["identity"][k] for k in IDENTITY}
             if identity is not None and current_identity != identity:
@@ -126,12 +162,15 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
                 if not values:
                     raise ValueError(f"replay/{name}/{process}: empty population")
                 rows[f"replay/{name}/{process}"] = statistics.median(values)
-    return {"identity": identity, "cpu": kernel["cpu"], "geometry": geometry, "rows": rows, "provenance": provenance, "artifacts": artifacts, "counted_metrics": counts, "experiments": experiments}
+    return {"identity": identity, "cpu": kernel["cpu"], "geometry": geometry, "rows": rows, "provenance": provenance, "artifacts": artifacts, "counted_metrics": counts, "experiments": experiments, "row_failures": row_failures}
 
 
 def startup(binary: str, directory: Path, env: dict[str, str]) -> dict:
     out, trace = directory / "startup.json", directory / "startup.strace"
-    execute(["strace", "-f", "-qq", "-s", "256", "-e", "trace=clock_nanosleep,nanosleep", "-o", str(trace), binary, "vm-startup-gate", "--out", str(out)], directory / "startup.log", env)
+    failure = execute_row(["strace", "-f", "-qq", "-s", "256", "-e", "trace=clock_nanosleep,nanosleep", "-o", str(trace), binary, "vm-startup-gate", "--out", str(out)], directory / "startup.log", env)
+    if failure:
+        return {"identity": None, "rows": {}, "row_failures": {
+            name: failure for name in ("startup/requested_sleep_ns", "startup/sleep_calls")}}
     receipt = read(out)
     starts = receipt["starts"]
     if len(starts) != 20 or len({r["pid"] for r in starts}) != 20:
@@ -159,12 +198,12 @@ def startup(binary: str, directory: Path, env: dict[str, str]) -> dict:
 
 def regressions(baseline: dict, candidate: dict, mode: str) -> list[tuple]:
     """Judge comparable rows. Instructions resolve changed references before calling."""
-    if any(not isinstance(candidate.get("identity", {}).get(k), str) or not candidate["identity"][k].strip() for k in IDENTITY):
+    if any(not isinstance((candidate.get("identity") or {}).get(k), str) or not candidate["identity"][k].strip() for k in IDENTITY):
         raise ValueError("missing performance identity")
     for key in ("identity", "cpu") if mode == "instructions" else ("identity", "geometry"):
         if not candidate.get(key) or candidate[key] != baseline.get(key):
             raise ValueError(f"incomparable {mode} baseline: {key}")
-    if not candidate.get("rows") or (mode != "instructions" and set(candidate["rows"]) != set(baseline.get("rows", {}))):
+    if not (candidate.get("rows") or candidate.get("row_failures")) or (mode != "instructions" and set(candidate["rows"]) != set(baseline.get("rows", {}))):
         raise ValueError("incomplete performance row population")
     failures = []
     for name, actual in candidate["rows"].items():
@@ -181,6 +220,30 @@ def regressions(baseline: dict, candidate: dict, mode: str) -> list[tuple]:
     return failures
 
 
+def report_rows(candidate: dict, selected: dict, failures: list, mode: str, refusal: str | None = None) -> None:
+    print("| Row | Verdict | Baseline | Observed | Ceiling |\n|---|---|---:|---:|---:|")
+    capped = candidate.get('row_failures', {})
+    failed_names = {row[0] for row in failures}
+    for name, actual in candidate["rows"].items():
+        base = selected["rows"][name]
+        ceiling = base * 1.01 if mode == "instructions" else selected["ceilings"][name]
+        verdict = refusal or selected.get("row_verdicts", {}).get(name, "gated")
+        print(f"| {name} | {'REFUSED' if refusal else 'FAIL' if name in failed_names else 'PASS'}; {verdict} | {base:.3f} | {actual:.3f} | {ceiling:.3f} |")
+    for name, failure in capped.items():
+        base = selected["rows"][name]
+        print(f"| {name} | FAIL; {failure['reason']} {failure['cap_seconds'] or ''} | {base:.3f} | - | instructions={failure['instructions']} (whole process) |")
+    for name in selected["rows"].keys() - candidate["rows"].keys() - capped.keys():
+        print(f"| {name} | {selected['row_verdicts'][name]} | {selected['rows'][name]:.3f} | - | - |")
+
+
+def binary_identity(binary: str, worker: str) -> dict:
+    identity = {}
+    for name, path in (("perf", binary), ("worker", worker)):
+        with Path(path).open("rb") as executable:
+            identity[name] = hashlib.file_digest(executable, "sha256").hexdigest()
+    return identity
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("instructions", "startup", "history", "check-sources"))
@@ -188,6 +251,7 @@ def main() -> int:
     parser.add_argument("--worker")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--sample", type=Path, help="reuse this same-commit instruction sample for history")
     parser.add_argument("--calibrate", action="store_true")
     parser.add_argument("--no-record", action="store_true")
     parser.add_argument("--history", type=Path, default=ROOT / ".benchmarks/perf-guard/runtime-duration-history-full.jsonl")
@@ -209,6 +273,7 @@ def main() -> int:
     env = {**os.environ, "LASH_VM_WORKER": args.worker, "GITHUB_RUN_ID": uuid.uuid4().hex}
     producer = startup if args.mode == "startup" else instructions
     samples = []
+    candidate = {}
     try:
         if args.mode == "history":
             subprocess.run(["git", "fetch", "origin", "main"], cwd=ROOT, check=True)
@@ -221,7 +286,16 @@ def main() -> int:
         for index in range(5 if args.calibrate and args.mode == "startup" else 1):
             directory = args.out / f"run-{index}"
             directory.mkdir(exist_ok=False)
-            sample = producer(args.binary, directory, env)
+            if args.sample:
+                if args.mode != "history":
+                    raise ValueError("--sample is only supported for history")
+                sample = read(args.sample)
+                if sample["provenance"]["commit"] != head or sample.get("binaries") != binary_identity(args.binary, args.worker):
+                    raise ValueError("history sample commit or executables changed")
+            else:
+                env["GITHUB_SHA"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+                sample = producer(args.binary, directory, env)
+                sample["binaries"] = binary_identity(args.binary, args.worker)
             if args.mode == "history":
                 # Keep only counted samples; producer timing tables and raw
                 # duration fields do not enter retained history artifacts.
@@ -232,13 +306,15 @@ def main() -> int:
             samples.append(sample)
             print(f"{args.mode}: collected run {index + 1}", flush=True)
         candidate = samples[-1]
-        if args.mode == "history":
+        if args.mode == "history" and not candidate.get("row_failures"):
             execute([args.binary, "counted-history-record", "--sample", str(args.out / "run-0/sample.json"),
                 "--history", str(args.history)], args.out / "history.log", env)
             print((args.out / "history.log").read_text(), end="")
             return 0
         if args.calibrate:
-            if any(not isinstance(candidate.get("identity", {}).get(k), str) or not candidate["identity"][k].strip() for k in IDENTITY):
+            if candidate.get("row_failures"):
+                raise ValueError("cannot calibrate capped rows")
+            if any(not isinstance((candidate.get("identity") or {}).get(k), str) or not candidate["identity"][k].strip() for k in IDENTITY):
                 raise ValueError("missing calibration identity")
             for sample in samples[1:]:
                 # Check identity/population without judging calibration noise.
@@ -267,30 +343,29 @@ def main() -> int:
             baseline_path.write_text(json.dumps(candidate, indent=2) + "\n")
             print(f"{args.mode}: calibrated {baseline_path}")
             return 1 if args.mode == "instructions" and failures else 0
+        if args.mode == "history":
+            baseline_path = args.baseline or Path("/workspace/kiln/lash/perf-gates/instructions-baseline.json")
+            committed = ROOT / "docs/perf/baselines/instructions.json"
+            if not baseline_path.exists():
+                baseline_path = committed
+        comparison_mode = "instructions" if args.mode == "history" else args.mode
         baseline = read(baseline_path)
         if baseline.get("commit"):
             subprocess.run(["git", "merge-base", "--is-ancestor", baseline["commit"], "HEAD"], cwd=ROOT, check=True)
-        selected = references(baseline, candidate, read(committed)) if args.mode == "instructions" else baseline
-        failures = regressions(selected, candidate, args.mode)
+        selected = references(baseline, candidate, read(committed)) if comparison_mode == "instructions" else baseline
+        failures = regressions(selected, candidate, comparison_mode)
+        capped = candidate.get("row_failures", {})
         (args.out / "decision.json").write_text(json.dumps({
             "mode": args.mode, "baseline_path": str(baseline_path),
             "baseline": baseline, "candidate": candidate,
             "row_verdicts": selected.get("row_verdicts", {}),
             "selected_baseline": selected,
-            "instruction_relative_threshold": 0.01 if args.mode == "instructions" else None,
-            "regressed_rows": failures, "outcome": "fail" if failures else "pass",
+            "instruction_relative_threshold": 0.01 if comparison_mode == "instructions" else None,
+            "regressed_rows": failures, "row_failures": capped, "outcome": "fail" if failures or capped else "pass",
         }, indent=2) + "\n")
-        print("| Row | Verdict | Baseline | Observed | Ceiling |\n|---|---|---:|---:|---:|")
-        failed_names = {row[0] for row in failures}
-        for name, actual in candidate["rows"].items():
-            base = selected["rows"][name]
-            ceiling = base * 1.01 if args.mode == "instructions" else selected["ceilings"][name]
-            verdict = selected.get("row_verdicts", {}).get(name, "gated")
-            print(f"| {name} | {'FAIL' if name in failed_names else 'PASS'}; {verdict} | {base:.3f} | {actual:.3f} | {ceiling:.3f} |")
-        for name in baseline["rows"].keys() - candidate["rows"].keys():
-            print(f"| {name} | {selected['row_verdicts'][name]} | {baseline['rows'][name]:.3f} | - | - |")
-        if failures:
-            print(f"{args.mode}: FAIL ({len(failures)} regressed rows)")
+        report_rows(candidate, selected, failures, comparison_mode)
+        if failures or capped:
+            print(f"{args.mode}: FAIL ({len(failures)} regressed rows, {len(capped)} failed producers)")
             return 1
         print(f"{args.mode}: PASS ({len(candidate['rows'])} rows)")
         # Only a clean main run advances the previous-main baseline, and a
@@ -309,6 +384,18 @@ def main() -> int:
                 temporary.replace(path)
         return 0
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        if candidate.get("row_failures"):
+            # An unavailable comparison identity must not hide already capped
+            # rows or manufacture passing verdicts for completed observations.
+            baseline = read(baseline_path)
+            (args.out / "decision.json").write_text(json.dumps({
+                "mode": args.mode, "baseline_path": str(baseline_path), "baseline": baseline,
+                "candidate": candidate, "selected_baseline": baseline, "regressed_rows": [],
+                "row_failures": candidate["row_failures"], "comparison_refusal": str(error), "outcome": "fail",
+            }, indent=2) + "\n")
+            report_rows(candidate, baseline, [], "instructions", refusal=str(error))
+            print(f"{args.mode}: FAIL (capped rows; remaining comparisons refused: {error})")
+            return 1
         (args.out / "decision.json").write_text(json.dumps({
             "mode": args.mode, "baseline_path": str(baseline_path), "outcome": "refused", "reason": str(error),
         }, indent=2) + "\n")
