@@ -716,6 +716,7 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         .fetch_one(&mut admin)
         .await
         .expect("read requested checkpoints");
+    eprintln!("isolated cells requested checkpoints: before={before}, after_setup={after}");
     assert_eq!(
         after, before,
         "cell setup must not request a cluster checkpoint"
@@ -743,6 +744,7 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         .fetch_one(&mut admin)
         .await
         .expect("read teardown checkpoints");
+    eprintln!("isolated cells requested checkpoints: after_teardown={after_teardown}");
     assert_eq!(
         after_teardown, after,
         "cell teardown must not checkpoint a live companion cell"

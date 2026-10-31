@@ -212,7 +212,7 @@ declare -A uniform_store_suites=(
   [pg-standard-retention]="//crates/lash-protocol-standard:lash-protocol-standard__unit_test|postgres|lash-internal-protocol-standard|--lib|cargo-test|ignored-only"
   [pg-operator-laws]="//crates/lashctl:operator_json_contract__test||lashctl|--test operator_json_contract|cargo-test|ignored-only"
   [pg-chaos-laws]="//crates/lash-sim:chaos_soak__test|chaos_soak_on_postgres|lash-sim|--test chaos_soak|cargo-test|ignored-only"
-  [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test|postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured,a_process_row_takes_its_lifecycle_columns_from_its_record_alone,postgres_obligation_checks_reject_incomplete_variants,turn_cancellation_shape_is_guarded,isolated_cells_do_not_checkpoint_or_share_state|lash-internal-postgres-store|--test schema_constraints|cargo-test|"
+  [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test|postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured,a_process_row_takes_its_lifecycle_columns_from_its_record_alone,postgres_obligation_checks_reject_incomplete_variants,turn_cancellation_shape_is_guarded,isolated_cells_do_not_checkpoint_or_share_state|lash-internal-postgres-store|--test schema_constraints|cargo-test|private-postgres"
   [pg-bound-run-settled-history]="//crates/lash-postgres-store:lash-postgres-store__unit_test|postgres_bound_run_skips_settled_history_without_changing_bindings_when_configured,durable::tests::lo_resolution_when_configured,durable::tests::lo_succession_when_configured,durable::tests::lo_process_receipt_when_configured,durable::tests::lo_process_frontier_on_postgres_when_configured,durable::tests::lo_fence_explicit_when_configured,durable::tests::lo_fence_function_when_configured,lo_postimage_explicit_when_configured,lo_postimage_function_when_configured,durable::graph::graph_store_tests::lo_root_when_configured,durable::tests::lo_root_prompt_retirement_when_configured|lash-internal-postgres-store|--lib|cargo-test|ignored-only"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
 )
@@ -243,7 +243,13 @@ render_buck2_suite() {
       args+=(--test_arg=--skip "--test_arg=${flag#skip=}")
     fi
   done
-  buck2_test "${args[@]}" "$label"
+  # Cluster statistics cannot be isolated by the external server's database
+  # slots. Keep these actions on their owning hermetic PostgreSQL runner.
+  if suite_has_flag "$flags" private-postgres; then
+    postgres_hermetic_test "${args[@]}" "$label"
+  else
+    buck2_test "${args[@]}" "$label"
+  fi
 }
 
 # The Cargo half: the same selection in nextest's or libtest's spelling.
