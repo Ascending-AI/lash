@@ -156,6 +156,26 @@ impl PreparedJoin<'_> {
         self.registers.source.publish_join(self.join);
     }
 }
+/// An exclusive bank borrow retains the checked evaluated inputs until commit.
+pub(super) struct PreparedInputs<'a> {
+    registers: &'a mut Registers,
+    inputs: Vec<source::Transfer>,
+}
+impl PreparedInputs<'_> {
+    pub(super) fn owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
+        self.inputs.iter().map(|input| input.owner()).collect()
+    }
+    pub(super) fn values(&self) -> Vec<Value> {
+        self.inputs.iter().map(|input| input.value()).collect()
+    }
+    pub(super) fn publish(self) {
+        for input in self.inputs {
+            self.registers.take(input.index(), Value::Null);
+            self.registers.source.publish_transfer(input);
+        }
+    }
+}
+
 pub(super) struct PreparedOutput<'a> {
     registers: &'a mut Registers,
     output: source::Output,
@@ -412,6 +432,33 @@ impl Registers {
         self.clear_range(values.len()..self.extent);
         self.extent = values.len();
         Ok(())
+    }
+
+    pub(super) fn prepare_source_inputs(
+        &mut self,
+        stream: &crate::compile::Stream,
+        pc: u32,
+    ) -> Result<Option<PreparedInputs<'_>>, HeapFault> {
+        let Some(op) = stream.ops.get(pc as usize) else {
+            return Ok(None);
+        };
+        let reads = op.reads();
+        let mut inputs = Vec::new();
+        inputs
+            .try_reserve(reads.len())
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        for reg in reads {
+            let Some(input) = self.checked_source_transfer(reg)? else {
+                return Ok(None);
+            };
+            inputs.push(input);
+        }
+        Ok(Some(PreparedInputs {
+            registers: self,
+            inputs,
+        }))
     }
 
     pub(super) fn prepare_source_output(

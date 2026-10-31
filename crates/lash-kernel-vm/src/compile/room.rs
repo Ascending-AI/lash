@@ -918,7 +918,7 @@ impl Source {
             .ok_or(Refused::Path)
     }
 
-    /// The first unpaid event after an expression, binding or variable assignment Commit.
+    /// The first unpaid event after an expression, binding or assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
     pub(crate) fn next_after_commit(&self, at: &Site) -> Result<Point, Refused> {
@@ -945,10 +945,8 @@ impl Source {
                 | doc::Node::Stmt(
                     doc::Stmt::Let { .. }
                         | doc::Stmt::Do { .. }
-                        | doc::Stmt::Assign {
-                            place: doc::Place::Variable(_),
-                            ..
-                        }
+                        | doc::Stmt::Assign { .. }
+                        | doc::Stmt::Remove { .. }
                 )
         ) || !self.room.peak_extra.contains_key(&point(at, Phase::Commit))
         {

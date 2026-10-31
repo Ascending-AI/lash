@@ -161,7 +161,7 @@ pub(in crate::machine::islands) fn scope_published() {
 pub(crate) fn member_publications() -> u64 {
     MEMBER_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn member_published() {
+pub(in crate::machine) fn member_published() {
     MEMBER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 

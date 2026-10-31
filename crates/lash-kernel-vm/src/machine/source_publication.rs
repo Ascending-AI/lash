@@ -10,6 +10,7 @@ mod join;
 mod leaf;
 mod literal;
 pub(in crate::machine) mod literal_storage;
+mod member;
 mod native;
 pub(in crate::machine) mod native_storage;
 mod occurrence;

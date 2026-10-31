@@ -504,6 +504,18 @@ fn observe_source_or_register(
             "both captured closures must install through source acceptance: {closure_constructions}"
         );
     }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_MEMBER)
+    {
+        assert!(
+            members >= 5,
+            "every precise append and replacement must publish its actual member journal: {members}"
+        );
+    }
     if mode != Mode::Source
         && layout == Layout(0)
         && !taped
