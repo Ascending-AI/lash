@@ -341,7 +341,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         }
         witnessed!(GuardedRead, Guard);
         let mut values = [Value::Absent; 1];
-        self.inputs(frame.slots, std::slice::from_ref(&site.target), &mut values)?;
+        self.source_inputs(frame, std::slice::from_ref(&site.target), &mut values)?;
         let [value] = values;
         frame.regs[site.kind.same.reg as usize] = self
             .retaining(&mut frame.state.transient, |island| {

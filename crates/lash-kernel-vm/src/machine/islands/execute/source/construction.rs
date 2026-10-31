@@ -113,12 +113,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             values.push(frame.regs[*reg as usize]);
         }
         let output = root(&room::Owner::Operand(at.site.clone()))?;
-        for (reg, operand) in roles.iter() {
-            self.logical.replace(
-                root(&room::Owner::Operand((**operand).clone()))?,
-                Some(SourceValue::Value(frame.regs[reg.ix()])),
-            );
-        }
         self.logical.flush(self.arena, self.heap)?;
         let event = JournalEvent {
             inputs,
@@ -126,6 +120,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        for input in &event.inputs {
+            if ledger.holding(*input, self.heap.pages())?.is_none() {
+                return Ok(ValuePublication::Unavailable);
+            }
+        }
         if ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
         }

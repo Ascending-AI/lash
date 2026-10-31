@@ -335,6 +335,26 @@ impl Source {
         self.compile_event_input(at, selected, None)
     }
 
+    /// A callee load shares its call's source site, but has no leaf Commit.
+    /// Only the source tree can classify an ordinary value occurrence here.
+    pub(crate) fn compile_leaf(&self, at: &Site) -> Result<Arc<CompiledInterval>, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        if !matches!(
+            node,
+            doc::Node::Expr(doc::Expr::Literal(_) | doc::Expr::Variable(_))
+        ) {
+            return Err(Refused::Path);
+        }
+        self.compile_event(&point(at, Phase::Commit), ExitKind::Normal)
+    }
+
     /// Exact execution supplies the selected child's authenticated operand.
     /// This is the source expression's Commit, with its unchanged algebra.
     pub(crate) fn compile_join(

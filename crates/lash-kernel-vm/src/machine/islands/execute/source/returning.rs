@@ -68,10 +68,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let input = root(input_selector.clone())?;
         let departure = root(departure_selector.clone())?;
         let incoming = Owner::Incoming(self.task);
-        self.logical.replace(input, Some(SourceValue::Value(value)));
         self.logical.flush(self.arena, self.heap)?;
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        if ledger.holding(input, self.heap.pages())?.is_none() {
+            return Ok(ValuePublication::Unavailable);
+        }
         if ledger.holding(departure, self.heap.pages())?.is_some()
             || ledger.holding(incoming, self.heap.pages())?.is_some()
         {

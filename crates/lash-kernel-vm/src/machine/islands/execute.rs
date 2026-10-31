@@ -382,7 +382,24 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         continue;
                     }
                     Opcode::Constant => {
-                        slab.view(active).regs[packet.dst as usize] = code.constant(packet);
+                        let value = code.constant(packet);
+                        if let Some(read) = recovery.source {
+                            match self.source_read(&mut slab.view(active), read, packet.dst, value)
+                            {
+                                Ok(true) => continue,
+                                Ok(false) => {}
+                                Err(stop) => {
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
+                            }
+                        }
+                        slab.view(active).regs[packet.dst as usize] = value;
                         continue;
                     }
                     Opcode::Local => {
@@ -395,6 +412,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             let stop = self.at(packet.y);
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         };
+                        if let Some(read) = recovery.source {
+                            match self.source_read(&mut slab.view(active), read, packet.dst, value)
+                            {
+                                Ok(true) => continue,
+                                Ok(false) => {}
+                                Err(stop) => {
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
+                            }
+                        }
                         slab.view(active).regs[packet.dst as usize] = value;
                         continue;
                     }
@@ -403,6 +436,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             let stop = self.at(packet.y);
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
                         };
+                        if let Some(read) = recovery.source {
+                            match self.source_read(&mut slab.view(active), read, packet.dst, value)
+                            {
+                                Ok(true) => continue,
+                                Ok(false) => {}
+                                Err(stop) => {
+                                    return self.slow_exit(
+                                        active,
+                                        &mut callers,
+                                        slab,
+                                        recovery,
+                                        stop,
+                                    );
+                                }
+                            }
+                        }
                         slab.view(active).regs[packet.dst as usize] = value;
                         continue;
                     }

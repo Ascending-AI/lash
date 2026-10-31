@@ -534,12 +534,14 @@ impl Build<'_> {
                 Kind::Const(value) => Some(Read::Literal {
                     reg: arg.reg,
                     value,
+                    source: arg.read?,
                 }),
                 Kind::Local { local, miss, .. } => Some(Read::Local {
                     reg: arg.reg,
                     at: local.at as usize,
                     shared: self.shared[local.at as usize],
                     miss,
+                    source: arg.read?,
                 }),
                 _ => None,
             })

@@ -115,7 +115,7 @@ impl Build<'_> {
                 else {
                     unreachable!();
                 };
-                let Op::Constant { dst, value } = separator.op else {
+                let Op::Constant { dst, value, .. } = separator.op else {
                     unreachable!();
                 };
                 let Op::Native {

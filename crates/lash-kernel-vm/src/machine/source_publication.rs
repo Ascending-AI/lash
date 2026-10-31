@@ -9,6 +9,7 @@ pub(in crate::machine) mod construction;
 mod join;
 mod leaf;
 mod literal;
+pub(in crate::machine) mod literal_storage;
 mod occurrence;
 mod read;
 use occurrence::source_loops;

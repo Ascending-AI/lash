@@ -235,16 +235,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .ok_or_else(|| malformed("native read operand has no source owner"))
         };
         let mut inputs = Vec::new();
-        for (at, value) in input_sites.into_iter().zip(args) {
-            let owner = root(at)?;
-            self.logical
-                .replace(owner, Some(SourceValue::Value(*value)));
-            inputs.push(owner);
+        for at in input_sites {
+            inputs.push(root(at)?);
         }
         let output = root(at.site.clone())?;
         self.logical.flush(self.arena, self.heap)?;
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        for input in &inputs {
+            if ledger.holding(*input, self.heap.pages())?.is_none() {
+                return Ok(ValuePublication::Unavailable);
+            }
+        }
         if ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(ValuePublication::Declined);
         }

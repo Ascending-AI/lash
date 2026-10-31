@@ -499,6 +499,9 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .rev()
                 .map(|position| position.projected(frame.state.callee.compiled, &frame.pending)),
         );
+        if let Some((statement, pc)) = source {
+            self.restore_expression_scopes(frame.slots, statement, pc);
+        }
         if let Err(error) = self
             .source_clear_operands(frame)
             .and_then(|()| self.source_bindings(frame))
@@ -518,7 +521,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             frame.slots,
             library.filter(|_| !frame.state.callee.plan.charged),
             frame.state.boundary,
-            source,
             activation,
         );
     }

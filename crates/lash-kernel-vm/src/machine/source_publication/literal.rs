@@ -1,124 +1,47 @@
 //! Deferred constants stage their complete backing before source acceptance.
+use super::literal_storage::{Literal, PreparedLiteral};
 use super::*;
 use crate::compile::room::publication::Occurrence;
-use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
+use crate::compile::room::{Phase, Point};
 use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::{
-    arena::PreparedBatch,
-    kernel_internals::{
-        logical::{Holding, JournalEvent, PublicationValue},
-        stored_pages,
-    },
-};
+use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 struct LiteralResult<'bank, 'literal, 'heap> {
     bank: PreparedOutput<'bank>,
-    literal: &'literal doc::Literal,
-    link: lash_kernel_value::content_ids::LinkId,
-    at: Point,
-    physical_room: u64,
-    heap: &'heap PagedHeap,
+    recipe: Literal<'literal, 'heap>,
 }
-struct PreparedLiteral<'bank> {
+struct PreparedBankLiteral<'bank> {
     bank: PreparedOutput<'bank>,
-    batch: PreparedBatch,
-    value: doc::Value,
-    holding: Holding,
-    at: Point,
+    data: PreparedLiteral,
 }
 impl<'bank> StoragePreparation for LiteralResult<'bank, '_, '_> {
-    type Prepared = PreparedLiteral<'bank>;
+    type Prepared = PreparedBankLiteral<'bank>;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
         actual: Program,
     ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let [event] = actual.events() else {
+        let Some(PreparedStorage {
+            registration,
+            storage,
+            actual,
+        }) = self.recipe.prepare(arena, actual)?
+        else {
             return Ok(None);
         };
-        if !event.inputs.is_empty()
-            || !event.outputs.is_empty()
-            || !event.entities.is_empty()
-            || event.frame.is_some()
-            || event.member.is_some()
-            || !event.scratch.is_empty()
-        {
-            return Ok(None);
-        }
-        use doc::{Literal, Value, heap::PageValue};
-        // Page construction may fail. Do it before reserving any nursery slot.
-        let page = match self.literal {
-            Literal::Null => PageValue::Null,
-            Literal::Absent => PageValue::Absent,
-            Literal::Bool(value) => PageValue::Bool(*value),
-            Literal::Float(value) => PageValue::Float(*value),
-            Literal::Int(value) => {
-                PageValue::Int(stored_pages::int(self.heap.pages(), value.clone())?)
-            }
-            Literal::Text(value) => PageValue::Text(stored_pages::text(self.heap.pages(), value)?),
-            Literal::Bytes(value) => {
-                PageValue::Bytes(stored_pages::bytes(self.heap.pages(), value.as_slice())?)
-            }
-            Literal::Function(function) => {
-                PageValue::Function(Box::new(lash_kernel_value::names::CallableId {
-                    link: self.link,
-                    function: *function,
-                }))
-            }
-        };
-        let mut nursery = doc::Nursery::unaccounted(arena.objects());
-        let value = match self.literal {
-            Literal::Null => Value::Null,
-            Literal::Absent => Value::Absent,
-            Literal::Bool(value) => Value::Bool(*value),
-            Literal::Float(value) => Value::Float(*value),
-            Literal::Int(value) => nursery.integer(value.clone()),
-            Literal::Text(value) => nursery.text(value),
-            Literal::Bytes(value) => nursery.bytes(value.as_slice()),
-            Literal::Function(function) => nursery.function(lash_kernel_value::names::CallableId {
-                link: self.link,
-                function: *function,
-            }),
-        };
-        // Compatibility eligibility only until the complete logical cutover.
-        // This physical estimate supplies no guest price or refusal.
-        if arena.install_bound(nursery.built()) > self.physical_room {
-            nursery.discard();
-            return Ok(None);
-        }
-        let installation = arena
-            .prepare_install(nursery.into_new())
-            .map_err(native_fault)?;
-        let (registration, batch) = installation.into_parts();
-        let holding = Holding::from_page(self.heap.pages(), &page)?;
-        let mut event = event.clone();
-        event
-            .outputs
-            .push((self.bank.owner(), PublicationValue::Page(page)));
         Ok(Some(PreparedStorage {
             registration,
-            storage: PreparedLiteral {
+            storage: PreparedBankLiteral {
                 bank: self.bank,
-                batch,
-                value,
-                holding,
-                at: self.at,
+                data: storage,
             },
-            actual: Program::new(vec![event]),
+            actual,
         }))
     }
     fn facts(prepared: &Self::Prepared, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        let facts = facts
-            .0
-            .get_mut(&prepared.at)
-            .ok_or_else(|| malformed("literal facts disappeared"))?;
-        facts.values.insert(
-            Measure::Local(Selector::Operand(prepared.at.site.clone())),
-            i128::from(prepared.holding.bytes()),
-        );
-        Ok(())
+        <Literal<'_, '_> as StoragePreparation>::facts(&prepared.data, facts)
     }
 }
 
@@ -157,7 +80,7 @@ impl KernelMachine {
             site: (**site).clone(),
             phase: Phase::Commit,
         };
-        let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
+        let Ok(interval) = source.compile_leaf(site) else {
             return Ok(false);
         };
         self.logical_flush()?;
@@ -254,16 +177,21 @@ impl KernelMachine {
             || Program::new(vec![JournalEvent::default()]),
             LiteralResult {
                 bank,
-                literal,
-                link,
-                at,
-                physical_room,
-                heap: &self.heap,
+                recipe: Literal {
+                    literal,
+                    link,
+                    output,
+                    at,
+                    physical_room,
+                    heap: &self.heap,
+                },
             },
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
-                prepared.batch.publish(arena);
-                prepared.bank.publish(prepared.value, prepared.holding);
+                prepared.data.batch.publish(arena);
+                prepared
+                    .bank
+                    .publish(prepared.data.value, prepared.data.holding);
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

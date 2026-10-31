@@ -98,10 +98,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if output != Owner::session(&binding.name) {
             return Ok(None);
         }
-        self.logical.replace(input, Some(SourceValue::Value(value)));
         self.logical.flush(self.arena, self.heap)?;
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        if ledger.holding(input, self.heap.pages())?.is_none() {
+            return Ok(None);
+        }
         let held = ledger.holding(output, self.heap.pages())?.is_some();
         if !site.bind && !held {
             return Ok(None);

@@ -154,9 +154,72 @@ pub(crate) struct Expr {
     /// resumes when a tier cannot run that op. An expression local's and a
     /// pin's are their value's: the op whose value they hold.
     pub(crate) pc: u32,
+    /// A pure read retains its canonical unpaid charge prefix before folding.
+    pub(crate) read: Option<SourceRead>,
     /// The register its value goes to.
     pub(crate) reg: u32,
     pub(crate) kind: Kind,
+}
+
+/// The original pure source operation and its unpaid region quote. Only
+/// Reader can construct it, while it still owns the actual open regions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SourceRead {
+    pc: u32,
+    quote: u64,
+    unpaid: u32,
+}
+impl SourceRead {
+    pub(crate) fn pc(self) -> u32 {
+        self.pc
+    }
+    pub(crate) fn quote(self) -> u64 {
+        self.quote
+    }
+    pub(crate) fn unpaid(self) -> u32 {
+        self.unpaid
+    }
+    pub(crate) fn verify(&self, stream: &Stream, reg: u32) -> bool {
+        if self.unpaid > self.pc {
+            return false;
+        }
+        let Some(op) = stream.ops.get(self.pc as usize) else {
+            return false;
+        };
+        if !matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
+            || op.writes() != Some(Reg(reg))
+        {
+            return false;
+        }
+        if self.unpaid == self.pc {
+            return self.quote == 0;
+        }
+        let prefix = &stream.ops[self.unpaid as usize..self.pc as usize];
+        if !matches!(prefix.first(), Some(Op::Region { .. })) {
+            return false;
+        }
+        let mut quote = 0_u64;
+        for (offset, op) in prefix.iter().enumerate() {
+            if let Op::Region { region, total } = op {
+                if stream.regions.head(region.0) != self.unpaid + offset as u32
+                    || stream
+                        .regions
+                        .summary(region.0)
+                        .ok()
+                        .is_none_or(|summary| summary.total() != u64::from(*total))
+                {
+                    return false;
+                }
+                let Some(next) = quote.checked_add(u64::from(*total)) else {
+                    return false;
+                };
+                quote = next;
+            } else if !op.kind().in_region() {
+                return false;
+            }
+        }
+        quote == self.quote
+    }
 }
 
 #[derive(Clone)]
@@ -416,6 +479,7 @@ pub(crate) fn statement(stream: &Stream, range: OpRange, rooted: bool) -> Option
             Reg(0),
             Expr {
                 pc: start,
+                read: None,
                 reg: 0,
                 kind: Kind::Act,
             },
@@ -508,6 +572,14 @@ impl<'s> Reader<'s> {
         let mut pc = start;
         while pc < end {
             let op = *stream.ops.get(pc as usize)?;
+            let read =
+                matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. }).then(|| {
+                    SourceRead {
+                        pc,
+                        quote: units(&self.open),
+                        unpaid: self.miss(pc),
+                    }
+                });
             let (reg, kind) = match op {
                 Op::Region { region, total } => {
                     if total == u32::MAX {
@@ -612,6 +684,7 @@ impl<'s> Reader<'s> {
                     let value = self.take(src)?;
                     let expr = Expr {
                         pc: value.pc,
+                        read: None,
                         reg: src.0,
                         kind: Kind::Pin(Box::new(value)),
                     };
@@ -638,6 +711,7 @@ impl<'s> Reader<'s> {
                     let body = self.take(Reg(reg))?;
                     let expr = Expr {
                         pc: body.pc,
+                        read: None,
                         reg,
                         kind: Kind::Let {
                             local: bound,
@@ -661,6 +735,7 @@ impl<'s> Reader<'s> {
                     let otherwise = self.arm(then_end, else_end, cond);
                     let expr = Expr {
                         pc,
+                        read: None,
                         reg: cond.0,
                         kind: Kind::Cond {
                             cond: Box::new(test),
@@ -679,6 +754,7 @@ impl<'s> Reader<'s> {
                 reg,
                 Expr {
                     pc,
+                    read,
                     reg: reg.0,
                     kind,
                 },

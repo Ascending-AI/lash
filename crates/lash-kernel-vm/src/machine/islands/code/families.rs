@@ -77,7 +77,11 @@ fn literal(value: Value, source: &Expr) -> bool {
 }
 
 fn operand(operand: &Operand, source: &Expr, plan: &IslandPlan) -> bool {
-    if operand.reg() != source.reg {
+    if operand.reg() != source.reg
+        || operand
+            .source()
+            .is_some_and(|read| unpin(source).read != Some(read))
+    {
         return false;
     }
     match operand {

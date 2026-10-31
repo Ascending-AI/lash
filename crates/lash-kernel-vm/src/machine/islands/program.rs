@@ -66,16 +66,23 @@ pub(crate) enum Read {
     Literal {
         reg: u32,
         value: Value,
+        source: crate::compile::expr::SourceRead,
     },
     Local {
         reg: u32,
         at: usize,
         shared: bool,
         miss: u32,
+        source: crate::compile::expr::SourceRead,
     },
 }
 
 impl Read {
+    pub(crate) fn source(&self) -> crate::compile::expr::SourceRead {
+        match self {
+            Self::Literal { source, .. } | Self::Local { source, .. } => *source,
+        }
+    }
     pub(crate) fn reg(&self) -> u32 {
         match self {
             Self::Literal { reg, .. } | Self::Local { reg, .. } => *reg,
@@ -848,6 +855,7 @@ impl<'e> Build<'e> {
                     self.emit(Op::Constant {
                         dst: saved + 1,
                         value: Value::Bool(false),
+                        source: None,
                     });
                 }
             }
@@ -859,6 +867,7 @@ impl<'e> Build<'e> {
                     at: local.at as usize,
                     shared: self.shared[local.at as usize],
                     miss: *miss,
+                    source: expr.read,
                 });
                 self.result(reg, &[]);
             }
@@ -867,6 +876,7 @@ impl<'e> Build<'e> {
                     dst: reg,
                     name: name.0,
                     miss: *miss,
+                    source: expr.read,
                 });
                 self.result(reg, &[]);
             }
@@ -874,14 +884,15 @@ impl<'e> Build<'e> {
                 self.emit(Op::Constant {
                     dst: reg,
                     value: *value,
+                    source: expr.read,
                 });
                 self.result(reg, &[]);
             }
-            Kind::Text { constant, miss } => {
+            Kind::Text { constant, .. } => {
                 self.emit(Op::Cold(Deferred::Text {
                     dst: reg,
                     constant: *constant,
-                    miss: *miss,
+                    source: expr.read?,
                 }));
                 self.result(reg, &[]);
             }

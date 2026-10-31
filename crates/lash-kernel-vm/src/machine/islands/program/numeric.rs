@@ -277,12 +277,34 @@ impl Op {
 /// Registers retain values evaluated before any intervening guest call.
 pub(crate) enum Operand {
     Register(u32),
-    Literal { reg: u32, value: Value },
-    Local { reg: u32, at: usize, miss: u32 },
-    Cell { reg: u32, at: usize, miss: u32 },
+    Literal {
+        reg: u32,
+        value: Value,
+        source: crate::compile::expr::SourceRead,
+    },
+    Local {
+        reg: u32,
+        at: usize,
+        miss: u32,
+        source: crate::compile::expr::SourceRead,
+    },
+    Cell {
+        reg: u32,
+        at: usize,
+        miss: u32,
+        source: crate::compile::expr::SourceRead,
+    },
 }
 
 impl Operand {
+    pub(in crate::machine::islands) fn source(&self) -> Option<crate::compile::expr::SourceRead> {
+        match self {
+            Self::Register(_) => None,
+            Self::Literal { source, .. }
+            | Self::Local { source, .. }
+            | Self::Cell { source, .. } => Some(*source),
+        }
+    }
     pub(in crate::machine::islands) fn reg(&self) -> u32 {
         match self {
             Self::Register(reg)
@@ -296,19 +318,31 @@ impl Operand {
 impl From<Read> for Operand {
     fn from(read: Read) -> Self {
         match read {
-            Read::Literal { reg, value } => Self::Literal { reg, value },
+            Read::Literal { reg, value, source } => Self::Literal { reg, value, source },
             Read::Local {
                 reg,
                 at,
                 miss,
                 shared: false,
-            } => Self::Local { reg, at, miss },
+                source,
+            } => Self::Local {
+                reg,
+                at,
+                miss,
+                source,
+            },
             Read::Local {
                 reg,
                 at,
                 miss,
                 shared: true,
-            } => Self::Cell { reg, at, miss },
+                source,
+            } => Self::Cell {
+                reg,
+                at,
+                miss,
+                source,
+            },
         }
     }
 }

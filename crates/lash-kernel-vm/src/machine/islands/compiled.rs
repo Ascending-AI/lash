@@ -29,7 +29,7 @@ pub(crate) enum Deferred {
     Text {
         dst: u32,
         constant: lash_kernel_exec::ConstIx,
-        miss: u32,
+        source: crate::compile::expr::SourceRead,
     },
 }
 

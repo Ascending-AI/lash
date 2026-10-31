@@ -502,6 +502,7 @@ impl Former<'_> {
         let ops = &self.tables.stream.ops;
         let opaque = |pc: u32, reg: Reg| Expr {
             pc,
+            read: None,
             reg: reg.0,
             kind: ExprKind::Opaque,
         };
@@ -660,6 +661,7 @@ impl Former<'_> {
                 };
                 Some(Expr {
                     pc: statement.ops.start,
+                    read: None,
                     reg,
                     kind,
                 })
@@ -716,6 +718,7 @@ impl Former<'_> {
                         super::Callee::Value(super::Var::Local(local)) => {
                             Callee::Read(Box::new(Expr {
                                 pc: statement.ops.start,
+                                read: None,
                                 reg: 0,
                                 kind: ExprKind::Local {
                                     local: lash_kernel_exec::LocalRef {
@@ -748,6 +751,7 @@ impl Former<'_> {
             };
             Some(self.admitted(Expr {
                 pc: statement.ops.start,
+                read: None,
                 reg: 0,
                 kind,
             })?)

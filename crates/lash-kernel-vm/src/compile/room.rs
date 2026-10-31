@@ -25,6 +25,7 @@ mod verify;
 pub(crate) enum TransferTarget {
     Binding,
     RootReturn,
+    NativeInput,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -806,6 +807,11 @@ impl Source {
         for (node, site) in parents.into_iter().rev() {
             match node {
                 doc::Node::Expr(doc::Expr::List(_) | doc::Expr::Tuple(_)) => continue,
+                doc::Node::Expr(doc::Expr::Call { function, .. })
+                    if matches!(self.calls.get(function), Some(CallSource::Native(_))) =>
+                {
+                    return Some(TransferTarget::NativeInput);
+                }
                 doc::Node::Stmt(doc::Stmt::Let { .. }) => {
                     return Some(TransferTarget::Binding);
                 }

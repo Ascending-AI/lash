@@ -155,7 +155,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             let owner = slots
                 .root(&selector, self.task, activation.invocation.id())
                 .ok_or_else(|| malformed("member operand has no source owner"))?;
-            self.logical.replace(owner, Some(SourceValue::Value(value)));
             inputs.push(owner);
             selectors.push(selector);
             values.push(value);
@@ -163,6 +162,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.logical.flush(self.arena, self.heap)?;
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        for input in &inputs {
+            if ledger.holding(*input, self.heap.pages())?.is_none() {
+                return Ok(false);
+            }
+        }
         // Ask the canonical member owner for both the graph change and the
         // post-member release. Aliases and self-edges are never summed here.
         let member = ledger

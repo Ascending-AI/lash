@@ -9,23 +9,22 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         operation: &Deferred,
     ) -> Result<Next, Stop> {
-        let (dst, constant, miss) = match operation {
+        let (dst, constant, source) = match operation {
             Deferred::Source(pc) => return Err(self.at(*pc)),
             Deferred::Text {
                 dst,
                 constant,
-                miss,
-            } => (*dst, *constant, *miss),
+                source,
+            } => (*dst, *constant, *source),
         };
-        let crate::compile::Constant::Deferred(lash_kernel_doc::Literal::Text(text)) =
-            &self.stream.consts[constant.ix()]
+        let crate::compile::Constant::Deferred(literal @ lash_kernel_doc::Literal::Text(_)) =
+            &frame.state.callee.stream.consts[constant.ix()]
         else {
             unreachable!("a text instruction names a text literal");
         };
-        if !self.resident_room(self.arena.text_install_bound(text.len() as u64)) {
-            return Err(self.at(miss));
+        if !self.source_literal(frame, source, dst, literal)? {
+            return Err(self.at(source.unpaid()));
         }
-        frame.regs[dst as usize] = self.arena.text(text);
         Ok(Next::Continue)
     }
 

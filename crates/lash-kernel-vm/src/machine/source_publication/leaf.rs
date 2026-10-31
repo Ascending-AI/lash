@@ -1,7 +1,7 @@
 //! Pure source reads install their bank occurrence in the accepted journal.
 use super::*;
 use crate::compile::room::publication::Occurrence;
-use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
+use crate::compile::room::{Measure, Owner as Selector, Phase, Point};
 use crate::machine::{Halt, KernelMachine, SlotState, fault};
 use crate::machine::{logical_held::Projection, stream::Running};
 use lash_kernel_exec::Op;
@@ -50,7 +50,7 @@ impl KernelMachine {
             site: (**site).clone(),
             phase: Phase::Commit,
         };
-        let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
+        let Ok(interval) = source.compile_leaf(site) else {
             return Ok(false);
         };
         self.logical_flush()?;

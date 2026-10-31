@@ -12,7 +12,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     ) -> Result<Next, Stop> {
         let mut args = [Value::Absent; 2];
         match &site.reads {
-            Some(reads) => self.inputs(frame.slots, reads.as_slice(), &mut args)?,
+            Some(reads) => self.source_inputs(frame, reads.as_slice(), &mut args)?,
             None => {
                 args = [
                     frame.regs[site.args[0] as usize],

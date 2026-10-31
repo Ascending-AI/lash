@@ -1365,15 +1365,11 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
         slots: &Slots,
         library: Option<super::LibraryCall>,
         boundary: Option<crate::compile::LibId>,
-        source: Option<(StmtId, u32)>,
         activation: source::Activation,
     ) {
         let plan = callee.plan;
         let captured = callee.captured;
         let mut slots = slots[..plan.slots].to_vec();
-        if let Some((statement, pc)) = source {
-            self.restore_expression_scopes(&mut slots, statement, pc);
-        }
         let exit = &mut self.scratch.exit;
         if captured != RESIDENT {
             for (index, at) in plan.captures.iter().enumerate() {

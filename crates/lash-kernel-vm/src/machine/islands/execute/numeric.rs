@@ -11,10 +11,17 @@ enum ScalarMiss {
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     #[inline(always)]
-    pub(super) fn operand(&mut self, frame: &Values<'_, 'e>, arg: &Operand) -> Result<Value, Stop> {
+    pub(super) fn operand(
+        &mut self,
+        frame: &mut Values<'_, 'e>,
+        arg: &Operand,
+    ) -> Result<Value, Stop> {
         let (value, miss) = match arg {
             Operand::Register(reg) => return Ok(frame.regs[*reg as usize]),
-            Operand::Literal { value, .. } => return Ok(*value),
+            Operand::Literal { value, .. } => (
+                Some(*value),
+                arg.source().map_or(0, |source| source.unpaid()),
+            ),
             Operand::Local { at, miss, .. } => (
                 match frame.slots[*at] {
                     SlotState::Value(value) => Some(value),
@@ -30,7 +37,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 *miss,
             ),
         };
-        value.ok_or_else(|| self.at(miss))
+        let value = value.ok_or_else(|| self.at(miss))?;
+        if let Some(source) = arg.source() {
+            self.source_read(frame, source, arg.reg(), value)?;
+        }
+        Ok(value)
     }
 
     #[inline(always)]

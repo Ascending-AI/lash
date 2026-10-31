@@ -59,6 +59,7 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PACKET_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_BRANCHES: std::cell::Cell<[[u64; 2]; 2]> = const { std::cell::Cell::new([[0; 2]; 2]) };
     static PRECISE_ENDS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static FOR_SCOPES: std::cell::Cell<[[u64; 2]; 2]> = const { std::cell::Cell::new([[0; 2]; 2]) };
@@ -98,6 +99,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PACKET_READ_PUBLICATIONS.with(|count| count.set(0));
     PRECISE_BRANCHES.with(|counts| counts.set([[0; 2]; 2]));
     PRECISE_ENDS.with(|counts| counts.set([0; 2]));
     FOR_SCOPES.with(|counts| counts.set([[0; 2]; 2]));
@@ -583,4 +585,13 @@ pub(in crate::machine) fn precise_branch_published(statement: bool, taken: bool)
         next[usize::from(statement)][usize::from(taken)] += 1;
         counts.set(next);
     });
+}
+
+#[cfg(test)]
+pub(crate) fn packet_reads() -> u64 {
+    PACKET_READ_PUBLICATIONS.with(|count| count.replace(0))
+}
+
+pub(in crate::machine) fn packet_read_published() {
+    PACKET_READ_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }

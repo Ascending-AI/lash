@@ -10,6 +10,7 @@ pub(in crate::machine::islands::execute) enum ValuePublication {
     Published(Value),
 }
 mod publication;
+mod read;
 mod returning;
 mod scope;
 mod session;
@@ -56,7 +57,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .source_room
             .transfer_target(at)
         {
-            Some(room::TransferTarget::Binding) => true,
+            Some(room::TransferTarget::Binding | room::TransferTarget::NativeInput) => true,
             Some(room::TransferTarget::RootReturn) => self.source_return_frame(frame),
             None => false,
         }

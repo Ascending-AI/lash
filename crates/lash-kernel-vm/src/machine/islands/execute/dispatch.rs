@@ -374,7 +374,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         args.len()
                     }
                     OperatorInputs::Source(reads) => {
-                        self.inputs(frame.slots, reads, &mut values)?;
+                        self.source_inputs(frame, reads, &mut values)?;
                         reads.len()
                     }
                     OperatorInputs::Scalar(_) => unreachable!("scalar inputs returned above"),
@@ -391,7 +391,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     args.len()
                 } else {
                     let reads = &code.inputs[packet.y as usize];
-                    self.inputs(frame.slots, reads, &mut values)?;
+                    self.source_inputs(frame, reads, &mut values)?;
                     reads.len()
                 };
                 match self
@@ -434,7 +434,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     args.len()
                 } else {
                     let reads = &code.inputs[packet.y as usize];
-                    self.inputs(frame.slots, reads, &mut values)?;
+                    self.source_inputs(frame, reads, &mut values)?;
                     reads.len()
                 };
                 return self.heap_destination(
@@ -483,7 +483,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let values = match inputs {
                     Some(inputs) => {
                         let mut values = [Value::Absent; 3];
-                        self.inputs(frame.slots, &inputs.reads, &mut values)?;
+                        self.source_inputs(frame, &inputs.reads, &mut values)?;
                         values
                     }
                     None => [
@@ -597,10 +597,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 } else {
                     let reads = &code.inputs[packet.y as usize];
                     let mut values = [Value::Absent; 1];
-                    self.inputs(frame.slots, reads, &mut values)?;
+                    self.source_inputs(frame, reads, &mut values)?;
                     values[0]
                 };
-                regs[site.same.reg as usize] = self
+                frame.regs[site.same.reg as usize] = self
                     .retaining(&mut frame.state.transient, |island| {
                         island.kind_test(site, value)
                     })?;
@@ -673,7 +673,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 let value = if let Some(reads) = &site.reads {
                     {
                         let mut values = [Value::Absent; 1];
-                        self.inputs(frame.slots, reads, &mut values)?;
+                        self.source_inputs(frame, reads, &mut values)?;
                         values[0]
                     }
                 } else {

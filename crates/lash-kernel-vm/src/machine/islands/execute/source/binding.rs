@@ -80,7 +80,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
-        self.logical.replace(input, Some(SourceValue::Value(value)));
         self.logical.flush(self.arena, self.heap)?;
         let entity = site.shared.then(|| doc::heap::EntityId {
             family: doc::heap::FamilyId::PRIMARY,
@@ -88,6 +87,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         });
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        if ledger.holding(input, self.heap.pages())?.is_none() {
+            return Ok(None);
+        }
         if site.bind && ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(Some(false));
         }

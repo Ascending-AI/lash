@@ -254,6 +254,7 @@ fn observe_source_or_register(
     let while_scopes = crate::machine::islands::witness::while_scopes();
     let for_scopes = crate::machine::islands::witness::for_scopes();
     let precise_ends = crate::machine::islands::witness::precise_ends();
+    let packet_reads = crate::machine::islands::witness::packet_reads();
     let precise_branches = crate::machine::islands::witness::precise_branches();
     let condition_iterations = crate::machine::islands::witness::precise_condition_iterations();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
@@ -277,6 +278,18 @@ fn observe_source_or_register(
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
     let closure_constructions = crate::machine::islands::witness::closure_constructions();
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_SCOPED_BINDINGS)
+    {
+        assert!(
+            packet_reads > 0,
+            "packet reads must publish their actual source operands before their consumers: {mode:?} {packet_reads}"
+        );
+    }
     if mode == Mode::Source
         && layout == Layout(0)
         && !taped

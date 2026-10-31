@@ -147,6 +147,37 @@ macro_rules! operations {
                     record.site.verify(stream)?;
                     record.to.verify(stream)?;
                 }
+                for operation in &self.sites.cold {
+                    if let Deferred::Text { dst, constant, source } = &operation.value
+                        && (!source.verify(stream, *dst)
+                            || !matches!(stream.ops.get(source.pc() as usize), Some(lash_kernel_exec::Op::Const { c, .. }) if c == constant)
+                            || !matches!(stream.consts.get(constant.ix()), Some(crate::compile::Constant::Deferred(lash_kernel_doc::Literal::Text(_)))))
+                    {
+                            return Err(crate::compile::islands::Refused::Region { region: source.pc() });
+                    }
+                }
+                for (packet, recovery) in self.packets.iter().zip(&self.recovery) {
+                    if let Some(source) = recovery.source
+                        && (!matches!(packet.opcode, Opcode::Constant | Opcode::Local | Opcode::Session)
+                            || !source.verify(stream, packet.dst)
+                            || !match (packet.opcode, &stream.ops[source.pc() as usize]) {
+                                (Opcode::Constant, lash_kernel_exec::Op::Const { c, .. }) => {
+                                    matches!(&stream.consts[c.ix()], crate::compile::Constant::Resident(value) if self.constant(*packet).same(value))
+                                }
+                                (Opcode::Local, lash_kernel_exec::Op::Local { local, .. }) => packet.x == local.at,
+                                (Opcode::Session, lash_kernel_exec::Op::Session { name, .. }) => packet.x == name.0,
+                                _ => false,
+                            }) {
+                        return Err(crate::compile::islands::Refused::Region { region: source.pc() });
+                    }
+                }
+                for reads in &self.inputs {
+                    for read in reads {
+                        if !read.source().verify(stream, read.reg()) {
+                            return Err(crate::compile::islands::Refused::Region { region: read.source().pc() });
+                        }
+                    }
+                }
                 self.verify_roles(stream)?;
                 self.verify_constructions(stream)
             }
@@ -208,17 +239,20 @@ operations! {
         Constant {
             dst: u32,
             value: Value,
+            source: Option<crate::compile::expr::SourceRead>,
         }
         Local {
             dst: u32,
             at: usize,
             shared: bool,
             miss: u32,
+            source: Option<crate::compile::expr::SourceRead>,
         }
         Session {
             dst: u32,
             name: u32,
             miss: u32,
+            source: Option<crate::compile::expr::SourceRead>,
         }
         Field {
             dst: u32,
@@ -448,6 +482,7 @@ pub(crate) enum HeapKernel {
 
 /// Cold source roles are independent of the physical packet operands.
 pub(super) struct Recovery {
+    pub(super) source: Option<crate::compile::expr::SourceRead>,
     pub(super) live: Box<[u32]>,
     #[cfg(any(test, feature = "perf-witness"))]
     pub(super) reason: crate::perf_witness::execution::Reason,
@@ -510,8 +545,9 @@ impl Code {
                     x,
                     y: 0,
                 });
-                code.recovery
-                    .push(Self::recovery(&instruction.op, instruction.live.clone()));
+                let mut recovery = Self::recovery(&instruction.op, instruction.live.clone());
+                recovery.source = None;
+                code.recovery.push(recovery);
             }
             let Instruction {
                 op, live, kernel, ..
@@ -526,7 +562,9 @@ impl Code {
                     x,
                     y: 0,
                 });
-                code.recovery.push(Self::recovery(&op, live.clone()));
+                let mut recovery = Self::recovery(&op, live.clone());
+                recovery.source = None;
+                code.recovery.push(recovery);
             }
             let scheduler = op.scheduler_pc();
             let recovery = Self::recovery(&op, live);
@@ -628,6 +666,12 @@ impl Code {
         #[cfg(not(any(test, feature = "perf-witness")))]
         let _ = op;
         Recovery {
+            source: match op {
+                Op::Constant { source, .. }
+                | Op::Local { source, .. }
+                | Op::Session { source, .. } => *source,
+                _ => None,
+            },
             live,
             #[cfg(any(test, feature = "perf-witness"))]
             reason: {
@@ -676,7 +720,7 @@ impl Code {
         };
         let at = |n: usize| u32::try_from(n).ok();
         match *op {
-            Op::Constant { dst, value } => {
+            Op::Constant { dst, value, .. } => {
                 let x = at(self.constants.len())?;
                 self.constants.push(value);
                 packet(Opcode::Constant, 0, dst, x, 0)
@@ -686,8 +730,11 @@ impl Code {
                 at: index,
                 shared,
                 miss,
+                ..
             } => at(index).and_then(|x| packet(Opcode::Local, u16::from(shared), dst, x, miss)),
-            Op::Session { dst, name, miss } => packet(Opcode::Session, 0, dst, name, miss),
+            Op::Session {
+                dst, name, miss, ..
+            } => packet(Opcode::Session, 0, dst, name, miss),
             Op::Bind { at: index, src } => {
                 at(index).and_then(|dst| packet(Opcode::Bind, 0, dst, src, 0))
             }
