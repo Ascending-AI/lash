@@ -6,14 +6,28 @@ use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{JournalEvent, Member, MemberEdit};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
+enum PreparedListMember {
+    Write(lash_kernel_state::arena::PreparedListWrite),
+    Remove(lash_kernel_state::arena::PreparedListRemove),
+}
+impl PreparedListMember {
+    fn publish(self, arena: &mut Arena, edit: MemberEdit) {
+        match self {
+            Self::Write(write) => write.publish(arena, edit),
+            Self::Remove(remove) => remove.publish(arena, edit),
+        }
+    }
+}
 impl KernelMachine {
-    pub(in crate::machine) fn publish_source_list_store(
+    pub(in crate::machine) fn publish_source_list_member(
         &mut self,
         running: &Running<'_>,
         pc: u32,
     ) -> Result<bool, Halt> {
-        let Op::SetIndex { target, .. } = running.stream.ops[pc as usize] else {
-            return Ok(false);
+        let (target, removing) = match running.stream.ops[pc as usize] {
+            Op::SetIndex { target, .. } => (target, false),
+            Op::RemoveIndex { target } => (target, true),
+            _ => return Ok(false),
         };
         let doc::Value::List(handle) = self.regs[target.ix()] else {
             return Ok(false);
@@ -25,7 +39,7 @@ impl KernelMachine {
             return Ok(false);
         };
         // The original guest range error precedes any member journal.
-        if index > len {
+        if index > len || (removing && index == len) {
             return Ok(false);
         }
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
@@ -58,16 +72,15 @@ impl KernelMachine {
         };
         let inputs = bank.owners();
         let values = bank.values();
-        let [doc::Value::List(actual), _, value] = values.as_slice() else {
-            return Err(malformed("list store has another source input shape").into());
+        let next = match values.as_slice() {
+            [doc::Value::List(actual), _] if removing && *actual == handle => None,
+            [doc::Value::List(actual), _, value] if !removing && *actual == handle => Some(*value),
+            _ => return Err(malformed("list member has another source input shape").into()),
         };
-        if *actual != handle {
-            return Err(malformed("list store names another source target").into());
-        }
         let edit = MemberEdit {
             handle,
             member: Member::List(index),
-            next: Some(*value),
+            next,
         };
         let store = self.logical.ledger();
         let slots = source
@@ -228,13 +241,13 @@ impl KernelMachine {
                     ..Default::default()
                 }])
             },
-            Reserve(|arena: &mut Arena| {
-                arena.prepare_list_write(
-                    handle,
-                    index,
-                    edit.next
-                        .ok_or_else(|| malformed("list store lost its value"))?,
-                )
+            Reserve(|arena: &mut Arena| match edit.next {
+                Some(value) => arena
+                    .prepare_list_write(handle, index, value)
+                    .map(|write| write.map(PreparedListMember::Write)),
+                None => arena
+                    .prepare_list_remove(handle, index)
+                    .map(|remove| remove.map(PreparedListMember::Remove)),
             }),
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
@@ -246,9 +259,15 @@ impl KernelMachine {
         )?;
         drop(arena);
         if published {
-            self.grown();
+            if !removing {
+                self.grown();
+            }
             #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::member_published();
+            if removing {
+                crate::machine::islands::witness::list_removal_published();
+            } else {
+                crate::machine::islands::witness::member_published();
+            }
         }
         Ok(published)
     }

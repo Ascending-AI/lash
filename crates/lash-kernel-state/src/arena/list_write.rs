@@ -223,3 +223,80 @@ impl PreparedCellWrite {
         );
     }
 }
+
+/// A resident list removal prepared without changing the list or its edges.
+pub struct PreparedListRemove {
+    version: ContentVersion,
+    handle: ArenaHandle,
+    index: u64,
+    len: u64,
+    removed: Value,
+    values: Vec<Value>,
+}
+impl Arena {
+    /// Reserve resident storage and mutation bookkeeping without editing a member.
+    pub fn prepare_list_remove(
+        &mut self,
+        handle: ArenaHandle,
+        index: u64,
+    ) -> Result<Option<PreparedListRemove>, HeapFault> {
+        let Some(version) = self.content_version(handle) else {
+            return Ok(None);
+        };
+        let Ok(Body::List(sequence)) = self.body(handle) else {
+            return Ok(None);
+        };
+        if !self.facts(handle).is_ok_and(|facts| !facts.cold) || index >= sequence.len {
+            return Ok(None);
+        }
+        let len = sequence.len;
+        let Ok(held) = self.sequence(handle) else {
+            return Ok(None);
+        };
+        let Some(removed) = held.get(index as usize).copied() else {
+            return Ok(None);
+        };
+        let mut values = Vec::new();
+        reserve(&mut values, held.len() - 1)?;
+        values.extend_from_slice(&held[..index as usize]);
+        values.extend_from_slice(&held[index as usize + 1..]);
+        reserve(&mut self.zero, 1)?;
+        reserve(&mut self.dirty, 1)?;
+        let cards = ((len - 1) / CARD - index / CARD + 1) as usize;
+        reserve(&mut self.facts[handle.index() as usize].cards, cards)?;
+        Ok(Some(PreparedListRemove {
+            version,
+            handle,
+            index,
+            len,
+            removed,
+            values,
+        }))
+    }
+}
+impl PreparedListRemove {
+    /// Install only the checked removal under its accepted registration.
+    pub fn publish(self, arena: &mut Arena, edit: crate::paged::logical::MemberEdit) {
+        assert!(arena.registration_active() && arena.content_is(&self.version));
+        assert!(
+            edit.handle == self.handle
+                && matches!(edit.member, crate::paged::logical::Member::List(index) if index == self.index)
+                && edit.next.is_none()
+        );
+        let Some(Body::List(sequence)) = arena.objects.get_mut(self.handle) else {
+            unreachable!("a checked list removal changed body");
+        };
+        *sequence = Sequence::whole(self.values);
+        arena.resident = arena.resident.saturating_sub(1);
+        arena.update_flat(self.handle, Some(&self.removed), None);
+        arena.unhold(&self.removed);
+        for card in self.index / CARD..=(self.len - 1) / CARD {
+            Arena::mark_resident(
+                &mut arena.facts[self.handle.index() as usize],
+                &mut arena.dirty,
+                self.handle,
+                Some(card),
+            );
+        }
+    }
+}
