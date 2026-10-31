@@ -251,6 +251,8 @@ fn observe_source_or_register(
     let precise_reads = crate::machine::islands::witness::precise_reads();
     let precise_literals = crate::machine::islands::witness::precise_literals();
     let precise_scopes = crate::machine::islands::witness::precise_scopes();
+    let while_scopes = crate::machine::islands::witness::while_scopes();
+    let condition_iterations = crate::machine::islands::witness::precise_condition_iterations();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
     let replay = crate::machine::islands::witness::source_replay_publications();
@@ -376,6 +378,17 @@ fn observe_source_or_register(
             "the source nested scope must publish its genuine owner release before clearing bindings"
         );
     }
+    if layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_SCOPED_BINDINGS)
+    {
+        assert!(
+            while_scopes[usize::from(mode == Mode::Source)] > 0,
+            "the actual while body must publish its scope release before the next condition: {mode:?} {while_scopes:?}"
+        );
+    }
     if mode == Mode::Source
         && layout == Layout(0)
         && !taped
@@ -399,6 +412,11 @@ fn observe_source_or_register(
             precise_test_iterations,
             [Some(1), Some(0)],
             "the true first header and false next header have distinct actual source occurrences"
+        );
+        assert_eq!(
+            condition_iterations,
+            [Some(1), Some(0)],
+            "condition operands belong to the header being tested, before its body is entered"
         );
         assert!(
             precise_joins.iter().all(|count| *count > 0),

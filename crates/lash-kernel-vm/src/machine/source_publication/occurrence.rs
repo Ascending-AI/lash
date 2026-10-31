@@ -1,4 +1,4 @@
-//! Source positions use the current frame's actual entered loop iterations.
+//! Source positions distinguish an active loop body from its next header.
 use super::*;
 use crate::compile::{Executable, Form};
 use crate::machine::{Control, Frame};
@@ -12,11 +12,15 @@ pub(super) fn source_loops(
         return Ok(None);
     }
     let mut loops = Vec::new();
-    for control in &frame.control {
-        let (stmt, started) = match control {
-            Control::For { stmt, started, .. } | Control::While { stmt, started } => {
-                (*stmt, *started)
-            }
+    for (index, control) in frame.control.iter().enumerate() {
+        let (stmt, iteration) = match control {
+            Control::For { stmt, started, .. } => (*stmt, started.saturating_sub(1)),
+            // A condition runs with the While itself on top. Its next body
+            // has not been entered yet; nested body controls name started - 1.
+            Control::While { stmt, started } => (
+                *stmt,
+                started.saturating_sub(u64::from(index + 1 < frame.control.len())),
+            ),
             Control::Try { .. } => return Ok(None),
             _ => continue,
         };
@@ -26,7 +30,7 @@ pub(super) fn source_loops(
         let (Form::For { site, .. } | Form::While { site, .. }) = &exe.stmt(stmt).form else {
             return Err(malformed("source loop stands at another form"));
         };
-        loops.push((site.clone(), started.saturating_sub(1)));
+        loops.push((site.clone(), iteration));
     }
     Ok(Some(loops))
 }

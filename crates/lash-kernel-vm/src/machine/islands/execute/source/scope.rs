@@ -23,27 +23,49 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if closing == &source.site {
             return Ok(false);
         }
-        let Some(Position::Block(parent, next)) = frame.state.control.iter().rev().nth(1) else {
-            return Ok(false);
-        };
-        let parent = self
-            .exe
-            .block(frame.state.callee.compiled.blocks[*parent].id);
-        let unpaid = if let Some(stmt) = parent.stmts.get(*next) {
-            match source.first_event(&self.exe.stmt(*stmt).site) {
-                Ok(point) => point,
-                Err(_) => return Ok(false),
-            }
-        } else {
-            Point {
-                site: parent.site.clone(),
-                phase: if parent.site == source.site {
-                    SourcePhase::Fallthrough
+        let (unpaid, while_body) = match frame.state.control.iter().rev().nth(1) {
+            Some(Position::Block(parent, next)) => {
+                let parent = self
+                    .exe
+                    .block(frame.state.callee.compiled.blocks[*parent].id);
+                let unpaid = if let Some(stmt) = parent.stmts.get(*next) {
+                    match source.first_event(&self.exe.stmt(*stmt).site) {
+                        Ok(point) => point,
+                        Err(_) => return Ok(false),
+                    }
                 } else {
-                    SourcePhase::Leave
-                },
+                    Point {
+                        site: parent.site.clone(),
+                        phase: if parent.site == source.site {
+                            SourcePhase::Fallthrough
+                        } else {
+                            SourcePhase::Leave
+                        },
+                    }
+                };
+                (unpaid, false)
             }
+            Some(Position::Loop {
+                id,
+                started,
+                cursor: None,
+                ..
+            }) => {
+                let crate::compile::Form::While { site, body, .. } = &self.exe.stmt(*id).form
+                else {
+                    return Err(malformed("scope parent has another loop form"));
+                };
+                if *body != frame.state.callee.compiled.blocks[block].id || *started == 0 {
+                    return Err(malformed("scope is not an entered while body"));
+                }
+                let Ok(unpaid) = source.first_event(&site.child(0)) else {
+                    return Ok(false);
+                };
+                (unpaid, true)
+            }
+            _ => return Ok(false),
         };
+        debug_assert!(!while_body || frame.state.control.len() >= 2);
         let leave = Point {
             site: closing.clone(),
             phase: SourcePhase::Leave,
@@ -160,6 +182,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::scope_published();
+            if while_body {
+                crate::machine::islands::witness::while_scope_published(false);
+            }
         }
         Ok(published)
     }

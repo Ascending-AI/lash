@@ -15,7 +15,7 @@ impl KernelMachine {
         task_id: doc::TaskId,
         exe: &Executable,
     ) -> Result<bool, Halt> {
-        let (source, link, loops, block, invocation, unpaid) = {
+        let (source, link, loops, block, invocation, unpaid, while_body) = {
             let frame = self.frame(task_id)?;
             let Some(roots) = &frame.logical else {
                 return Ok(false);
@@ -37,31 +37,46 @@ impl KernelMachine {
             if exe.block(*block).site == source.site {
                 return Ok(false);
             }
-            let Some(Control::Block {
-                block: parent,
-                next,
-            }) = frame.control.iter().rev().nth(1)
-            else {
-                return Ok(false);
-            };
-            let parent = exe.block(*parent);
-            if *next > parent.stmts.len() {
-                return Err(malformed("scope parent has another source cursor").into());
-            }
-            let unpaid = if let Some(stmt) = parent.stmts.get(*next) {
-                let Ok(point) = source.first_event(&exe.stmt(*stmt).site) else {
-                    return Ok(false);
-                };
-                point
-            } else {
-                Point {
-                    site: parent.site.clone(),
-                    phase: if parent.site == source.site {
-                        Phase::Fallthrough
+            let (unpaid, while_body) = match frame.control.iter().rev().nth(1) {
+                Some(Control::Block {
+                    block: parent,
+                    next,
+                }) => {
+                    let parent = exe.block(*parent);
+                    if *next > parent.stmts.len() {
+                        return Err(malformed("scope parent has another source cursor").into());
+                    }
+                    let unpaid = if let Some(stmt) = parent.stmts.get(*next) {
+                        let Ok(point) = source.first_event(&exe.stmt(*stmt).site) else {
+                            return Ok(false);
+                        };
+                        point
                     } else {
-                        Phase::Leave
-                    },
+                        Point {
+                            site: parent.site.clone(),
+                            phase: if parent.site == source.site {
+                                Phase::Fallthrough
+                            } else {
+                                Phase::Leave
+                            },
+                        }
+                    };
+                    (unpaid, false)
                 }
+                Some(Control::While { stmt, started }) => {
+                    let crate::compile::Form::While { site, body, .. } = &exe.stmt(*stmt).form
+                    else {
+                        return Err(malformed("scope parent has another loop form").into());
+                    };
+                    if body != block || *started == 0 {
+                        return Err(malformed("scope is not an entered while body").into());
+                    }
+                    let Ok(unpaid) = source.first_event(&site.child(0)) else {
+                        return Ok(false);
+                    };
+                    (unpaid, true)
+                }
+                _ => return Ok(false),
             };
             (
                 source,
@@ -70,8 +85,10 @@ impl KernelMachine {
                 *block,
                 roots.invocation().id(),
                 unpaid,
+                while_body,
             )
         };
+        debug_assert!(!while_body || !loops.is_empty());
         let at = Point {
             site: exe.block(block).site.clone(),
             phase: Phase::Leave,
@@ -227,6 +244,9 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_scope_published();
+            if while_body {
+                crate::machine::islands::witness::while_scope_published(true);
+            }
         }
         Ok(published)
     }

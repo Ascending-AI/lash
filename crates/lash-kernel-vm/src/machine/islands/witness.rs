@@ -59,6 +59,8 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PRECISE_CONDITION_ITERATIONS: std::cell::Cell<[Option<u64>; 2]> = const { std::cell::Cell::new([None; 2]) };
+    static WHILE_SCOPES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_SCOPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_LITERALS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
     static PRECISE_READS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
@@ -93,6 +95,8 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PRECISE_CONDITION_ITERATIONS.with(|counts| counts.set([None; 2]));
+    WHILE_SCOPES.with(|counts| counts.set([0; 2]));
     PRECISE_SCOPES.with(|count| count.set(0));
     PRECISE_LITERALS.with(|counts| counts.set([0; 4]));
     PRECISE_READS.with(|counts| counts.set([0; 2]));
@@ -508,4 +512,30 @@ pub(crate) fn precise_scopes() -> u64 {
 
 pub(in crate::machine) fn precise_scope_published() {
     PRECISE_SCOPES.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn while_scopes() -> [u64; 2] {
+    WHILE_SCOPES.with(|counts| counts.replace([0; 2]))
+}
+
+#[cfg(test)]
+pub(crate) fn precise_condition_iterations() -> [Option<u64>; 2] {
+    PRECISE_CONDITION_ITERATIONS.with(|counts| counts.replace([None; 2]))
+}
+
+pub(in crate::machine) fn precise_condition_published(taken: bool, iteration: u64) {
+    PRECISE_CONDITION_ITERATIONS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(taken)] = Some(iteration);
+        counts.set(next);
+    });
+}
+
+pub(in crate::machine) fn while_scope_published(precise: bool) {
+    WHILE_SCOPES.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(precise)] += 1;
+        counts.set(next);
+    });
 }

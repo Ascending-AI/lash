@@ -183,6 +183,15 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_source_published();
+            if matches!(running.stmt.form, crate::compile::Form::While { .. })
+                && **site == running.stmt.site.child(0)
+                && let doc::Value::Bool(taken) = value
+                && let Some(frontier) = &frame.source_frontier
+                && let Some((loop_site, iteration)) = frontier.position().occurrence.loops.last()
+            {
+                assert_eq!(loop_site, &running.stmt.site);
+                crate::machine::islands::witness::precise_condition_published(taken, *iteration);
+            }
             if matches!(op, Op::Session { .. }) {
                 crate::machine::islands::witness::precise_session_read_published();
             }
