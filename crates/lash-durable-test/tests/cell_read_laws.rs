@@ -1044,6 +1044,14 @@ impl Scenario for ReadTurn {
                 if self.cell == Cell::ModelMixed {
                     let turn = transcript.entries().iter().find_map(|entry| entry.provenance.turn_id.clone()).ok_or("a model turn is retained")?;
                     let records = durable.read_turn_tool_calls(&turn).await.map_err(|e| e.to_string())?;
+                    let refs = records.iter().map(|record| lash::TurnToolCallRef { turn_id: turn.clone(), call_id: record.call_id.clone() }).collect::<Vec<_>>();
+                    let batch = durable.read_tool_calls(&refs).await.map_err(|e|e.to_string())?;
+                    for ((call, read), record) in refs.iter().zip(batch).zip(&records) {
+                        let scalar = durable.read_tool_call(call).await.map_err(|e|e.to_string())?;
+                        if scalar != read || read != (lash::ToolCallRead::Settled { record: Box::new(record.clone()) }) {
+                            return Err(format!("mixed model-read scalar, batch and list disagree on {}", call.call_id));
+                        }
+                    }
                     let blocks: Vec<_> = transcript.entries().iter().filter_map(|entry| match &entry.item {
                         lash::transcript::TranscriptItem::Message(message) => Some(message.blocks.as_slice()),
                         _ => None,
@@ -1218,7 +1226,13 @@ impl Scenario for ReadTurn {
                     .turn_id
                     .clone()
                     .ok_or("the cell retains its turn")?;
-                for fact in facts {
+                let refs = facts.iter().map(|fact| lash::TurnToolCallRef { turn_id: turn_id.clone(), call_id: fact.call_id.clone() }).collect::<Vec<_>>();
+                let batch = durable.read_tool_calls(&refs).await.map_err(|e|e.to_string())?;
+                let listed = durable.read_turn_tool_calls(&turn_id).await.map_err(|e|e.to_string())?;
+                for (fact, read) in facts.into_iter().zip(batch) {
+                    if read != (lash::ToolCallRead::Settled { record: Box::new(fact.record()) }) || listed.iter().filter(|record| **record == fact.record()).count() != 1 {
+                        return Err(format!("saved Read batch and list disagree on {}", fact.call_id));
+                    }
                     let call = lash::TurnToolCallRef {
                         turn_id: turn_id.clone(),
                         call_id: fact.call_id.clone(),

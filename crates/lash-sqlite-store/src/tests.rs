@@ -324,7 +324,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
         let run = (mask & 2 != 0).then_some(0);
         let call = (mask & 4 != 0).then_some("call");
         let result = connection.execute(
-            "INSERT OR REPLACE INTO model_call_pins (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call) VALUES ('session', 'turn:run', '0', 'call', 1, 0, ?1, ?2, ?3)",
+            "INSERT OR REPLACE INTO model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call) VALUES ('session', 'turn:run', '0', 'call', 1, 0, ?1, ?2, ?3)",
             params![owner, run, call],
         );
         assert_eq!(
@@ -336,7 +336,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
     assert!(
         connection
             .execute(
-                "UPDATE model_call_pins SET enclosing_run = -1 WHERE session_id = 'session'",
+                "UPDATE model_call_records SET enclosing_run = -1 WHERE session_id = 'session'",
                 [],
             )
             .is_err(),

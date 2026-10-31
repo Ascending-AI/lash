@@ -571,6 +571,7 @@
       ],
       "round_crash_matrix": [
         "tests/round_crash_matrix.rs",
+        "tests/support/call_directory.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs"
       ],
@@ -655,6 +656,7 @@
         "tests/turn_phases/slots.rs"
       ],
       "turn_round_crash_matrix": [
+        "tests/support/call_directory.rs",
         "tests/support/matrix.rs",
         "tests/support/seed.rs",
         "tests/support/sim.rs",

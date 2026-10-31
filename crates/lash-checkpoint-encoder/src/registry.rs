@@ -154,6 +154,8 @@ registry! {
     SESSION_METADATA = 52, "SessionMetadata", Enveloped, Node, Cell;
     PROMPT_TEXT = 53, "PromptText", Enveloped, Node, Stores;
     PROMPT_FRAGMENT = 54, "PromptFragment", Enveloped, Node, Stores;
+    MODEL_READ = 55, "ModelRead", Enveloped, Node, Host;
+    PROCESS_CALLER_SAVE = 56, "ProcessCallerSave", Enveloped, Node, Host;
 }
 
 registry! {

@@ -192,6 +192,13 @@ table lash_execution_resolutions
   column slot text not-null
   primary-key (execution, link, slot)
   foreign-key (execution) references lash_package_executions (execution) on delete cascade
+table lash_execution_uses
+  column execution text not-null
+  column link text not-null
+  column slot text not-null
+  column use_json text not-null
+  primary-key (execution, link, slot)
+  foreign-key (execution) references lash_package_executions (execution) on delete cascade
 table lash_fleet_format
   column format_version integer not-null
   column singleton boolean not-null default
@@ -245,28 +252,21 @@ table lash_migrations
   column state text not-null
   column to_version integer not-null
   primary-key (phase, migration)
-table lash_model_call_pins
-  column answered boolean not-null
-  column attempt bigint not-null
+table lash_model_call_records
+  column answered boolean not-null default
+  column attempt bigint nullable
   column call text not-null
   column call_id text not-null
   column enclosing_call text nullable
   column enclosing_owner text nullable
   column enclosing_run bigint nullable
+  column ended_at_ms bigint nullable
+  column record_ref bytea nullable
   column run text not-null
   column session_id text not-null
-  unique (session_id, run, call_id)
-  primary-key (session_id, run, call)
-table lash_model_call_records
-  column call text not-null
-  column call_id text not-null
-  column ended_at_ms bigint not-null
-  column record_ref bytea not-null
-  column run text not-null
-  column session_id text not-null
-  column written_epoch bigint not-null
-  unique (session_id, run, call_id)
-  primary-key (session_id, run, call)
+  column written_epoch bigint nullable
+  unique (session_id, run, call)
+  primary-key (session_id, call_id)
   foreign-key (record_ref) references lash_blobs (hash) on delete restrict
 table lash_nodes
   column boot_id text not-null
@@ -286,7 +286,8 @@ table lash_package_executions
   column actor_key text not-null
   column ended integer not-null default
   column execution text not-null
-  column registration_json text not-null
+  column referrer_json text not-null
+  column requirements_json text not-null
   primary-key (execution)
   foreign-key (actor_key) references lash_actors (actor_key) on delete cascade
 table lash_package_labels
@@ -591,15 +592,29 @@ table lash_session_terminal_changes
   column staged_seq bigint not-null default
   unique (change_seq)
   primary-key (staged_seq)
-table lash_tool_call_cancel_requests
+table lash_tool_calls
+  column admission_seq bigint not-null
+  column admitted_count bigint not-null
+  column answer_outcome text nullable
+  column body_ref bytea nullable
   column call_id text not-null
+  column cancellable boolean not-null
+  column counted boolean not-null
+  column decision text nullable
+  column decision_ref bytea nullable
+  column execution_owner text not-null
+  column member bigint not-null
   column origin text nullable
+  column owner_key text not-null
   column reason text nullable
-  column request_id text not-null
-  column run text not-null
-  column session_id text not-null
-  primary-key (session_id, run, call_id)
-  foreign-key (session_id, run) references lash_session_runs (session_id, run) on delete cascade
+  column request_id text nullable
+  column run_seq bigint not-null
+  column session_id text nullable
+  column turn_id text nullable
+  unique (execution_owner, call_id)
+  primary-key (owner_key, call_id)
+  foreign-key (body_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (decision_ref) references lash_blobs (hash) on delete restrict
 table lash_tool_intent_retired_owners
   column owner text not-null
   primary-key (owner)
@@ -652,7 +667,6 @@ table lash_turn_phases
   column phase_arg bigint nullable
   column run text not-null
   column session_id text not-null
-  column tool_calls bigint not-null default
   column turn_deadline_ms bigint nullable
   column working_execution_ref bytea nullable
   column written_epoch bigint not-null

@@ -64,6 +64,7 @@ mod park;
 mod process_view;
 pub(crate) mod processes;
 mod prompts;
+mod tool_calls;
 
 /// Drain one bounded page; the collection repeats pages in separate transactions.
 ///
@@ -143,6 +144,7 @@ pub(crate) use prompts::release as release_prompt_snapshots;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
 pub(crate) use session_close::TABLES as SESSION_CLOSE_TABLES;
 pub(crate) use snapshots::TABLES as EXEC_SNAPSHOTS_TABLES;
+pub(crate) use tool_calls::TABLES as TOOL_CALL_TABLES;
 pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
 pub(crate) use waits::TABLES as WAITS_TABLES;
 
@@ -164,6 +166,7 @@ pub(crate) fn retire_session_rows(
         &OwnerKey::session_turns(session),
     )?);
     roots.extend(model_calls::delete_session(tx, session)?);
+    roots.extend(tool_calls::delete_session(tx, session)?);
     roots.extend(snapshots::retire_under(
         tx,
         &ExecKey::session_cells(session),
@@ -190,6 +193,10 @@ pub(crate) fn retire_process_rows(
         tx,
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )?;
+    facts.extend(tool_calls::delete_owner(
+        tx,
+        &lash_durable::domain::CallOwner::Process(process.clone()),
+    )?);
     facts.extend(model_calls::delete_session(
         tx,
         &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
@@ -823,6 +830,7 @@ fn apply_domain(
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write),
         DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, write),
         DomainWrite::ModelCall(write) => model_calls::apply(tx, committing, write),
+        DomainWrite::ToolCall(write) => tool_calls::apply(tx, committing, write),
     }
 }
 

@@ -10,26 +10,19 @@
 /// owner's.
 pub const TABLE: &str = "run_records";
 
-/// The immutable host requests awaiting their owning call decisions.
-pub const CALL_CANCEL_TABLE: &str = "tool_call_cancel_requests";
-
 crate::statements! {
     /// `run_records` statements both backends issue verbatim.
     pub struct RunRecordStatements @ "durable_run_record" {
         /// Resolve an admitted call in a turn or any of its cells.
-        call_decision = "SELECT kind FROM run_records WHERE call_id = ?3
-             AND (owner_key = ?1 OR substr(owner_key, 1, length(CAST(?2 AS TEXT))) = ?2)
-             AND kind IN ('x_start', 'x_cancel', 'x_final', 'x_final_outcome', 'x_outcome')
-             ORDER BY CASE kind WHEN 'x_final' THEN 0 WHEN 'x_final_outcome' THEN 0 WHEN 'x_cancel' THEN 1
-                 WHEN 'x_outcome' THEN 2 ELSE 3 END LIMIT 1";
+        call_decision = "SELECT CASE decision WHEN 'final' THEN 'x_final' WHEN 'cancel' THEN 'x_cancel'
+                ELSE CASE WHEN answer_outcome IS NOT NULL THEN 'x_outcome' ELSE 'x_start' END END
+             FROM tool_calls WHERE owner_key = ?1 AND call_id = ?2 AND cancellable";
 
-        /// First request wins; receipt retries never replace provenance.
-        insert_call_cancel = "INSERT INTO tool_call_cancel_requests
-             (session_id, run, call_id, request_id, origin, reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT DO NOTHING";
-
-        call_cancel = "SELECT request_id, origin, reason FROM tool_call_cancel_requests
-             WHERE session_id = ?1 AND run = ?2 AND call_id = ?3";
+        /// First request wins without adding a transaction or a request row.
+        insert_call_cancel = "UPDATE tool_calls SET request_id = ?4, origin = ?5, reason = ?6
+             WHERE session_id = ?1 AND turn_id = ?2 AND call_id = ?3 AND request_id IS NULL";
+        call_cancel = "SELECT request_id, origin, reason FROM tool_calls
+             WHERE session_id = ?1 AND turn_id = ?2 AND call_id = ?3 AND request_id IS NOT NULL";
 
         /// Whether owner `?1`'s run `?2` has a fact at ordinal `?3`.
         ordinal_taken = "SELECT 1 FROM run_records

@@ -377,6 +377,19 @@ impl SessionProjection {
         let session = &self.head.session_id;
         let mut prepared = AcknowledgedPhase::prepared(tx);
         for write in tx.domain() {
+            if let DomainWrite::ToolCall(lash_durable::domain::ToolCallWrite::Admit {
+                counted: true,
+                logical: lash_durable::domain::CallOwner::Turn(target, run),
+                ..
+            }) = write
+                && target == session
+                && let Some(turn) = self.turn.as_mut().filter(|turn| turn.run == *run)
+            {
+                turn.tool_calls = turn
+                    .tool_calls
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("tool admission count overflow"))?;
+            }
             let DomainWrite::Turn(write) = write else {
                 continue;
             };
@@ -468,18 +481,6 @@ impl SessionProjection {
                         .ok_or_else(|| invalid("working postimage has no matching open turn"))?;
                     turn.working = *working;
                     turn.written_epoch = tx.epoch();
-                }
-                TurnWrite::AddToolCalls {
-                    session: target,
-                    run,
-                    calls,
-                } if target == session => {
-                    if let Some(turn) = self.turn.as_mut().filter(|turn| turn.run == *run) {
-                        turn.tool_calls = turn
-                            .tool_calls
-                            .checked_add(*calls)
-                            .ok_or_else(|| invalid("tool admission count overflow"))?;
-                    }
                 }
                 _ => {}
             }

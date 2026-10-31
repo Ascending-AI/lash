@@ -35,9 +35,7 @@ mod trace;
 
 pub(crate) use carry::KernelCarry;
 pub use carry::cell_migration_refusal;
-pub(crate) use envelope::{
-    check_cell_snapshot, recorded_call, recorded_cell_ledger, snapshot_tool_calls,
-};
+pub(crate) use envelope::{check_cell_snapshot, recorded_call, snapshot_tool_calls};
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::{CodeModeExecutionState, saved_function_pins};
 pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};

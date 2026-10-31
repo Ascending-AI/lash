@@ -731,6 +731,7 @@ pub(super) fn report_answered_cell(
         return Ok(());
     };
     let CellToolCalls {
+        execution,
         mut ledger,
         read_facts,
         ..
@@ -746,6 +747,35 @@ pub(super) fn report_answered_cell(
             .map(|fact| round::graph::stage_read_fact(&mut staging, fact))
             .collect::<Result<_, _>>()
             .map_err(exec)?;
+        for (fact, body) in read_facts.iter().zip(&ledger.reads) {
+            let execution = execution
+                .clone()
+                .unwrap_or_else(|| OwnerKey::Turn(row.session.clone(), row.run.clone()));
+            tx.write(lash_durable::DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Admit {
+                    counted: false,
+                    logical: lash_durable::domain::CallOwner::Turn(
+                        row.session.clone(),
+                        row.run.clone(),
+                    ),
+                    execution: execution.clone(),
+                    run: RunSeq(0),
+                    member: fact.ordinal,
+                    call: fact.call_id.clone(),
+                    cancellable: false,
+                },
+            ));
+            tx.write(lash_durable::DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Answer {
+                    owner: execution,
+                    call: fact.call_id.clone(),
+                    answer: lash_durable::domain::ToolCallAnswer {
+                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
+                        body: Some(*body),
+                    },
+                },
+            ));
+        }
         tx.stage_all(staging);
     }
     if ledger.entries.is_empty() && ledger.reads.is_empty() {

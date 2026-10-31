@@ -1644,6 +1644,7 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/round_crash_matrix.rs",
+        "tests/support/call_directory.rs",
         "tests/support/matrix.rs",
         "tests/support/sim.rs",
     ],
@@ -2094,6 +2095,7 @@ lash_rust_integration_test(
         "synthetic-next",
     ],
     srcs_patterns = [
+        "tests/support/call_directory.rs",
         "tests/support/matrix.rs",
         "tests/support/seed.rs",
         "tests/support/sim.rs",

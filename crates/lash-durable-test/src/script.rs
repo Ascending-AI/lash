@@ -324,6 +324,8 @@ pub(crate) struct Shared {
     pub(crate) actor_receipt: Mutex<Option<ActorReceiptObserver>>,
     pub(crate) mail_receipt: Mutex<Option<MailReceiptObserver>>,
     pub(crate) actor_reply: Mutex<Option<ActorReplyObserver>>,
+    pub(crate) call_owner: Mutex<Option<lash_durable::domain::CallOwner>>,
+    pub(crate) call_rows: Mutex<Vec<(CommitLabel, Vec<lash_durable::domain::ToolCallRow>)>>,
 }
 
 /// A write about to enter the store, numbered and matched against the rules.
@@ -680,6 +682,18 @@ impl Script {
     ) -> &Self {
         *self.shared.refusal.lock_recover() = Some(Arc::new(refusal));
         self
+    }
+
+    /// Read this owner's directory after each successful call publication,
+    /// before reply loss or a node crash can hide the commit.
+    pub fn observe_tool_calls(&self, owner: lash_durable::domain::CallOwner) -> &Self {
+        *self.shared.call_owner.lock_recover() = Some(owner);
+        self
+    }
+
+    /// Directory snapshots observed at the successful database boundary.
+    pub fn tool_call_rows(&self) -> Vec<(CommitLabel, Vec<lash_durable::domain::ToolCallRow>)> {
+        self.shared.call_rows.lock_recover().clone()
     }
 
     /// Every write so far, in the order the writes entered.

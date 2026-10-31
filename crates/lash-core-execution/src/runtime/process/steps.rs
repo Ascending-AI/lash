@@ -647,11 +647,7 @@ pub fn tool_step_output(
                 args: completed.args.clone(),
                 output: completed.output.clone(),
             });
-            replace_payload(
-                process,
-                settled,
-                record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()),
-            )
+            replace_record(process, settled, record)
         }
     };
     result
@@ -665,6 +661,36 @@ fn process_material(process: &ProcessId, text: String) -> Material {
         MaterialRole::AttemptOutput,
         text,
     )
+}
+
+fn replace_record(
+    process: &ProcessId,
+    settled: SettledOutput,
+    record: Option<crate::ToolCallRecord>,
+) -> SettledOutput {
+    let material = record.and_then(|record| call_record_material(process, record));
+    match (settled, material) {
+        (SettledOutput::Completed(_), Some(material)) => SettledOutput::Completed(material),
+        (SettledOutput::Failed(failure), Some(material)) => {
+            let (failure, _) = failure.into_parts();
+            SettledOutput::Failed(material.failure(failure.reason, failure.suggested_delay_ms))
+        }
+        (SettledOutput::Completed(_) | SettledOutput::Failed(_), None) => {
+            SettledOutput::Interrupted
+        }
+        (settled, _) => settled,
+    }
+}
+
+fn call_record_material(process: &ProcessId, record: crate::ToolCallRecord) -> Option<Material> {
+    Material::journal_local_typed(
+        MaterialOwner::Process {
+            process_id: process.clone(),
+        },
+        MaterialRole::AttemptOutput,
+        crate::runtime::actor::round::graph::ArchivalCall(record),
+    )
+    .ok()
 }
 
 fn replace_payload(
@@ -708,11 +734,7 @@ pub fn tool_step_refused(
             args: call.args.clone(),
             output,
         });
-    replace_payload(
-        process,
-        settled,
-        record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()),
-    )
+    replace_record(process, settled, record)
 }
 
 /// The committed outcome of the resolution `call` of a granted tool's call
@@ -734,8 +756,8 @@ pub fn dispatch_resolution(
             args: call.args.clone(),
             output: crate::ToolCallOutput::success(value),
         });
-    match record.and_then(|record| serde_json::to_string(&crate::Durable(&record)).ok()) {
-        Some(text) => SettledOutput::Completed(process_material(process, text)),
+    match record.and_then(|record| call_record_material(process, record)) {
+        Some(material) => SettledOutput::Completed(material),
         None => SettledOutput::Interrupted,
     }
 }
@@ -871,64 +893,10 @@ pub fn tool_step_resolved(
         args: retained.call.args,
         output,
     };
-    match serde_json::to_string(&crate::Durable(&record)) {
-        Ok(text) => SettledOutput::Completed(process_material(process, text)),
-        Err(_) => SettledOutput::Interrupted,
+    match call_record_material(process, record) {
+        Some(material) => SettledOutput::Completed(material),
+        None => SettledOutput::Interrupted,
     }
-}
-
-/// Read one retained process tool record without driving its owner or
-/// consulting its current catalog. Unknown, unfinished or unmaterialized
-/// calls have no retained record.
-///
-/// # Errors
-/// Failed durable reads or corrupt committed records.
-pub async fn read_process_tool_call(
-    host: &ActorContext,
-    process_id: &ProcessId,
-    call_id: &crate::ToolCallId,
-) -> Result<Option<crate::ToolCallRecord>, lash_durable::DurableError> {
-    use crate::runtime::actor::round::{self, PolicyView};
-    use lash_durable::domain::OwnerKey;
-    use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
-
-    let corrupt = |message| {
-        DurableError::Store(StoreFailure {
-            code: None,
-            kind: StoreFailureKind::Corrupt,
-            message,
-        })
-    };
-    let reads = host.durable_reads()?;
-    let rows = reads
-        .run_facts(&OwnerKey::Process(process_id.clone()))
-        .await?;
-    let waits = round::PinnedWaits::read(reads, &rows).await?;
-    let fold = round::fold(&rows, &PolicyView::new([]), &waits)
-        .map_err(|error| corrupt(format!("the process's tool records: {error}")))?;
-    for member in fold.rounds().flat_map(|round| round.members()) {
-        if member.call() != call_id {
-            continue;
-        }
-        let Some(payload) = member
-            .outcome()
-            .and_then(lash_core_store::tool_run::SettledOutput::payload)
-        else {
-            return Ok(None);
-        };
-        let record: crate::ToolCallRecord = serde_json::from_str(payload).map_err(|error| {
-            corrupt(format!(
-                "call {call_id} has no readable tool record: {error}"
-            ))
-        })?;
-        if record.call_id != *call_id {
-            return Err(corrupt(format!(
-                "call {call_id} has another call's recorded answer"
-            )));
-        }
-        return Ok(Some(record));
-    }
-    Ok(None)
 }
 
 /// One step of a process as its run journal retains it (FIG-6370).

@@ -463,6 +463,39 @@ impl ActorTx {
         &self.domain
     }
 
+    /// Attach a canonical body while composing this commit's terminal publication.
+    /// Returns false if this transaction has no matching body-free settlement.
+    pub fn archive_tool_call(
+        &mut self,
+        owner: &crate::domain::OwnerKey,
+        call: &lash_protocol_types::ToolCallId,
+        body: lash_core_store::checkpoint_graph::NodeId,
+    ) -> bool {
+        for write in &mut self.domain {
+            if let DomainWrite::ToolCall(
+                crate::domain::ToolCallWrite::Answer {
+                    owner: held_owner,
+                    call: held_call,
+                    answer,
+                }
+                | crate::domain::ToolCallWrite::Complete {
+                    owner: held_owner,
+                    call: held_call,
+                    answer,
+                    ..
+                },
+            ) = write
+                && held_owner == owner
+                && held_call == call
+                && answer.body.is_none()
+            {
+                answer.body = Some(body);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Whether this commit can change a send follower's authoritative
     /// snapshot. Phase roots, receipts and tool facts alone leave its input
     /// binding, terminal, session standing and park unchanged. Classify the
@@ -475,7 +508,6 @@ impl ActorTx {
                 DomainWrite::Turn(turn) => match turn {
                     TurnWrite::Admit { .. } | TurnWrite::Terminal { .. } => true,
                     TurnWrite::Advance { .. }
-                    | TurnWrite::AddToolCalls { .. }
                     | TurnWrite::Answer { .. }
                     | TurnWrite::Namespaces { .. }
                     | TurnWrite::Working { .. } => false,
@@ -496,6 +528,7 @@ impl ActorTx {
                 | DomainWrite::ExecRoot(_)
                 | DomainWrite::EffectAdmission(_)
                 | DomainWrite::Prompt(_)
+                | DomainWrite::ToolCall(_)
                 | DomainWrite::ModelCall(_)
                 | DomainWrite::ModelCallPin(_) => false,
             })

@@ -93,6 +93,7 @@ mod replay;
 mod run_records;
 mod session_close;
 pub(crate) mod session_mail;
+mod tool_calls;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use session_mail::cut_session_wakes;
 mod snapshots;
@@ -258,6 +259,7 @@ pub(crate) async fn retire_session_rows(
     let mut roots = environment::remove_head(&mut *tx, session).await?;
     roots.extend(run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
     roots.extend(model_calls::delete_session(&mut *tx, session).await?);
+    roots.extend(tool_calls::delete_session(&mut *tx, session).await?);
     roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
     roots.extend(run_records::delete_under(&mut *tx, &cells).await?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
@@ -279,6 +281,13 @@ pub(crate) async fn retire_process_rows(
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )
     .await?;
+    facts.extend(
+        tool_calls::delete_owner(
+            &mut *tx,
+            &lash_durable::domain::CallOwner::Process(process.clone()),
+        )
+        .await?,
+    );
     facts.extend(
         model_calls::delete_session(
             tx,
@@ -870,6 +879,7 @@ async fn apply_domain(
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write).await,
         DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, committing, write).await,
         DomainWrite::ModelCall(write) => model_calls::apply(tx, committing, write).await,
+        DomainWrite::ToolCall(write) => tool_calls::apply(tx, committing, write).await,
     }
 }
 

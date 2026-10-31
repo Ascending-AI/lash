@@ -235,7 +235,33 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3),
+        hydrate_tool_call_decision = "WITH RECURSIVE root AS (SELECT decision_ref AS hash FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 JOIN blobs AS parent ON parent.hash = reach.hash
+                 WHERE CASE
+                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
+                       WHEN get_byte(parent.content, 4) < 128
+                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
+                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
+                            NOT BETWEEN 1000 AND 1999
+                   END)
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        hydrate_tool_call_answer = "WITH RECURSIVE root AS (SELECT body_ref AS hash FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 JOIN blobs AS parent ON parent.hash = reach.hash
+                 WHERE CASE
+                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
+                       WHEN get_byte(parent.content, 4) < 128
+                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
+                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
+                            NOT BETWEEN 1000 AND 1999
+                   END)
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref IS NOT NULL),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
@@ -690,6 +716,16 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
             .bind(owner.stored())
             .bind(number::<i64>(run.0)?)
             .bind(number::<i64>(ordinal.0)?),
+        RootOwner::ToolCall { owner, call, part } => query(match part {
+            lash_durable::domain::tool_calls::ToolCallRoot::Decision => {
+                sql.hydrate_tool_call_decision.sql()
+            }
+            lash_durable::domain::tool_calls::ToolCallRoot::Answer => {
+                sql.hydrate_tool_call_answer.sql()
+            }
+        })
+        .bind(owner.stored())
+        .bind(call.as_str()),
         RootOwner::ModelCall(key) => query(sql.hydrate_model_call.sql())
             .bind(key.session.as_str())
             .bind(key.call.owner_column())
@@ -766,6 +802,9 @@ pub(super) async fn root_of(
             .bind(owner.stored())
             .bind(number::<i64>(run.0)?)
             .bind(number::<i64>(ordinal.0)?),
+        RootOwner::ToolCall { owner, call, part } => query(super::tool_calls::root_sql(*part))
+            .bind(owner.stored())
+            .bind(call.as_str()),
         RootOwner::ModelCall(key) => query(super::model_calls::SQL.root.sql())
             .bind(key.session.as_str())
             .bind(key.call.owner_column())

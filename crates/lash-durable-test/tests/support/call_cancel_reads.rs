@@ -114,6 +114,38 @@ pub(super) async fn attribution(turn: &CellTurn) -> Vec<String> {
                 cell.read_facts
             ));
         }
+        let refs = cell
+            .read_facts
+            .iter()
+            .map(|fact| lash::TurnToolCallRef {
+                turn_id: turn_id.clone(),
+                call_id: fact.call_id.clone(),
+            })
+            .collect::<Vec<_>>();
+        let batch = durable
+            .read_tool_calls(&refs)
+            .await
+            .map_err(|error| error.to_string())?;
+        for (fact, read) in cell.read_facts.iter().zip(batch) {
+            let scalar = durable
+                .read_tool_call(&lash::TurnToolCallRef {
+                    turn_id: turn_id.clone(),
+                    call_id: fact.call_id.clone(),
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+            if scalar != read
+                || read
+                    != (lash::ToolCallRead::Settled {
+                        record: Box::new(fact.record()),
+                    })
+            {
+                return Err(format!(
+                    "scalar, batch and list disagree on cancelled Read {}",
+                    fact.call_id
+                ));
+            }
+        }
         for fact in &cell.read_facts {
             let records = calls
                 .iter()

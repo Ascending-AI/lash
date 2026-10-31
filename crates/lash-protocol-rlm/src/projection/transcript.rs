@@ -19,17 +19,6 @@ impl TranscriptDecoderPlugin for RlmTranscriptDecoder {
         crate::executor::recorded_call(decoder, outcome).map(Some)
     }
 
-    fn decode_cell_ledger(
-        &self,
-        decoder: &mut lash_core_store::checkpoint_graph::GraphDecoder<'_>,
-        root: lash_core_store::checkpoint_graph::NodeId,
-    ) -> Result<
-        Option<(Vec<lash_core::ToolCallRecord>, Vec<lash_core::ToolCallId>)>,
-        lash_core_store::checkpoint_graph::GraphRefusal,
-    > {
-        crate::executor::recorded_cell_ledger(decoder, root).map(Some)
-    }
-
     fn decode_message(&self, message: &lash_core::Message) -> Option<TranscriptItem> {
         if !super::context::is_rlm_protocol_output(message.origin.as_ref()) {
             return None;

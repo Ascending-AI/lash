@@ -67,7 +67,6 @@ pub use lash_core::tool_dispatch::{
     LaunchReceipt, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
 };
 pub use lash_core_store::session_identity::FrameNodeIdError;
-pub use lash_core_store::transcript::CellCallLedger;
 pub use lash_execution_contracts::process::DefinitionAcquisition;
 pub use lash_execution_contracts::process::ProcessEnvLoadError;
 pub use lash_execution_contracts::process::ResolvedProcessDefinition;

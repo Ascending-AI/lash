@@ -51,6 +51,11 @@ pub struct CommittedTurnsWithCallsPage {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolCallRead {
+    /// A committed terminal with no materialized tool record.
+    SettledWithoutRecord {
+        call_id: crate::ToolCallId,
+        outcome: Box<RecordedCallOutcome>,
+    },
     Settled {
         #[serde(serialize_with = "crate::persistence::serialize_durable")]
         record: Box<ToolCallRecord>,
@@ -61,6 +66,47 @@ pub enum ToolCallRead {
     NotYetSettled {
         call_id: crate::ToolCallId,
     },
+}
+
+/// The typed terminal of a recorded execution, including cancellation attribution.
+pub use lash_core::tool_run::AttemptOutcome as RecordedCallOutcome;
+
+pub(crate) fn tool_call_read(
+    call_id: &crate::ToolCallId,
+    read: lash_core::call_store::CallRead,
+) -> crate::support::Result<ToolCallRead> {
+    use lash_core::call_store::CallRead;
+    Ok(match read {
+        CallRead::Unknown => ToolCallRead::NotFound {
+            call_id: call_id.clone(),
+        },
+        CallRead::Pending { .. } => ToolCallRead::NotYetSettled {
+            call_id: call_id.clone(),
+        },
+        CallRead::Settled {
+            record: Some(record),
+            ..
+        } => ToolCallRead::Settled { record },
+        CallRead::Settled {
+            record: None,
+            outcome:
+                lash_core::durable_port::domain::tool_calls::ToolCallSettlement::Execution(outcome),
+        } => ToolCallRead::SettledWithoutRecord {
+            call_id: call_id.clone(),
+            outcome,
+        },
+        CallRead::Settled { record: None, .. } => {
+            return Err(crate::EmbedError::Durable(
+                lash_core::durable_port::DurableError::Store(
+                    lash_core::durable_port::StoreFailure {
+                        code: None,
+                        kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                        message: "a settled read has no record".to_owned(),
+                    },
+                ),
+            ));
+        }
+    })
 }
 
 pub(crate) fn fresh_turn_id() -> TurnId {

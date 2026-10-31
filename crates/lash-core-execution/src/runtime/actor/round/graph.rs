@@ -388,13 +388,20 @@ pub enum MaterialNode {
     Outcome(NodeId),
     Value(NodeId),
     CallPayload(NodeId),
+    /// A process payload is the canonical record, without model presentation.
+    CallRecord(NodeId),
+    ProcessReadOutput(NodeId),
 }
 
 impl MaterialNode {
     #[must_use]
     pub fn node(&self) -> NodeId {
         match self {
-            Self::Outcome(node) | Self::Value(node) | Self::CallPayload(node) => *node,
+            Self::Outcome(node)
+            | Self::Value(node)
+            | Self::CallPayload(node)
+            | Self::CallRecord(node)
+            | Self::ProcessReadOutput(node) => *node,
         }
     }
 
@@ -404,6 +411,8 @@ impl MaterialNode {
             Self::Outcome(_) => NodeKind::CALL_OUTCOME,
             Self::Value(_) => NodeKind::FROZEN_VALUE,
             Self::CallPayload(_) => NodeKind::CALL_OUTCOME,
+            Self::CallRecord(_) => NodeKind::CALL_BODY,
+            Self::ProcessReadOutput(_) => NodeKind::PROCESS_CALLER_SAVE,
         }
     }
 
@@ -448,6 +457,14 @@ impl TokenCodec for MaterialNode {
                 out.sum(2, 1);
                 node.encode(out);
             }
+            Self::CallRecord(node) => {
+                out.sum(3, 1);
+                node.encode(out);
+            }
+            Self::ProcessReadOutput(node) => {
+                out.sum(4, 1);
+                node.encode(out);
+            }
         }
     }
 
@@ -458,6 +475,8 @@ impl TokenCodec for MaterialNode {
             0 => NodeId::decode(input).map(Self::Outcome),
             1 => NodeId::decode(input).map(Self::Value),
             2 => NodeId::decode(input).map(Self::CallPayload),
+            3 => NodeId::decode(input).map(Self::CallRecord),
+            4 => NodeId::decode(input).map(Self::ProcessReadOutput),
             other => Err(unsupported(other)),
         }
     }
@@ -495,7 +514,12 @@ impl SettledFact {
             (Some(named), Some(material @ MaterialNode::Outcome(_))) => material.check(&named),
             (
                 Some(named),
-                Some(material @ (MaterialNode::Value(_) | MaterialNode::CallPayload(_))),
+                Some(
+                    material @ (MaterialNode::Value(_)
+                    | MaterialNode::CallPayload(_)
+                    | MaterialNode::CallRecord(_)
+                    | MaterialNode::ProcessReadOutput(_)),
+                ),
             ) => material.check(&named).or_else(|_| {
                 load_material(decoder, named, *material)
                     .map(|_| ())
@@ -690,7 +714,10 @@ impl CallOutcome {
             &self.tool_name,
             &self.args,
             &self.output,
-            self.read.as_deref(),
+            (
+                lash_protocol_types::ToolCallExecution::Recorded,
+                self.read.as_deref(),
+            ),
         )?;
         let presentation = staging.encode_value(NodeKind::PRESENTATION, &self.presentation)?;
         let mut encoded = TokenWriter::new();
@@ -805,6 +832,98 @@ pub fn stage_value(
         .map_err(GraphRefusal::from)
 }
 
+/// A caller save carries references to its canonical saved-read bodies.
+#[derive(Clone, Debug)]
+pub struct ProcessReadOutput {
+    pub output: serde_json::Value,
+    pub reads: Vec<lash_protocol_types::ReadFact>,
+}
+impl serde::Serialize for ProcessReadOutput {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut output = self.output.clone();
+        let result = output
+            .as_object_mut()
+            .filter(|object| object.len() == 1)
+            .and_then(|object| object.values_mut().next())
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| {
+                serde::ser::Error::custom("a caller save has one tagged process result")
+            })?;
+        result.insert(
+            "read_facts".to_owned(),
+            serde_json::to_value(&self.reads).map_err(serde::ser::Error::custom)?,
+        );
+        serde::Serialize::serialize(&output, serializer)
+    }
+}
+struct StoredProcessReads {
+    output: serde_json::Value,
+    reads: Vec<NodeId>,
+}
+impl TokenCodec for StoredProcessReads {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.output.encode(out);
+        self.reads.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            output: serde_json::Value::decode(input)?,
+            reads: Vec::decode(input)?,
+        })
+    }
+}
+impl ProcessReadOutput {
+    pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
+        let reads = self
+            .reads
+            .iter()
+            .map(|fact| stage_read_fact(staging, fact))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(staging.encode_value(
+            NodeKind::PROCESS_CALLER_SAVE,
+            &StoredProcessReads {
+                output: self.output.clone(),
+                reads,
+            },
+        )?)
+    }
+    pub fn load(decoder: &mut GraphDecoder<'_>, node: NodeId) -> Result<Self, GraphRefusal> {
+        let stored: StoredProcessReads = decoder.decode(node, NodeKind::PROCESS_CALLER_SAVE)?;
+        let reads = stored
+            .reads
+            .into_iter()
+            .map(|body| load_read_fact(decoder, body))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            output: stored.output,
+            reads,
+        })
+    }
+    pub fn bodies(
+        decoder: &mut GraphDecoder<'_>,
+        node: NodeId,
+    ) -> Result<Vec<(lash_protocol_types::ReadFact, NodeId)>, GraphRefusal> {
+        let stored: StoredProcessReads = decoder.decode(node, NodeKind::PROCESS_CALLER_SAVE)?;
+        stored
+            .reads
+            .into_iter()
+            .map(|body| Ok((load_read_fact(decoder, body)?, body)))
+            .collect()
+    }
+}
+
+/// A typed process record whose JSON payload is still the host record.
+#[derive(Clone, Debug)]
+pub struct ArchivalCall(pub crate::ToolCallRecord);
+
+impl serde::Serialize for ArchivalCall {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&crate::Durable(&self.0), serializer)
+    }
+}
+
 /// Stages `material`'s payload as the node a fact's settled output names: a
 /// call's answer, held typed, as its outcome ([`CallOutcome::stage`]), when
 /// that outcome reads back as exactly the answer; any other payload as one
@@ -820,6 +939,16 @@ pub fn stage_material<T: NamesMaterial>(
     staging: &mut GraphStaging,
     material: &Material<T>,
 ) -> Result<MaterialNode, GraphRefusal> {
+    if let Some(output) = material.typed::<ProcessReadOutput>() {
+        return output.stage(staging).map(MaterialNode::ProcessReadOutput);
+    }
+    if let Some(record) = material.typed::<ArchivalCall>() {
+        return CallBody {
+            record: record.0.clone(),
+        }
+        .stage(staging)
+        .map(MaterialNode::CallRecord);
+    }
     if let Some(completed) = material.typed::<CompletedCall>() {
         let outcome = CallOutcome::of(completed, None, 0);
         let node = outcome.stage(staging)?;
@@ -858,6 +987,13 @@ pub fn load_material<T: NamesMaterial>(
 ) -> Result<Material<T>, GraphRefusal> {
     let mismatch = |_| GraphRefusal::PublicationMismatch;
     match material {
+        MaterialNode::ProcessReadOutput(node) => {
+            Material::verified(named, ProcessReadOutput::load(decoder, node)?).map_err(mismatch)
+        }
+        MaterialNode::CallRecord(node) => {
+            let record = CallBody::load(decoder, node)?.record;
+            Material::verified(named, ArchivalCall(record)).map_err(mismatch)
+        }
         MaterialNode::CallPayload(node) => {
             let call = CallOutcome::load(decoder, node)?;
             Material::verified(named, call.completed(call.args.clone())?).map_err(mismatch)
@@ -1296,7 +1432,7 @@ impl RoundFact {
             }
             Self::Present { reads } => {
                 for read in reads {
-                    decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
+                    decoder.child_kind(id, *read, &[NodeKind::MODEL_READ])?;
                 }
             }
             Self::Start { .. } | Self::Cancel { .. } | Self::Final { .. } => {}
@@ -1525,7 +1661,7 @@ impl ReportView {
             decoder.child_kind(id, *body, &[NodeKind::CALL_BODY])?;
         }
         for read in &view.reads {
-            decoder.child_kind(id, *read, &[NodeKind::FROZEN_VALUE])?;
+            decoder.child_kind(id, *read, &[NodeKind::CALL_BODY])?;
         }
         Ok(view)
     }
@@ -1553,49 +1689,95 @@ pub fn stage_read_fact(
     staging: &mut GraphStaging,
     fact: &lash_protocol_types::ReadFact,
 ) -> Result<NodeId, GraphRefusal> {
-    let value = serde_json::to_value(fact).map_err(|error| GraphRefusal::InvalidBody {
-        kind: NodeKind::FROZEN_VALUE.0,
-        reason: error.to_string(),
-    })?;
-    let MaterialNode::Value(node) = stage_value(staging, &value)? else {
-        unreachable!()
-    };
-    Ok(node)
+    CallBody {
+        record: fact.record(),
+    }
+    .stage(staging)
+}
+
+fn read_fact(record: crate::ToolCallRecord) -> Result<lash_protocol_types::ReadFact, GraphRefusal> {
+    let execution = record.classification.execution();
+    let read = record
+        .classification
+        .into_read()
+        .ok_or_else(|| GraphRefusal::InvalidBody {
+            kind: NodeKind::CALL_BODY.0,
+            reason: "a saved read has no caller attribution".to_owned(),
+        })?;
+    Ok(lash_protocol_types::ReadFact {
+        execution,
+        caller: read.caller,
+        provider: read.provider,
+        ordinal: read.ordinal,
+        site: read.site,
+        origin: read.origin,
+        call_id: record.call_id,
+        tool: record.tool,
+        args: record.args,
+        outcome: record.output.outcome,
+    })
 }
 
 pub fn load_read_fact(
     decoder: &mut GraphDecoder<'_>,
     node: NodeId,
 ) -> Result<lash_protocol_types::ReadFact, GraphRefusal> {
-    decode_tree_value(&load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
-        kind: NodeKind::FROZEN_VALUE.0,
-        reason: error.to_string(),
-    })
+    read_fact(CallBody::load(decoder, node)?.record)
 }
 
-/// A model read saves its final presentation beside its semantic fact.
+struct StoredModelRead {
+    body: NodeId,
+    presentation: crate::runtime::effect::ToolPresentation,
+}
+impl TokenCodec for StoredModelRead {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.body.encode(out);
+        encode_tree(&self.presentation, out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            body: NodeId::decode(input)?,
+            presentation: decode_tree(input)?,
+        })
+    }
+}
+
+/// A saved model read and its presentation share the canonical archival body.
 pub fn stage_model_read(
     staging: &mut GraphStaging,
     saved: &super::ModelReadResult,
 ) -> Result<NodeId, GraphRefusal> {
-    let value = serde_json::to_value(saved).map_err(|error| GraphRefusal::InvalidBody {
-        kind: NodeKind::FROZEN_VALUE.0,
-        reason: error.to_string(),
-    })?;
-    let MaterialNode::Value(node) = stage_value(staging, &value)? else {
-        unreachable!()
-    };
-    Ok(node)
+    let body = stage_read_fact(staging, &saved.fact)?;
+    Ok(staging.encode_value(
+        NodeKind::MODEL_READ,
+        &StoredModelRead {
+            body,
+            presentation: saved.presentation.clone(),
+        },
+    )?)
 }
 
 pub fn load_model_read(
     decoder: &mut GraphDecoder<'_>,
     node: NodeId,
 ) -> Result<super::ModelReadResult, GraphRefusal> {
-    decode_tree_value(&load_value(decoder, node)?).map_err(|error| GraphRefusal::InvalidBody {
-        kind: NodeKind::FROZEN_VALUE.0,
-        reason: error.to_string(),
+    let saved: StoredModelRead = decoder.decode(node, NodeKind::MODEL_READ)?;
+    Ok(super::ModelReadResult {
+        fact: load_read_fact(decoder, saved.body)?,
+        presentation: saved.presentation,
     })
+}
+
+/// The canonical answer selected by a saved model-read publication.
+pub fn model_read_body(
+    decoder: &mut GraphDecoder<'_>,
+    node: NodeId,
+) -> Result<NodeId, GraphRefusal> {
+    decoder
+        .decode::<StoredModelRead>(node, NodeKind::MODEL_READ)
+        .map(|saved| saved.body)
 }
 
 #[cfg(test)]

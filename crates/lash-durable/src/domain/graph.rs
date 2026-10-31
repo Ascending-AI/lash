@@ -90,6 +90,12 @@ pub enum RootOwner {
     Exec(ExecKey),
     /// A retained model call, addressed exactly as its prompt.
     ModelCall(super::PromptCallKey),
+    /// Retained tool-call decision or archival answer.
+    ToolCall {
+        owner: OwnerKey,
+        call: ToolCallId,
+        part: super::tool_calls::ToolCallRoot,
+    },
     /// `run_records`.
     RunFact {
         owner: OwnerKey,
@@ -130,6 +136,10 @@ impl RootOwner {
         match self {
             Self::Exec(_) => RootSource::Exec,
             Self::ModelCall(_) => RootSource::ModelCall,
+            Self::ToolCall { part, .. } => match part {
+                super::tool_calls::ToolCallRoot::Decision => RootSource::ToolCallDecision,
+                super::tool_calls::ToolCallRoot::Answer => RootSource::ToolCallAnswer,
+            },
             Self::RunFact { .. } => RootSource::RunFact,
             Self::EffectAdmission { .. } => RootSource::EffectAdmission,
             Self::TurnPhase { .. } => RootSource::TurnPhase,
@@ -503,6 +513,55 @@ impl DomainWrite {
     pub fn publications(&self) -> Vec<RootChange> {
         let one = |change: Option<RootChange>| change.into_iter().collect();
         match self {
+            Self::ToolCall(write) => {
+                use super::tool_calls::{ToolCallRoot, ToolCallWrite};
+                let (owner, call, part, root) = match write {
+                    ToolCallWrite::Admit { .. } | ToolCallWrite::Expire { .. } => {
+                        return Vec::new();
+                    }
+                    ToolCallWrite::Decide {
+                        owner, call, fact, ..
+                    } => (owner, call, ToolCallRoot::Decision, Some(*fact)),
+                    ToolCallWrite::Answer {
+                        owner,
+                        call,
+                        answer,
+                    } => (owner, call, ToolCallRoot::Answer, answer.body),
+                    ToolCallWrite::Complete {
+                        owner,
+                        call,
+                        fact,
+                        answer,
+                    } => {
+                        return [
+                            (ToolCallRoot::Decision, Some(*fact)),
+                            (ToolCallRoot::Answer, answer.body),
+                        ]
+                        .into_iter()
+                        .filter_map(|(part, root)| {
+                            change(
+                                RootOwner::ToolCall {
+                                    owner: owner.clone(),
+                                    call: call.clone(),
+                                    part,
+                                },
+                                None,
+                                root,
+                            )
+                        })
+                        .collect();
+                    }
+                };
+                one(change(
+                    RootOwner::ToolCall {
+                        owner: owner.clone(),
+                        call: call.clone(),
+                        part,
+                    },
+                    None,
+                    root,
+                ))
+            }
             Self::ModelCall(write) => one(change(
                 RootOwner::ModelCall(write.key.clone()),
                 None,

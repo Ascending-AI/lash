@@ -1223,3 +1223,11 @@ page_law!(lo_root_retained_delta_preserves_reachability);
 
 #[path = "environment_laws.rs"]
 mod environment_laws;
+
+#[tokio::test]
+async fn tool_call_publications_are_atomic_retained_and_keyed() {
+    let tier = tier(false).await;
+    laws::tool_call_publications_are_atomic_retained_and_keyed(&tier, &tier.store)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}

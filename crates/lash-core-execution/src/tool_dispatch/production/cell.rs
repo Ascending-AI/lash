@@ -465,6 +465,16 @@ fn unknown_member() -> MemberBody {
 }
 
 impl MemberBodies for CellMembers {
+    fn archival_read(
+        &self,
+        call: &crate::ToolCallId,
+        output: &SettledOutput,
+    ) -> Option<ToolCallRecord> {
+        self.reply_to(call, output)?
+            .record
+            .filter(|record| record.classification.read().is_some())
+    }
+
     /// Close the span of each call whose outcome this activation's
     /// acknowledged commit wrote, at the end that commit retained (P1): an
     /// attempt that ends closes nothing, and a successor that folds an

@@ -173,15 +173,28 @@ async fn legal_tool_identities_remain_visible_in_call_ledger_projections() {
         expected
     );
 
-    let (records, open) = crate::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
-        &cx,
-        &session,
-        &run,
-        Some(&run),
-        &Default::default(),
+    let selected = crate::call_store::list(
+        cx.durable_reads().unwrap(),
+        &lash_durable::domain::CallOwner::Turn(session.clone(), run.clone()),
+        None,
+        128,
     )
     .await
     .unwrap();
+    let mut records = Vec::new();
+    let mut open = std::collections::BTreeSet::new();
+    for (cursor, read) in selected {
+        match read {
+            crate::call_store::CallRead::Pending { .. } => {
+                open.insert(cursor.call);
+            }
+            crate::call_store::CallRead::Settled {
+                record: Some(record),
+                ..
+            } => records.push(*record),
+            _ => {}
+        }
+    }
     assert_eq!(
         records,
         [expected],

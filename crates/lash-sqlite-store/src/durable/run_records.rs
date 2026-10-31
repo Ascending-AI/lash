@@ -422,13 +422,11 @@ pub(super) fn request_call_cancel(
 )> {
     use lash_durable::domain::ToolCallCancelAnswer as A;
     let turn = OwnerKey::Turn(request.session.clone(), request.run.clone()).stored();
-    let cells = lash_durable::domain::ExecKey::turn_cells(&request.session, &request.run);
     let decision = tx
         .prepare_cached(SQL.call_decision.sql())?
-        .query_row(
-            rusqlite::params![turn, cells, request.call.as_str()],
-            |row| row.get::<_, String>(0),
-        )
+        .query_row(rusqlite::params![turn, request.call.as_str()], |row| {
+            row.get::<_, String>(0)
+        })
         .optional()?;
     match decision.as_deref() {
         Some("x_final" | "x_final_outcome") => return Ok(Ok((A::FinalWon, None))),

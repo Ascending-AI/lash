@@ -15,6 +15,7 @@ pub(super) struct StoredBody {
 }
 
 struct BodyFields<'a> {
+    execution: lash_protocol_types::ToolCallExecution,
     call_id: &'a ToolCallId,
     provider_call_id: &'a Option<String>,
     tool: &'a str,
@@ -24,7 +25,10 @@ struct BodyFields<'a> {
 }
 
 fn encode_body(body: BodyFields<'_>, answer: Option<NodeId>, out: &mut TokenWriter) {
-    out.seq(6);
+    out.seq(7);
+    out.unsigned(u64::from(
+        body.execution == lash_protocol_types::ToolCallExecution::Read,
+    ));
     out.text(body.call_id.as_str());
     body.provider_call_id.encode(out);
     out.text(body.tool);
@@ -43,6 +47,7 @@ impl TokenCodec for StoredBody {
     fn encode(&self, out: &mut TokenWriter) {
         encode_body(
             BodyFields {
+                execution: self.record.classification.execution(),
                 call_id: &self.record.call_id,
                 provider_call_id: &self.record.provider_call_id,
                 tool: &self.record.tool,
@@ -56,7 +61,16 @@ impl TokenCodec for StoredBody {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
+        input.expect_struct(7)?;
+        let execution = match input.unsigned()? {
+            0 => lash_protocol_types::ToolCallExecution::Recorded,
+            1 => lash_protocol_types::ToolCallExecution::Read,
+            other => {
+                return Err(TokenError::UnsupportedVariant {
+                    variant: u32::try_from(other).unwrap_or(u32::MAX),
+                });
+            }
+        };
         let call_id = decode_call_id(input)?;
         let provider_call_id = Option::decode(input)?;
         let tool = input.text()?.to_owned();
@@ -65,11 +79,20 @@ impl TokenCodec for StoredBody {
             node: Cell::new(None),
         };
         let output = decode_output(input, &answer)?;
+        let classification = match (execution, decode_opt_tree(input)?.map(Box::new)) {
+            (lash_protocol_types::ToolCallExecution::Recorded, read) => {
+                lash_protocol_types::ToolCallClassification::Recorded { read }
+            }
+            (lash_protocol_types::ToolCallExecution::Read, Some(read)) => {
+                lash_protocol_types::ToolCallClassification::UnrecordedRead { read }
+            }
+            (lash_protocol_types::ToolCallExecution::Read, None) => {
+                return Err(invalid("an unrecorded read has no identity"));
+            }
+        };
         Ok(Self {
             record: crate::ToolCallRecord {
-                classification: lash_protocol_types::ToolCallClassification::Recorded {
-                    read: decode_opt_tree(input)?.map(Box::new),
-                },
+                classification,
                 call_id,
                 provider_call_id,
                 tool,
@@ -94,7 +117,10 @@ impl CallBody {
             &self.record.tool,
             &self.record.args,
             &self.record.output,
-            self.record.classification.read(),
+            (
+                self.record.classification.execution(),
+                self.record.classification.read(),
+            ),
         )
     }
 
@@ -105,8 +131,12 @@ impl CallBody {
         tool: &str,
         args: &serde_json::Value,
         output: &ToolCallOutput,
-        read: Option<&lash_protocol_types::ToolReadIdentity>,
+        identity: (
+            lash_protocol_types::ToolCallExecution,
+            Option<&lash_protocol_types::ToolReadIdentity>,
+        ),
     ) -> Result<NodeId, GraphRefusal> {
+        let (execution, read) = identity;
         let answer = match &output.outcome {
             crate::ToolCallOutcome::Success(value) => {
                 let mut body = TokenWriter::new();
@@ -122,6 +152,7 @@ impl CallBody {
         let mut body = TokenWriter::new();
         encode_body(
             BodyFields {
+                execution,
                 call_id,
                 provider_call_id,
                 tool,

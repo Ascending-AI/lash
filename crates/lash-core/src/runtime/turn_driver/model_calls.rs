@@ -31,9 +31,10 @@ impl RuntimeTurnDriver<'_> {
         let read = async {
             self.scoped_effect_controller
                 .durable_reads()?
-                .model_calls(
+                .model_calls_by_id(
                     &self.session_id,
                     &lash_durable::domain::ModelCallId::turn_owner(&self.turn_id),
+                    std::slice::from_ref(id),
                 )
                 .await
         }
@@ -41,10 +42,7 @@ impl RuntimeTurnDriver<'_> {
         .map_err(|error| {
             RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, error.to_string())
         })?;
-        Ok(read
-            .into_iter()
-            .find(|record| &record.call_id == id)
-            .map(|record| record.record))
+        Ok(read.into_iter().next().map(|record| record.record))
     }
 
     /// Publish every call the turn has retained that this activation has
@@ -54,7 +52,7 @@ impl RuntimeTurnDriver<'_> {
         let read = async {
             self.scoped_effect_controller
                 .durable_reads()?
-                .model_calls(
+                .model_call_ids(
                     &self.session_id,
                     &lash_durable::domain::ModelCallId::turn_owner(&self.turn_id),
                 )
@@ -63,8 +61,8 @@ impl RuntimeTurnDriver<'_> {
         .await;
         match read {
             Ok(records) => {
-                for record in records {
-                    self.publish_model_call(event_tx, &record.call_id);
+                for id in records {
+                    self.publish_model_call(event_tx, &id);
                 }
             }
             Err(error) => {

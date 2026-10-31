@@ -916,3 +916,14 @@ async fn lo_root_when_configured() {
 
 #[path = "environment_laws.rs"]
 mod environment_laws;
+
+#[tokio::test]
+async fn tool_call_publications_are_atomic_retained_and_keyed() {
+    let tier = tier_with(crate::testing::fixture_config(), true)
+        .await
+        .expect("the hermetic PostgreSQL target supplies a database");
+    let peer = &tier.peer.as_ref().expect("a cold peer").1;
+    laws::tool_call_publications_are_atomic_retained_and_keyed(&tier, peer)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}

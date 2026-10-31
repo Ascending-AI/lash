@@ -205,16 +205,6 @@ CREATE TABLE IF NOT EXISTS session_terminal_changes (
 CREATE INDEX IF NOT EXISTS idx_session_terminal_changes_session
     ON session_terminal_changes(session_id, change_seq);
 
-CREATE TABLE IF NOT EXISTS tool_call_cancel_requests (
-    session_id TEXT NOT NULL,
-    run TEXT NOT NULL,
-    call_id TEXT NOT NULL,
-    request_id TEXT NOT NULL,
-    origin TEXT,
-    reason TEXT,
-    PRIMARY KEY (session_id, run, call_id),
-    FOREIGN KEY (session_id, run) REFERENCES session_runs(session_id, run) ON DELETE CASCADE
-);
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
     session_id TEXT NOT NULL,
@@ -791,13 +781,14 @@ pub(crate) fn expected_version() -> i64 {
 
 /// The shared table sets provisioning applies after the schema bodies, in
 /// order; see [`crate::schema_fragments`].
-pub(crate) const FRAGMENTS: [&str; 12] = [
+pub(crate) const FRAGMENTS: [&str; 13] = [
     crate::schema_fragments::SESSION_INGRESS_TABLE,
     crate::schema_fragments::SESSION_RUNS_TABLES,
     crate::durable::DURABLE_TABLES,
     crate::durable::NODE_WAKES_TABLES,
     crate::durable::RUN_RECORDS_TABLES,
     crate::durable::MODEL_CALL_TABLES,
+    crate::durable::TOOL_CALL_TABLES,
     crate::durable::EXEC_SNAPSHOTS_TABLES,
     crate::durable::TURN_PHASES_TABLES,
     crate::durable::WAITS_TABLES,

@@ -997,36 +997,27 @@ CREATE INDEX IF NOT EXISTS idx_lash_actor_mail_kind_seq ON lash_actor_mail(actor
 -- records as rows, keyed by (owner, run, ordinal), the second fence. An
 -- execution's start commits before its body runs; one outcome per call.
 
-CREATE TABLE IF NOT EXISTS lash_model_call_pins (
-    session_id TEXT NOT NULL, run TEXT NOT NULL, call TEXT NOT NULL, call_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL CONSTRAINT lash_model_call_pins_attempt_check CHECK (attempt > 0), answered BOOLEAN NOT NULL,
-    enclosing_owner TEXT, enclosing_run BIGINT, enclosing_call TEXT,
-    CONSTRAINT ck_model_call_pins_enclosing CHECK ((enclosing_owner IS NULL AND enclosing_run IS NULL AND enclosing_call IS NULL) OR (enclosing_owner IS NOT NULL AND enclosing_run IS NOT NULL AND enclosing_run >= 0 AND enclosing_call IS NOT NULL)),
-    PRIMARY KEY (session_id, run, call), UNIQUE (session_id, run, call_id)
-);
 CREATE TABLE IF NOT EXISTS lash_model_call_records (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
     call TEXT NOT NULL,
     call_id TEXT NOT NULL,
-    record_ref BYTEA NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
-    ended_at_ms BIGINT NOT NULL,
-    written_epoch BIGINT NOT NULL,
-    PRIMARY KEY (session_id, run, call),
-    UNIQUE (session_id, run, call_id)
+    attempt BIGINT CHECK (attempt > 0),
+    answered BOOLEAN NOT NULL DEFAULT FALSE,
+    enclosing_owner TEXT, enclosing_run BIGINT, enclosing_call TEXT,
+    record_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    ended_at_ms BIGINT,
+    written_epoch BIGINT,
+    PRIMARY KEY (session_id, call_id),
+    UNIQUE (session_id, run, call),
+    CONSTRAINT ck_model_call_records_enclosing CHECK ((enclosing_owner IS NULL AND enclosing_run IS NULL AND enclosing_call IS NULL) OR (enclosing_owner IS NOT NULL AND enclosing_run IS NOT NULL AND enclosing_run >= 0 AND enclosing_call IS NOT NULL)),
+    CHECK ((record_ref IS NULL) = (ended_at_ms IS NULL)),
+    CHECK ((record_ref IS NULL) = (written_epoch IS NULL)),
+    CHECK (record_ref IS NOT NULL OR attempt IS NOT NULL),
+    CHECK (record_ref IS NULL OR answered)
 );
-CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON lash_model_call_records(record_ref);
+CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON lash_model_call_records(record_ref) WHERE record_ref IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS lash_tool_call_cancel_requests (
-    session_id TEXT NOT NULL,
-    run TEXT NOT NULL,
-    call_id TEXT NOT NULL,
-    request_id TEXT NOT NULL,
-    origin TEXT,
-    reason TEXT,
-    PRIMARY KEY (session_id, run, call_id),
-    FOREIGN KEY (session_id, run) REFERENCES lash_session_runs(session_id, run) ON DELETE CASCADE
-);
 
 CREATE TABLE IF NOT EXISTS lash_run_records (
     owner_key TEXT COLLATE "C" NOT NULL,
@@ -1046,6 +1037,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_run_records_outcome
     ON lash_run_records (owner_key, run_seq, call_id)
     WHERE kind IN ('x_outcome', 'x_final_outcome') AND call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_run_records_record_ref ON lash_run_records (record_ref);
+
+
+CREATE TABLE IF NOT EXISTS lash_tool_calls (
+    owner_key TEXT NOT NULL, call_id TEXT NOT NULL,
+    execution_owner TEXT NOT NULL, run_seq BIGINT NOT NULL, member BIGINT NOT NULL,
+    admission_seq BIGINT NOT NULL,
+    counted BOOLEAN NOT NULL,
+    admitted_count BIGINT NOT NULL CHECK (admitted_count >= 0),
+    cancellable BOOLEAN NOT NULL,
+    session_id TEXT, turn_id TEXT,
+    request_id TEXT, origin TEXT, reason TEXT,
+    decision TEXT CHECK (decision IN ('final', 'cancel')),
+    decision_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    answer_outcome TEXT,
+    body_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
+    PRIMARY KEY (owner_key, call_id),
+    CHECK ((decision IS NULL) = (decision_ref IS NULL)),
+    CHECK (body_ref IS NULL OR answer_outcome IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_tool_calls_execution ON lash_tool_calls(execution_owner, call_id);
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_order ON lash_tool_calls(owner_key, admission_seq, call_id);
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_turn_order ON lash_tool_calls(session_id, turn_id, admission_seq DESC) WHERE turn_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_unanswered_reads ON lash_tool_calls(session_id, turn_id) WHERE NOT cancellable AND answer_outcome IS NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_requests ON lash_tool_calls(session_id, turn_id, call_id) WHERE request_id IS NOT NULL AND answer_outcome IS NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_reads ON lash_tool_calls(owner_key, admission_seq, call_id) WHERE answer_outcome = '"Read"';
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_body ON lash_tool_calls(body_ref) WHERE body_ref IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_decision ON lash_tool_calls(decision_ref) WHERE decision_ref IS NOT NULL;
 
 -- Session close (L6b, FIG-5176): a closing session's last step done, each
 -- step its own fenced transaction (ADR 0132 §12). After the 'tombstone'
@@ -1159,8 +1177,6 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
-    tool_calls BIGINT NOT NULL DEFAULT 0 CONSTRAINT lash_turn_phases_tool_calls_check
-        CHECK (tool_calls >= 0),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -1341,7 +1357,9 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     SELECT 'environment_head' AS source, root_ref FROM lash_environment_heads
     UNION ALL SELECT 'exec', root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL
     UNION ALL SELECT 'run_fact', record_ref FROM lash_run_records WHERE record_ref IS NOT NULL
-    UNION ALL SELECT 'model_call', record_ref FROM lash_model_call_records
+    UNION ALL SELECT 'model_call', record_ref FROM lash_model_call_records WHERE record_ref IS NOT NULL
+    UNION ALL SELECT 'tool_call_decision', decision_ref FROM lash_tool_calls WHERE decision_ref IS NOT NULL
+    UNION ALL SELECT 'tool_call_answer', body_ref FROM lash_tool_calls WHERE body_ref IS NOT NULL
     UNION ALL SELECT 'admission', admission_ref FROM lash_effect_admissions
     UNION ALL SELECT 'phase', checkpoint_ref FROM lash_turn_phases WHERE checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'working', working_execution_ref FROM lash_turn_phases
@@ -1438,9 +1456,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 8ca95acafe658f95); a call
+    -- Generated from this build's statements (registry 89f3b819548ff594); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '8ca95acafe658f95'
+    IF p_registry IS DISTINCT FROM '89f3b819548ff594'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1583,34 +1601,70 @@ BEGIN
         v_p := v_step->'p';
         v_first := NULL;
         CASE v_step->>'s'
-        WHEN 'durable_model_call.append' THEN
-            INSERT INTO lash_model_call_records
-            (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch)
-            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT)) ON CONFLICT (session_id, run, call) DO NOTHING;
+        WHEN 'durable_tool_call.finish_reads' THEN
+            UPDATE lash_tool_calls SET answer_outcome = (v_p->>2)
+            WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1) AND NOT cancellable AND answer_outcome IS NULL;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
-        WHEN 'durable_model_call_postgres.root_matches' THEN
-            v_rows := 0;
-            FOR v_row IN SELECT record_ref FROM lash_model_call_records
-            WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2) AND record_ref = (decode(v_p->>3, 'hex')) LOOP
-                IF v_step ? 'c' AND v_first IS NULL THEN
-                    v_first := to_jsonb(v_row);
-                END IF;
-                v_rows := v_rows + 1;
-            END LOOP;
-        WHEN 'durable_model_call.retire_pin' THEN
-            DELETE FROM lash_model_call_pins WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2);
+        WHEN 'durable_tool_call.admit' THEN
+            INSERT INTO lash_tool_calls
+            (owner_key, call_id, execution_owner, run_seq, member, cancellable, session_id, turn_id, counted, admission_seq, admitted_count)
+            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), ((v_p->>5)::BOOLEAN), (v_p->>6), (v_p->>7), ((v_p->>8)::BOOLEAN),
+                COALESCE((SELECT admission_seq + 1 FROM lash_tool_calls WHERE owner_key = (v_p->>0) ORDER BY admission_seq DESC LIMIT 1), 0),
+                COALESCE((SELECT admitted_count FROM lash_tool_calls WHERE owner_key = (v_p->>0) ORDER BY admission_seq DESC LIMIT 1), 0) + CASE WHEN ((v_p->>8)::BOOLEAN) THEN 1 ELSE 0 END)
+            ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id
+            WHERE lash_tool_calls.execution_owner = excluded.execution_owner
+              AND lash_tool_calls.run_seq = excluded.run_seq AND lash_tool_calls.member = excluded.member
+              AND lash_tool_calls.cancellable = excluded.cancellable AND lash_tool_calls.counted = excluded.counted;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_tool_call.decide' THEN
+            UPDATE lash_tool_calls SET decision = (v_p->>2), decision_ref = (decode(v_p->>3, 'hex'))
+            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1)
+              AND ((decision IS NULL AND answer_outcome IS NULL) OR (decision = (v_p->>2) AND decision_ref = (decode(v_p->>3, 'hex'))));
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_tool_call.answer' THEN
+            UPDATE lash_tool_calls SET answer_outcome = (v_p->>2), body_ref = (decode(v_p->>3, 'hex'))
+            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1)
+              AND (decision IS NULL OR (decision = 'cancel' AND ((v_p->>4)::BOOLEAN)) OR (decision = 'final' AND NOT ((v_p->>4)::BOOLEAN)))
+              AND (answer_outcome IS NULL OR (answer_outcome = (v_p->>2)
+                AND (body_ref = (decode(v_p->>3, 'hex')) OR (body_ref IS NULL AND (decode(v_p->>3, 'hex')) IS NULL))));
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_tool_call.complete' THEN
+            UPDATE lash_tool_calls SET decision = 'final', decision_ref = (decode(v_p->>2, 'hex')),
+                answer_outcome = (v_p->>3), body_ref = (decode(v_p->>4, 'hex'))
+            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1) AND NOT ((v_p->>5)::BOOLEAN)
+              AND ((decision IS NULL AND answer_outcome IS NULL)
+                OR (decision = 'final' AND decision_ref = (decode(v_p->>2, 'hex'))
+                  AND (answer_outcome IS NULL OR (answer_outcome = (v_p->>3)
+                    AND (body_ref = (decode(v_p->>4, 'hex')) OR (body_ref IS NULL AND (decode(v_p->>4, 'hex')) IS NULL))))));
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_model_call.append' THEN
+            INSERT INTO lash_model_call_records
+            (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered)
+            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT), TRUE)
+            ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref,
+                ended_at_ms = COALESCE(lash_model_call_records.ended_at_ms, excluded.ended_at_ms),
+                written_epoch = COALESCE(lash_model_call_records.written_epoch, excluded.written_epoch), answered = TRUE
+            WHERE lash_model_call_records.call_id = excluded.call_id
+              AND (lash_model_call_records.record_ref IS NULL OR lash_model_call_records.record_ref = excluded.record_ref);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.reserve' THEN
-            INSERT INTO lash_model_call_pins (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call)
+            INSERT INTO lash_model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call)
             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), ((v_p->>4)::BIGINT), FALSE, (v_p->>5), ((v_p->>6)::BIGINT), (v_p->>7))
-            ON CONFLICT (session_id, run, call) DO UPDATE SET attempt = excluded.attempt
-            WHERE lash_model_call_pins.call_id = excluded.call_id AND lash_model_call_pins.attempt < excluded.attempt;
+            ON CONFLICT (session_id, run, call) DO UPDATE SET attempt = CASE WHEN lash_model_call_records.attempt < excluded.attempt THEN excluded.attempt ELSE lash_model_call_records.attempt END
+            WHERE lash_model_call_records.record_ref IS NULL AND lash_model_call_records.call_id = excluded.call_id
+              AND lash_model_call_records.enclosing_owner IS NOT DISTINCT FROM excluded.enclosing_owner
+              AND lash_model_call_records.enclosing_run IS NOT DISTINCT FROM excluded.enclosing_run
+              AND lash_model_call_records.enclosing_call IS NOT DISTINCT FROM excluded.enclosing_call;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.answered' THEN
-            UPDATE lash_model_call_pins SET answered = TRUE WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2);
+            UPDATE lash_model_call_records SET answered = TRUE WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2) AND record_ref IS NULL;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_run_fact_batch_postgres.append' THEN
@@ -1738,11 +1792,6 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'durable_turn.add_tool_calls' THEN
-            UPDATE lash_turn_phases SET tool_calls = tool_calls + ((v_p->>2)::BIGINT)
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
-            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_turn.open_named_run' THEN
             v_rows := 0;
             FOR v_row IN SELECT run FROM lash_session_runs
@@ -1910,8 +1959,8 @@ BEGIN
                      WHERE head.session_id = (v_p->>0))
              WHERE session_id = (v_p->>0) AND run = (v_p->>1)
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
-             RETURNING run, EXISTS (SELECT 1 FROM lash_tool_call_cancel_requests
-                 WHERE session_id = (v_p->>0) AND run = (v_p->>1)) AS has_call_cancels LOOP
+             RETURNING run, EXISTS (SELECT 1 FROM lash_tool_calls
+                 WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1) AND NOT cancellable AND answer_outcome IS NULL) AS has_pending_reads LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2025,8 +2074,7 @@ BEGIN
                  RETURNING graph_root_ref
              ), cancel AS (
                  DELETE FROM lash_turn_cancel_requests WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1)
-             ), call_cancels AS (
-                 DELETE FROM lash_tool_call_cancel_requests WHERE session_id = (v_p->>0) AND run = (v_p->>1)
+
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,

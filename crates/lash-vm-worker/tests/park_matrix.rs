@@ -1280,6 +1280,7 @@ impl KernelEffects for LawHost {
                 .map_err(|refusal| ParentFault(refusal.to_string()))
         };
         Ok(lash_vm_broker::kernel::HostParts {
+            read_calls: Vec::new(),
             host: Some(stage(staging, NodeKind::HOST_ROOT, "park-law host")?),
             envelope: Some(stage(
                 staging,

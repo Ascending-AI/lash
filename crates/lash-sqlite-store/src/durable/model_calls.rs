@@ -8,28 +8,55 @@ use rusqlite::Connection;
 use std::sync::LazyLock;
 
 pub(crate) const TABLES: &str = "
-CREATE TABLE IF NOT EXISTS model_call_pins (
-    session_id TEXT NOT NULL, run TEXT NOT NULL, call TEXT NOT NULL, call_id TEXT NOT NULL,
-    attempt INTEGER NOT NULL CHECK (attempt > 0), answered INTEGER NOT NULL CHECK (answered IN (0, 1)),
-    enclosing_owner TEXT, enclosing_run INTEGER, enclosing_call TEXT,
-    CONSTRAINT ck_model_call_pins_enclosing CHECK ((enclosing_owner IS NULL AND enclosing_run IS NULL AND enclosing_call IS NULL) OR (enclosing_owner IS NOT NULL AND enclosing_run IS NOT NULL AND enclosing_run >= 0 AND enclosing_call IS NOT NULL)),
-    PRIMARY KEY (session_id, run, call), UNIQUE (session_id, run, call_id)
-) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS model_call_records (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
     call TEXT NOT NULL,
     call_id TEXT NOT NULL,
-    record_ref BLOB NOT NULL REFERENCES blobs(hash),
-    ended_at_ms INTEGER NOT NULL,
-    written_epoch INTEGER NOT NULL,
-    PRIMARY KEY (session_id, run, call),
-    UNIQUE (session_id, run, call_id)
+    attempt INTEGER CHECK (attempt > 0), answered INTEGER NOT NULL DEFAULT 0 CHECK (answered IN (0, 1)),
+    enclosing_owner TEXT, enclosing_run INTEGER, enclosing_call TEXT,
+    record_ref BLOB REFERENCES blobs(hash),
+    ended_at_ms INTEGER,
+    written_epoch INTEGER,
+    PRIMARY KEY (session_id, call_id),
+    UNIQUE (session_id, run, call),
+    CONSTRAINT ck_model_call_records_enclosing CHECK ((enclosing_owner IS NULL AND enclosing_run IS NULL AND enclosing_call IS NULL) OR (enclosing_owner IS NOT NULL AND enclosing_run IS NOT NULL AND enclosing_run >= 0 AND enclosing_call IS NOT NULL)),
+    CHECK ((record_ref IS NULL) = (ended_at_ms IS NULL)),
+    CHECK ((record_ref IS NULL) = (written_epoch IS NULL)),
+    CHECK (record_ref IS NOT NULL OR attempt IS NOT NULL),
+    CHECK (record_ref IS NULL OR answered)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON model_call_records(record_ref);
+CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON model_call_records(record_ref) WHERE record_ref IS NOT NULL;
 ";
 pub(super) static SQL: LazyLock<ModelCallStatements> =
     LazyLock::new(|| ModelCallStatements::render(crate::schema_layout::MAIN));
+
+lash_store_sql::statements! {
+    struct ModelCallSqliteStatements @ "durable_model_call_sqlite" {
+        selected = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
+            WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
+              AND call_id IN (SELECT value FROM json_each(?3)) ORDER BY run, call";
+        selected_pins = "SELECT run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call FROM model_call_records
+            WHERE session_id = ?1 AND record_ref IS NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
+              AND call_id IN (SELECT value FROM json_each(?3)) ORDER BY run, call";
+    }
+}
+static SQLITE: LazyLock<ModelCallSqliteStatements> =
+    LazyLock::new(|| ModelCallSqliteStatements::render(crate::schema_layout::MAIN));
+
+pub(super) fn ids(
+    tx: &Connection,
+    session: &lash_kernel_value::identity::SessionId,
+    owner: &str,
+) -> Answer<Vec<lash_protocol_types::llm::types::LlmCallId>> {
+    Ok(Ok(tx
+        .prepare_cached(SQL.ids.sql())?
+        .query_map([session.as_str(), owner], |row| {
+            row.get::<_, String>(0)
+                .map(lash_protocol_types::llm::types::LlmCallId)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?))
+}
 
 pub(super) fn apply(
     tx: &Connection,
@@ -47,29 +74,12 @@ pub(super) fn apply(
             commit.now.0,
             commit.epoch.0,
         ])?;
-    // A successful insert owns this exact record. Only a replay can find
-    // an older sealed row, whose immutable identity must then match.
-    if inserted == 0 {
-        let retained: String = tx.prepare_cached(SQL.root.sql())?.query_row(
-            [
-                write.key.session.as_str(),
-                &write.key.call.owner_column(),
-                &write.key.call.call_column(),
-            ],
-            |row| crate::codec::hash_column(row, 0),
-        )?;
-        if retained != write.record.to_hex() {
-            return Ok(Err(super::corrupt(
-                "model call",
-                "a sealed call cannot be replaced",
-            )));
-        }
+    if inserted != 1 {
+        return Ok(Err(super::corrupt(
+            "model call",
+            "a sealed call cannot be replaced",
+        )));
     }
-    tx.prepare_cached(SQL.retire_pin.sql())?.execute([
-        write.key.session.as_str(),
-        &write.key.call.owner_column(),
-        &write.key.call.call_column(),
-    ])?;
     Ok(Ok(()))
 }
 
@@ -77,22 +87,37 @@ pub(super) fn delete_session(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_pins.sql())?
-        .execute([session.as_str()])?;
-    tx.prepare_cached(SQL.delete_session.sql())?
-        .query_map([session.as_str()], |row| crate::codec::hash_column(row, 0))?
-        .collect()
+    let roots = tx
+        .prepare_cached(SQL.delete_session.sql())?
+        .query_map([session.as_str()], |row| {
+            crate::codec::optional_hash_column(row, 0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(roots.into_iter().flatten().collect())
 }
 
 pub(super) fn read(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
     owner: &str,
+    ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
     limits: DecodeLimits,
 ) -> Answer<Vec<ModelCallRecord>> {
+    let keys = ids.map(|ids| {
+        serde_json::Value::from(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>()).to_string()
+    });
+    let sql = if keys.is_some() {
+        SQLITE.selected.sql()
+    } else {
+        SQL.read.sql()
+    };
+    let mut params = vec![session.as_str(), owner];
+    if let Some(keys) = &keys {
+        params.push(keys);
+    }
     let rows = tx
-        .prepare_cached(SQL.read.sql())?
-        .query_map([session.as_str(), owner], |row| {
+        .prepare_cached(sql)?
+        .query_map(rusqlite::params_from_iter(params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 crate::codec::hash_column(row, 1)?,
@@ -154,7 +179,8 @@ pub(super) fn apply_pin(
             attempt,
             enclosing,
         } => {
-            tx.prepare_cached(SQL.reserve.sql())?
+            let changed = tx
+                .prepare_cached(SQL.reserve.sql())?
                 .execute(rusqlite::params![
                     key.session.as_str(),
                     key.call.owner_column(),
@@ -167,6 +193,12 @@ pub(super) fn apply_pin(
                         .map(|owner| i64::try_from(owner.run.0).unwrap_or(i64::MAX)),
                     enclosing.as_ref().map(|owner| owner.call.as_str()),
                 ])?;
+            if changed != 1 {
+                return Ok(Err(super::corrupt(
+                    "model call reservation",
+                    "conflicting identity",
+                )));
+            }
         }
         ModelCallPinWrite::Answered { key } => {
             tx.prepare_cached(SQL.answered.sql())?.execute([
@@ -182,10 +214,26 @@ pub(super) fn pins(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
     owner: &str,
+    ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
+    call: Option<&str>,
 ) -> Answer<Vec<lash_durable::domain::ModelCallPinRow>> {
+    let keys = ids.map(|ids| {
+        serde_json::Value::from(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>()).to_string()
+    });
+    let sql = if call.is_some() {
+        SQL.pin_by_key.sql()
+    } else if keys.is_some() {
+        SQLITE.selected_pins.sql()
+    } else {
+        SQL.pins.sql()
+    };
+    let mut params = vec![session.as_str(), owner];
+    if let Some(selected) = call.or(keys.as_deref()) {
+        params.push(selected);
+    }
     let rows = tx
-        .prepare_cached(SQL.pins.sql())?
-        .query_map([session.as_str(), owner], |row| {
+        .prepare_cached(sql)?
+        .query_map(rusqlite::params_from_iter(params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,

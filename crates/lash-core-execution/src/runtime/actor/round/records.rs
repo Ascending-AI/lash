@@ -117,6 +117,10 @@ fn settled_fact(
         let node = graph::stage_material(staging, material)?;
         let held = match node {
             MaterialNode::CallPayload(_) => material.typed::<CompletedCall>().is_some(),
+            MaterialNode::CallRecord(_) => material.typed::<graph::ArchivalCall>().is_some(),
+            MaterialNode::ProcessReadOutput(_) => {
+                material.typed::<graph::ProcessReadOutput>().is_some()
+            }
             MaterialNode::Value(_) => material.holds_text(),
             MaterialNode::Outcome(_) => false,
         };
@@ -149,7 +153,10 @@ fn settled_fact(
 
 /// Stages `record`'s RoundFact and returns its node, with whether a read of
 /// that node gives back `record` exactly ([`StagedRecord`]).
-fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), GraphRefusal> {
+fn stage(
+    staging: &mut GraphStaging,
+    record: &Record,
+) -> Result<(NodeId, bool, Option<MaterialNode>), GraphRefusal> {
     let (fact, held) = match record {
         Record::Admit(body) if body.admissions.is_empty() => (
             RoundFact::Admit {
@@ -254,6 +261,12 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
         ),
         Record::CellReport(report) => (RoundFact::CellReport { report: *report }, true),
     };
+    let material = match &fact {
+        RoundFact::Outcome { output, .. } | RoundFact::FinalOutcome { output, .. } => {
+            output.material
+        }
+        _ => None,
+    };
     let node = fact.stage_settled(staging)?;
     // The fact's own body (its state trees among it) must read back as it
     // was written, or a fold's read refuses it as it would any other.
@@ -261,7 +274,7 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
         && GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32))
             .decode::<RoundFact>(node, NodeKind::ROUND_FACT)
             .is_ok_and(|read| read == fact);
-    Ok((node, held))
+    Ok((node, held, material))
 }
 
 /// `row`'s body, read from `facts`: refused unless its RoundFact is of the
@@ -447,7 +460,91 @@ fn append_held(
         reason = "a fact's typed body always encodes, and an unbounded staging area places \
                   every value it holds"
     )]
-    let (node, held) = stage(&mut staging, record).expect("a run fact stages");
+    let (node, held, material) = stage(&mut staging, record).expect("a run fact stages");
+    if let Some(call) = call {
+        use lash_durable::domain::{ToolCallAnswer, ToolCallDecision, ToolCallWrite};
+        let decision = match record {
+            Record::Cancel { .. } => Some(ToolCallDecision::Cancel),
+            Record::Final { .. } => Some(ToolCallDecision::Final),
+            _ => None,
+        };
+        if let Some(decision) = decision {
+            tx.write(DomainWrite::ToolCall(ToolCallWrite::Decide {
+                owner: owner.clone(),
+                call: call.clone(),
+                decision,
+                fact: node,
+            }));
+        }
+        if let Record::Outcome(body) | Record::FinalOutcome(body) = record {
+            let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 32));
+            let body_node = match material {
+                Some(MaterialNode::CallRecord(node)) => Some(node),
+                Some(MaterialNode::Outcome(node) | MaterialNode::CallPayload(node)) =>
+                {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "a staged outcome owns its archival body"
+                    )]
+                    Some(
+                        graph::CallOutcome::body_node(&mut decoder, node)
+                            .expect("staged call body"),
+                    )
+                }
+                Some(MaterialNode::ProcessReadOutput(node)) => {
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "the process output and reads were just staged"
+                    )]
+                    for (fact, body) in graph::ProcessReadOutput::bodies(&mut decoder, node)
+                        .expect("staged caller reads")
+                    {
+                        tx.write(DomainWrite::ToolCall(ToolCallWrite::Admit {
+                            counted: false,
+                            logical: lash_durable::domain::tool_calls::logical_owner(owner),
+                            execution: owner.clone(),
+                            run,
+                            member: fact.ordinal,
+                            call: fact.call_id.clone(),
+                            cancellable: false,
+                        }));
+                        tx.write(DomainWrite::ToolCall(ToolCallWrite::Answer {
+                            owner: owner.clone(),
+                            call: fact.call_id,
+                            answer: ToolCallAnswer {
+                                outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
+                                body: Some(body),
+                            },
+                        }));
+                    }
+                    None
+                }
+                Some(MaterialNode::Value(_)) | None => None,
+            };
+            let answer = ToolCallAnswer {
+                outcome: lash_durable::domain::tool_calls::ToolCallSettlement::execution(
+                    body.output.outcome(),
+                ),
+                body: body_node,
+            };
+            tx.write(DomainWrite::ToolCall(
+                if matches!(record, Record::FinalOutcome(_)) {
+                    ToolCallWrite::Complete {
+                        owner: owner.clone(),
+                        call: call.clone(),
+                        fact: node,
+                        answer,
+                    }
+                } else {
+                    ToolCallWrite::Answer {
+                        owner: owner.clone(),
+                        call: call.clone(),
+                        answer,
+                    }
+                },
+            ));
+        }
+    }
     tx.stage_all(staging);
     tx.write(DomainWrite::RunFact(RunFactWrite::Append {
         owner: owner.clone(),
@@ -470,12 +567,39 @@ pub(super) fn admit_record(
     admissions: Vec<NodeId>,
     reads: Vec<super::ModelReadPlan>,
 ) {
-    if let OwnerKey::Turn(session, turn) | OwnerKey::Cell(session, turn, _) = owner {
-        tx.write(DomainWrite::Turn(
-            lash_durable::domain::TurnWrite::AddToolCalls {
-                session: session.clone(),
-                run: turn.clone(),
-                calls: (drafts.len() + reads.len()) as u64,
+    let mut slot = 0_u64;
+    let mut directory_admissions = Vec::new();
+    for draft in drafts {
+        while reads.iter().any(|read| read.slot == slot) {
+            slot += 1;
+        }
+        directory_admissions.push((
+            slot,
+            draft.call().clone(),
+            true,
+            lash_durable::domain::tool_calls::request_owner(owner, draft.request()),
+        ));
+        slot += 1;
+    }
+    directory_admissions.extend(reads.iter().map(|read| {
+        (
+            read.slot,
+            read.call_id.clone(),
+            false,
+            lash_durable::domain::tool_calls::request_owner(owner, &read.request),
+        )
+    }));
+    directory_admissions.sort_by_key(|(slot, _, _, _)| *slot);
+    for (member, call, cancellable, logical) in directory_admissions {
+        tx.write(DomainWrite::ToolCall(
+            lash_durable::domain::ToolCallWrite::Admit {
+                counted: matches!(owner, OwnerKey::Turn(..) | OwnerKey::Cell(..)),
+                logical,
+                execution: owner.clone(),
+                run,
+                member,
+                call,
+                cancellable,
             },
         ));
     }

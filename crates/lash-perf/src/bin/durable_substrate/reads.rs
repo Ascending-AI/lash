@@ -675,7 +675,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fifty_dependent_reads_obey_the_cost_model() {
         let fixture = tempfile::tempdir().unwrap();
-        let report = crate::support::Report::open(&fixture.path().join("reads.jsonl")).unwrap();
+        let evidence = std::env::var_os("TEST_UNDECLARED_OUTPUTS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| fixture.path().to_path_buf());
+        let report = crate::support::Report::open(&evidence.join("reads.jsonl")).unwrap();
         let worker =
             std::path::PathBuf::from(std::env::var_os("LASH_VM_WORKER").expect("worker runfile"));
         let run = crate::Run {

@@ -46,8 +46,8 @@ use lash_store_sql::Dialect;
 use super::steps::{Entry, Step};
 use super::{
     PostgresDurableStore, SQL, get, graph, head_commit, model_calls, park, processes, prompts,
-    replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure, turns,
-    waits,
+    replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure,
+    tool_calls, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -189,9 +189,12 @@ pub(crate) const FUNCTION: &str = "lash_owner_commit";
 /// Every statement a step may name: what the function dispatches on.
 pub(super) fn entries() -> Vec<&'static Entry> {
     vec![
+        &tool_calls::FINISH_READS,
+        &tool_calls::ADMIT,
+        &tool_calls::DECIDE,
+        &tool_calls::ANSWER,
+        &tool_calls::COMPLETE,
         &model_calls::APPEND,
-        &model_calls::ROOT_MATCHES,
-        &model_calls::RETIRE_PIN,
         &model_calls::RESERVE,
         &model_calls::ANSWERED,
         &run_records::APPEND,
@@ -204,7 +207,6 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &turns::INSERT_PHASE,
         &turns::ADVANCE_PHASE,
         &turns::ANSWER_SET,
-        &turns::ADD_TOOL_CALLS,
         &turns::OPEN_NAMED_RUN,
         &turns::UPSERT_NAMESPACES,
         &turns::WORKING_SET,
@@ -317,6 +319,8 @@ pub(super) fn program(
         DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
         DomainWrite::SessionCommit(_) | DomainWrite::SessionClose(_) => Ok(None),
         DomainWrite::ModelCall(write) => Ok(Some(model_calls::steps(epoch, write))),
+        DomainWrite::ToolCall(lash_durable::domain::ToolCallWrite::Expire { .. }) => Ok(None),
+        DomainWrite::ToolCall(write) => tool_calls::steps(epoch, write).map(Some),
         DomainWrite::ModelCallPin(write) => Ok(Some(model_calls::pin_steps(write))),
     }
 }

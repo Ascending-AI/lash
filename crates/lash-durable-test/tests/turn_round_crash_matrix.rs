@@ -61,6 +61,9 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/call_directory.rs"]
+mod call_directory;
+
 use matrix::MatrixTestExt as _;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1217,6 +1220,26 @@ impl Scenario for L4 {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
+        let ids = fold
+            .rounds()
+            .flat_map(|view| view.members())
+            .map(|member| {
+                (
+                    member.call().clone(),
+                    member
+                        .outcome()
+                        .map(lash_core_store::tool_run::SettledOutput::outcome),
+                )
+            })
+            .collect::<Vec<_>>();
+        violations.extend(
+            call_directory::check(
+                nodes.database().as_ref(),
+                &lash_durable::domain::tool_calls::logical_owner(&owner()),
+                &ids,
+            )
+            .await,
+        );
         for member in fold.rounds().flat_map(|view| view.members()) {
             if let Some(pinned) = member.draft().pinned_wait()
                 && database.wait(&pinned.id).await.is_ok()

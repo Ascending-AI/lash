@@ -17,8 +17,16 @@ impl RuntimeDrive {
             .as_ref()
             .and_then(|row| row.phase.model())
             .map_or(self.driver.model_call_ordinal, |pin| pin.call);
-        let reserved = cx.durable_reads()?.model_call_pins(&self.driver.session_id, &lash_durable::domain::ModelCallId::turn_owner(&self.driver.turn_id)).await?
-            .into_iter().find(|pin| matches!(pin.key.call, lash_durable::domain::ModelCallId::Turn { ordinal, .. } if ordinal == call));
+        let reserved = cx
+            .durable_reads()?
+            .model_call_pin(&lash_durable::domain::PromptCallKey {
+                session: self.driver.session_id.clone(),
+                call: lash_durable::domain::ModelCallId::Turn {
+                    run: self.driver.turn_id.clone(),
+                    ordinal: call,
+                },
+            })
+            .await?;
         let record = reserved.map_or_else(
             || crate::LlmCallRecord {
                 call_id: crate::LlmCallId(format!(

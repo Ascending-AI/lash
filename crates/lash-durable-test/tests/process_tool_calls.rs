@@ -800,12 +800,23 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
     let durable = world.backend.durable();
     let processes = world.core.processes();
     assert!(
-        processes
-            .tool_call(&process, &call.call_id)
+        matches!(
+            processes.tool_call(&process, &call.call_id).await.unwrap(),
+            lash::ToolCallRead::Settled { .. }
+        ),
+        "the host reads the ended process's call"
+    );
+    let call_owner = lash_durable::domain::CallOwner::Process(process.clone());
+    let selection = lash_durable::domain::ToolCallSelection::Calls(vec![call.call_id.clone()]);
+    assert_eq!(
+        durable
+            .tool_calls(&call_owner, &selection)
             .await
             .unwrap()
-            .is_some(),
-        "the host reads the ended process's call"
+            .rows
+            .len(),
+        1,
+        "the retained process owns its call row"
     );
     assert!(!durable.run_facts(&owner).await.unwrap().rows.is_empty());
     assert!(durable.wait(&wait).await.unwrap().is_some());
@@ -821,6 +832,15 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
         .unwrap();
     assert_eq!(report.pruned_processes, 1, "{report:?}");
     assert!(
+        durable
+            .tool_calls(&call_owner, &selection)
+            .await
+            .unwrap()
+            .rows
+            .is_empty(),
+        "prune expired the retained call row"
+    );
+    assert!(
         durable.run_facts(&owner).await.unwrap().rows.is_empty(),
         "the pruned process's run facts remain"
     );
@@ -829,11 +849,10 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
         "the pruned process's wait remains"
     );
     assert!(
-        processes
-            .tool_call(&process, &call.call_id)
-            .await
-            .unwrap()
-            .is_none(),
+        matches!(
+            processes.tool_call(&process, &call.call_id).await.unwrap(),
+            lash::ToolCallRead::NotFound { .. }
+        ),
         "the pruned process's call still reads"
     );
     world.shutdown().await;

@@ -59,11 +59,6 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2
              RETURNING run";
 
-        /// Count `?3` newly admitted tool calls of the matching unfinished
-        /// turn. No phase row for a cell of an operation means no turn to count.
-        add_tool_calls = "UPDATE turn_phases SET tool_calls = tool_calls + ?3
-             WHERE session_id = ?1 AND run = ?2";
-
         /// Record receipt `?3` of the call run `?2` of session `?1` pins in
         /// its model phase, at epoch `?4`. No row when the run has no phase
         /// row, is not in its model phase, or holds a receipt.
@@ -89,8 +84,8 @@ crate::statements! {
                      WHERE head.session_id = ?1)
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
-             RETURNING run, EXISTS (SELECT 1 FROM tool_call_cancel_requests
-                 WHERE session_id = ?1 AND run = ?2) AS has_call_cancels";
+             RETURNING run, EXISTS (SELECT 1 FROM tool_calls
+                 WHERE session_id = ?1 AND turn_id = ?2 AND NOT cancellable AND answer_outcome IS NULL) AS has_pending_reads";
 
         /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot,
         /// working execution and receipt.
@@ -153,7 +148,10 @@ crate::statements! {
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.working_execution_ref, p.answer_ref, p.tool_calls
+                    p.working_execution_ref, p.answer_ref,
+                    COALESCE((SELECT admitted_count FROM tool_calls
+                        WHERE session_id = r.session_id AND turn_id = r.run
+                        ORDER BY admission_seq DESC LIMIT 1), 0)
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
@@ -177,7 +175,6 @@ crate::statements! {
         /// Drop the cancel request run `?2` of session `?1` accepted, in the
         /// transaction that ends it.
         delete_cancel = "DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
-        delete_call_cancels = "DELETE FROM tool_call_cancel_requests WHERE session_id = ?1 AND run = ?2";
 
         /// Record run `?2` of session `?1`'s first cancel request: request id
         /// `?3`, origin `?4`, reason `?5`, disposition `?6`, mode `?7`.

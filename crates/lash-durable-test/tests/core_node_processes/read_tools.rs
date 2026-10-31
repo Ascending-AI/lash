@@ -600,17 +600,31 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
         super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-history", build);
     let saved_reads = core.processes().saved_reads(&process).await.unwrap();
     assert_eq!(saved_reads.iter().map(|record| serde_json::to_value(lash_protocol_types::Durable(record)).unwrap()["classification"]["read"]["ordinal"].clone()).collect::<Vec<_>>(), [serde_json::json!(1),serde_json::json!(2)], "a terminal process lists its saved reads without its old replay store");
+    let ids = saved_reads
+        .iter()
+        .map(|record| record.call_id.clone())
+        .collect::<Vec<_>>();
+    let batch = core.processes().tool_calls(&process, &ids).await.unwrap();
+    assert_eq!(batch.len(), saved_reads.len());
+    for (read, record) in batch.iter().zip(&saved_reads) {
+        assert_eq!(
+            read,
+            &lash::ToolCallRead::Settled {
+                record: Box::new(record.clone())
+            },
+            "scalar, batch and list retain one answer after reopen"
+        );
+    }
     for event in activities
         .iter()
         .filter(|event| event["type"] == "tool_call_returned")
     {
         let id = lash::ToolCallId::parse(event["call_id"].as_str().unwrap()).unwrap();
-        let saved = core
-            .processes()
-            .tool_call(&process, &id)
-            .await
-            .unwrap()
-            .expect("the caller's save retains the live read row");
+        let lash::ToolCallRead::Settled { record: saved } =
+            core.processes().tool_call(&process, &id).await.unwrap()
+        else {
+            panic!("the call retains its archival record")
+        };
         let identity = serde_json::to_value(lash_protocol_types::Durable(&saved)).unwrap();
         assert_eq!(identity["classification"]["kind"], "unrecorded_read");
         assert_eq!(
@@ -623,7 +637,7 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
         );
         assert_eq!(
             saved_reads.iter().find(|record| record.call_id == id),
-            Some(&saved),
+            Some(saved.as_ref()),
             "listing and lookup preserve the same record"
         );
         assert_eq!(saved.args, event["args"]);
@@ -746,22 +760,7 @@ async fn process_read_refusal(kind: &'static str) {
     )
     .await
     .unwrap();
-    let mut facts = Vec::new();
-    for step in &steps {
-        if step.tool
-            == format!(
-                "{}/{}",
-                lash_vm_runtime::LASH_VM_ENGINE_KIND,
-                lash_vm_runtime::KERNEL_RUN_STEP
-            )
-            && let Some(payload) = step
-                .outcome
-                .as_ref()
-                .and_then(lash_core_store::tool_run::SettledOutput::payload)
-        {
-            facts.extend(lash_vm_runtime::process::saved_read_facts(payload).unwrap());
-        }
-    }
+    let facts = core.processes().saved_reads(&process).await.unwrap();
     if kind == "hook" {
         assert_eq!(reader.count.load(Ordering::SeqCst), 0);
         assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
@@ -771,7 +770,7 @@ async fn process_read_refusal(kind: &'static str) {
         let [fact] = facts.as_slice() else {
             panic!("one saved refusal: {facts:?}");
         };
-        let lash_core::ToolCallOutcome::Failure(failure) = &fact.outcome else {
+        let lash_core::ToolCallOutcome::Failure(failure) = &fact.output.outcome else {
             panic!("the refused read succeeded");
         };
         match kind {
@@ -790,7 +789,9 @@ async fn process_read_refusal(kind: &'static str) {
                 .tool_call(&process, &fact.call_id)
                 .await
                 .unwrap(),
-            Some(fact.record())
+            lash::ToolCallRead::Settled {
+                record: Box::new(fact.clone())
+            }
         );
     }
     core.shutdown().await.unwrap();

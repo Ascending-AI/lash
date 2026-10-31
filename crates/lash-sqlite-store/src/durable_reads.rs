@@ -3,6 +3,64 @@ use super::*;
 
 #[async_trait::async_trait]
 impl DurableReads for SqliteDurableStore {
+    async fn tool_calls(
+        &self,
+        owner: &lash_durable::domain::CallOwner,
+        selection: &lash_durable::domain::ToolCallSelection,
+    ) -> Result<lash_durable::domain::ToolCalls, DurableError> {
+        let (owner, selection) = (owner.clone(), selection.clone());
+        let limits = self.graph_reads.owner();
+        self.read(move |tx| tool_calls::read(tx, &owner, &selection, limits))
+            .await
+    }
+    async fn model_calls_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        let (session, owner, ids) = (session.clone(), owner.to_owned(), ids.to_vec());
+        let limits = self.graph_reads.owner();
+        self.read(move |tx| model_calls::read(tx, &session, &owner, Some(&ids), limits))
+            .await
+    }
+    async fn model_call_pin(
+        &self,
+        key: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        let key = key.clone();
+        self.query(move |tx| {
+            model_calls::pins(
+                tx,
+                &key.session,
+                &key.call.owner_column(),
+                None,
+                Some(&key.call.call_column()),
+            )
+        })
+        .await
+        .map(|rows| rows.into_iter().next())
+    }
+    async fn model_call_pins_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        let (session, owner, ids) = (session.clone(), owner.to_owned(), ids.to_vec());
+        self.query(move |tx| model_calls::pins(tx, &session, &owner, Some(&ids), None))
+            .await
+    }
+    async fn model_call_ids(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+        let (session, owner) = (session.clone(), owner.to_owned());
+        self.query(move |tx| model_calls::ids(tx, &session, &owner))
+            .await
+    }
+
     async fn model_call_pins(
         &self,
         session: &lash_kernel_value::identity::SessionId,
@@ -10,7 +68,7 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         let (session, owner) = (session.clone(), owner.to_owned());
 
-        self.query(move |tx| model_calls::pins(tx, &session, &owner))
+        self.query(move |tx| model_calls::pins(tx, &session, &owner, None, None))
             .await
     }
 
@@ -21,7 +79,7 @@ impl DurableReads for SqliteDurableStore {
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         let (session, owner) = (session.clone(), owner.to_owned());
         let limits = self.graph_reads.owner();
-        self.read(move |tx| model_calls::read(tx, &session, &owner, limits))
+        self.read(move |tx| model_calls::read(tx, &session, &owner, None, limits))
             .await
     }
 

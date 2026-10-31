@@ -181,11 +181,15 @@ impl OwnedCall<'_> {
             .cx
             .durable_reads()
             .map_err(live)?
-            .model_calls(&self.key.session, &self.key.call.owner_column())
+            .model_calls_by_id(
+                &self.key.session,
+                &self.key.call.owner_column(),
+                &[crate::provider::call_id_for_scope(scope)],
+            )
             .await
             .map_err(live)?
             .into_iter()
-            .find(|record| record.call_id == crate::provider::call_id_for_scope(scope))
+            .next()
         {
             return Ok(record
                 .record
@@ -197,11 +201,15 @@ impl OwnedCall<'_> {
             .cx
             .durable_reads()
             .map_err(live)?
-            .model_call_pins(&self.key.session, &self.key.call.owner_column())
+            .model_call_pins_by_id(
+                &self.key.session,
+                &self.key.call.owner_column(),
+                &[crate::provider::call_id_for_scope(scope)],
+            )
             .await
             .map_err(live)?
             .into_iter()
-            .find(|pin| pin.key == self.key)
+            .next()
             .map_or(0, |pin| pin.attempt);
         let attempt = previous.saturating_add(1);
         self.cx

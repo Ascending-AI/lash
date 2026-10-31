@@ -144,9 +144,6 @@ impl TranscriptEntry {
     }
 }
 
-/// Settled records and admitted identities awaiting an outcome in a saved cell.
-pub type CellCallLedger = (Vec<lash_protocol_types::ToolCallRecord>, Vec<ToolCallId>);
-
 /// A protocol's decoder of the stored shapes it owns, usable without
 /// restoring a live session. Core owns identities, timestamps and reply
 /// provenance; a decoder supplies only the decoded item.
@@ -159,15 +156,6 @@ pub trait TranscriptDecoderPlugin: Send + Sync {
         _outcome: crate::checkpoint_graph::NodeId,
     ) -> Result<Option<lash_protocol_types::ToolCallRecord>, crate::checkpoint_graph::GraphRefusal>
     {
-        Ok(None)
-    }
-
-    /// Settled bodies and pending identities in a saved cell's ledger.
-    fn decode_cell_ledger(
-        &self,
-        _decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
-        _root: crate::checkpoint_graph::NodeId,
-    ) -> Result<Option<CellCallLedger>, crate::checkpoint_graph::GraphRefusal> {
         Ok(None)
     }
 
@@ -223,26 +211,6 @@ impl TranscriptDecoders {
         Err(crate::checkpoint_graph::GraphRefusal::InvalidBody {
             kind: crate::checkpoint_graph::NodeKind::CALL_BODY.0,
             reason: "no protocol decoder reads this call ledger".to_owned(),
-        })
-    }
-
-    /// Read a protocol's saved call ledger without materializing a session.
-    pub fn decode_cell_ledger(
-        &self,
-        decoder: &mut crate::checkpoint_graph::GraphDecoder<'_>,
-        root: crate::checkpoint_graph::NodeId,
-    ) -> Result<
-        (Vec<lash_protocol_types::ToolCallRecord>, Vec<ToolCallId>),
-        crate::checkpoint_graph::GraphRefusal,
-    > {
-        for registered in &self.decoders {
-            if let Some(calls) = registered.decode_cell_ledger(decoder, root)? {
-                return Ok(calls);
-            }
-        }
-        Err(crate::checkpoint_graph::GraphRefusal::InvalidBody {
-            kind: crate::checkpoint_graph::NodeKind::EXEC_ROOT.0,
-            reason: "no protocol decoder reads this cell ledger".to_owned(),
         })
     }
 }

@@ -239,18 +239,28 @@ async fn record_answer(
         staging,
     } = receipt;
     let mut tx = cx.begin().await?;
-    if let Some(pin) = cx
-        .durable_reads()?
-        .model_call_pins(session, &ModelCallId::turn_owner(run))
-        .await?
-        .into_iter()
-        .find(|pin| pin.call_id == call_id)
+    drive.stage_model_calls(&mut tx)?;
+    // A sealed record retires its reservation in this same commit.
+    let sealed = tx
+        .domain()
+        .iter()
+        .any(|write| matches!(write, DomainWrite::ModelCall(record) if record.call_id == call_id));
+    if !sealed
+        && let Some(pin) = cx
+            .durable_reads()?
+            .model_call_pins_by_id(
+                session,
+                &ModelCallId::turn_owner(run),
+                std::slice::from_ref(&call_id),
+            )
+            .await?
+            .into_iter()
+            .next()
     {
         tx.write(DomainWrite::ModelCallPin(
             lash_durable::domain::ModelCallPinWrite::Answered { key: pin.key },
         ));
     }
-    drive.stage_model_calls(&mut tx)?;
     tx.stage_all(staging);
     tx.owe(root, owed);
     tx.write(DomainWrite::Turn(TurnWrite::Answer {
@@ -679,10 +689,8 @@ async fn phase_loop(
                 if let Some(pin) = &mut pinned
                     && let Some(reservation) = cx
                         .durable_reads()?
-                        .model_call_pins(&session, &ModelCallId::turn_owner(&run))
+                        .model_call_pin(&call_key(&session, &run, pin.call))
                         .await?
-                        .iter()
-                        .find(|reserved| reserved.key.call.call_column() == pin.call.to_string())
                 {
                     pin.attempt = pin.attempt.max(reservation.attempt);
                 }

@@ -579,16 +579,16 @@ async fn end(
             crate::SessionRevision(head.receipt.head_revision)
         });
     heads.acknowledged(cx, &row.session).await?;
-    for record in cx
+    for call_id in cx
         .durable_reads()?
-        .model_calls(
+        .model_call_ids(
             &row.session,
             &lash_durable::domain::ModelCallId::turn_owner(&row.run),
         )
         .await?
     {
         services
-            .publish_model_call(cx, row, &record.call_id, publication_revision)
+            .publish_model_call(cx, row, &call_id, publication_revision)
             .await?;
     }
     super::turn_trace::members_ended(

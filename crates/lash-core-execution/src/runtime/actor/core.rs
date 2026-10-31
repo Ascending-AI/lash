@@ -943,9 +943,15 @@ impl ActorContext {
             .domain()
             .iter()
             .filter_map(|write| match write {
-                lash_durable::DomainWrite::Turn(
-                    lash_durable::domain::TurnWrite::AddToolCalls { calls, .. },
-                ) => Some(*calls),
+                lash_durable::DomainWrite::ToolCall(
+                    lash_durable::domain::ToolCallWrite::Admit {
+                        counted: true,
+                        execution:
+                            lash_durable::domain::OwnerKey::Turn(..)
+                            | lash_durable::domain::OwnerKey::Cell(..),
+                        ..
+                    },
+                ) => Some(1),
                 _ => None,
             })
             .sum::<u64>();

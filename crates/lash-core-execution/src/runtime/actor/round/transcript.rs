@@ -5,9 +5,8 @@
 //! text, its FrozenValue), and a cell's answers are its report's ReportView.
 //!
 //! The turn's terminal stages its transcript and publishes it as the run's
-//! root in the commit that retires the ledger; a settled turn's calls are
-//! read from it alone. An open turn's calls are the same derivation over
-//! its ledger as it stands.
+//! root in the commit that retires the ledger. History reads use it for
+//! presentation; keyed call reads use the retained call directory.
 
 use std::collections::BTreeMap;
 
@@ -37,6 +36,7 @@ pub enum TranscriptEntry {
     /// A recorded model round retains its immutable environment lifetime.
     Environment(NodeId),
     Read(NodeId),
+    ProcessReads(NodeId),
 }
 
 /// Kind 45: a turn's answered calls, in order.
@@ -53,6 +53,7 @@ impl TokenCodec for TranscriptEntry {
             Self::Report(node) => (2, node),
             Self::Environment(node) => (3, node),
             Self::Read(node) => (4, node),
+            Self::ProcessReads(node) => (5, node),
         };
         out.sum(variant, 1);
         node.encode(out);
@@ -68,6 +69,7 @@ impl TokenCodec for TranscriptEntry {
             2 => Ok(Self::Report(node)),
             3 => Ok(Self::Environment(node)),
             4 => Ok(Self::Read(node)),
+            5 => Ok(Self::ProcessReads(node)),
             other => Err(TokenError::UnsupportedVariant { variant: other }),
         }
     }
@@ -195,6 +197,8 @@ impl TurnTranscript {
                         TranscriptEntry::Call(CallOutcome::body_node(&mut decoder, node)?)
                     }
                     MaterialNode::Value(node) => TranscriptEntry::Payload(node),
+                    MaterialNode::CallRecord(node) => TranscriptEntry::Call(node),
+                    MaterialNode::ProcessReadOutput(node) => TranscriptEntry::ProcessReads(node),
                 });
             }
             entries.extend(read_facts.map(|(_, node)| TranscriptEntry::Read(node)));
@@ -221,9 +225,9 @@ impl TurnTranscript {
         for entry in &transcript.entries {
             let (node, kind) = match entry {
                 TranscriptEntry::Call(node) => (node, NodeKind::CALL_BODY),
-                TranscriptEntry::Payload(node) | TranscriptEntry::Read(node) => {
-                    (node, NodeKind::FROZEN_VALUE)
-                }
+                TranscriptEntry::Payload(node) => (node, NodeKind::FROZEN_VALUE),
+                TranscriptEntry::Read(node) => (node, NodeKind::MODEL_READ),
+                TranscriptEntry::ProcessReads(node) => (node, NodeKind::PROCESS_CALLER_SAVE),
                 TranscriptEntry::Report(node) => (node, NodeKind::REPORT_VIEW),
                 TranscriptEntry::Environment(node) => (node, NodeKind::ROUND_ENVIRONMENT),
             };
@@ -249,6 +253,12 @@ impl TurnTranscript {
         for entry in &self.entries {
             match *entry {
                 TranscriptEntry::Environment(_) => {}
+                TranscriptEntry::ProcessReads(node) => records.extend(
+                    graph::ProcessReadOutput::load(decoder, node)?
+                        .reads
+                        .iter()
+                        .map(lash_protocol_types::ReadFact::record),
+                ),
                 TranscriptEntry::Read(node) => {
                     records.push(graph::load_model_read(decoder, node)?.fact.record())
                 }

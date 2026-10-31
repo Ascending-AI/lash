@@ -227,6 +227,47 @@ impl DurableStore for ObservedStore {
 
 #[async_trait::async_trait]
 impl DurableReads for ObservedStore {
+    async fn tool_calls(
+        &self,
+        owner: &crate::domain::CallOwner,
+        selection: &crate::domain::ToolCallSelection,
+    ) -> Result<crate::domain::ToolCalls, DurableError> {
+        self.inner.tool_calls(owner, selection).await
+    }
+
+    async fn model_calls_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        self.inner.model_calls_by_id(session, owner, ids).await
+    }
+
+    async fn model_call_pin(
+        &self,
+        key: &crate::domain::PromptCallKey,
+    ) -> Result<Option<crate::domain::ModelCallPinRow>, DurableError> {
+        self.inner.model_call_pin(key).await
+    }
+
+    async fn model_call_pins_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<crate::domain::ModelCallPinRow>, DurableError> {
+        self.inner.model_call_pins_by_id(session, owner, ids).await
+    }
+
+    async fn model_call_ids(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+        self.inner.model_call_ids(session, owner).await
+    }
+
     async fn model_call_pins(
         &self,
         session: &lash_kernel_value::identity::SessionId,

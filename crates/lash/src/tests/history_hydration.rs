@@ -29,6 +29,12 @@ mod tool_call_reads {
 
     struct ReadProbe {
         inner: Arc<dyn DurableStore>,
+        call_reads: Mutex<
+            Vec<(
+                lash_durable::domain::CallOwner,
+                lash_durable::domain::ToolCallSelection,
+            )>,
+        >,
         /// Ledger reads, by owner.
         owners: Mutex<Vec<OwnerKey>>,
         /// Transcript hydrates, by run (FIG-6601).
@@ -49,6 +55,7 @@ mod tool_call_reads {
         let stores = sqlite_memory_store_set().await;
         let probe = Arc::new(ReadProbe {
             inner: Arc::new(stores.durable_store()),
+            call_reads: Mutex::new(Vec::new()),
             owners: Mutex::new(Vec::new()),
             transcripts: Mutex::new(Vec::new()),
             turns: Mutex::new(0),
@@ -85,13 +92,14 @@ mod tool_call_reads {
         drop(session);
         core.node.stop().await;
         probe.owners.lock().expect("read probe").clear();
+        probe.call_reads.lock().expect("read probe").clear();
         probe.transcripts.lock().expect("read probe").clear();
         *probe.turns.lock().expect("read probe") = 0;
         Ok((core, durable, probe, turns))
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_tool_call_batch_decodes_exactly_the_named_turns() -> crate::Result<()> {
+    async fn a_tool_call_batch_decodes_only_requested_call_bodies() -> crate::Result<()> {
         let (_core, durable, probe, turns) = fixture().await?;
         let reference = |index: usize, call_id| crate::TurnToolCallRef {
             turn_id: turns[index].0.clone(),
@@ -129,21 +137,45 @@ mod tool_call_reads {
             probe.owners.lock().expect("read probe").is_empty(),
             "a settled turn's calls read no ledger"
         );
-        assert_eq!(
-            *probe.transcripts.lock().expect("read probe"),
-            vec![turns[1].0.clone(), turns[3].0.clone()],
-            "one transcript decode per named turn, even for duplicate and missing ids"
+        assert!(
+            probe.transcripts.lock().expect("read probe").is_empty(),
+            "keyed call reads load no transcript"
         );
+        let expected = [
+            (
+                turns[1].0.clone(),
+                vec![calls[1].call_id.clone(), calls[4].call_id.clone()],
+            ),
+            (
+                turns[3].0.clone(),
+                vec![
+                    calls[0].call_id.clone(),
+                    calls[2].call_id.clone(),
+                    calls[3].call_id.clone(),
+                ],
+            ),
+        ];
+        let requested = probe.call_reads.lock().expect("read probe");
+        assert_eq!(requested.len(), 2, "one indexed selection per named turn");
+        for ((owner, selection), (turn, ids)) in requested.iter().zip(expected) {
+            assert_eq!(
+                owner,
+                &lash_durable::domain::CallOwner::Turn(durable.session_id().clone(), turn)
+            );
+            assert_eq!(
+                selection,
+                &lash_durable::domain::ToolCallSelection::Calls(ids)
+            );
+        }
         assert_eq!(
             *probe.turns.lock().expect("read probe"),
-            1,
-            "the batch reads the session's unfinished turn once"
+            0,
+            "keyed calls need no unfinished-turn read"
         );
         Ok(())
     }
-    /// FIG-6231: opting in decodes exactly one transcript for each returned
-    /// page turn and no ledger (FIG-6601); plain pages and empty pages decode
-    /// no calls. A committed turn is never the unfinished one, which the page
+    /// FIG-6231: opting in reads the call directory of each returned page
+    /// turn. Plain pages and empty pages decode no calls. A committed turn is never the unfinished one, which the page
     /// never reads.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_committed_page_decodes_only_its_turns_tool_calls() -> crate::Result<()> {
@@ -167,17 +199,35 @@ mod tool_call_reads {
             );
         }
         assert!(probe.owners.lock().expect("read probe").is_empty());
+        assert!(probe.transcripts.lock().expect("read probe").is_empty());
         assert_eq!(
-            *probe.transcripts.lock().expect("read probe"),
-            vec![turns[2].0.clone(), turns[3].0.clone()]
+            probe
+                .call_reads
+                .lock()
+                .expect("read probe")
+                .iter()
+                .map(|(owner, _)| owner.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                lash_durable::domain::CallOwner::Turn(
+                    durable.session_id().clone(),
+                    turns[2].0.clone()
+                ),
+                lash_durable::domain::CallOwner::Turn(
+                    durable.session_id().clone(),
+                    turns[3].0.clone()
+                )
+            ]
         );
         assert_eq!(*probe.turns.lock().expect("read probe"), 0);
         let tail = durable.committed_turns(Some(&page.next), limit).await?;
         probe.transcripts.lock().expect("read probe").clear();
+        probe.call_reads.lock().expect("read probe").clear();
         let empty = durable
             .committed_turns_with_calls(Some(&tail.next), limit)
             .await?;
         assert!(empty.turns.is_empty());
+        assert!(probe.call_reads.lock().expect("read probe").is_empty());
         assert!(probe.owners.lock().expect("read probe").is_empty());
         assert!(probe.transcripts.lock().expect("read probe").is_empty());
         Ok(())
@@ -185,6 +235,51 @@ mod tool_call_reads {
 
     #[async_trait::async_trait]
     impl DurableReads for ReadProbe {
+        async fn tool_calls(
+            &self,
+            owner: &lash_durable::domain::CallOwner,
+            selection: &lash_durable::domain::ToolCallSelection,
+        ) -> Result<lash_durable::domain::ToolCalls, DurableError> {
+            self.call_reads
+                .lock()
+                .expect("read probe")
+                .push((owner.clone(), selection.clone()));
+            self.inner.tool_calls(owner, selection).await
+        }
+
+        async fn model_calls_by_id(
+            &self,
+            session: &lash_kernel_value::identity::SessionId,
+            owner: &str,
+            ids: &[lash_protocol_types::llm::types::LlmCallId],
+        ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+            self.inner.model_calls_by_id(session, owner, ids).await
+        }
+
+        async fn model_call_pin(
+            &self,
+            key: &lash_durable::domain::PromptCallKey,
+        ) -> Result<Option<lash_durable::domain::ModelCallPinRow>, DurableError> {
+            self.inner.model_call_pin(key).await
+        }
+
+        async fn model_call_pins_by_id(
+            &self,
+            session: &lash_kernel_value::identity::SessionId,
+            owner: &str,
+            ids: &[lash_protocol_types::llm::types::LlmCallId],
+        ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+            self.inner.model_call_pins_by_id(session, owner, ids).await
+        }
+
+        async fn model_call_ids(
+            &self,
+            session: &lash_kernel_value::identity::SessionId,
+            owner: &str,
+        ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+            self.inner.model_call_ids(session, owner).await
+        }
+
         async fn model_call_pins(
             &self,
             session: &lash_kernel_value::identity::SessionId,

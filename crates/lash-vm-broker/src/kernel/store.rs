@@ -143,6 +143,13 @@ pub struct AdmittedCall {
 /// host's state owes while the execution is parked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostParts {
+    /// Caller-owned reads first saved by this checkpoint.
+    pub read_calls: Vec<(
+        lash_durable::domain::CallOwner,
+        lash_protocol_types::ToolCallId,
+        u64,
+        NodeId,
+    )>,
     /// A HostRoot.
     pub host: Option<NodeId>,
     /// A CellEnvelope.
@@ -849,6 +856,29 @@ impl DurableSnapshotStore {
         let parts = host
             .stage_host(&mut staging, &mut reads, &calls)
             .map_err(refused)?;
+        for (logical, call, ordinal, body) in &parts.read_calls {
+            tx.write(DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Admit {
+                    counted: false,
+                    logical: logical.clone(),
+                    execution: self.exec.owner(),
+                    run: RunSeq(0),
+                    member: *ordinal,
+                    call: call.clone(),
+                    cancellable: false,
+                },
+            ));
+            tx.write(DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Answer {
+                    owner: self.exec.owner(),
+                    call: call.clone(),
+                    answer: lash_durable::domain::ToolCallAnswer {
+                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
+                        body: Some(*body),
+                    },
+                },
+            ));
+        }
         // The candidate the commit publishes: the park's checkpoint root, or
         // the session descriptor an end hands the turn.
         let mut requirements = lash_vocabulary::claims::ClaimRequirements::default();

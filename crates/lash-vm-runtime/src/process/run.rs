@@ -74,21 +74,42 @@ pub(crate) async fn run_kernel_step(
         .workers
         .begin_execution(std::time::Duration::ZERO, Arc::clone(&run.clock));
     match kernel_run(&engine, run, stop).await {
-        Ok((output, candidate)) => match serde_json::to_string(&output) {
-            Ok(text) => {
-                let output = Box::new(SettledOutput::Completed(material(&process, text)));
-                match candidate {
-                    Some(candidate) => EngineStepAnswer::Paged {
-                        output,
-                        candidate: lash_execution_contracts::process::StepCandidate(Arc::new(
-                            candidate,
-                        )),
-                    },
-                    None => EngineStepAnswer::Settled(output),
+        Ok((mut output, candidate)) => {
+            let read_facts = match &mut output {
+                KernelRunOutput::Ended { read_facts, .. }
+                | KernelRunOutput::Parked { read_facts, .. } => std::mem::take(read_facts),
+            };
+            let output = serde_json::to_value(output)
+                .map_err(|error| RunFault(error.to_string()))
+                .and_then(|output| {
+                    Material::journal_local_typed(
+                        MaterialOwner::Process {
+                            process_id: process.clone(),
+                        },
+                        MaterialRole::AttemptOutput,
+                        lash_vm_broker::round_graph::ProcessReadOutput {
+                            output,
+                            reads: read_facts,
+                        },
+                    )
+                    .map_err(|error| RunFault(error.to_string()))
+                });
+            match output {
+                Ok(material) => {
+                    let output = Box::new(SettledOutput::Completed(material));
+                    match candidate {
+                        Some(candidate) => EngineStepAnswer::Paged {
+                            output,
+                            candidate: lash_execution_contracts::process::StepCandidate(Arc::new(
+                                candidate,
+                            )),
+                        },
+                        None => EngineStepAnswer::Settled(output),
+                    }
                 }
+                Err(error) => failed(&process, &error).into(),
             }
-            Err(error) => failed(&process, &RunFault(error.to_string())).into(),
-        },
+        }
         Err(Unsettled::Fault(fault)) => failed(&process, &fault).into(),
         Err(Unsettled::Capacity(cause, detail)) => {
             tracing::debug!(process_id = %process, %cause, %detail, "kernel_run met a capacity verdict");

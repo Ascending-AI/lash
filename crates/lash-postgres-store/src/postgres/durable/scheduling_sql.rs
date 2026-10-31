@@ -139,7 +139,7 @@ lash_store_sql::statements! {
         /// snapshot. The retained owner payload is not reloaded.
         open_retained = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
-                    (SELECT COALESCE(json_agg(json_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason) ORDER BY q.run, q.call_id), '[]'::json)::text FROM tool_call_cancel_requests q WHERE q.session_id = ?2),
+                    (SELECT COALESCE(json_agg(json_build_array(q.turn_id, q.call_id, q.request_id, q.origin, q.reason) ORDER BY q.turn_id, q.call_id), '[]'::json)::text FROM tool_calls q WHERE q.session_id = ?2 AND q.request_id IS NOT NULL AND q.answer_outcome IS NULL),
                     COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text,
                     (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
                         WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
@@ -157,9 +157,9 @@ lash_store_sql::statements! {
                     NOT leaf.tombstoned,
                     (SELECT jsonb_agg(jsonb_build_array(plugin_id, min_format, max_format))
                        FROM fleet_plugin_writers), v.config_ref,
-                    COALESCE((SELECT jsonb_agg(jsonb_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason)
-                                               ORDER BY q.run, q.call_id)
-                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text,
+                    COALESCE((SELECT jsonb_agg(jsonb_build_array(q.turn_id, q.call_id, q.request_id, q.origin, q.reason)
+                                               ORDER BY q.turn_id, q.call_id)
+                              FROM tool_calls q WHERE q.session_id = ?2 AND q.request_id IS NOT NULL AND q.answer_outcome IS NULL), '[]'::jsonb)::text,
                     COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text,
                     (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
                         WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5

@@ -345,10 +345,8 @@ pub(super) async fn request_call_cancel(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let cells = lash_durable::domain::ExecKey::turn_cells(&request.session, &request.run);
     let decision: Option<String> = crate::observed_sql::query_scalar(SQL.call_decision.sql())
         .bind(turn.stored())
-        .bind(cells)
         .bind(request.call.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await

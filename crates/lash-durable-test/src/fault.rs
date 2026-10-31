@@ -498,6 +498,12 @@ impl FaultStore {
         let facts = Arc::new(RunFacts::appended(tx.domain(), tx.graph(), tx.epoch()));
         let observer = self.script.actor_receipt.lock_recover().clone();
         let observed = observer.as_ref().map(|_| tx.clone());
+        let call_owner = self.script.call_owner.lock_recover().clone().filter(|_| {
+            tx.domain()
+                .iter()
+                .any(|write| matches!(write, DomainWrite::ToolCall(_)))
+        });
+        let call_script = Arc::clone(&self.script);
         let answer = self
             .write_carrying(
                 WriteKind::Actor,
@@ -510,7 +516,26 @@ impl FaultStore {
                     if let Some(refusal) = refusal {
                         Err(DurableError::Domain(refusal))
                     } else {
-                        let answer = send(store, tx).await;
+                        let answer = send(Arc::clone(&store), tx).await;
+                        if answer.is_ok()
+                            && let Some(owner) = call_owner
+                        {
+                            #[expect(clippy::expect_used, reason = "an observing law must be able to read its committed publication")]
+                            let calls = store
+                                .tool_calls(
+                                    &owner,
+                                    &lash_durable::domain::ToolCallSelection::List {
+                                        after: None,
+                                        limit: u32::MAX,
+                                    },
+                                )
+                                .await
+                                .expect("the committed call directory reads");
+                            call_script
+                                .call_rows
+                                .lock_recover()
+                                .push((label, calls.rows));
+                        }
                         if let (Some(observer), Some(observed), Ok(answer)) =
                             (&observer, &observed, &answer)
                         {
@@ -914,6 +939,49 @@ impl DurableStore for FaultStore {
 
 #[async_trait::async_trait]
 impl DurableReads for FaultStore {
+    async fn tool_calls(
+        &self,
+        owner: &lash_durable::domain::CallOwner,
+        selection: &lash_durable::domain::ToolCallSelection,
+    ) -> Result<lash_durable::domain::ToolCalls, DurableError> {
+        self.read(self.inner.tool_calls(owner, selection)).await
+    }
+
+    async fn model_calls_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        self.read(self.inner.model_calls_by_id(session, owner, ids))
+            .await
+    }
+
+    async fn model_call_pin(
+        &self,
+        key: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        self.read(self.inner.model_call_pin(key)).await
+    }
+
+    async fn model_call_pins_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        self.read(self.inner.model_call_pins_by_id(session, owner, ids))
+            .await
+    }
+
+    async fn model_call_ids(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+        self.read(self.inner.model_call_ids(session, owner)).await
+    }
+
     async fn model_call_pins(
         &self,
         session: &lash_kernel_value::identity::SessionId,

@@ -40,6 +40,7 @@ pub mod session_close;
 pub mod session_follow;
 pub mod session_mail;
 pub mod snapshots;
+pub mod tool_calls;
 pub mod turns;
 pub mod waits;
 

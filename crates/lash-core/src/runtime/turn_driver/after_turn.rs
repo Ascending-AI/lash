@@ -39,13 +39,20 @@ impl FinishedTurn {
         run: &lash_vocabulary::identity::TurnId,
         outcome: &TurnOutcome,
         unrecorded: Option<crate::runtime::durable::session::CellToolCalls>,
-        decoders: &crate::transcript::TranscriptDecoders,
     ) -> Result<Self, TurnError> {
-        let mut tool_calls = RuntimeTurnServices::ledger_tool_calls(cx, session, run, decoders)
+        let mut tool_calls = RuntimeTurnServices::settled_tool_calls(cx, session, run)
             .await
             .map_err(TurnError::Durable)?;
         if let Some(cell) = unrecorded {
-            tool_calls.extend(cell.records);
+            let retained: std::collections::BTreeSet<_> = tool_calls
+                .iter()
+                .map(|record| record.call_id.clone())
+                .collect();
+            tool_calls.extend(
+                cell.records
+                    .into_iter()
+                    .filter(|record| !retained.contains(&record.call_id)),
+            );
         }
         Ok(Self {
             outcome: outcome.clone(),

@@ -1737,6 +1737,7 @@ impl Scenario for CellTurn {
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         *self.world.nodes.lock_recover() = Arc::downgrade(nodes);
         self.send().await?;
+        self.observe_call_directory(nodes);
         nodes.start("a");
         nodes.quiesce().await;
         nodes.start("b");

@@ -41,6 +41,11 @@ pub mod processes;
 pub mod prompts;
 pub use lash_core_store::tool_run::OperationRun;
 pub use model_calls::{ModelCallOwner, ModelCallPinRow, ModelCallPinWrite, ModelCallWrite};
+pub mod tool_calls;
+pub use tool_calls::{
+    CallOwner, ToolCallAnswer, ToolCallCursor, ToolCallDecision, ToolCallRow, ToolCallSelection,
+    ToolCallWrite, ToolCalls,
+};
 pub mod run_records;
 pub mod session_close;
 pub mod session_mail;
@@ -145,6 +150,8 @@ pub enum DomainWrite {
     Prompt(PromptWrite),
     /// A call's retained sealed record.
     ModelCall(ModelCallWrite),
+    /// Retained call publications in the existing execution commit.
+    ToolCall(ToolCallWrite),
     /// Outstanding dispatch reservations and accepted tails.
     ModelCallPin(ModelCallPinWrite),
 }
@@ -489,6 +496,38 @@ impl DurableError {
 /// body.
 #[async_trait::async_trait]
 pub trait DurableReads: Send + Sync {
+    /// Select call metadata and only its archival bodies under one graph read.
+    async fn tool_calls(
+        &self,
+        owner: &CallOwner,
+        selection: &ToolCallSelection,
+    ) -> Result<ToolCalls, DurableError>;
+    /// Decode only the sealed records named by opaque call identity.
+    async fn model_calls_by_id(
+        &self,
+        session: &SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError>;
+    /// Read only the named dispatch reservations.
+    async fn model_call_pins_by_id(
+        &self,
+        session: &SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<ModelCallPinRow>, DurableError>;
+    /// Read one reservation by the prompt key retained with its admission.
+    async fn model_call_pin(
+        &self,
+        key: &PromptCallKey,
+    ) -> Result<Option<ModelCallPinRow>, DurableError>;
+    /// Identity-only notification catch-up; no record graph is hydrated.
+    async fn model_call_ids(
+        &self,
+        session: &SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError>;
+
     /// Sealed calls for a prompt owner, in logical call order, decoded under
     /// one protected graph read. The owner uses ModelCallId::owner_column.
     async fn model_calls(

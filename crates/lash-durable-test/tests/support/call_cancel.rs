@@ -102,6 +102,17 @@ pub(super) fn typescript_source(case: CancelCase) -> String {
 }
 
 impl CellTurn {
+    pub(super) fn observe_call_directory(&self, nodes: &Arc<SimNodes>) {
+        if matches!(self.cell, Cell::ExplicitCancel(_)) {
+            nodes
+                .script()
+                .observe_tool_calls(lash_durable::domain::CallOwner::Turn(
+                    session(),
+                    self.run.lock_recover().clone().expect("the admitted turn"),
+                ));
+        }
+    }
+
     pub(super) async fn cancellation_laws(
         &self,
         nodes: &SimNodes,
@@ -316,6 +327,50 @@ impl CellTurn {
             );
         }
         if let Some(selected) = selected {
+            use lash_durable::domain::{CallOwner, ToolCallDecision, ToolCallSelection};
+            let snapshots = nodes.script().tool_call_rows();
+            let mut seen_decision = None;
+            let mut seen_answer = None;
+            let mut separated = false;
+            for (_, rows) in &snapshots {
+                let Some(row) = rows.iter().find(|row| row.call == selected) else {
+                    continue;
+                };
+                if seen_decision.is_some() && row.decision != seen_decision {
+                    violations.push("the call directory replaced a committed decision".into());
+                }
+                if seen_answer.is_some() && row.answer != seen_answer {
+                    violations.push("the call directory replaced a committed answer".into());
+                }
+                separated |= row.decision.is_some() && row.answer.is_none();
+                seen_decision = row.decision;
+                seen_answer = row.answer.clone();
+            }
+            if seen_decision
+                != Some(if case.order.final_wins() {
+                    ToolCallDecision::Final
+                } else {
+                    ToolCallDecision::Cancel
+                })
+                || seen_answer.is_none()
+            {
+                violations.push(format!(
+                    "the directory lost its winner or terminal: {seen_decision:?}, {seen_answer:?}"
+                ));
+            }
+            if matches!(case.order, CommitOrder::Final | CommitOrder::Cancel) && !separated {
+                violations.push("the directory never exposed a decision before its answer".into());
+            }
+            let logical = CallOwner::Turn(session(), self.run.lock_recover().clone().unwrap());
+            let selected_row = nodes
+                .database()
+                .tool_calls(&logical, &ToolCallSelection::Calls(vec![selected.clone()]))
+                .await
+                .unwrap();
+            if selected_row.rows.len() != 1 || selected_row.rows[0].answer != seen_answer {
+                violations
+                    .push("the retained row differs from the last committed publication".into());
+            }
             let expected = match case.order {
                 CommitOrder::Final => Kind::XFinal,
                 CommitOrder::PlainFinal => Kind::XFinalOutcome,

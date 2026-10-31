@@ -27,6 +27,7 @@ pub use lash_core_execution::ActorContext;
 pub use lash_core_execution::ExecutionOwner;
 pub use lash_core_execution::IngressReservedSourceKeyRefusal;
 pub use lash_core_execution::admitted_scope_wire;
+pub use lash_core_execution::call_store;
 pub use lash_core_execution::compat;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
@@ -173,7 +174,7 @@ pub mod facade_support {
     pub use lash_core_execution::tool_reads::{ReadContext, ReadTarget, run_read};
 
     pub use lash_core_execution::runtime::process::steps::{
-        RecordedProcessStep, process_step_call, read_process_steps, read_process_tool_call,
+        RecordedProcessStep, process_step_call, read_process_steps,
     };
     /// The shift-tracing seam a durable substrate implements against (the trace runtime,
     /// a step's issue and its standing), public in every feature variant.

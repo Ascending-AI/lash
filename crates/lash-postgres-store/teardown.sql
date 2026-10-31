@@ -116,20 +116,19 @@ DROP TABLE IF EXISTS lash_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_actors CASCADE;
 
-DROP TABLE IF EXISTS lash_execution_uses CASCADE;
 DROP TABLE IF EXISTS lash_package_executions CASCADE;
+
+DROP TABLE IF EXISTS lash_execution_uses CASCADE;
 
 DROP TABLE IF EXISTS lash_execution_resolutions CASCADE;
 
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 
-DROP TABLE IF EXISTS lash_model_call_pins CASCADE;
-
 DROP TABLE IF EXISTS lash_model_call_records CASCADE;
 
-DROP TABLE IF EXISTS lash_tool_call_cancel_requests CASCADE;
-
 DROP TABLE IF EXISTS lash_run_records CASCADE;
+
+DROP TABLE IF EXISTS lash_tool_calls CASCADE;
 
 DROP TABLE IF EXISTS lash_session_close CASCADE;
 

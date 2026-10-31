@@ -1075,12 +1075,14 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
             &call_id, expected,
             "the effect names the executed tool call"
         );
-        let record = core
+        let lash::ToolCallRead::Settled { record } = core
             .processes()
             .tool_call(&process, &call_id)
             .await
             .expect("the retained tool record reads")
-            .expect("the tool call has a record");
+        else {
+            panic!("the call retains its archival record")
+        };
         assert_eq!(record.call_id, call_id);
         assert_eq!(record.tool, WRITE_TOOL_OPERATION);
         let args = serde_json::json!({ "x": index + 1 });

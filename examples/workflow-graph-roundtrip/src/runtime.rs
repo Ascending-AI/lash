@@ -268,7 +268,7 @@ pub(crate) async fn observe(
         }
         for mut event in events {
             if let Some(call_id) = &event.call_id
-                && let Some(record) = core
+                && let lash::ToolCallRead::Settled { record } = core
                     .processes()
                     .tool_call(&overlay.process, call_id)
                     .await?

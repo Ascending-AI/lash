@@ -345,41 +345,6 @@ pub(crate) fn recorded_call(
     lash_vm_broker::round_graph::CallBody::load(decoder, body).map(|body| body.record)
 }
 
-/// Offline call reads while a cell is still saved under its execution root.
-pub(crate) fn recorded_cell_ledger(
-    decoder: &mut GraphDecoder<'_>,
-    root: NodeId,
-) -> Result<(Vec<lash_core::ToolCallRecord>, Vec<lash_core::ToolCallId>), GraphRefusal> {
-    use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
-    let root: ExecRoot = decoder.decode(root, NodeKind::EXEC_ROOT)?;
-    let host = match root.status {
-        ExecStatus::Parked => root.host.ok_or_else(|| GraphRefusal::InvalidBody {
-            kind: NodeKind::EXEC_ROOT.0,
-            reason: "a parked cell has no host ledger".to_owned(),
-        })?,
-        ExecStatus::Ended => CellEnd::load(decoder, root.state)?.host,
-    };
-    let state = HostState::load(decoder, host)?;
-    let mut records = Vec::new();
-    let mut pending = Vec::new();
-    for call in state.calls.items() {
-        match call.status {
-            CallStatus::Pending => pending.push(call.call_id.clone()),
-            CallStatus::Completed { outcome, .. } => {
-                let body = lash_vm_broker::round_graph::CallOutcome::body_node(decoder, outcome)?;
-                records.push(recorded_call(decoder, body)?);
-            }
-        }
-    }
-    records.extend(
-        state
-            .read_facts(decoder)?
-            .iter()
-            .map(lash_protocol_types::ReadFact::record),
-    );
-    Ok((records, pending))
-}
-
 /// Whether this build resumes `cell`, a cell's stored root: its host state,
 /// the envelope the resumed cell runs on with, the document it names, and
 /// the kernel version its parked state was written under. The account of

@@ -161,7 +161,10 @@ lash_store_sql::statements! {
         turn = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                     p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                    p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
+                    p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                    COALESCE((SELECT admitted_count FROM tool_calls
+                        WHERE session_id = r.session_id AND turn_id = r.run
+                        ORDER BY admission_seq DESC LIMIT 1), 0),
                     c.request_id, c.origin, c.reason, c.disposition, c.mode
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
@@ -186,7 +189,7 @@ lash_store_sql::statements! {
         /// owner payload is not reloaded.
         open_retained = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
-                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason)) FROM (SELECT run, call_id, request_id, origin, reason FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q),
+                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason)) FROM (SELECT turn_id AS run, call_id, request_id, origin, reason FROM tool_calls WHERE session_id = ?2 AND request_id IS NOT NULL AND answer_outcome IS NULL ORDER BY turn_id, call_id) q),
                     (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page),
                     (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
                         WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
@@ -201,7 +204,10 @@ lash_store_sql::statements! {
                  SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                         p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                         p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                        p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
+                        p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                    COALESCE((SELECT admitted_count FROM tool_calls
+                        WHERE session_id = r.session_id AND turn_id = r.run
+                        ORDER BY admission_seq DESC LIMIT 1), 0),
                         c.request_id, c.origin, c.reason, c.disposition, c.mode
                  FROM session_runs AS r
                  JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
@@ -212,8 +218,8 @@ lash_store_sql::statements! {
              SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     t.*,
                     (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason))
-                     FROM (SELECT run, call_id, request_id, origin, reason
-                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q),
+                     FROM (SELECT turn_id AS run, call_id, request_id, origin, reason
+                           FROM tool_calls WHERE session_id = ?2 AND request_id IS NOT NULL AND answer_outcome IS NULL ORDER BY turn_id, call_id) q),
                     (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page),
                     (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
                         WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5

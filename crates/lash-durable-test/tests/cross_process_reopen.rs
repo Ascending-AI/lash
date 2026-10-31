@@ -458,12 +458,14 @@ async fn observations(core: &lash::LashCore, root: &ProcessId, state: &mut State
                     );
                 }
                 let call_id = call.parse::<lash_core::ToolCallId>().unwrap();
-                let request = core
+                let lash::ToolCallRead::Settled { record: request } = core
                     .processes()
                     .tool_call(&record.id, &call_id)
                     .await
                     .unwrap()
-                    .expect("an effect retains its request");
+                else {
+                    panic!("the call retains its archival record")
+                };
                 state.requests.push(json!({"process": record.id, "call":request.call_id,"operation": request.tool,"args":request.args}));
             }
         }

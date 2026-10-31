@@ -54,8 +54,7 @@ lash_store_sql::statements! {
                  RETURNING graph_root_ref
              ), cancel AS (
                  DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
-             ), call_cancels AS (
-                 DELETE FROM tool_call_cancel_requests WHERE session_id = ?1 AND run = ?2
+
              )
              SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
                  (SELECT working_execution_ref FROM phase) AS working_execution_ref,
@@ -160,11 +159,6 @@ pub(super) static ADVANCE_PHASE: Entry = Entry::new(
     ],
     Shape::Returning,
 );
-pub(super) static ADD_TOOL_CALLS: Entry = Entry::new(
-    || &SQL.add_tool_calls,
-    &[Ty::Text, Ty::Text, Ty::Int],
-    Shape::Exec,
-);
 pub(super) static ANSWER_SET: Entry = Entry::new(
     || &SQL.answer_set,
     &[Ty::Text, Ty::Text, Ty::Key, Ty::Int],
@@ -265,6 +259,7 @@ pub(super) static LOCK_KEY: Entry = Entry::new(
 
 /// The capture slot of a terminal's retention read.
 const TERMINAL_RETENTION: u8 = 2;
+const TERMINAL_TOOL_READS: u8 = 3;
 
 /// The end of `referrer`'s local edges, gated on `gate`, as a step.
 pub(super) fn end_local_step(
@@ -322,7 +317,14 @@ fn terminal_steps(
         Value::Now,
         Value::Key(transcript.map(|transcript| transcript.to_hex())),
     ]);
-    let mut program = vec![Step::one(&END_RUN, ended)];
+    let mut program = vec![
+        Step::one(&END_RUN, ended).capturing(TERMINAL_TOOL_READS),
+        super::tool_calls::finish_reads_step(session, run)?.when_flag(
+            TERMINAL_TOOL_READS,
+            "has_pending_reads",
+            true,
+        ),
+    ];
     if let Some(revision) = head_revision {
         // The terminal is numbered once within its publishing transaction,
         // then the session's retention applies.
@@ -459,15 +461,6 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Step::one(&ADVANCE_PHASE, values),
             ]
         }
-        TurnWrite::AddToolCalls {
-            session,
-            run,
-            calls,
-        } => {
-            let mut values = turn(session, run);
-            values.push(Value::int(integer::<i64>(*calls)?));
-            vec![Step::any(&ADD_TOOL_CALLS, values)]
-        }
         TurnWrite::Answer {
             session,
             run,
@@ -574,11 +567,6 @@ pub(super) async fn apply(
     write: &TurnWrite,
 ) -> Result<(), DurableError> {
     match write {
-        TurnWrite::AddToolCalls { .. } => {
-            let program = steps(commit.epoch, write)?.unwrap_or_default();
-            steps::run(tx, &program, &commit.steps()).await?;
-            Ok(())
-        }
         TurnWrite::Admit { session, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
             match steps::run(tx, &program, &commit.steps()).await? {

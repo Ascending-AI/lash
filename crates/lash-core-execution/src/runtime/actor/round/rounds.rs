@@ -146,6 +146,7 @@ pub struct PresentRecord {
     ordinal: lash_durable::domain::Ordinal,
     reads: Vec<lash_core_store::checkpoint_graph::NodeId>,
     nodes: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
+    answers: Vec<(crate::ToolCallId, lash_core_store::checkpoint_graph::NodeId)>,
 }
 
 impl PresentRecord {
@@ -159,6 +160,21 @@ impl PresentRecord {
         mut self,
         staging: lash_core_store::checkpoint_graph::GraphStaging,
     ) -> Self {
+        let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(
+            &staging,
+            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+        );
+        #[expect(
+            clippy::expect_used,
+            reason = "new model reads were just staged by their typed writer"
+        )]
+        for node in &self.reads {
+            let saved =
+                super::graph::load_model_read(&mut decoder, *node).expect("staged model read");
+            let body =
+                super::graph::model_read_body(&mut decoder, *node).expect("staged model read body");
+            self.answers.push((saved.fact.call_id, body));
+        }
         self.nodes = staging.into_nodes().into_values().collect();
         self
     }
@@ -166,6 +182,18 @@ impl PresentRecord {
     /// Writes the record into `tx`.
     pub fn write(&self, tx: &mut ActorTx) {
         tx.stage(self.nodes.clone());
+        for (call, body) in &self.answers {
+            tx.write(lash_durable::DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Answer {
+                    owner: self.owner.clone(),
+                    call: call.clone(),
+                    answer: lash_durable::domain::ToolCallAnswer {
+                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
+                        body: Some(*body),
+                    },
+                },
+            ));
+        }
         append(
             tx,
             &self.owner,
@@ -210,6 +238,7 @@ pub fn presentation(
         ordinal: view.cursor().take(),
         reads: Vec::new(),
         nodes: Vec::new(),
+        answers: Vec::new(),
     });
     (Presentation::of(entries), record)
 }

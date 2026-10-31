@@ -19,12 +19,58 @@ use lash_durable::{ActorKey, CommitCapacity, DurableError, DurableReads};
 
 #[async_trait::async_trait]
 impl DurableReads for PostgresDurableStore {
+    async fn tool_calls(
+        &self,
+        owner: &lash_durable::domain::CallOwner,
+        selection: &lash_durable::domain::ToolCallSelection,
+    ) -> Result<lash_durable::domain::ToolCalls, DurableError> {
+        self.read_tool_calls(owner, selection).await
+    }
+
+    async fn model_calls_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+        self.read_model_calls(session, owner, Some(ids)).await
+    }
+    async fn model_call_pin(
+        &self,
+        key: &lash_durable::domain::PromptCallKey,
+    ) -> Result<Option<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        self.read_model_call_pins(
+            &key.session,
+            &key.call.owner_column(),
+            None,
+            Some(&key.call.call_column()),
+        )
+        .await
+        .map(|rows| rows.into_iter().next())
+    }
+    async fn model_call_pins_by_id(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+        ids: &[lash_protocol_types::llm::types::LlmCallId],
+    ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+        self.read_model_call_pins(session, owner, Some(ids), None)
+            .await
+    }
+    async fn model_call_ids(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+        self.read_model_call_ids(session, owner).await
+    }
+
     async fn model_call_pins(
         &self,
         session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
-        self.read_model_call_pins(session, owner).await
+        self.read_model_call_pins(session, owner, None, None).await
     }
 
     async fn model_calls(
@@ -32,7 +78,7 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_kernel_value::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
-        self.read_model_calls(session, owner).await
+        self.read_model_calls(session, owner, None).await
     }
 
     async fn turn(

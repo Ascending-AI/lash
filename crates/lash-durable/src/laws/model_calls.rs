@@ -7,6 +7,22 @@ use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
 
+fn tool_admissions(id: &SessionId, run: &TurnId, prefix: &str, calls: u64) -> Vec<DomainWrite> {
+    (0..calls)
+        .map(|member| {
+            DomainWrite::ToolCall(crate::domain::ToolCallWrite::Admit {
+                counted: true,
+                logical: crate::domain::CallOwner::Turn(id.clone(), run.clone()),
+                execution: crate::domain::OwnerKey::Turn(id.clone(), run.clone()),
+                run: RunSeq(1),
+                member,
+                call: lash_protocol_types::ToolCallId::fixture(&format!("{prefix}-{member}")),
+                cancellable: true,
+            })
+        })
+        .collect()
+}
+
 /// A turn counts the model calls it admitted. Admission starts the count at
 /// 0; each model phase stores its pin's call as the count, and the pin and
 /// the row read back with it; a resend, the same call's next attempt, keeps
@@ -307,11 +323,9 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([third_node.clone(), transient_node]);
     tx.write(DomainWrite::Turn(answer(third)));
-    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
-        session: id.clone(),
-        run: run.clone(),
-        calls: 3,
-    }));
+    for write in tool_admissions(id, run, "receipt-first", 3) {
+        tx.write(write);
+    }
     tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
         run: RunSeq(2),
         checkpoint: transient,
@@ -326,11 +340,9 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
         run: RunSeq(3),
         checkpoint: middle,
     })));
-    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
-        session: id.clone(),
-        run: run.clone(),
-        calls: 2,
-    }));
+    for write in tool_admissions(id, run, "receipt-second", 2) {
+        tx.write(write);
+    }
     tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
         run: RunSeq(4),
         checkpoint: final_root,
@@ -367,11 +379,9 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     let (rolled_back, rolled_back_node) = super::tagged_node("receipt-rolled-back");
     let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([rolled_back_node, third_node]);
-    tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
-        session: id.clone(),
-        run: run.clone(),
-        calls: 9,
-    }));
+    for write in tool_admissions(id, run, "receipt-refused", 9) {
+        tx.write(write);
+    }
     tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
         run: RunSeq(5),
         checkpoint: rolled_back,
@@ -480,20 +490,36 @@ pub async fn a_turn_counts_its_tool_admissions_atomically(store: &dyn DurableSto
             .ok_or_else(|| LawBroken("the turn vanished".into()))
     };
     ensure!(count().await? == 0, "new turn has no tool admissions");
-    let increment = |calls| {
-        DomainWrite::Turn(TurnWrite::AddToolCalls {
-            session: id.clone(),
-            run: run.clone(),
-            calls,
-        })
-    };
     let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
-    tx.write(increment(2));
-    tx.write(increment(3));
+    for write in tool_admissions(&id, &run, "first", 2)
+        .into_iter()
+        .chain(tool_admissions(&id, &run, "second", 3))
+    {
+        tx.write(write);
+    }
     store.commit(tx, LABEL).await?;
     ensure!(count().await? == 5, "the commit lost an increment");
+    let mut saved = tool_admissions(&id, &run, "caller-save", 1).remove(0);
+    if let DomainWrite::ToolCall(crate::domain::ToolCallWrite::Admit {
+        counted,
+        cancellable,
+        ..
+    }) = &mut saved
+    {
+        *counted = false;
+        *cancellable = false;
+    }
     let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
-    tx.write(increment(7));
+    tx.write(saved);
+    store.commit(tx, LABEL).await?;
+    ensure!(
+        count().await? == 5,
+        "a caller-saved Read consumed the admission budget"
+    );
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
+    for write in tool_admissions(&id, &run, "refused", 7) {
+        tx.write(write);
+    }
     // A receipt is refused outside a model phase, after the increment ran.
     let (root, body) = super::tagged_node("refused-tool-count");
     tx.stage(Some(body));

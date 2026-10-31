@@ -76,6 +76,72 @@ fn encode_member(out: &mut TokenWriter, member: Option<&AdmissionMember>) {
 /// Each graph-reference write, tagged by its table and operation.
 fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), GraphRefusal> {
     match write {
+        DomainWrite::ToolCall(write) => {
+            use super::tool_calls::{ToolCallDecision, ToolCallWrite};
+            match write {
+                ToolCallWrite::Admit {
+                    counted,
+                    logical,
+                    execution,
+                    run,
+                    member,
+                    call,
+                    cancellable,
+                } => {
+                    out.sum(6, 7);
+                    out.text(&logical.stored());
+                    out.text(&execution.stored());
+                    out.unsigned(run.0);
+                    out.unsigned(*member);
+                    out.text(call.as_str());
+                    out.unsigned(u64::from(*cancellable));
+                    out.unsigned(u64::from(*counted));
+                }
+                ToolCallWrite::Decide {
+                    owner,
+                    call,
+                    decision,
+                    fact,
+                } => {
+                    out.sum(7, 4);
+                    out.text(&owner.stored());
+                    out.text(call.as_str());
+                    out.unsigned(u64::from(*decision == ToolCallDecision::Cancel));
+                    out.bytes(&fact.0);
+                }
+                ToolCallWrite::Answer {
+                    owner,
+                    call,
+                    answer,
+                }
+                | ToolCallWrite::Complete {
+                    owner,
+                    call,
+                    answer,
+                    ..
+                } => {
+                    let outcome = serde_json::to_string(&answer.outcome).map_err(|error| {
+                        GraphRefusal::InvalidBody {
+                            kind: 0,
+                            reason: error.to_string(),
+                        }
+                    })?;
+                    let complete = matches!(write, ToolCallWrite::Complete { .. });
+                    out.sum(if complete { 10 } else { 8 }, if complete { 5 } else { 4 });
+                    out.text(&owner.stored());
+                    out.text(call.as_str());
+                    if let ToolCallWrite::Complete { fact, .. } = write {
+                        out.bytes(&fact.0);
+                    }
+                    out.text(&outcome);
+                    encode_node(out, answer.body.as_ref());
+                }
+                ToolCallWrite::Expire { owner } => {
+                    out.sum(9, 1);
+                    out.text(&owner.stored());
+                }
+            }
+        }
         DomainWrite::ExecRoot(ExecRootWrite::Put {
             exec,
             expected,
@@ -172,6 +238,11 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
 pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
     let source = owner.source() as u32;
     match owner {
+        RootOwner::ToolCall { owner, call, .. } => {
+            out.sum(source, 2);
+            out.text(&owner.stored());
+            out.text(call.as_str());
+        }
         RootOwner::ModelCall(key) => {
             out.sum(source, 3);
             out.text(key.session.as_str());

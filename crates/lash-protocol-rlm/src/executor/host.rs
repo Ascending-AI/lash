@@ -922,6 +922,7 @@ impl KernelEffects for CellHost<'_> {
         }
         graph.state.tool_call_limit = ledgers.tool_call_limit;
         graph.state.reads = ledgers.reads;
+        let mut read_calls = Vec::new();
         for fact in ledgers
             .read_facts
             .iter()
@@ -929,6 +930,12 @@ impl KernelEffects for CellHost<'_> {
         {
             let node =
                 lash_vm_broker::round_graph::stage_read_fact(staging, fact).map_err(fault)?;
+            read_calls.push((
+                lash_core::durable_port::domain::CallOwner::from_opener(&self.opener),
+                fact.call_id.clone(),
+                fact.ordinal,
+                node,
+            ));
             graph
                 .state
                 .read_facts
@@ -979,6 +986,7 @@ impl KernelEffects for CellHost<'_> {
             .map(|requirement| requirement.callback.clone())
             .collect();
         Ok(HostParts {
+            read_calls,
             host: Some(host),
             envelope: Some(envelope),
             owed,

@@ -288,6 +288,16 @@ pub trait MemberBodies: Send + Sync {
     /// observed its own outcome.
     fn unanswered(&self, _execution: &AdmittedExecution, _output: &SettledOutput) {}
 
+    /// Preserve caller attribution for a terminal read without attempt material.
+    /// This projection runs while composing the existing outcome commit.
+    fn archival_read(
+        &self,
+        _call: &crate::ToolCallId,
+        _output: &SettledOutput,
+    ) -> Option<crate::ToolCallRecord> {
+        None
+    }
+
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
     /// final outcome is recorded, so a crash in between repeats it; it is
@@ -1458,6 +1468,56 @@ impl Lifecycle {
         Ok(())
     }
 
+    fn archive_terminal_reads(&self, tx: &mut lash_durable::ActorTx) -> Result<(), RoundError> {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphRefusal, GraphStaging,
+        };
+        use lash_durable::domain::{ToolCallWrite, tool_calls::ToolCallSettlement};
+        let records = tx
+            .domain()
+            .iter()
+            .filter_map(|write| {
+                let lash_durable::DomainWrite::ToolCall(
+                    ToolCallWrite::Answer {
+                        owner,
+                        call,
+                        answer,
+                    }
+                    | ToolCallWrite::Complete {
+                        owner,
+                        call,
+                        answer,
+                        ..
+                    },
+                ) = write
+                else {
+                    return None;
+                };
+                if answer.body.is_some() {
+                    return None;
+                }
+                let ToolCallSettlement::Execution(outcome) = &answer.outcome else {
+                    return None;
+                };
+                let output = SettledOutput::new(outcome.as_ref().clone(), None).ok()?;
+                self.bodies
+                    .archival_read(call, &output)
+                    .map(|record| (owner.clone(), call.clone(), record))
+            })
+            .collect::<Vec<_>>();
+        for (owner, call, record) in records {
+            let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+            let body = super::graph::CallBody { record }
+                .stage(&mut staging)
+                .map_err(DurableError::from)?;
+            tx.stage_all(staging);
+            if !tx.archive_tool_call(&owner, &call, body) {
+                return Err(DurableError::Graph(GraphRefusal::PublicationMismatch).into());
+            }
+        }
+        Ok(())
+    }
+
     /// Commit `tx`, which staged `staged`, under `label`: the rows it
     /// appended with those records, or [`Act::Refused`] when the store
     /// refused it or its acknowledgement was lost. Ownership lost is an
@@ -1468,6 +1528,7 @@ impl Lifecycle {
         label: CommitLabel,
         staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
+        self.archive_terminal_reads(&mut tx)?;
         self.bodies.stage_commit(&mut tx, self.cx.epoch())?;
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         match self.cx.commit(tx, label).await {
@@ -1526,6 +1587,7 @@ impl Lifecycle {
         ),
         staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
+        self.archive_terminal_reads(&mut tx)?;
         self.bodies.stage_commit(&mut tx, self.cx.epoch())?;
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
         let published = match candidate.0.publication(&mut tx, commit).await {

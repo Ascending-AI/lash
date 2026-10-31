@@ -528,7 +528,8 @@ async fn cell_calls(
         },
     };
     let reads = cx.durable_reads()?;
-    let facts = reads.run_facts(&OwnerKey::Cell(session, run, cell)).await?;
+    let owner = OwnerKey::Cell(session, run, cell);
+    let facts = reads.run_facts(&owner).await?;
     let waits = round::PinnedWaits::read(reads, &facts).await?;
     let fold = round::fold(&facts, &PolicyView::new([]), &waits)
         .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
@@ -536,6 +537,7 @@ async fn cell_calls(
         &facts,
         &fold,
         CellToolCalls {
+            execution: Some(owner),
             records,
             ledger,
             ..Default::default()
@@ -554,6 +556,7 @@ fn cell_calls_from_ledger(
     use lash_core_store::tool_run::SettledOutput;
 
     let CellToolCalls {
+        execution,
         mut records,
         mut ledger,
         read_facts,
@@ -629,6 +632,7 @@ fn cell_calls_from_ledger(
         });
     }
     Ok(CellToolCalls {
+        execution,
         records,
         ledger,
         read_facts,
@@ -1369,7 +1373,6 @@ impl TurnDrive for RuntimeDrive {
                     &driver.turn_id,
                     &outcome,
                     unrecorded,
-                    &plugins.transcript_decoders(),
                 )
                 .await?,
             )

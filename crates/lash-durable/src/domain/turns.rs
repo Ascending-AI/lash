@@ -325,14 +325,6 @@ pub enum TurnWrite {
         /// The protocol iteration.
         iteration: u32,
     },
-    /// Add the newly admitted `calls` to the matching unfinished turn,
-    /// atomically with their run facts. A cell belonging to an operation
-    /// rather than a turn has no phase row and changes nothing.
-    AddToolCalls {
-        session: SessionId,
-        run: TurnId,
-        calls: u64,
-    },
     /// Record `answer`, a receipt of the model call the unfinished turn's
     /// model phase pins, beside its phase (`model.answer`): the phase and
     /// its root stay as they are, and the receipt is rooted until the

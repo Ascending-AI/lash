@@ -368,6 +368,47 @@ impl DurableStore for RecordedStore {
 
 #[async_trait::async_trait]
 impl DurableReads for RecordedStore {
+    async fn tool_calls(
+        &self,
+        owner: &lash::durable::domain::CallOwner,
+        selection: &lash::durable::domain::ToolCallSelection,
+    ) -> Result<lash::durable::domain::ToolCalls, DurableError> {
+        self.inner.tool_calls(owner, selection).await
+    }
+
+    async fn model_calls_by_id(
+        &self,
+        session: &lash::SessionId,
+        owner: &str,
+        ids: &[lash::LlmCallId],
+    ) -> Result<Vec<lash::turn::ModelCallRecord>, DurableError> {
+        self.inner.model_calls_by_id(session, owner, ids).await
+    }
+
+    async fn model_call_pin(
+        &self,
+        key: &lash::durable::domain::PromptCallKey,
+    ) -> Result<Option<lash::durable::domain::ModelCallPinRow>, DurableError> {
+        self.inner.model_call_pin(key).await
+    }
+
+    async fn model_call_pins_by_id(
+        &self,
+        session: &lash::SessionId,
+        owner: &str,
+        ids: &[lash::LlmCallId],
+    ) -> Result<Vec<lash::durable::domain::ModelCallPinRow>, DurableError> {
+        self.inner.model_call_pins_by_id(session, owner, ids).await
+    }
+
+    async fn model_call_ids(
+        &self,
+        session: &lash::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash::LlmCallId>, DurableError> {
+        self.inner.model_call_ids(session, owner).await
+    }
+
     async fn model_calls(
         &self,
         session: &lash::SessionId,

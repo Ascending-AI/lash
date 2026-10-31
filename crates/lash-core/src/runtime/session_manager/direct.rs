@@ -328,7 +328,7 @@ impl DirectCompletionCapability {
                             ),
                         )
                     })?
-                    .model_call_pins(&key.session, &key.call.owner_column())
+                    .model_call_pin(&key)
                     .await
                     .map_err(|error| {
                         lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(
@@ -337,9 +337,7 @@ impl DirectCompletionCapability {
                                 error.to_string(),
                             ),
                         )
-                    })?
-                    .into_iter()
-                    .find(|pin| pin.key == key);
+                    })?;
                 let mut fact = pin.map_or_else(
                     || {
                         let call_id = crate::runtime::owned_call::owned_call_id(&key);

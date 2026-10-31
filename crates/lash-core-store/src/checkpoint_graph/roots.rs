@@ -55,6 +55,10 @@ pub enum RootSource {
     RetirementHold = 16,
     /// Sealed calls retained with their owning session.
     ModelCall = 17,
+    /// Protected tool decision retained until logical owner expiry.
+    ToolCallDecision = 23,
+    /// Canonical tool answer retained until logical owner expiry.
+    ToolCallAnswer = 24,
     /// `session_runs.terminal_transcript_ref`: the calls a turn answered,
     /// published by its terminal, while the run's row lives (FIG-6601).
     RunTranscript = 18,
@@ -77,7 +81,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 21] = [
         Self::EnvironmentHead,
         Self::Exec,
         Self::RunFact,
@@ -93,6 +97,8 @@ impl RootSource {
         Self::ReadLease,
         Self::RetirementHold,
         Self::ModelCall,
+        Self::ToolCallDecision,
+        Self::ToolCallAnswer,
         Self::RunTranscript,
         Self::PromptSnapshot,
         Self::PromptRequestBody,
@@ -118,6 +124,8 @@ impl RootSource {
             Self::ReadLease => "lease",
             Self::RetirementHold => "retirement",
             Self::ModelCall => "model_call",
+            Self::ToolCallDecision => "tool_call_decision",
+            Self::ToolCallAnswer => "tool_call_answer",
             Self::RunTranscript => "terminal_transcript",
             Self::PromptSnapshot => "prompt_snapshot",
             Self::PromptRequestBody => "prompt_request",
@@ -179,6 +187,8 @@ impl RootSource {
             Self::ModelAnswer => RootField::of("lash_turn_phases", "answer_ref", None),
             Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
             Self::ModelCall => RootField::of("lash_model_call_records", "record_ref", None),
+            Self::ToolCallDecision => RootField::of("lash_tool_calls", "decision_ref", None),
+            Self::ToolCallAnswer => RootField::of("lash_tool_calls", "body_ref", None),
             Self::RetirementHold => RootField::of("lash_retirement_holds", "root_ref", None),
             Self::RunTranscript => {
                 RootField::of("lash_session_runs", "terminal_transcript_ref", None)
@@ -205,6 +215,8 @@ impl RootSource {
             Self::ModelAnswer => ("turn_phases", "answer_ref", None),
             Self::ReadLease => ("root_leases", "root_ref", None),
             Self::ModelCall => ("model_call_records", "record_ref", None),
+            Self::ToolCallDecision => ("tool_calls", "decision_ref", None),
+            Self::ToolCallAnswer => ("tool_calls", "body_ref", None),
             Self::RetirementHold => ("retirement_holds", "root_ref", None),
             Self::RunTranscript => ("session_runs", "terminal_transcript_ref", None),
         }

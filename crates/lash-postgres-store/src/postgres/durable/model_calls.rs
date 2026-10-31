@@ -10,10 +10,14 @@ use std::sync::LazyLock;
 pub(super) static SQL: LazyLock<ModelCallStatements> =
     LazyLock::new(|| ModelCallStatements::render(Dialect::postgres()));
 lash_store_sql::statements! {
-    /// The immutable record guard, checked after the idempotent insert.
     struct ModelCallPostgresStatements @ "durable_model_call_postgres" {
-        root_matches = "SELECT record_ref FROM model_call_records
-            WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref = ?4";
+        selected = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
+            WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
+              AND call_id = ANY(?3) ORDER BY run, call";
+        selected_pins = "SELECT run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call FROM model_call_records
+            WHERE session_id = ?1 AND record_ref IS NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
+              AND call_id = ANY(?3) ORDER BY run, call";
+
     }
 }
 static POSTGRES: LazyLock<ModelCallPostgresStatements> =
@@ -30,16 +34,6 @@ pub(super) static APPEND: Entry = Entry::new(
         Ty::Now,
         Ty::Int,
     ],
-    Shape::Exec,
-);
-pub(super) static ROOT_MATCHES: Entry = Entry::new(
-    || &POSTGRES.root_matches,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Key],
-    Shape::Select,
-);
-pub(super) static RETIRE_PIN: Entry = Entry::new(
-    || &SQL.retire_pin,
-    &[Ty::Text, Ty::Text, Ty::Text],
     Shape::Exec,
 );
 pub(super) static RESERVE: Entry = Entry::new(
@@ -70,23 +64,16 @@ fn key_values(key: &lash_durable::domain::PromptCallKey) -> Vec<Value> {
     ]
 }
 
-/// The insert, immutable-root check and reservation retirement stay ordered.
+/// Seal the lifecycle row without replacing an immutable record.
 pub(super) fn steps(epoch: lash_durable::Epoch, write: &ModelCallWrite) -> Vec<Step> {
-    let key = key_values(&write.key);
-    let mut append = key.clone();
+    let mut append = key_values(&write.key);
     append.extend([
         Value::text(&write.call_id.0),
         Value::key(write.record.to_hex()),
         Value::Now,
         Value::int(epoch.0),
     ]);
-    let mut guard = key.clone();
-    guard.push(Value::key(write.record.to_hex()));
-    vec![
-        Step::any(&APPEND, append),
-        Step::one(&ROOT_MATCHES, guard),
-        Step::any(&RETIRE_PIN, key),
-    ]
+    vec![Step::one(&APPEND, append)]
 }
 
 pub(super) fn pin_steps(write: &lash_durable::domain::ModelCallPinWrite) -> Vec<Step> {
@@ -114,7 +101,7 @@ pub(super) fn pin_steps(write: &lash_durable::domain::ModelCallPinWrite) -> Vec<
                         .map(|owner| owner.call.as_str().to_owned()),
                 ),
             ]);
-            Step::any(&RESERVE, values)
+            Step::one(&RESERVE, values)
         }
         ModelCallPinWrite::Answered { key } => Step::any(&ANSWERED, key_values(key)),
     }]
@@ -140,34 +127,61 @@ pub(super) async fn delete_session(
     tx: &mut PgConnection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query(SQL.delete_pins.sql())
-        .bind(session.as_str())
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    crate::keys::query_scalar(SQL.delete_session.sql())
+    let roots = crate::keys::query_scalar::<Option<String>>(SQL.delete_session.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(tx))
-        .await
+        .await?;
+    Ok(roots.into_iter().flatten().collect())
 }
 
 impl super::PostgresDurableStore {
+    pub(super) async fn read_model_call_ids(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        owner: &str,
+    ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
+        self.read(|tx| {
+            Box::pin(async move {
+                let ids: Vec<String> = crate::observed_sql::query_scalar(SQL.ids.sql())
+                    .bind(session.as_str())
+                    .bind(owner)
+                    .fetch_all(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+                Ok(ids
+                    .into_iter()
+                    .map(lash_protocol_types::llm::types::LlmCallId)
+                    .collect())
+            })
+        })
+        .await
+    }
     pub(super) async fn read_model_calls(
         &self,
         session: &lash_kernel_value::identity::SessionId,
         owner: &str,
+        ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
     ) -> Result<Vec<ModelCallRecord>, DurableError> {
         use lash_core_store::{checkpoint_graph::GraphDecoder, model_calls::ModelCallFact};
         use lash_durable::domain::RunFacts;
         let limits = self.pools.graph_reads.owner();
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
-                let rows: Vec<(String, crate::keys::Key, i64)> =
-                    crate::observed_sql::query_as(SQL.read.sql())
-                        .bind(session.as_str())
-                        .bind(owner)
-                        .fetch_all(crate::observed_sql::executor(&mut **snapshot))
-                        .await
-                        .map_err(sqlx_failure)?;
+                let sql = if ids.is_some() {
+                    POSTGRES.selected.sql()
+                } else {
+                    SQL.read.sql()
+                };
+                let mut query = crate::observed_sql::query_as(sql)
+                    .bind(session.as_str())
+                    .bind(owner);
+                if let Some(ids) = ids {
+                    query = query.bind(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>());
+                }
+                let rows: Vec<(String, crate::keys::Key, i64)> = query
+                    .fetch_all(crate::observed_sql::executor(&mut **snapshot))
+                    .await
+                    .map_err(sqlx_failure)?;
                 let roots = rows
                     .iter()
                     .map(|(_, root, _)| super::node_ref(root))
@@ -208,8 +222,15 @@ pub(super) async fn apply_pin(
     commit: &Committing<'_>,
     write: &lash_durable::domain::ModelCallPinWrite,
 ) -> Result<(), DurableError> {
-    // These writes accept any row count, exactly as their explicit SQL did.
-    super::steps::run(tx, &pin_steps(write), &commit.steps()).await?;
+    if super::steps::run(tx, &pin_steps(write), &commit.steps())
+        .await?
+        .is_some()
+    {
+        return Err(super::corrupt(
+            "model call reservation",
+            "conflicting identity",
+        ));
+    }
     Ok(())
 }
 /// SQL reservation row, including the opaque outcome that owns its terminal.
@@ -229,12 +250,27 @@ impl super::PostgresDurableStore {
         &self,
         session: &lash_kernel_value::identity::SessionId,
         owner: &str,
+        ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
+        call: Option<&str>,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
-                let rows: Vec<StoredModelCallPin> = crate::observed_sql::query_as(SQL.pins.sql())
+                let sql = if call.is_some() {
+                    SQL.pin_by_key.sql()
+                } else if ids.is_some() {
+                    POSTGRES.selected_pins.sql()
+                } else {
+                    SQL.pins.sql()
+                };
+                let mut query = crate::observed_sql::query_as(sql)
                     .bind(session.as_str())
-                    .bind(owner)
+                    .bind(owner);
+                if let Some(call) = call {
+                    query = query.bind(call);
+                } else if let Some(ids) = ids {
+                    query = query.bind(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>());
+                }
+                let rows: Vec<StoredModelCallPin> = query
                     .fetch_all(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(sqlx_failure)?;

@@ -102,76 +102,70 @@ impl Processes {
             .map(|owner| owner.node))
     }
 
-    /// Read a retained tool call by the typed id on its process effect
-    /// occurrence. Reads committed round outcomes, including after reopening
-    /// the deployment; it runs no engine, tool, hook or current catalog lookup.
-    /// Unknown calls, unfinished calls and outcomes without retained material
-    /// return `None`. Process pruning retires these records with their owner.
+    /// Read one retained process call, including pending and body-free terminals.
+    /// It runs no engine, tool, hook or current catalog lookup. Process pruning
+    /// expires the call with its logical owner.
     pub async fn tool_call(
         &self,
         process_id: &ProcessId,
         call_id: &crate::ToolCallId,
-    ) -> Result<Option<crate::tools::ToolCallRecord>> {
+    ) -> Result<crate::ToolCallRead> {
         let host = self.core.actor_context();
-        if let Some(record) =
-            lash_core::facade_support::read_process_tool_call(&host, process_id, call_id).await?
-        {
-            return Ok(Some(record));
-        }
-        #[cfg(feature = "codemode")]
-        {
-            Ok(self
-                .saved_reads(process_id)
-                .await?
-                .into_iter()
-                .find(|record| record.call_id == *call_id))
-        }
-        #[cfg(not(feature = "codemode"))]
-        {
-            Ok(None)
-        }
+        let read = lash_core::call_store::call(
+            host.durable_reads()?,
+            &lash_core::durable_port::domain::CallOwner::Process(process_id.clone()),
+            call_id,
+        )
+        .await?;
+        crate::turn::tool_call_read(call_id, read)
     }
 
-    /// Saved reads in caller ordinal order, independent of the bounded live
-    /// replay store. Terminal processes retain these records until pruning.
-    /// This offline query runs no engine, provider, hook or catalog lookup.
-    #[cfg(feature = "codemode")]
+    /// Read selected process calls in input order, preserving duplicates and misses.
+    pub async fn tool_calls(
+        &self,
+        process_id: &ProcessId,
+        calls: &[crate::ToolCallId],
+    ) -> Result<Vec<crate::ToolCallRead>> {
+        let host = self.core.actor_context();
+        let reads = lash_core::call_store::calls(
+            host.durable_reads()?,
+            &lash_core::durable_port::domain::CallOwner::Process(process_id.clone()),
+            calls,
+        )
+        .await?;
+        calls
+            .iter()
+            .zip(reads)
+            .map(|(call, read)| crate::turn::tool_call_read(call, read))
+            .collect()
+    }
+
+    /// Saved reads in durable admission order, independent of live replay state.
     pub async fn saved_reads(
         &self,
         process_id: &ProcessId,
     ) -> Result<Vec<crate::tools::ToolCallRecord>> {
         let host = self.core.actor_context();
-        let kernel_run = format!(
-            "{}/{}",
-            lash_vm_runtime::LASH_VM_ENGINE_KIND,
-            lash_vm_runtime::KERNEL_RUN_STEP
-        );
-        let mut reads = Vec::new();
-        for step in lash_core::facade_support::read_process_steps(&host, process_id).await? {
-            if step.tool != kernel_run {
-                continue;
+        let owner = lash_core::durable_port::domain::CallOwner::Process(process_id.clone());
+        let mut after = None;
+        let mut records = Vec::new();
+        loop {
+            let page = lash_core::call_store::list_reads(host.durable_reads()?, &owner, after, 128)
+                .await?;
+            let done = page.len() < 128;
+            after = page.last().map(|(cursor, _)| cursor.clone());
+            records.extend(page.into_iter().filter_map(|(_, read)| match read {
+                lash_core::call_store::CallRead::Settled {
+                    record: Some(record),
+                    ..
+                } => Some(*record),
+                _ => None,
+            }));
+            if done {
+                break;
             }
-            let Some(payload) = step
-                .outcome
-                .as_ref()
-                .and_then(lash_core_store::tool_run::SettledOutput::payload)
-            else {
-                continue;
-            };
-            reads.extend(
-                lash_vm_runtime::process::saved_read_facts(payload).map_err(|error| {
-                    EmbedError::Durable(lash_core::durable_port::DurableError::Store(
-                        lash_core::durable_port::StoreFailure {
-                            code: None,
-                            kind: lash_core::durable_port::StoreFailureKind::Corrupt,
-                            message: format!("the kernel run's saved read facts: {error}"),
-                        },
-                    ))
-                })?,
-            );
         }
-        reads.sort_by_key(|fact| fact.ordinal);
-        Ok(reads.into_iter().map(|fact| fact.record()).collect())
+        Ok(records)
     }
 
     /// Replay recorded run segments of a process observed at `counts`, on

@@ -36,6 +36,9 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+#[path = "support/call_directory.rs"]
+mod call_directory;
+
 use matrix::MatrixTestExt as _;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -750,6 +753,26 @@ impl Scenario for RoundScenario {
             Ok(fold) => fold,
             Err(refusal) => return vec![format!("the run records do not fold: {refusal}")],
         };
+        let ids = fold
+            .rounds()
+            .flat_map(|view| view.members())
+            .map(|member| {
+                (
+                    member.call().clone(),
+                    member
+                        .outcome()
+                        .map(lash_core_store::tool_run::SettledOutput::outcome),
+                )
+            })
+            .collect::<Vec<_>>();
+        violations.extend(
+            call_directory::check(
+                nodes.database().as_ref(),
+                &lash_durable::domain::tool_calls::logical_owner(&owner()),
+                &ids,
+            )
+            .await,
+        );
         if let Some(view) = fold.round(RUN) {
             self.settled.lock_recover().extend(
                 view.members()
@@ -1495,8 +1518,17 @@ async fn settled_payload_reuse() {
     // A new settlement changes only its own image, never earlier members'.
     let mut tx = database.begin(&actor(), epoch, u64::MAX).await.unwrap();
     let next = RunSeq(RUN.0 + 1);
-    let changed_draft = members[0].draft().clone();
-    // A different run may reuse this call's pinned request.
+    let original = members[0].draft();
+    let changed_draft = ExecutionDraft::new(
+        original.admitted_at(),
+        call("changed-branch"),
+        original.tool().clone(),
+        original.request().clone(),
+        original.policy(),
+        original.limit(),
+        original.park(),
+    );
+    // A new call may reuse the pinned request, while retaining its own identity.
     let changed = round::admit(&mut tx, &owner(), next, vec![changed_draft]).unwrap();
     let changed_output = SettledOutput::Completed(output("changed payload".to_owned()));
     round::settle(

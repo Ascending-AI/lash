@@ -244,6 +244,7 @@ pub enum CellExit {
 /// records. Only the references are written with the consuming turn commit.
 #[derive(Clone, Debug, Default)]
 pub struct CellToolCalls {
+    pub execution: Option<lash_durable::domain::OwnerKey>,
     pub records: Vec<crate::ToolCallRecord>,
     pub ledger: lash_core_execution::runtime::actor::round::graph::ReportView,
     /// Read facts from the final stretch, saved by the consuming turn.

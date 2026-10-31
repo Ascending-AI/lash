@@ -358,15 +358,29 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     })
     .await
     .expect("the cell parks on its approval")?;
-    let (settled, pending) =
-        lash_core::runtime::durable::services::RuntimeTurnServices::tool_call_bodies(
-            &world.core.actor_context(),
-            session.session_id(),
-            &lash_vocabulary::identity::TurnId::fixture(run),
-            Some(&lash_vocabulary::identity::TurnId::fixture(run)),
-            &world.core.transcript_decoders(),
-        )
-        .await?;
+    let owner = lash_core::durable_port::domain::CallOwner::Turn(
+        session.session_id().clone(),
+        lash_vocabulary::identity::TurnId::fixture(run),
+    );
+    let page = lash_core::call_store::list(
+        world.core.actor_context().durable_reads()?,
+        &owner,
+        None,
+        128,
+    )
+    .await?;
+    let mut settled = Vec::new();
+    let mut pending = Vec::new();
+    for (cursor, read) in page {
+        match read {
+            lash_core::call_store::CallRead::Pending { .. } => pending.push(cursor.call),
+            lash_core::call_store::CallRead::Settled {
+                record: Some(record),
+                ..
+            } => settled.push(*record),
+            _ => {}
+        }
+    }
     assert!(!pending.is_empty(), "the parked approval is a known call");
     assert_eq!(
         settled.len(),

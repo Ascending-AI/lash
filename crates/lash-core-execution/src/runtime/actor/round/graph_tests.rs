@@ -471,6 +471,31 @@ fn saved_read_fact_rejects_unknown_members() {
         .unwrap(),
         saved
     );
+    for variant in ["parked", "ended"] {
+        let caller_save = ProcessReadOutput {
+            output: serde_json::json!({ (variant): { "read_facts": [], "value": 7 } }),
+            reads: vec![fact.clone()],
+        };
+        let expected =
+            serde_json::json!({ (variant): { "read_facts": [fact.clone()], "value": 7 } });
+        assert_eq!(
+            serde_json::to_value(&caller_save).unwrap(),
+            expected,
+            "caller-save serialization keeps Reads inside the tagged result"
+        );
+        let node = caller_save.stage(&mut staging).unwrap();
+        let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 20));
+        let loaded = ProcessReadOutput::load(&mut decoder, node).unwrap();
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), expected);
+        let bodies = ProcessReadOutput::bodies(&mut decoder, node).unwrap();
+        assert_eq!(bodies.len(), 1);
+        assert_eq!(bodies[0].0, fact);
+        assert_eq!(
+            bodies[0].1,
+            stage_read_fact(&mut staging, &fact).unwrap(),
+            "the caller save and directory share the canonical Read body"
+        );
+    }
     for pointer in ["", "/caller", "/outcome/payload/cause/panic"] {
         let mut tree = serde_json::to_value(&fact).unwrap();
         tree.pointer_mut(pointer)

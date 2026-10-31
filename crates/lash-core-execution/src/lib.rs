@@ -59,6 +59,7 @@ pub use lash_protocol_types::{
     module_artifact_refusal::ModuleArtifactRefusal,
 };
 
+pub mod call_store;
 pub mod direct;
 pub mod direct_completion_client;
 pub mod effect_attempt;

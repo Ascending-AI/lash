@@ -54,7 +54,6 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     turn_deadline_ms INTEGER,
     written_epoch INTEGER NOT NULL,
     model_calls INTEGER NOT NULL DEFAULT 0,
-    tool_calls INTEGER NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),
@@ -111,8 +110,8 @@ lash_store_sql::statements! {
                      WHERE head.session_id = ?1)
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL AND ?7 IS NULL
-             RETURNING run, EXISTS (SELECT 1 FROM tool_call_cancel_requests
-                 WHERE session_id = ?1 AND run = ?2) AS has_call_cancels";
+             RETURNING run, EXISTS (SELECT 1 FROM tool_calls
+                 WHERE session_id = ?1 AND turn_id = ?2 AND NOT cancellable AND answer_outcome IS NULL) AS has_pending_reads";
     }
 }
 static SQLITE_SQL: LazyLock<SqliteTurnStatements> =
@@ -136,12 +135,8 @@ pub(super) fn apply(
     commit: &Committing<'_>,
     write: &TurnWrite,
 ) -> Answer<()> {
-    // Every write but an advance (which takes them) and a tool-call count
-    // may change the phase row the fenced read saw.
-    if !matches!(
-        write,
-        TurnWrite::Advance { .. } | TurnWrite::AddToolCalls { .. }
-    ) {
+    // Every write but an advance (which takes them) may change the phase roots.
+    if !matches!(write, TurnWrite::Advance { .. }) {
         commit.open_roots.forget();
     }
     match write {
@@ -268,19 +263,6 @@ pub(super) fn apply(
                     run: run.clone(),
                 }),
             }
-        }
-        TurnWrite::AddToolCalls {
-            session,
-            run,
-            calls,
-        } => {
-            tx.prepare_cached(SQL.add_tool_calls.sql())?
-                .execute(rusqlite::params![
-                    session.as_str(),
-                    run.as_str(),
-                    integer::<i64>(*calls)?,
-                ])?;
-            Ok(Ok(()))
         }
         TurnWrite::Answer {
             session,
@@ -446,12 +428,15 @@ pub(super) fn apply(
                     |row| row.get::<_, bool>(1),
                 )
                 .optional()?;
-            let Some(has_call_cancels) = ended else {
+            let Some(has_pending_reads) = ended else {
                 return refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
                 });
             };
+            if has_pending_reads {
+                super::tool_calls::finish_reads(tx, session, run)?;
+            }
             if let Some(revision) = head_revision {
                 crate::revisions::record_terminal_conn(tx, session, *revision, commit.now)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
@@ -504,13 +489,6 @@ pub(super) fn apply(
             }
             for record in super::run_records::delete_turn(tx, session, run)? {
                 commit.retired.stored(record);
-            }
-            if has_call_cancels {
-                cached_execute(
-                    tx,
-                    SQL.delete_call_cancels.sql(),
-                    rusqlite::params![session.as_str(), run.as_str()],
-                )?;
             }
             cached_execute(
                 tx,

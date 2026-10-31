@@ -46,6 +46,10 @@ use crate::{ActorKey, DomainWrite, DurableError, DurableStore, Epoch};
 
 mod races;
 pub use races::*;
+mod tool_calls;
+pub use tool_calls::*;
+mod model_calls;
+pub use model_calls::*;
 
 /// Foreign data a law writes past the store's own checks, or a row of a
 /// root source whose writer is not a graph commit yet.
@@ -933,6 +937,51 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     expected: root,
                 })),
             ),
+            RootSource::ToolCallDecision | RootSource::ToolCallAnswer => {
+                use crate::domain::{ToolCallAnswer, ToolCallDecision, ToolCallWrite};
+                let call = lash_protocol_types::ToolCallId::fixture("root-law-tool");
+                owner_commit(
+                    tier,
+                    &owner,
+                    BTreeMap::new(),
+                    vec![DomainWrite::ToolCall(ToolCallWrite::Admit {
+                        counted: true,
+                        logical: crate::domain::tool_calls::logical_owner(&facts),
+                        execution: facts.clone(),
+                        run: RunSeq(0),
+                        member: 0,
+                        call: call.clone(),
+                        cancellable: true,
+                    })],
+                )
+                .await
+                .map_err(|error| refused("tool admission", error))?;
+                let publish = if source == RootSource::ToolCallDecision {
+                    ToolCallWrite::Decide {
+                        owner: facts.clone(),
+                        call,
+                        decision: ToolCallDecision::Final,
+                        fact: root,
+                    }
+                } else {
+                    ToolCallWrite::Answer {
+                        owner: facts.clone(),
+                        call,
+                        answer: ToolCallAnswer {
+                            outcome: crate::domain::tool_calls::ToolCallSettlement::execution(
+                                lash_core_store::tool_run::AttemptOutcome::Interrupted,
+                            ),
+                            body: Some(root),
+                        },
+                    }
+                };
+                (
+                    Some(DomainWrite::ToolCall(publish)),
+                    Some(DomainWrite::ToolCall(ToolCallWrite::Expire {
+                        owner: crate::domain::tool_calls::logical_owner(&facts),
+                    })),
+                )
+            }
             RootSource::ModelCall => (
                 Some(DomainWrite::ModelCall(crate::domain::ModelCallWrite {
                     key: crate::domain::PromptCallKey {
@@ -1469,95 +1518,4 @@ pub async fn an_owner_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphT
         }
     }
     Ok(())
-}
-
-/// Turn-model ordinals and nested owner keys remain distinct, including a
-/// replay of the enclosing outcome transaction.
-pub async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(
-    tier: &dyn GraphTier,
-    peer: &dyn DurableStore,
-) -> LawOutcome {
-    use crate::domain::{ModelCallId, ModelCallWrite, PromptCallKey};
-    use lash_core_store::model_calls::{ModelCallEnd, ModelCallFact};
-    use lash_protocol_types::{llm::types::LlmCallId, llm::types::LlmCallRecord};
-
-    let owner = owned(tier, "model-call-keys").await?;
-    let run = turn("call-key-run");
-    let mut nodes = staging();
-    let mut writes = Vec::new();
-    let addresses = (1..=12)
-        .map(|ordinal| {
-            (
-                ModelCallId::Turn {
-                    run: run.clone(),
-                    ordinal,
-                },
-                format!("turn-model-{ordinal}"),
-                ordinal,
-            )
-        })
-        .chain(std::iter::once((
-            ModelCallId::Owned {
-                owner: run.to_string(),
-                key: "tool-attempt:1/direct:1".into(),
-            },
-            "nested-model".to_owned(),
-            0,
-        )));
-    let mut expected = Vec::new();
-    for (address, id, ordinal) in addresses {
-        let call_id = LlmCallId(id);
-        let fact = ModelCallFact {
-            call: ordinal,
-            call_id: call_id.clone(),
-            end: ModelCallEnd::Answered,
-            record: LlmCallRecord {
-                call_id: call_id.clone(),
-                label: None,
-                attempts: Vec::new(),
-                replay_drops: Vec::new(),
-            },
-        };
-        expected.push(fact.clone());
-        let record = fact
-            .stage(&mut nodes)
-            .map_err(|error| refused("model fact", error))?;
-        writes.push(DomainWrite::ModelCall(ModelCallWrite {
-            key: PromptCallKey {
-                session: owner.session.clone(),
-                call: address,
-            },
-            call_id,
-            record,
-        }));
-    }
-    let nodes = nodes.into_nodes();
-    owner_commit(tier, &owner, nodes.clone(), writes.clone()).await?;
-    // The owned partition sorts first; turn calls are numeric across 9/10.
-    expected.rotate_right(1);
-    let first = peer
-        .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
-        .await?;
-    ensure!(
-        first
-            .iter()
-            .map(|row| ModelCallFact {
-                call: row.call,
-                call_id: row.call_id.clone(),
-                end: row.end.clone(),
-                record: row.record.clone()
-            })
-            .collect::<Vec<_>>()
-            == expected,
-        "cold read lost an identity, record or numeric ordinal: {first:?}"
-    );
-    owner_commit(tier, &owner, nodes, writes).await?;
-    let replayed = peer
-        .model_calls(&owner.session, &ModelCallId::turn_owner(&run))
-        .await?;
-    ensure!(
-        first == replayed,
-        "replaying the owner changed its sealed model calls"
-    );
-    exact(tier, "replayed model-call outcome").await
 }
