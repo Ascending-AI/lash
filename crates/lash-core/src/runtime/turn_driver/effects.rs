@@ -105,7 +105,7 @@ fn absorb_checkpoint_admissions(
     Ok(())
 }
 
-impl RuntimeTurnDriver<'_> {
+impl TurnEffectContext {
     pub(in crate::runtime) async fn execute_checkpoint_locally(
         &mut self,
         messages: crate::MessageSequence,
@@ -230,7 +230,9 @@ impl RuntimeTurnDriver<'_> {
             .turn_cancel()
             .is_some_and(|cancel| cancel.run == self.turn_id))
     }
+}
 
+impl RuntimeTurnDriver<'_> {
     pub(super) async fn invoke_turn_checkpoint_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -257,8 +259,8 @@ impl RuntimeTurnDriver<'_> {
         } = admitted;
         self.opener_state.absorb_ledger(incorporation);
         // The recorded admitted set is the only way the checkpoint's rows
-        // reach this driver: the step body ran on a copy of it. It is folded
-        // in before the result is read, so a checkpoint that admitted work
+        // reach this driver: the step body owned its own admission slots.
+        // Fold them before reading the result, so a checkpoint that admitted work
         // and then failed hands that work to the failure path on the live
         // pass and on every replay alike.
         self.absorb_checkpoint_admissions(turn_inputs)
@@ -358,7 +360,9 @@ impl RuntimeTurnDriver<'_> {
         )
         .await
     }
+}
 
+impl TurnEffectContext {
     pub(in crate::runtime) async fn run_checkpoint(
         &mut self,
         messages: crate::MessageSequence,
@@ -400,7 +404,7 @@ impl RuntimeTurnDriver<'_> {
                 session_id: self.session_id.clone(),
                 plugin_config: plugins.admitted_plugin_config(),
                 checkpoint,
-                state: self.checkpoint_state_view(messages, protocol_iteration),
+                state: self.checkpoint_state_view(messages),
                 sessions: self.session_services.read_service(),
                 trace: crate::trace::ExtensionTrace::seed(
                     self.trace.clone(),

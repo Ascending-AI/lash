@@ -55,10 +55,7 @@ impl LashRuntime {
     /// commit records all of it. A resumed one ([`TurnStart::Resumed`])
     /// passes what its checkpoint recorded: no configuration is resolved and
     /// no callback runs, and it reads the retained trace scope back
-    /// (FIG-5363, FIG-5395, FIG-6021). No preparation proposes an admission. `held` is the head
-    /// the session's owner holds, if it holds one: the turn's prelude takes
-    /// its base from it when it is the window the prelude names
-    /// (FIG-6634).
+    /// (FIG-5363, FIG-5395, FIG-6021). No preparation proposes an admission.
     #[expect(
         clippy::expect_used,
         reason = "the runtime session is installed for the whole preparation"
@@ -69,7 +66,6 @@ impl LashRuntime {
         run: &TurnId,
         mut admissions: LogicalTurnAdmissions,
         start: TurnStart,
-        held: Option<&crate::runtime::durable::head::SessionHead>,
         observer: &TurnObserver,
     ) -> Result<DurableTurn, RuntimeError> {
         // An admission never mixes run specs, so the head input's spec is the
@@ -224,12 +220,6 @@ impl LashRuntime {
                 .plugins(),
         );
         let base_read_model = self.state.read_model();
-        let prelude_history = crate::store::SessionHeadRef {
-            generation: 0,
-            revision: self.state.head_revision,
-            leaf: self.state.session_graph.leaf_node_id.clone(),
-            checkpoint: self.state.checkpoint_ref.clone(),
-        };
         let pin = crate::runtime::durable::head::window_pin(&self.state).map_err(|error| {
             RuntimeError::new(
                 RuntimeErrorCode::RuntimeStoreCorrupt,
@@ -279,43 +269,6 @@ impl LashRuntime {
             messages: request_messages,
         };
         drop(context_transform);
-        let mut prelude = Box::new(crate::runtime::effect::TurnPrelude::new(
-            crate::EffectAddress::new(
-                controller.execution_scope().clone(),
-                format!("turn-config:{run}"),
-            )
-            .map_err(RuntimeEffectControllerError::from)
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?,
-            pressure.decisions,
-            prelude_history,
-            None,
-        ));
-        let store = self.services.store.as_ref().ok_or_else(|| {
-            RuntimeError::new(
-                RuntimeErrorCode::ArtifactMissing,
-                "turn preparation has no history store",
-            )
-        })?;
-        // The runtime's read model may include a phase checkpoint's tail.
-        // The base is the immutable graph window the prelude names: the
-        // owner's held head when it is that window, else read from the
-        // store; the tail belongs to the recorded view edits and needs no
-        // separate checkpoint root.
-        let held = held
-            .filter(|head| head.state().session_id == self.state.session_id)
-            .map(crate::runtime::durable::head::SessionHead::prelude_base);
-        let (prelude_base_messages, _, _) = crate::runtime::durable::head::restore_prelude(
-            &prelude,
-            held.as_ref().map(|(head, base)| (head, base)),
-            store,
-        )
-        .await
-        .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        prelude.capture_messages(
-            &prelude_base_messages,
-            &messages,
-            &prepared_context.messages,
-        );
         self.state.last_prompt_usage = None;
 
         // The before-turn hooks: their session changes and events.
@@ -341,16 +294,6 @@ impl LashRuntime {
         turn_graph_appends
             .apply_session_contributions(&self.state.session_id, &prepared.session)
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
-        if plugins.has_before_turn_hooks() {
-            prelude.before_turn = Some(
-                crate::EffectAddress::new(
-                    controller.execution_scope().clone(),
-                    format!("plugin-callbacks:before-turn:{run}"),
-                )
-                .map_err(RuntimeEffectControllerError::from)
-                .map_err(RuntimeEffectControllerError::into_runtime_error)?,
-            );
-        }
         // A durable turn continues from its committed checkpoint and is
         // never replayed: what its driver observes is this owner's own work,
         // so it observes as its own live attempt and needs no journal
@@ -452,8 +395,6 @@ impl LashRuntime {
             run: std::marker::PhantomData,
             session,
             policy: resolved_turn_policy,
-            prelude,
-            prelude_base_messages,
             prepared_context,
             answered_cell_calls: Default::default(),
             answered_cell_execution: None,

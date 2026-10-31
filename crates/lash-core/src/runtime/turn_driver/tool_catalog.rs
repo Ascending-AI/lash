@@ -149,33 +149,6 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    pub(super) async fn run_before_llm_call(
-        &mut self,
-        messages: crate::MessageSequence,
-        protocol_iteration: usize,
-        request: &LlmRequest,
-        last_call_usage: Option<crate::LlmUsage>,
-    ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
-        let bindings = self.session_services.bindings();
-        self.session
-            .plugins()
-            .bind_services(Arc::clone(&bindings))?;
-        self.session
-            .plugins()
-            .protocol_session()
-            .before_llm_call(
-                crate::ProtocolBeforeLlmCallContext {
-                    session_id: self.session_id.clone(),
-                    bindings,
-                    state: self.checkpoint_state_view(messages, protocol_iteration),
-                    latest_prompt_usage: last_call_usage,
-                    run_spec: self.run_config.run().spec().clone(),
-                },
-                request,
-            )
-            .await
-    }
-
     pub(super) fn checkpoint_state_view(
         &self,
         messages: crate::MessageSequence,
@@ -214,5 +187,33 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         Ok(())
+    }
+}
+
+impl TurnEffectContext {
+    pub(super) async fn run_before_llm_call(
+        &mut self,
+        messages: crate::MessageSequence,
+        request: &LlmRequest,
+        last_call_usage: Option<crate::LlmUsage>,
+    ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
+        let bindings = self.session_services.bindings();
+        self.session
+            .plugins()
+            .bind_services(Arc::clone(&bindings))?;
+        self.session
+            .plugins()
+            .protocol_session()
+            .before_llm_call(
+                crate::ProtocolBeforeLlmCallContext {
+                    session_id: self.session_id.clone(),
+                    bindings,
+                    state: self.checkpoint_state_view(messages),
+                    latest_prompt_usage: last_call_usage,
+                    run_spec: self.run_config.run().spec().clone(),
+                },
+                request,
+            )
+            .await
     }
 }

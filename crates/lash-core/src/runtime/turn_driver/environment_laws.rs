@@ -178,7 +178,6 @@ async fn fixture_with(plugins: Vec<Arc<dyn crate::PluginFactory>>) -> Fixture {
         &run,
         crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
         crate::runtime::turn_loop::TurnStart::Fresh(None),
-        None,
         &observer,
     ))
     .await

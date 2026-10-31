@@ -62,7 +62,6 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         &run,
         crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
         crate::runtime::turn_loop::TurnStart::Fresh(None),
-        None,
         &observer,
     ))
     .await
@@ -98,9 +97,8 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
             .collect::<Vec<_>>()
             .into();
         // Owned history occurs after a cold restore or a plugin rewrite.
-        // Both sequences and the recorded prelude are copied by the actual
-        // executor constructor, including for effects that never read them.
-        driver.prelude_base_messages = history.clone();
+        // The machine supplies the body history; the driver retains its
+        // independently prepared request context.
         driver.prepared_context.messages = history.clone();
         machine.adopt_committed_messages(history.clone());
         machine.adopt_prepared_messages(history);

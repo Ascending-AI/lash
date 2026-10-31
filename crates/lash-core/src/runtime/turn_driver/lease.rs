@@ -25,8 +25,8 @@ impl<'run> RuntimeTurnDriver<'run> {
         envelope: RuntimeEffectEnvelope,
         decode: impl FnOnce(RuntimeEffectOutcome) -> Result<T, RuntimeEffectControllerError>,
     ) -> Result<T, RuntimeEffectControllerError> {
-        // The step body runs on a copy of this driver and hands nothing back
-        // but its outcome: every decision it made rides the recorded outcome,
+        // The step body owns its effect context and hands back only its
+        // outcome: every decision it made rides the recorded outcome,
         // so a replay that never ran the body reconstructs the same state.
         let scoped_effect_controller = self.scoped_effect_controller.clone();
         let scoped_effect_controller = match &envelope.command {

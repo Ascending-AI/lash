@@ -54,8 +54,8 @@ impl RuntimeTurnDriver<'_> {
     /// derives nothing: no stream hook is finished and no response hook runs
     /// here. The phase runner commits the outcome as the call's receipt
     /// under `model.answer` and awaits its acknowledgement; only then does
-    /// [`Self::run_assistant_response_hooks`] derive the response from the
-    /// receipt, on this worker or any other.
+    /// [`TurnEffectContext::run_assistant_response_hooks`] derive the
+    /// response from the receipt, on this worker or any other.
     ///
     /// So a durably recorded response is never purchased again: a crash or a
     /// fault anywhere after the receipt's acknowledgement derives again from
@@ -90,7 +90,9 @@ impl RuntimeTurnDriver<'_> {
         )
         .await
     }
+}
 
+impl TurnEffectContext {
     async fn transform_assistant_stream_chunk(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
@@ -160,7 +162,7 @@ impl RuntimeTurnDriver<'_> {
         capsule: &crate::runtime::AssistantStreamCapsule,
     ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
     {
-        let address = self.receipt_hook_address()?.clone();
+        let address = receipt_hook_address(self.model_call_address.as_ref())?.clone();
         let original = response.clone();
         let plugins = self.session.plugins();
         let stream_hook_states = plugins
@@ -184,7 +186,9 @@ impl RuntimeTurnDriver<'_> {
         }
         Ok((current.unwrap_or(original), events))
     }
+}
 
+impl RuntimeTurnDriver<'_> {
     /// Finish the stream a model call's receipt recorded in `capsule`, for a
     /// derivation or a cancelled settlement that runs no response hook:
     /// the stream-finished callbacks end it for its recorded reason.
@@ -195,7 +199,7 @@ impl RuntimeTurnDriver<'_> {
         if capsule.finishing().1.is_empty() {
             return Ok(());
         }
-        let address = self.receipt_hook_address()?;
+        let address = receipt_hook_address(self.model_call_address.as_ref())?;
         self.session
             .plugins()
             .replay_assistant_stream(address, capsule)
@@ -203,18 +207,9 @@ impl RuntimeTurnDriver<'_> {
             .map(drop)
             .map_err(response_derivation_error)
     }
+}
 
-    fn receipt_hook_address(
-        &self,
-    ) -> Result<&crate::plugin::ModelCallAddress, RuntimeEffectControllerError> {
-        self.model_call_address.as_ref().ok_or_else(|| {
-            RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                "a model receipt with assistant callbacks must contain its call identity",
-            )
-        })
-    }
-
+impl TurnEffectContext {
     /// Runs one unjournaled attempt of an admitted model call on the
     /// transport its template bound, sending `admitted`'s request template
     /// as it was admitted, its attachment slots delivered afresh by the
@@ -958,7 +953,9 @@ impl RuntimeTurnDriver<'_> {
             );
         }
     }
+}
 
+impl RuntimeTurnDriver<'_> {
     pub(super) fn handle_log_event(&self, event: crate::sansio::LogEvent) {
         if !self.trace.is_observed() {
             return;
@@ -1042,7 +1039,9 @@ impl RuntimeTurnDriver<'_> {
             }
         }
     }
+}
 
+impl TurnEffectContext {
     /// Record one decoded stream event on the extended trace. `payload` is
     /// built only when a sink will take it.
     fn trace_stream_event(
@@ -1630,3 +1629,14 @@ mod generation_report_tests;
 #[cfg(test)]
 #[path = "streaming_protocol_abort_tests.rs"]
 mod protocol_abort_evidence_tests;
+
+fn receipt_hook_address(
+    address: Option<&crate::plugin::ModelCallAddress>,
+) -> Result<&crate::plugin::ModelCallAddress, RuntimeEffectControllerError> {
+    address.ok_or_else(|| {
+        RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+            "a model receipt with assistant callbacks must contain its call identity",
+        )
+    })
+}

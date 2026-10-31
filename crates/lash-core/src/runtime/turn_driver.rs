@@ -13,6 +13,7 @@ mod handlers;
 pub(crate) mod issue;
 mod lease;
 mod local_effects;
+use local_effects::TurnEffectContext;
 mod machine;
 mod model_calls;
 mod prepare;
@@ -69,10 +70,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_id: lash_vocabulary::identity::TurnId,
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
-    pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
-    /// The messages of the window `prelude` names, as a store read of it
-    /// gives them: what every recorded prelude of that window restores over.
-    pub(super) prelude_base_messages: crate::MessageSequence,
 
     pub(super) prompt_state: lash_core_store::prompt_sections::OwnerPromptState,
     pub(super) prepared_context: crate::session_model::context::PreparedContext,
@@ -132,9 +129,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect body's emissions key under that effect's invocation replay key
     /// instead.
     pub(super) turn_observations: crate::engine::ObservationCursor,
-    /// Where this driver stands when it observes: the turn's shift, which
-    /// may emit once a step body of this attempt has really run, or, on the
-    /// copy a recorded step's body runs on, that body's live step.
+    /// Where the turn driver stands when it observes. Effect bodies carry
+    /// their own standing, bound to the body's live step.
     pub(super) trace: crate::trace::TraceStanding,
     /// The admitted call the next model-call effect sends (ADR 0133 §6), its
     /// request template and recorded response context: handed to that

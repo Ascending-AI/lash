@@ -5,27 +5,11 @@ impl RuntimeTurnDriver<'_> {
         &self,
         protocol_iteration: usize,
     ) -> lash_trace::TraceContext {
-        lash_trace::TraceContext::default()
-            .for_session(self.session_id.clone())
-            .for_turn_index(self.turn_index)
-            .for_protocol_iteration(protocol_iteration)
-            .for_turn(self.turn_id.clone())
-    }
-
-    /// The trace id of one model call, named by the effect that made it, so a
-    /// step body on any worker names the call the same way without a counter
-    /// carried between steps.
-    pub(super) fn llm_call_id(
-        &self,
-        protocol_iteration: usize,
-        invocation: &crate::RuntimeInvocation,
-    ) -> String {
-        format!(
-            "{}:{}:{}:{}",
-            self.session_id,
+        turn_trace_context(
+            &self.session_id,
+            &self.turn_id,
             self.turn_index,
             protocol_iteration,
-            invocation.effect_id().unwrap_or_default()
         )
     }
 
@@ -46,14 +30,11 @@ impl RuntimeTurnDriver<'_> {
         &self,
         protocol_iteration: usize,
     ) -> Option<crate::RuntimeExecutionTracing> {
-        let tracing = &self.host.core.tracing;
-        Some({
-            crate::RuntimeExecutionTracing::new(
-                tracing.clone(),
-                self.trace.scope().cloned(),
-                self.trace_context(protocol_iteration),
-            )
-        })
+        execution_tracing(
+            &self.host.core.tracing,
+            &self.trace,
+            self.trace_context(protocol_iteration),
+        )
     }
 
     pub(super) fn mark_phase_begin(&self, phase: RuntimeTurnPhase) {
@@ -102,4 +83,68 @@ impl Drop for TurnPhaseSpan {
             probe.end(self.phase);
         }
     }
+}
+
+impl TurnEffectContext {
+    pub(super) fn trace_context(&self, protocol_iteration: usize) -> lash_trace::TraceContext {
+        turn_trace_context(
+            &self.session_id,
+            &self.turn_id,
+            self.turn_index,
+            protocol_iteration,
+        )
+    }
+
+    pub(super) fn execution_tracing(
+        &self,
+        protocol_iteration: usize,
+    ) -> Option<crate::RuntimeExecutionTracing> {
+        execution_tracing(
+            &self.host.core.tracing,
+            &self.trace,
+            self.trace_context(protocol_iteration),
+        )
+    }
+
+    /// The trace id of one model call, named by the effect that made it, so a
+    /// step body on any worker names the call the same way without a counter
+    /// carried between steps.
+    pub(super) fn llm_call_id(
+        &self,
+        protocol_iteration: usize,
+        invocation: &crate::RuntimeInvocation,
+    ) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            self.session_id,
+            self.turn_index,
+            protocol_iteration,
+            invocation.effect_id().unwrap_or_default()
+        )
+    }
+}
+
+fn turn_trace_context(
+    session_id: &SessionId,
+    turn_id: &lash_vocabulary::identity::TurnId,
+    turn_index: usize,
+    protocol_iteration: usize,
+) -> lash_trace::TraceContext {
+    lash_trace::TraceContext::default()
+        .for_session(session_id.clone())
+        .for_turn_index(turn_index)
+        .for_protocol_iteration(protocol_iteration)
+        .for_turn(turn_id.clone())
+}
+
+fn execution_tracing(
+    tracing: &crate::trace::TraceRuntime,
+    standing: &crate::trace::TraceStanding,
+    context: lash_trace::TraceContext,
+) -> Option<crate::RuntimeExecutionTracing> {
+    Some(crate::RuntimeExecutionTracing::new(
+        tracing.clone(),
+        standing.scope().cloned(),
+        context,
+    ))
 }

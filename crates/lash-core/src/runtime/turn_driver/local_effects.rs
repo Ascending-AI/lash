@@ -1,10 +1,66 @@
 use super::*;
 use crate::ActorContext;
-use crate::facade_support::RuntimeSessionStateFacadeOps;
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 
+/// The owned capabilities of one effect body. The turn driver alone owns
+/// admission, cell consumption, commit publication and after-turn state.
+pub(super) struct TurnEffectContext {
+    pub(super) session: Session,
+    pub(super) policy: RuntimeSessionPolicy,
+    pub(super) host: RuntimeHost,
+    pub(super) scoped_effect_controller: ActorContext,
+    pub(super) session_id: SessionId,
+    pub(super) turn_id: lash_vocabulary::identity::TurnId,
+    pub(super) turn_index: usize,
+    read_view: EffectReadView,
+    pub(super) execution_frame: Option<crate::FrameNodeId>,
+    pub(super) session_services: Arc<RuntimeSessionServices>,
+    pub(super) turn_context: crate::TurnContext,
+    pub(super) pending_turn_inputs: Vec<crate::AdmittedTurnInputs>,
+    pub(super) pending_checkpoint_turn_inputs: Option<crate::AdmittedTurnInputs>,
+    pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+    pub(super) opener_state: crate::session::OpenerState,
+    pub(super) children_stop: CancellationToken,
+    pub(super) cell_end: crate::CellEndHandoff,
+    pub(super) session_pages: Option<crate::plugin::SessionPages>,
+    pub(super) held_response: Option<crate::HeldResponse>,
+    pub(super) model_stop_error: Arc<std::sync::Mutex<Option<crate::LlmCallError>>>,
+    pub(super) model_limit: Option<crate::ExecutionLimit>,
+    pub(super) call_drains: streaming::CallDrains,
+    pub(super) turn_observations: crate::engine::ObservationCursor,
+    pub(super) trace: crate::trace::TraceStanding,
+    pub(super) admitted_body: Option<lash_protocol_types::llm::types::AdmittedSend>,
+    pub(super) model_attempt: u32,
+    pub(super) model_call_address: Option<crate::plugin::ModelCallAddress>,
+    pub(super) model_call_ordinal: u32,
+    pub(super) run_config: crate::runtime::durable::run_config::RecordedRunConfig,
+}
+
+/// Captured read inputs; the callback materializes its message view when it runs.
+struct EffectReadView {
+    state: crate::RuntimeSessionState,
+    graph: Arc<crate::SessionGraph>,
+    protocol_turn_options: crate::ProtocolTurnOptions,
+}
+
+impl TurnEffectContext {
+    pub(super) fn checkpoint_state_view(
+        &self,
+        messages: crate::MessageSequence,
+    ) -> crate::SessionReadView {
+        crate::SessionReadView::derived_from_persisted_state(
+            &self.read_view.state,
+            self.policy.policy.clone(),
+            self.turn_index,
+            self.read_view.protocol_turn_options.clone(),
+            Arc::clone(&self.read_view.graph),
+            messages,
+        )
+    }
+}
+
 struct LocalTurnEffectRunner {
-    driver: RuntimeTurnDriver<'static>,
+    context: TurnEffectContext,
     protocol_iteration: usize,
     messages: crate::MessageSequence,
     /// The machine's admitted last-call usage at this effect's boundary.
@@ -19,7 +75,7 @@ struct LocalTurnEffectRunner {
 #[async_trait::async_trait]
 impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     fn execution_state(&self) -> Option<Arc<dyn crate::plugin::ExecutionState>> {
-        Some(self.driver.session.plugins().clone())
+        Some(self.context.session.plugins().clone())
     }
 
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
@@ -35,7 +91,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     /// A recorded step's body observes as that body's live step. A body that
     /// replays by re-execution is bound none, and keeps the turn's standing.
     fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
-        self.driver.trace = self.driver.trace.in_body(&live);
+        self.context.trace = self.context.trace.in_body(&live);
     }
 
     async fn execute(
@@ -47,7 +103,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
         match envelope.command {
             RuntimeEffectCommand::BeforeLlmCall { request } => {
                 let decision = if runner
-                    .driver
+                    .context
                     .session
                     .plugins()
                     .protocol_session()
@@ -55,13 +111,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 {
                     let flat = request.materialize();
                     runner
-                        .driver
-                        .run_before_llm_call(
-                            runner.messages,
-                            runner.protocol_iteration,
-                            &flat,
-                            runner.last_call_usage,
-                        )
+                        .context
+                        .run_before_llm_call(runner.messages, &flat, runner.last_call_usage)
                         .await
                 } else {
                     Ok(None)
@@ -87,9 +138,13 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // this deployment's fault: it leaves the step unsealed and
                 // the engine runs it again, and it is never the call's
                 // recorded result.
-                let provider = runner.driver.policy.binding().bind_for_unjournaled_call()?;
+                let provider = runner
+                    .context
+                    .policy
+                    .binding()
+                    .bind_for_unjournaled_call()?;
                 // The admitted call's exact body: the body sends it as it is.
-                let body = runner.driver.admitted_body.take().ok_or_else(|| {
+                let body = runner.context.admitted_body.take().ok_or_else(|| {
                     RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                         "a model call's effect runs only for an admitted call with its body",
@@ -97,18 +152,18 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 })?;
                 // A cancellation the turn already honoured stops the model
                 // call.
-                let stop = runner.driver.children_stop.child_token();
+                let stop = runner.context.children_stop.child_token();
                 let request = Arc::new((*request).into_retained());
                 let invocation = envelope.invocation.into_runtime_invocation();
                 let protocol_iteration = runner.protocol_iteration;
                 let event_tx = runner.event_tx.clone();
-                let driver = &mut runner.driver;
+                let context = &mut runner.context;
                 let crate::runtime::RuntimeLlmCallOutcome {
                     result,
                     text_streamed,
                     call_record,
                     stream,
-                } = Box::pin(driver.run_llm_call(
+                } = Box::pin(context.run_llm_call(
                     request,
                     &body,
                     protocol_iteration,
@@ -130,7 +185,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 plan,
                 capsule,
             } => runner
-                .driver
+                .context
                 .run_assistant_response_hooks(*response, &plan, &capsule)
                 .await
                 .map(
@@ -141,7 +196,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 ),
             RuntimeEffectCommand::ExecCode { code } => {
                 let result = runner
-                    .driver
+                    .context
                     .run_exec_code(
                         &code,
                         runner.active_events.clone(),
@@ -157,9 +212,9 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             }
             RuntimeEffectCommand::Checkpoint { checkpoint } => {
                 runner
-                    .driver
+                    .context
                     .execute_checkpoint_locally(
-                        runner.messages.clone(),
+                        runner.messages,
                         runner.protocol_iteration,
                         checkpoint,
                         runner.decides_candidate,
@@ -199,79 +254,52 @@ pub(super) fn turn_effect_executor(
         driver.trace.scope().cloned(),
         driver.trace_context(machine.protocol_iteration()),
     );
-    let owned_driver = RuntimeTurnDriver {
-        run: std::marker::PhantomData,
-        // An effect body takes no boundary of its own, but a cell it runs
-        // asks whether its turn may end at one inside it (FIG-4739).
+    // Preserve the body's read cut without giving it a turn commit owner.
+    // Materializing an owned message sequence belongs to the callback body,
+    // not to constructing an executor for an effect that may never read it.
+    let mut read_state = driver.turn_pipeline.state().clone();
+    read_state.ensure_agent_frame_initialized_with_clock(driver.host.core.clock.as_ref());
+    let execution_frame = read_state.current_frame_node_id.clone();
+    let read_graph = Arc::new(std::mem::take(&mut read_state.session_graph));
+    let context = TurnEffectContext {
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
-        prelude: driver.prelude.clone(),
-        prelude_base_messages: driver.prelude_base_messages.clone(),
-        prepared_context: driver.prepared_context.clone(),
-        prompt_state: driver.prompt_state.clone(),
-
-        answered_cell_calls: Default::default(),
-        cell_end: driver.cell_end.clone(),
-        answered_cell_execution: None,
-        answered_cell_end: None,
-        held_response: driver.held_response.clone(),
-        // A step body closes no cell span: the driver that runs the cell
-        // does, once a commit consumes its answer.
-        cell_start: None,
-        answered_cell_close: None,
-        session_pages: driver.session_pages.clone(),
         host: driver.host.clone(),
         scoped_effect_controller,
         session_id: driver.session_id.clone(),
         turn_id: driver.turn_id.clone(),
         turn_index: driver.turn_index,
-        turn_pipeline: crate::runtime::TurnBoundary::from_state_with_clock(
-            driver.turn_pipeline.state().clone(),
-            Arc::clone(&driver.host.core.clock),
-            driver.turn_pipeline.state().turn_scope(&driver.turn_id),
-            driver.host.core.durability.commit_budget,
-        )
-        .with_output_cuts(driver.host.core.control.output_cuts)
-        .with_definition_engines(driver.host.core.process_engines.clone())
-        .with_metrics(driver.host.core.tracing.metrics().clone())
-        .with_trace(driver.trace.clone()),
-        pending_model_calls: Vec::new(),
-        staged_model_calls: Vec::new(),
-        published_model_calls: std::collections::HashSet::new(),
-        model_call_ordinal: driver.model_call_ordinal,
-        sealed_attempt_count: 0,
-        provider_panic: None,
-        failure_evidence: Vec::new(),
+        read_view: EffectReadView {
+            state: read_state,
+            graph: read_graph,
+            protocol_turn_options: driver.protocol_turn_options.clone(),
+        },
+        execution_frame,
         session_services: Arc::clone(&driver.session_services),
-        // A step body runs no after-turn callback.
-        after_turn_reads: None,
-        protocol_turn_options: driver.protocol_turn_options.clone(),
         turn_context: driver.turn_context.clone(),
         pending_turn_inputs: driver.pending_turn_inputs.clone(),
         pending_checkpoint_turn_inputs: driver.pending_checkpoint_turn_inputs.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
-        protocol_reply: Default::default(),
         opener_state: driver.opener_state.clone(),
         children_stop: driver.children_stop.clone(),
+        cell_end: driver.cell_end.clone(),
+        session_pages: driver.session_pages.clone(),
+        held_response: driver.held_response.clone(),
         model_stop_error: Arc::clone(&driver.model_stop_error),
         model_limit: driver.model_limit,
         call_drains: driver.call_drains.clone(),
-        // The body's own lane, keyed by the effect invocation it runs: the
-        // turn cursor is the main driver's alone, and cloning it would put
-        // body and driver emissions on colliding {key}#{ordinal} ids.
+        // Body and driver emissions have distinct observation identities.
         turn_observations: body_observation_cursor(body_replay_key),
         trace: driver.trace.clone(),
         admitted_body: driver.admitted_body.take(),
         model_attempt: driver.model_attempt,
         model_call_address: driver.model_call_address.clone(),
+        model_call_ordinal: driver.model_call_ordinal,
         run_config: driver.run_config.clone(),
-        environment: driver.environment.clone(),
-        adopted_environment: driver.adopted_environment.clone(),
-        environment_frontier: driver.environment_frontier.clone(),
     };
     lash_core_execution::core_internal::owned_runner_executor(
         Box::new(LocalTurnEffectRunner {
-            driver: owned_driver,
+            context,
             protocol_iteration: machine.protocol_iteration(),
             messages: machine.message_sequence(),
             last_call_usage: machine.last_call_usage().cloned().and_then(nonzero_usage),

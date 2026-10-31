@@ -406,7 +406,6 @@ impl RuntimeTurnServices {
             &row.run,
             admissions,
             start,
-            held,
             &observer,
         ))
         .await?;
