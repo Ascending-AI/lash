@@ -7,6 +7,8 @@ pub(in crate::machine) use closure::ClosureConstruction;
 pub(in crate::machine) mod construction;
 mod join;
 mod leaf;
+mod occurrence;
+use occurrence::source_loops;
 mod session;
 use super::session::Session;
 use crate::admission::{Allowance, SourceResources};
@@ -302,6 +304,10 @@ impl Context<'_> {
         })?;
         debug_assert!(committed.materializations.entities().is_empty());
         self.logical_memory.set(committed.balance.total()?);
+        #[cfg(any(test, feature = "testing"))]
+        crate::machine::islands::witness::source_loop_published(
+            &frontier.position().occurrence.loops,
+        );
         Ok(true)
     }
 }

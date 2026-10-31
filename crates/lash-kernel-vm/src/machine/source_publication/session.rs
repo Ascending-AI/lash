@@ -2,7 +2,7 @@
 use super::*;
 use crate::compile::room::publication::Occurrence;
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
-use crate::machine::{Control, Halt, KernelMachine, fault, stream::Running};
+use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{JournalEvent, Owner, PublicationValue};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
@@ -32,21 +32,15 @@ impl KernelMachine {
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
-        let (source, link) = {
+        let (source, link, loops) = {
             let frame = self.frame(running.task)?;
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             (
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
+                loops,
             )
         };
         if source.site.unit != lash_kernel_value::sites::Unit::Main
@@ -151,7 +145,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

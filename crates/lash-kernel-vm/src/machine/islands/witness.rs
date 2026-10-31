@@ -59,6 +59,7 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static SOURCE_LOOP_PUBLICATIONS: std::cell::RefCell<std::collections::BTreeMap<lash_kernel_value::sites::Site, std::collections::BTreeSet<u64>>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static PRECISE_JOINS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static COUNTS: RefCell<Option<Counts>> = const { RefCell::new(None) };
     static SESSION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -404,5 +405,30 @@ pub(in crate::machine) fn precise_join_published(scoped: bool) {
         let mut next = counts.get();
         next[usize::from(scoped)] += 1;
         counts.set(next);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn source_loop_publications()
+-> std::collections::BTreeMap<lash_kernel_value::sites::Site, std::collections::BTreeSet<u64>> {
+    SOURCE_LOOP_PUBLICATIONS.with(|counts| std::mem::take(&mut *counts.borrow_mut()))
+}
+
+pub(in crate::machine) fn source_loop_published(loops: &[(lash_kernel_value::sites::Site, u64)]) {
+    if !loops.iter().any(|(_, iteration)| *iteration < 2) {
+        return;
+    }
+    SOURCE_LOOP_PUBLICATIONS.with(|counts| {
+        let mut counts = counts.borrow_mut();
+        for (site, iteration) in loops.iter().filter(|(_, iteration)| *iteration < 2) {
+            match counts.get_mut(site) {
+                Some(iterations) => {
+                    iterations.insert(*iteration);
+                }
+                None => {
+                    counts.insert(site.clone(), [*iteration].into());
+                }
+            }
+        }
     });
 }

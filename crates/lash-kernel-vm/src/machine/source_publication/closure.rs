@@ -5,8 +5,7 @@ use crate::compile::{
     room::{ExitKind, Measure, Phase, Point, publication::Occurrence},
 };
 use crate::machine::{
-    Control, Halt, KernelMachine, SlotState, fault, registers::PreparedConstruction,
-    stream::Running,
+    Halt, KernelMachine, SlotState, fault, registers::PreparedConstruction, stream::Running,
 };
 use doc::heap::EntityId;
 use lash_kernel_exec::Op;
@@ -120,18 +119,11 @@ impl KernelMachine {
         let lash_kernel_value::sites::Unit::Library(function) = target.site.unit else {
             return Ok(false);
         };
-        let (source, link, captures) = {
+        let (source, link, captures, loops) = {
             let frame = self.frame(running.task)?;
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             let mut captures = Vec::new();
             captures
                 .try_reserve(target.captures.len())
@@ -148,6 +140,7 @@ impl KernelMachine {
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
                 captures,
+                loops,
             )
         };
         let Ok(unpaid) = source.next_after_commit(site) else {
@@ -230,7 +223,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

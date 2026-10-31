@@ -4,7 +4,7 @@ use crate::compile::{
     SourceJoin,
     room::{Measure, Phase, Point, publication::Occurrence},
 };
-use crate::machine::{Control, Halt, KernelMachine, SlotState, fault, stream::Running};
+use crate::machine::{Halt, KernelMachine, SlotState, fault, stream::Running};
 use lash_kernel_exec::{LocalRef, Op};
 use lash_kernel_state::kernel_internals::logical::{JournalEvent, PublicationValue};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
@@ -48,18 +48,11 @@ impl KernelMachine {
         join: &SourceJoin,
         scope: Option<LocalRef>,
     ) -> Result<bool, Halt> {
-        let (source, link) = {
+        let (source, link, loops) = {
             let frame = self.frame(running.task)?;
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             if let Some(local) = scope
                 && running
                     .exe
@@ -73,6 +66,7 @@ impl KernelMachine {
             (
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
+                loops,
             )
         };
         let Ok(unpaid) = source.next_after_commit(&join.to) else {
@@ -155,7 +149,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

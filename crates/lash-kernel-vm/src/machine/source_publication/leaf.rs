@@ -2,7 +2,7 @@
 use super::*;
 use crate::compile::room::publication::Occurrence;
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
-use crate::machine::{Control, Halt, KernelMachine, SlotState, fault};
+use crate::machine::{Halt, KernelMachine, SlotState, fault};
 use crate::machine::{logical_held::Projection, stream::Running};
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{JournalEvent, PublicationValue};
@@ -24,20 +24,11 @@ impl KernelMachine {
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
-        let (source, link, cell) = {
+        let (source, link, cell, loops) = {
             let frame = self.frame(running.task)?;
-            // Loop headers and active departures need their own exact runtime
-            // occurrence. This cohort has neither; it never invents one.
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             let cell = match op {
                 Op::Local { local, .. } => match frame.slot(local.at) {
                     SlotState::Cell(cell) => Some(*cell),
@@ -49,6 +40,7 @@ impl KernelMachine {
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
                 cell,
+                loops,
             )
         };
         let Ok(unpaid) = source.next_after_commit(site) else {
@@ -108,7 +100,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

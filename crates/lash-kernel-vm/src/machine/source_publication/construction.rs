@@ -3,7 +3,7 @@ pub(in crate::machine) mod storage;
 use super::*;
 use crate::compile::room::{ExitKind, Phase, Point, publication::Occurrence};
 use crate::machine::{
-    Control, Halt, KernelMachine, fault, registers::PreparedConstruction, stream::Running,
+    Halt, KernelMachine, fault, registers::PreparedConstruction, stream::Running,
 };
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{Holding, JournalEvent, PublicationValue as PV};
@@ -101,21 +101,15 @@ impl KernelMachine {
             return Ok(false);
         };
         let physical_room = self.capacity_headroom();
-        let (source, link) = {
+        let (source, link, loops) = {
             let frame = self.frame(running.task)?;
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             (
                 Arc::clone(&running.exe.code(frame.code).source_room),
                 frame.link,
+                loops,
             )
         };
         let Ok(unpaid) = source.next_after_commit(site) else {
@@ -195,7 +189,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

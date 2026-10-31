@@ -14,8 +14,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let code = &frame.state.callee.compiled.code;
         let regs = &mut frame.regs;
         match packet.opcode {
-            Opcode::ScopeClose => {
-                let site = &code.sites.scope_close[packet.x as usize];
+            Opcode::ScopePrefix => {
+                let site = &code.sites.scope_prefix[packet.x as usize];
                 if !self.fits(site.ahead) {
                     return Err(self.at(site.miss));
                 }

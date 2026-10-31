@@ -297,7 +297,7 @@ operations! {
             }
         }
         [Native native Heap heap] {
-            ScopeClose scope_close {
+            ScopePrefix scope_prefix {
                 ahead: u64,
                 miss: u32,
             }

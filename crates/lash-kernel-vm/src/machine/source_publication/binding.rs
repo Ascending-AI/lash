@@ -4,8 +4,7 @@ use crate::compile::room::publication::Occurrence;
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::stream::Running;
 use crate::machine::{
-    Control, Eval, KernelMachine, SlotState, fault, frames::PreparedBinding,
-    registers::PreparedTransfer,
+    Eval, KernelMachine, SlotState, fault, frames::PreparedBinding, registers::PreparedTransfer,
 };
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{
@@ -89,20 +88,11 @@ impl KernelMachine {
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
-        let (source, link, cell) = {
+        let (source, link, cell, loops) = {
             let frame = self.frame(running.task)?;
-            // Loop headers and active departures need their own exact runtime
-            // occurrence. This cohort has neither; it never invents one.
-            if frame.cleaning.is_some()
-                || frame.control.iter().any(|control| {
-                    matches!(
-                        control,
-                        Control::For { .. } | Control::While { .. } | Control::Try { .. }
-                    )
-                })
-            {
+            let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
-            }
+            };
             if running
                 .exe
                 .code(frame.code)
@@ -124,6 +114,7 @@ impl KernelMachine {
                 } else {
                     None
                 },
+                loops,
             )
         };
         let successor = if scoped {
@@ -290,7 +281,7 @@ impl KernelMachine {
             occurrence: Occurrence {
                 task: running.task,
                 invocation: roots.invocation().id(),
-                loops: vec![],
+                loops,
                 action: None,
                 departure: None,
             },

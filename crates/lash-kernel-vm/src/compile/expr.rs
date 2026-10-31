@@ -257,6 +257,8 @@ pub(crate) enum Kind {
         local: LocalRef,
         value: Box<Expr>,
         body: Box<Expr>,
+        bind_ahead: u64,
+        bind_miss: u32,
         ahead: u64,
         miss: u32,
     },
@@ -451,7 +453,7 @@ struct Reader<'s> {
     open: Vec<Close>,
     /// Each expression local this run bound and has not ended: its
     /// variable, its register and its value.
-    lets: Vec<(LocalRef, u32, Expr)>,
+    lets: Vec<(LocalRef, u32, Expr, u64, u32)>,
     /// The frame positions of the expression locals open around the ops
     /// read, outermost first: an arm sees its conditional's.
     scope: Vec<u32>,
@@ -619,7 +621,8 @@ impl<'s> Reader<'s> {
                 }
                 Op::LetBind { local, src } => {
                     let value = self.take(src)?;
-                    self.lets.push((local, src.0, value));
+                    let prefix = (units(&self.open), self.miss(pc));
+                    self.lets.push((local, src.0, value, prefix.0, prefix.1));
                     self.scope.push(local.at);
                     pc += 1;
                     continue;
@@ -627,7 +630,7 @@ impl<'s> Reader<'s> {
                 // The value its body computes, in the same register, is the
                 // expression's.
                 Op::LetEnd { local } => {
-                    let (bound, reg, value) = self.lets.pop()?;
+                    let (bound, reg, value, bind_ahead, bind_miss) = self.lets.pop()?;
                     self.scope.pop();
                     if bound.at != local.at {
                         return None;
@@ -640,6 +643,8 @@ impl<'s> Reader<'s> {
                             local: bound,
                             value: Box::new(value),
                             body: Box::new(body),
+                            bind_ahead,
+                            bind_miss,
                             ahead: units(&self.open),
                             miss: self.miss(pc),
                         },

@@ -1251,17 +1251,23 @@ impl<'e> Build<'e> {
                 local,
                 value,
                 body,
+                bind_ahead,
+                bind_miss,
                 ahead,
                 miss,
             } => {
                 self.expr(value)?;
+                self.emit(Op::ScopePrefix {
+                    ahead: *bind_ahead,
+                    miss: *bind_miss,
+                });
                 self.emit(Op::Bind {
                     at: local.at as usize,
                     src: value.reg,
                 });
                 self.live.retain(|at| *at != value.reg);
                 self.expr(body)?;
-                self.emit(Op::ScopeClose {
+                self.emit(Op::ScopePrefix {
                     ahead: *ahead,
                     miss: *miss,
                 });
