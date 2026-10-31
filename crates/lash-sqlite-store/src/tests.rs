@@ -271,6 +271,79 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
     }
 }
 
+/// FIG-7569: nullable SQL families admit exactly the domain's complete values.
+#[test]
+fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
+    let connection = Connection::open_in_memory().expect("SQLite CHECK witness");
+    for ddl in crate::schema::provisioning_statements() {
+        connection.execute_batch(ddl).expect("schema");
+    }
+    for (kind, turns, valid) in [
+        ("until_gc", None, true),
+        ("head_only", None, true),
+        ("last_turns", None, false),
+        ("last_turns", Some(0_i64), false),
+        ("last_turns", Some(-1), false),
+        ("last_turns", Some(1), true),
+        ("last_turns", Some(i64::from(u32::MAX)), true),
+        ("last_turns", Some(i64::from(u32::MAX) + 1), false),
+        ("head_only", Some(1), false),
+    ] {
+        let result = connection.execute(
+            "INSERT OR REPLACE INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('session', 'root', ?1, ?2)",
+            params![kind, turns],
+        );
+        assert_eq!(
+            result.is_ok(),
+            valid,
+            "retention {kind}/{turns:?}: {result:?}"
+        );
+    }
+    for (kind, id, valid) in [
+        (None, None, false),
+        (None, Some("scope"), false),
+        (Some("turn"), None, false),
+        (Some("unknown"), Some("scope"), false),
+        (Some("turn"), Some("scope"), true),
+        (Some("session_operation"), Some("scope"), true),
+        (Some("process"), Some("scope"), true),
+        (Some("session"), Some("scope"), true),
+    ] {
+        let result = connection.execute(
+            "INSERT OR REPLACE INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, change_seq, lifetime, lifetime_scope_kind, lifetime_scope_id, start_json, execution_json, lifecycle_json) VALUES ('process', 'host', 'engine', 0, 0, 0, 'until', ?1, ?2, '{}', '{}', '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"running\"}}')",
+            params![kind, id],
+        );
+        assert_eq!(
+            result.is_ok(),
+            valid,
+            "lifetime {kind:?}/{id:?}: {result:?}"
+        );
+    }
+    for mask in 0..8 {
+        let owner = (mask & 1 != 0).then_some("owner");
+        let run = (mask & 2 != 0).then_some(0);
+        let call = (mask & 4 != 0).then_some("call");
+        let result = connection.execute(
+            "INSERT OR REPLACE INTO model_call_pins (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call) VALUES ('session', 'turn:run', '0', 'call', 1, 0, ?1, ?2, ?3)",
+            params![owner, run, call],
+        );
+        assert_eq!(
+            result.is_ok(),
+            mask == 0 || mask == 7,
+            "enclosing presence {mask}: {result:?}"
+        );
+    }
+    assert!(
+        connection
+            .execute(
+                "UPDATE model_call_pins SET enclosing_run = -1 WHERE session_id = 'session'",
+                [],
+            )
+            .is_err(),
+        "an enclosing run is unsigned"
+    );
+}
+
 #[test]
 fn queued_work_checks_reject_illegal_vocabulary() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");

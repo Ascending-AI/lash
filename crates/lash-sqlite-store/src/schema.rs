@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     -- The shift authority holds exactly the states a raise writes: unraised,
     -- sealed by an execution (its start marker), or raised by a control verb
     -- (no marker). A closing session was raised by its close.
-    CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns > 0)),
+    CONSTRAINT ck_session_meta_retention CHECK ((retention_kind IN ('until_gc', 'head_only') AND retention_last_turns IS NULL) OR (retention_kind = 'last_turns' AND retention_last_turns IS NOT NULL AND retention_last_turns BETWEEN 1 AND 4294967295)),
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -607,7 +607,7 @@ CREATE TABLE IF NOT EXISTS processes (
     CONSTRAINT ck_processes_last_event_sequence CHECK (typeof(last_event_sequence) = 'integer'),
     CONSTRAINT ck_processes_cancel_requested_at CHECK (typeof(cancel_requested_at_ms) = CASE WHEN json_type(lifecycle_json, '$.cancel_request') IS NULL THEN 'null' ELSE 'integer' END),
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
-    CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
+    CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IS NOT NULL AND lifetime_scope_kind IN ('turn', 'session_operation', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
 
 
