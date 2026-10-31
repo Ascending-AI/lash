@@ -395,6 +395,19 @@ impl ProcessSteps for NoSteps {
         Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        step: &lash_execution_contracts::process::StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<lash_core_execution::runtime::process::steps::StepAssessment, StepRefusal> {
+        Err(StepRefusal::UnknownTool {
+            step: step.step().0.clone(),
+            tool: step.step().0.clone(),
+        })
+    }
+
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,

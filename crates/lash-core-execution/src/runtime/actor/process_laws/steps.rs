@@ -7,6 +7,28 @@ impl ProcessSteps for LawSteps {
         std::time::Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &Arc<crate::runtime::process::StepRuntime>,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        _target: Option<&crate::runtime::process::steps::InvocationTarget>,
+    ) -> Result<crate::runtime::process::steps::StepAssessment, StepRefusal> {
+        let policy = match step_tool(step) {
+            LAW_FLAKY => ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(3).unwrap_or(std::num::NonZeroU32::MIN),
+                10,
+                50,
+            ),
+            _ => ExecutionPolicy::Once,
+        };
+
+        Ok(crate::runtime::process::steps::StepAssessment::Current {
+            tool: lash_vocabulary::tool_contract::ToolId::new(step_tool(step)),
+            policy,
+        })
+    }
+
     async fn admit(
         &self,
         _runtime: &Arc<crate::runtime::process::StepRuntime>,

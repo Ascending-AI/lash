@@ -41,9 +41,9 @@ use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{AdmittedExecution, MemberBody, MemberOutcome};
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
-    ProcessSteps, StepAdmission, StepRefusal, StepRuntime, discharge_tool_step,
-    dispatch_resolution, tool_step_output, tool_step_refused, tool_step_resolved,
-    tool_step_settled,
+    ProcessSteps, StepAdmission, StepAssessment, StepRefusal, StepRuntime, binding_drift_output,
+    discharge_tool_step, dispatch_resolution, tool_step_output, tool_step_refused,
+    tool_step_resolved, tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_store::tool_run::Material;
@@ -54,6 +54,9 @@ use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 
 use super::DurableProcessWorker;
+
+mod binding;
+use binding::StepBinding;
 
 /// Whether `step` is the resolution of a granted tool's call (P6): its
 /// effect is linked as a dispatch grant in the env `runtime`'s tools were
@@ -629,57 +632,12 @@ impl ProcessSteps for WorkerSteps {
                         }
                     }
                 }
-                let link = match target.as_ref() {
-                    Some(target) => {
-                        let matched = crate::DeferredMatch {
-                            requested: target
-                                .dispatch_requested
-                                .clone()
-                                .unwrap_or_else(|| effect.to_string()),
-                            outcome: crate::DeferredOutcome::Resolved {
-                                link: target.route.clone(),
-                            },
-                        };
-                        let (link, binding) =
-                            tools.context.matched_link(&matched).map_err(unavailable)?;
-                        if let Err(reason) = binding {
-                            return Err(StepRefusal::CompositionUnavailable { reason });
-                        }
-                        link
-                    }
-                    None => tools.context.step_link(effect).map_err(unavailable)?,
-                };
-                match link {
-                    crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {
-                        step: step.0.clone(),
-                        tool: effect.to_string(),
-                    }),
-                    // A resolved link's binding this node cannot read parks
-                    // the process before the call is admitted (S8), as a
-                    // match's does.
-                    crate::plugin::StepLink::Unreadable { reason, .. } => {
-                        Err(StepRefusal::CompositionUnavailable { reason })
-                    }
-                    // A link whose provider this node does not register
-                    // parks the process as an unreadable binding does
-                    // (FIG-6993): the call's record names the provider, so
-                    // only a node that registers it claims the process to
-                    // run, and the strand report names it while none is
-                    // live. Nothing settles.
-                    crate::plugin::StepLink::ProviderUnregistered { provider } => {
-                        Err(StepRefusal::CompositionUnavailable {
-                            reason: format!(
-                                "the call's provider `{provider}` is not registered on this node"
-                            ),
-                        })
-                    }
+                match binding::linked(&tools, step, effect, target.as_ref())? {
                     // The body's limit and the park's deadline are pinned
                     // separately, as a round member's are.
                     // It is admitted under the policy its link recorded,
                     // which the served manifest carries (C1).
-                    crate::plugin::StepLink::Served {
-                        manifest, binding, ..
-                    } => {
+                    StepBinding::Current { manifest, binding } => {
                         let pin = MemberPin::admitted(
                             manifest.id.clone(),
                             manifest.execution_policy,
@@ -702,7 +660,7 @@ impl ProcessSteps for WorkerSteps {
                     // step settles with a typed tool failure, which its
                     // engine receives as a catchable error, and no body
                     // starts, on this attempt or a retry.
-                    crate::plugin::StepLink::Drifted { tool, kind } => {
+                    StepBinding::Drifted { tool, kind } => {
                         let control = self
                             .0
                             .config
@@ -710,32 +668,7 @@ impl ProcessSteps for WorkerSteps {
                             .control
                             .execution_budgets
                             .tool_check_phase();
-                        let effect = effect.to_string();
-                        let (code, cause, message) = match &kind {
-                            crate::ToolSurfaceDriftKind::Missing => (
-                                "linked_tool_missing",
-                                crate::ToolFailureCause::LinkedToolMissing {
-                                    effect: effect.clone(),
-                                    tool: tool.clone(),
-                                },
-                                format!(
-                                    "the effect `{effect}` is linked to tool `{tool}`, which is \
-                                     missing from what this node's provider serves since the \
-                                     process's env linked it; nothing ran"
-                                ),
-                            ),
-                            crate::ToolSurfaceDriftKind::ContractChanged { pinned, live } => (
-                                "operation_contract_changed",
-                                crate::ToolFailureCause::OperationContractChanged {
-                                    effect: effect.clone(),
-                                    tool: tool.clone(),
-                                    pinned: pinned.clone(),
-                                    live: live.clone(),
-                                },
-                                lash_core::operation_contract_changed(&effect, &tool, pinned, live)
-                                    .message,
-                            ),
-                        };
+                        let output = binding_drift_output(&process.id, effect, tool.clone(), kind);
                         let mut admission = StepAdmission::new(
                             tool,
                             crate::ExecutionPolicy::Once,
@@ -748,11 +681,51 @@ impl ProcessSteps for WorkerSteps {
                             .iter()
                             .find(|entry| entry.manifest.id == admission.tool)
                             .map(|entry| entry.manifest.operation.clone());
-                        admission.settled =
-                            Some(step_failure(process, code, message, Some(cause), None).output);
+                        admission.settled = Some(output);
                         Ok(admission)
                     }
                 }
+            }
+        }
+    }
+
+    fn assess(
+        &self,
+        runtime: &Arc<StepRuntime>,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<StepAssessment, StepRefusal> {
+        match step {
+            StepRequest::Engine { kind, .. } => {
+                let engine = engine_kind(process).unwrap_or_default();
+                let steps = self
+                    .0
+                    .config
+                    .runtime_host
+                    .process_engines
+                    .engine_steps(engine, kind)?;
+                Ok(StepAssessment::Current {
+                    tool: kind.admitted_tool(engine),
+                    policy: steps.retry(kind),
+                })
+            }
+            StepRequest::Tool {
+                step, use_: effect, ..
+            } => {
+                let tools = runtime
+                    .built_tools()
+                    .ok_or_else(|| StepRefusal::Unavailable {
+                        step: step.0.clone(),
+                        reason: "the activation prepared no step tools".into(),
+                    })?;
+                Ok(match binding::linked(&tools, step, effect, target)? {
+                    StepBinding::Current { manifest, .. } => StepAssessment::Current {
+                        tool: manifest.id,
+                        policy: manifest.execution_policy,
+                    },
+                    StepBinding::Drifted { tool, kind } => StepAssessment::Drifted { tool, kind },
+                })
             }
         }
     }

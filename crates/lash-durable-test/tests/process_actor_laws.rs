@@ -333,6 +333,27 @@ impl ProcessSteps for LawSteps {
         std::time::Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<lash_core_execution::runtime::process::steps::StepAssessment, StepRefusal> {
+        if scripted_steps::tool(step).as_str() == REFUSED_TOOL {
+            return Err(StepRefusal::Refused {
+                step: step.step().0.clone(),
+                reason: "its input does not match the tool's declaration".to_owned(),
+            });
+        }
+        Ok(
+            lash_core_execution::runtime::process::steps::StepAssessment::Current {
+                tool: scripted_steps::tool(step),
+                policy: ExecutionPolicy::Once,
+            },
+        )
+    }
+
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,

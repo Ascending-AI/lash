@@ -697,7 +697,7 @@ impl ProcessActivation {
             }
         };
         let restoring = !continuation.facts_current(tx.revision());
-        let (rows, waits) = continuation
+        let fact_count = continuation
             .facts(reads, process, &driver, tx.revision())
             .await?;
         if restoring {
@@ -709,7 +709,7 @@ impl ProcessActivation {
                 owned.actor(),
                 owned.epoch(),
                 lash_durable::OwnerRead::ActiveRunRows,
-                rows.rows.len() as u64,
+                fact_count as u64,
             );
         }
         owned
@@ -776,31 +776,58 @@ impl ProcessActivation {
                 .await?;
             return Ok(Pass::Again);
         }
-        let mut policies = Vec::with_capacity(driver.steps.len());
+        let retained = continuation
+            .reduced()
+            .map_err(|error| corrupt("a process's run records", error))?;
+        let mut policies = Vec::new();
         let mut link_failures = BTreeMap::new();
         for step in driver.steps.values() {
-            if let Ok(admission) = self
-                .steps
-                .admit(
-                    &live.bodies.runtime,
-                    &record,
-                    &step.request,
-                    step.target.as_ref(),
-                    millis(now),
-                )
-                .await
+            let Some(view) = retained.round(lash_durable::domain::RunSeq(step.run)) else {
+                continue;
+            };
+            let Some(member) = usize::try_from(step.member)
+                .ok()
+                .and_then(|index| view.members().get(index))
+            else {
+                continue;
+            };
+            if member.outcome().is_some()
+                || !member.draft().policy().reruns_interrupted()
+                || matches!(member.state(), round::MemberState::Waiting { .. })
+                || live.lifecycle.holds_execution(&view.id_of(member))
             {
-                policies.push((admission.tool, admission.policy));
-                if let Some(output) = admission.settled {
+                continue;
+            }
+            use crate::runtime::process::steps::StepAssessment;
+            match self.steps.assess(
+                &live.bodies.runtime,
+                &record,
+                &step.request,
+                step.target.as_ref(),
+            ) {
+                Ok(StepAssessment::Current { tool, policy }) => policies.push((tool, policy)),
+                Ok(StepAssessment::Drifted { tool, kind }) => {
+                    let StepRequest::Tool { use_: effect, .. } = &step.request else {
+                        return Err(corrupt("an existing engine step", "tool-binding drift"));
+                    };
+                    policies.push((
+                        tool.clone(),
+                        lash_kernel_value::tool_contract::ExecutionPolicy::Once,
+                    ));
+                    let output = crate::runtime::process::steps::binding_drift_output(
+                        process, effect, tool, kind,
+                    );
                     link_failures.insert(step.call.clone(), (&step.request, output));
                 }
+                Err(_) => {}
             }
         }
         if owned.cx.process_revision().await? != tx.revision() {
             return Ok(Pass::Again);
         }
         let policies = PolicyView::new(policies);
-        let fold = round::fold(&rows, &policies, &waits)
+        let fold = continuation
+            .fold(&policies)
             .map_err(|error| corrupt("a process's run records", error))?;
         live.lifecycle
             .publish_committed(&fold)

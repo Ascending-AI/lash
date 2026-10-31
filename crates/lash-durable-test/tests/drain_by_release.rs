@@ -310,6 +310,21 @@ impl ProcessSteps for DrainSteps {
         std::time::Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &ProcessRecord,
+        _step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<lash_core_execution::runtime::process::steps::StepAssessment, StepRefusal> {
+        Ok(
+            lash_core_execution::runtime::process::steps::StepAssessment::Current {
+                tool: scripted_steps::tool(_step),
+                policy: ExecutionPolicy::Once,
+            },
+        )
+    }
+
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,

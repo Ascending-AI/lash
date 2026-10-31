@@ -193,14 +193,18 @@ impl RoundMember {
 pub struct RoundView {
     owner: OwnerKey,
     run: RunSeq,
-    members: Vec<RoundMember>,
+    members: Arc<Vec<RoundMember>>,
     cursor: Arc<RunCursor>,
     presented: bool,
-    reads: Vec<super::ModelReadPlan>,
-    read_facts: Vec<lash_core_store::checkpoint_graph::NodeId>,
+    reads: Arc<Vec<super::ModelReadPlan>>,
+    read_facts: Arc<Vec<lash_core_store::checkpoint_graph::NodeId>>,
 }
 
 impl RoundView {
+    pub(super) fn fresh_cursor(&mut self) {
+        self.cursor = RunCursor::at(self.cursor.peek());
+    }
+
     pub fn reads(&self) -> &[super::ModelReadPlan] {
         &self.reads
     }
@@ -312,82 +316,8 @@ impl RoundView {
     }
 }
 
-/// An activation's owned facts and checked records. Repeated folds borrow
-/// the checked records and share their immutable payload images. Appending
-/// facts preserves earlier images; a reload constructs a new set of records.
-pub struct RunRecords {
-    facts: RunFacts,
-    decoded: BTreeMap<(RunSeq, Ordinal), Arc<Record>>,
-}
-
-impl RunRecords {
-    /// Start reading one protected snapshot of an owner's facts.
-    #[must_use]
-    pub fn new(facts: RunFacts) -> Self {
-        Self {
-            facts,
-            decoded: BTreeMap::new(),
-        }
-    }
-
-    /// The immutable snapshot these records read.
-    #[must_use]
-    pub fn facts(&self) -> &RunFacts {
-        &self.facts
-    }
-
-    /// Include appended facts and their immutable nodes, each row whose
-    /// node `staged` names as the record staged there: an acknowledged
-    /// commit's own records ([`Committed::staged`](super::lifecycle::Committed::staged))
-    /// are not read and checked again.
-    pub fn extend(&mut self, appended: RunFacts, staged: Vec<StagedRecord>) {
-        // Normally appended nodes are new or byte-identical. A conflicting
-        // image invalidates every checked record, including its descendants:
-        // the next fold must encounter the decoder's integrity refusal.
-        if appended.nodes.iter().any(|(id, node)| {
-            self.facts
-                .nodes
-                .get(id)
-                .is_some_and(|previous| previous != node)
-        }) {
-            self.decoded.clear();
-        } else {
-            let mut held: BTreeMap<_, _> = staged
-                .into_iter()
-                .filter_map(|staged| staged.record.map(|record| (staged.node, record)))
-                .collect();
-            for row in &appended.rows {
-                if let Some(record) = held.remove(&row.record)
-                    && record.kind() == row.kind
-                {
-                    self.decoded.entry((row.run, row.ordinal)).or_insert(record);
-                }
-            }
-        }
-        self.facts.extend(appended);
-    }
-
-    /// Fold the records under the current policies and pinned waits.
-    ///
-    /// # Errors
-    /// The same record and ordering refusals as [`fold`].
-    pub fn fold(
-        &mut self,
-        current: &PolicyView,
-        waits: &PinnedWaits,
-    ) -> Result<RunFold, FoldRefusal> {
-        let facts = &self.facts;
-        fold_records(facts, current, waits, &mut |row| {
-            let record = match self.decoded.entry((row.run, row.ordinal)) {
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(decode(facts, row)?)
-                }
-            };
-            Ok(Arc::clone(record))
-        })
-    }
-}
+mod retained;
+pub use retained::RunRecords;
 
 fn decode(facts: &RunFacts, row: &RunFactRow) -> Result<Arc<Record>, FoldRefusal> {
     records::read(facts, row)
@@ -425,25 +355,15 @@ pub fn fold(
     current: &PolicyView,
     waits: &PinnedWaits,
 ) -> Result<RunFold, FoldRefusal> {
-    fold_records(facts, current, waits, &mut |row| decode(facts, row))
-}
-
-type ReadRecord<'a> = dyn FnMut(&RunFactRow) -> Result<Arc<Record>, FoldRefusal> + 'a;
-
-fn fold_records(
-    facts: &RunFacts,
-    current: &PolicyView,
-    waits: &PinnedWaits,
-    read: &mut ReadRecord<'_>,
-) -> Result<RunFold, FoldRefusal> {
     let mut runs: BTreeMap<RunSeq, Vec<&RunFactRow>> = BTreeMap::new();
     for row in &facts.rows {
         runs.entry(row.run).or_default().push(row);
     }
     let mut folded = RunFold::default();
-    for (run, mut records) in runs {
-        records.sort_by_key(|row| row.ordinal);
-        for (expected, row) in (0_u64..).zip(&records) {
+    let mut recoveries = Vec::new();
+    for (run, mut rows) in runs {
+        rows.sort_by_key(|row| row.ordinal);
+        for (expected, row) in (0_u64..).zip(&rows) {
             if row.ordinal.0 != expected {
                 return Err(FoldRefusal::OrdinalGap {
                     run,
@@ -451,24 +371,33 @@ fn fold_records(
                 });
             }
         }
-        if records
-            .first()
-            .is_some_and(|row| row.kind == RunFactKind::CellReport)
-        {
-            let report = fold_report(facts, &records, read)?;
-            folded.reports.insert(run, report);
+        let Some(first) = rows.first() else {
+            continue;
+        };
+        if first.kind == RunFactKind::CellReport {
+            folded.reports.insert(
+                run,
+                fold_report(facts, &rows, &mut |row| decode(facts, row))?,
+            );
             continue;
         }
-        let view = fold_run(facts, run, &records, waits, read)?;
-        for member in &view.members {
-            folded
-                .recoveries
-                .push((view.admitted_id(member), member.recovery(current)));
+        let mut reduced = RoundReduction::new(run, first, decode(facts, first)?, waits)?;
+        for row in &rows[1..] {
+            reduced.apply(facts, row, decode(facts, row)?.as_ref())?;
         }
+        let view = reduced.view()?;
+        recoveries.extend(
+            view.members
+                .iter()
+                .map(|member| (view.admitted_id(member), member.recovery(current))),
+        );
         folded.rounds.insert(run, view);
     }
+    folded.recoveries = Arc::new(recoveries);
     Ok(folded)
 }
+
+type ReadRecord<'a> = dyn FnMut(&RunFactRow) -> Result<Arc<Record>, FoldRefusal> + 'a;
 
 /// A cell's report: its run's one fact.
 fn fold_report(
@@ -495,71 +424,107 @@ fn fold_report(
     })
 }
 
-fn fold_run(
-    facts: &RunFacts,
+#[derive(Clone)]
+struct RoundReduction {
+    owner: OwnerKey,
     run: RunSeq,
-    records: &[&RunFactRow],
-    waits: &PinnedWaits,
-    read: &mut ReadRecord<'_>,
-) -> Result<RoundView, FoldRefusal> {
-    let Some(admit) = records
-        .first()
-        .filter(|row| row.ordinal == ADMIT_ORDINAL && row.kind == RunFactKind::Admit)
-    else {
-        return Err(FoldRefusal::OrdinalGap {
-            run,
-            missing: ADMIT_ORDINAL,
-        });
-    };
-    let record = read(admit)?;
-    let Record::Admit(body) = record.as_ref() else {
-        return Err(out_of_order(admit));
-    };
-    let corrupt_plan = |reason: &str| FoldRefusal::Undecodable {
-        run,
-        ordinal: ADMIT_ORDINAL,
-        reason: reason.into(),
-    };
-    let mut identities: std::collections::BTreeSet<_> = if body.reads.is_empty() {
-        std::collections::BTreeSet::new()
-    } else {
-        body.members
-            .iter()
-            .map(|member| member.call.clone())
-            .collect()
-    };
-    let mut previous = None;
-    for (index, plan) in body.reads.iter().enumerate() {
-        if plan.ordinal != index as u64 + 1
-            || plan.slot >= (body.members.len() + body.reads.len()) as u64
-            || previous.is_some_and(|slot| slot >= plan.slot)
-            || plan.metadata().call_id() != plan.call_id
-            || !matches!(plan.caller, crate::ToolReadCaller::ModelRound { .. })
-            || !identities.insert(plan.call_id.clone())
-        {
-            return Err(corrupt_plan(
-                "a saved model read plan has inconsistent identities or slots",
-            ));
+    admission: Arc<Record>,
+    drafts: Vec<ExecutionDraft>,
+    members: Vec<Option<RoundMember>>,
+    presented: bool,
+    read_facts: Vec<lash_core_store::checkpoint_graph::NodeId>,
+    next: u64,
+}
+
+impl RoundReduction {
+    fn new(
+        run: RunSeq,
+        admit: &RunFactRow,
+        record: Arc<Record>,
+        waits: &PinnedWaits,
+    ) -> Result<Self, FoldRefusal> {
+        if admit.ordinal != ADMIT_ORDINAL || admit.kind != RunFactKind::Admit {
+            return Err(FoldRefusal::OrdinalGap {
+                run,
+                missing: ADMIT_ORDINAL,
+            });
         }
-        previous = Some(plan.slot);
-    }
-    let mut members: Vec<Option<RoundMember>> = Vec::new();
-    members.resize_with(body.members.len(), || None);
-    let drafts: Vec<ExecutionDraft> = body
-        .members
-        .iter()
-        .map(|member| member.draft(&admit.owner, waits))
-        .collect::<Result<_, _>>()
-        .map_err(|reason| FoldRefusal::Undecodable {
+        let Record::Admit(body) = record.as_ref() else {
+            return Err(out_of_order(admit));
+        };
+        let corrupt_plan = |reason: &str| FoldRefusal::Undecodable {
             run,
             ordinal: ADMIT_ORDINAL,
-            reason: reason.to_owned(),
-        })?;
-    let mut presented = false;
-    let mut read_facts = Vec::new();
-    for row in &records[1..] {
-        let record = read(row)?;
-        match record.as_ref() {
+            reason: reason.into(),
+        };
+        let mut identities: std::collections::BTreeSet<_> = if body.reads.is_empty() {
+            std::collections::BTreeSet::new()
+        } else {
+            body.members
+                .iter()
+                .map(|member| member.call.clone())
+                .collect()
+        };
+        let mut previous = None;
+        for (index, plan) in body.reads.iter().enumerate() {
+            if plan.ordinal != index as u64 + 1
+                || plan.slot >= (body.members.len() + body.reads.len()) as u64
+                || previous.is_some_and(|slot| slot >= plan.slot)
+                || plan.metadata().call_id() != plan.call_id
+                || !matches!(plan.caller, crate::ToolReadCaller::ModelRound { .. })
+                || !identities.insert(plan.call_id.clone())
+            {
+                return Err(corrupt_plan(
+                    "a saved model read plan has inconsistent identities or slots",
+                ));
+            }
+            previous = Some(plan.slot);
+        }
+        let mut members: Vec<Option<RoundMember>> = Vec::new();
+        members.resize_with(body.members.len(), || None);
+        let drafts: Vec<ExecutionDraft> = body
+            .members
+            .iter()
+            .map(|member| member.draft(&admit.owner, waits))
+            .collect::<Result<_, _>>()
+            .map_err(|reason| FoldRefusal::Undecodable {
+                run,
+                ordinal: ADMIT_ORDINAL,
+                reason: reason.to_owned(),
+            })?;
+
+        Ok(Self {
+            owner: admit.owner.clone(),
+            run,
+            admission: record,
+            drafts,
+            members,
+            presented: false,
+            read_facts: Vec::new(),
+            next: 1,
+        })
+    }
+
+    fn apply(
+        &mut self,
+        facts: &RunFacts,
+        row: &RunFactRow,
+        record: &Record,
+    ) -> Result<(), FoldRefusal> {
+        let run = self.run;
+        let Record::Admit(body) = self.admission.as_ref() else {
+            return Err(out_of_order(row));
+        };
+        let corrupt_plan = |reason: &str| FoldRefusal::Undecodable {
+            run,
+            ordinal: ADMIT_ORDINAL,
+            reason: reason.into(),
+        };
+        let drafts = &self.drafts;
+        let members = &mut self.members;
+        let presented = &mut self.presented;
+        let read_facts = &mut self.read_facts;
+        match record {
             Record::Admit(_) | Record::CellReport(_) => return Err(out_of_order(row)),
             Record::Start(start) => {
                 let index = usize::try_from(start.member)
@@ -609,7 +574,7 @@ fn fold_run(
                 let SettledOutput::Waiting(source) = &parked.output else {
                     return Err(out_of_order(row));
                 };
-                let member = open_attempt(&mut members, row, parked.start)?;
+                let member = open_attempt(members, row, parked.start)?;
                 if member.cancellation.is_some() || member.final_payload.is_some() {
                     return Err(out_of_order(row));
                 }
@@ -627,8 +592,8 @@ fn fold_run(
                 if matches!(settled.output, SettledOutput::Waiting(_)) {
                     return Err(out_of_order(row));
                 }
-                let member = open_attempt(&mut members, row, settled.start)?;
-                if matches!(record.as_ref(), Record::FinalOutcome(_))
+                let member = open_attempt(members, row, settled.start)?;
+                if matches!(record, Record::FinalOutcome(_))
                     && (member.cancellation.is_some() || member.final_payload.is_some())
                 {
                     return Err(out_of_order(row));
@@ -650,7 +615,7 @@ fn fold_run(
                 member.ended_at_ms = settled.ended_at_ms;
             }
             Record::Retry(retry) => {
-                let member = open_attempt(&mut members, row, retry.start)?;
+                let member = open_attempt(members, row, retry.start)?;
                 let MemberState::Started { attempt, .. } = member.state else {
                     return Err(out_of_order(row));
                 };
@@ -683,7 +648,7 @@ fn fold_run(
                 start,
                 cancellation,
             } => {
-                let member = open_attempt(&mut members, row, *start)?;
+                let member = open_attempt(members, row, *start)?;
                 if member.final_payload.is_some()
                     || member.cancellation.replace(cancellation.clone()).is_some()
                 {
@@ -691,7 +656,7 @@ fn fold_run(
                 }
             }
             Record::Final { start, payload } => {
-                let member = open_attempt(&mut members, row, *start)?;
+                let member = open_attempt(members, row, *start)?;
                 if member.cancellation.is_some()
                     || member.final_payload.replace(payload.clone()).is_some()
                 {
@@ -719,8 +684,8 @@ fn fold_run(
                         ));
                     }
                 }
-                read_facts = reads.clone();
-                if presented
+                *read_facts = reads.clone();
+                if *presented
                     || row.call.is_some()
                     || members.iter().any(|member| {
                         member
@@ -730,30 +695,39 @@ fn fold_run(
                 {
                     return Err(out_of_order(row));
                 }
-                presented = true;
+                *presented = true;
             }
         }
+        self.next += 1;
+        Ok(())
     }
-    // The admission commits every member's first start with it, so a
-    // member without one is a record the rows lost.
-    let members = (0_u64..)
-        .zip(members)
-        .map(|(index, member)| {
-            member.ok_or(FoldRefusal::OrdinalGap {
-                run,
-                missing: first_start(index),
+
+    fn view(&self) -> Result<RoundView, FoldRefusal> {
+        let members = (0_u64..)
+            .zip(self.members.iter().cloned())
+            .map(|(index, member)| {
+                member.ok_or(FoldRefusal::OrdinalGap {
+                    run: self.run,
+                    missing: first_start(index),
+                })
             })
+            .collect::<Result<Vec<_>, _>>()?;
+        let Record::Admit(body) = self.admission.as_ref() else {
+            return Err(FoldRefusal::OrdinalGap {
+                run: self.run,
+                missing: ADMIT_ORDINAL,
+            });
+        };
+        Ok(RoundView {
+            owner: self.owner.clone(),
+            run: self.run,
+            members: Arc::new(members),
+            cursor: RunCursor::at(Ordinal(self.next)),
+            presented: self.presented,
+            reads: Arc::new(body.reads.clone()),
+            read_facts: Arc::new(self.read_facts.clone()),
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(RoundView {
-        owner: admit.owner.clone(),
-        run,
-        members,
-        cursor: RunCursor::at(Ordinal(records.len() as u64)),
-        presented,
-        reads: body.reads.clone(),
-        read_facts,
-    })
+    }
 }
 
 /// The member whose open attempt started at `start` and is named by `row`'s

@@ -1540,6 +1540,21 @@ impl ProcessSteps for HangingSteps {
         std::time::Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &lash_execution_contracts::process::ProcessRecord,
+        _step: &lash_execution_contracts::process::StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<lash_core_execution::runtime::process::steps::StepAssessment, StepRefusal> {
+        Ok(
+            lash_core_execution::runtime::process::steps::StepAssessment::Current {
+                tool: lash_core_execution::testing::step_tool(_step, "law"),
+                policy: lash_kernel_value::tool_contract::ExecutionPolicy::Once,
+            },
+        )
+    }
+
     async fn admit(
         &self,
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,

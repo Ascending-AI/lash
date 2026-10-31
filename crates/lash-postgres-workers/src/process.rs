@@ -322,6 +322,28 @@ impl ProcessSteps for WorkerSteps {
         std::time::Duration::from_secs(2)
     }
 
+    fn assess(
+        &self,
+        _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
+        _process: &ProcessRecord,
+        step: &StepRequest,
+        _target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
+    ) -> Result<lash_core_execution::runtime::process::steps::StepAssessment, StepRefusal> {
+        if !matches!(step, StepRequest::Engine { kind, .. } if [BEFORE, AFTER].contains(&kind.0.as_str()))
+        {
+            return Err(StepRefusal::Refused {
+                step: step.step().0.clone(),
+                reason: "the worker's witness bodies are its before and after engine steps".into(),
+            });
+        }
+        Ok(
+            lash_core_execution::runtime::process::steps::StepAssessment::Current {
+                tool: step_tool(step),
+                policy: ExecutionPolicy::Once,
+            },
+        )
+    }
+
     async fn admit(
         &self,
         _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,

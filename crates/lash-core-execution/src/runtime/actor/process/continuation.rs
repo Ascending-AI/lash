@@ -11,7 +11,7 @@ use lash_execution_contracts::process::{EngineState, ProcessRecord};
 
 use super::activation::{corrupt, registry_failure};
 use super::driver::Driver;
-use crate::runtime::actor::round::PinnedWaits;
+use crate::runtime::actor::round::{FoldRefusal, PinnedWaits, PolicyView, RunFold, RunRecords};
 use lash_vocabulary::identity::ProcessId;
 
 /// One activation's acknowledged process state. See the module
@@ -44,8 +44,8 @@ struct HeldEngine {
 #[derive(Clone)]
 struct HeldFacts {
     current: Option<StateRevision>,
-    read_limits: DecodeLimits,
-    runs: BTreeMap<RunSeq, (RunFacts, PinnedWaits)>,
+    runs: BTreeMap<RunSeq, (RunRecords, PinnedWaits)>,
+    projected: Option<(PolicyView, RunFold)>,
 }
 
 impl Continuation {
@@ -342,7 +342,7 @@ impl Continuation {
         process: &ProcessId,
         driver: &Driver,
         revision: StateRevision,
-    ) -> Result<(RunFacts, PinnedWaits), DurableError> {
+    ) -> Result<usize, DurableError> {
         let owner = OwnerKey::Process(process.clone());
         let live = in_flight(driver);
         let current = self
@@ -352,20 +352,41 @@ impl Continuation {
         if !current {
             let mut held = HeldFacts {
                 current: Some(revision),
-                read_limits: lash_durable::domain::graph::OWNER_READ_LIMITS,
                 runs: BTreeMap::new(),
+                projected: None,
             };
             for run in &live {
                 let facts = reads.run_facts_of(&owner, *run).await?;
-                held.read_limits = facts.read_limits;
                 let waits = PinnedWaits::read(reads, &facts).await?;
-                held.runs.insert(*run, (facts, waits));
+                held.runs.insert(*run, (RunRecords::new(facts), waits));
             }
             self.facts = Some(held);
         }
         let held = self.facts.get_or_insert_with(HeldFacts::empty);
+        let previous = held.runs.len();
         held.runs.retain(|run, _| live.contains(run));
-        Ok(held.combined())
+        if held.runs.len() != previous {
+            held.projected = None;
+        }
+        Ok(held
+            .runs
+            .values()
+            .map(|(records, _)| records.facts().rows.len())
+            .sum())
+    }
+
+    pub(super) fn reduced(&mut self) -> Result<RunFold, FoldRefusal> {
+        let held = self.facts.get_or_insert_with(HeldFacts::empty);
+        if let Some((_, fold)) = &held.projected {
+            return Ok(fold.fresh_cursors());
+        }
+        held.fold(&PolicyView::default())
+    }
+
+    pub(super) fn fold(&mut self, current: &PolicyView) -> Result<RunFold, FoldRefusal> {
+        self.facts
+            .get_or_insert_with(HeldFacts::empty)
+            .fold(current)
     }
 
     /// This activation's commit that left the actor at `revision` was
@@ -393,19 +414,27 @@ impl Continuation {
         }
         held.current = Some(revision);
         let live = in_flight(driver);
-        for (run, facts) in by_run(appended, &live) {
+        let appended = by_run(appended, &live);
+        if !appended.is_empty() {
+            held.projected = None;
+        }
+        for (run, facts) in appended {
             let waits = PinnedWaits::read(reads, &facts).await?;
             match held.runs.get_mut(&run) {
                 Some((held_facts, held_waits)) => {
-                    held_facts.extend(facts);
+                    held_facts.extend(facts, Vec::new());
                     held_waits.extend(waits);
                 }
                 None => {
-                    held.runs.insert(run, (facts, waits));
+                    held.runs.insert(run, (RunRecords::new(facts), waits));
                 }
             }
         }
+        let previous = held.runs.len();
         held.runs.retain(|run, _| live.contains(run));
+        if held.runs.len() != previous {
+            held.projected = None;
+        }
         Ok(())
     }
 
@@ -432,24 +461,24 @@ impl HeldFacts {
     fn empty() -> Self {
         Self {
             current: None,
-            read_limits: lash_durable::domain::graph::OWNER_READ_LIMITS,
             runs: BTreeMap::new(),
+            projected: None,
         }
     }
 
-    /// The facts of every run held, in run and ordinal order, with their
-    /// waits.
-    fn combined(&self) -> (RunFacts, PinnedWaits) {
-        let mut facts = RunFacts {
-            read_limits: self.read_limits,
-            ..RunFacts::default()
-        };
-        let mut waits = PinnedWaits::default();
-        for (run_facts, run_waits) in self.runs.values() {
-            facts.extend(run_facts.clone());
-            waits.extend(run_waits.clone());
+    fn fold(&mut self, current: &PolicyView) -> Result<RunFold, FoldRefusal> {
+        if let Some((policies, fold)) = &self.projected
+            && policies == current
+        {
+            return Ok(fold.fresh_cursors());
         }
-        (facts, waits)
+        let mut folded = RunFold::default();
+        for (records, waits) in self.runs.values_mut() {
+            folded.extend(records.fold(current, waits)?);
+        }
+        let projected = folded.fresh_cursors();
+        self.projected = Some((current.clone(), folded));
+        Ok(projected)
     }
 }
 

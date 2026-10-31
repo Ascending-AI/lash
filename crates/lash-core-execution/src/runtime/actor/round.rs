@@ -596,7 +596,7 @@ pub enum Recovery {
 /// An owner's run records folded: what each admitted execution recovers to.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunFold {
-    recoveries: Vec<(AdmittedId, Recovery)>,
+    recoveries: Arc<Vec<(AdmittedId, Recovery)>>,
     rounds: std::collections::BTreeMap<RunSeq, RoundView>,
     reports: std::collections::BTreeMap<RunSeq, lash_core_store::checkpoint_graph::NodeId>,
 }

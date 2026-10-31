@@ -55,6 +55,9 @@ use lash_execution_contracts::waits::ParkDeadline;
 use lash_vocabulary::identity::ProcessId;
 use lash_vocabulary::tool_contract::ToolId;
 
+mod recovery;
+pub use recovery::{StepAssessment, binding_drift_output};
+
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StepAdmission {
@@ -390,6 +393,19 @@ pub trait ProcessSteps: Send + Sync {
         target: Option<&InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal>;
+
+    /// Assess an existing recorded binding without admitting a new execution,
+    /// resolving a first use, or constructing limits and pins.
+    ///
+    /// # Errors
+    /// [`StepRefusal`] when the prepared binding cannot be assessed.
+    fn assess(
+        &self,
+        runtime: &Arc<StepRuntime>,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        target: Option<&InvocationTarget>,
+    ) -> Result<StepAssessment, StepRefusal>;
 
     /// Build `process`'s composition and the activation's step tools into
     /// `runtime`, before the activation admits or resumes any step of it

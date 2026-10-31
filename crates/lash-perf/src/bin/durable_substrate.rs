@@ -132,7 +132,7 @@ enum Kind {
     Cell,
     Parked,
     HotWaits { waits: usize },
-    ProcessProbe(process::Mode),
+    ProcessProbe(process::Mode, usize),
     Idle { actors: usize },
     Store,
     Operations,
@@ -193,11 +193,24 @@ fn case(name: &str) -> Result<Case> {
             )
         }
         "parked-process" => (Kind::Parked, Script::default()),
-        "process-steps-10" => (Kind::ProcessProbe(process::Mode::Steps), Script::default()),
-        "process-timers-10" => (Kind::ProcessProbe(process::Mode::Timers), Script::default()),
-        "process-fanout-10" => (Kind::ProcessProbe(process::Mode::Fanout), Script::default()),
+        "process-steps-10" => (
+            Kind::ProcessProbe(process::Mode::Steps, 10),
+            Script::default(),
+        ),
+        "process-timers-10" => (
+            Kind::ProcessProbe(process::Mode::Timers, 10),
+            Script::default(),
+        ),
+        "process-fanout-10" => (
+            Kind::ProcessProbe(process::Mode::Fanout, 10),
+            Script::default(),
+        ),
         "process-ready-fanout-10" => (
-            Kind::ProcessProbe(process::Mode::ReadyFanout),
+            Kind::ProcessProbe(process::Mode::ReadyFanout, 10),
+            Script::default(),
+        ),
+        "process-ready-fanout-128" => (
+            Kind::ProcessProbe(process::Mode::ReadyFanout, 128),
             Script::default(),
         ),
         "process-waits-10" => (Kind::HotWaits { waits: 10 }, Script::default()),
@@ -312,7 +325,7 @@ async fn bench_main() -> Result<()> {
             Kind::Parked => {
                 processes::parked(&run, &case, Duration::from_secs(args.park_seconds)).await?;
             }
-            Kind::ProcessProbe(mode) => processes::probe(&run, &case, mode, 10).await?,
+            Kind::ProcessProbe(mode, count) => processes::probe(&run, &case, mode, count).await?,
             Kind::HotWaits { waits } => processes::hot_waits(&run, &case, waits).await?,
             Kind::Idle { actors } => {
                 processes::idle(&run, &case, actors, Duration::from_secs(args.idle_seconds))

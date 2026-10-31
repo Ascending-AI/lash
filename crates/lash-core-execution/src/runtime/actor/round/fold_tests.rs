@@ -202,14 +202,14 @@ fn a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once() {
             draft("b", "once", ExecutionPolicy::Once),
         ],
     );
-    let rows = rows(&tx);
+    let mut records = RunRecords::new(rows(&tx));
 
     let as_pinned = PolicyView::new([
         (ToolId::new("repeats"), repeatable()),
         (ToolId::new("once"), ExecutionPolicy::Once),
     ]);
     assert_eq!(
-        recoveries(&fold(&rows, &as_pinned, &PinnedWaits::default()).unwrap()),
+        recoveries(&records.fold(&as_pinned, &PinnedWaits::default()).unwrap()),
         vec![Recovery::RerunAtOrdinal(Ordinal(1)), Recovery::Interrupt]
     );
 
@@ -218,7 +218,7 @@ fn a_current_once_vetoes_a_stored_repeat_and_never_upgrades_a_stored_once() {
         (ToolId::new("once"), repeatable()),
     ]);
     assert_eq!(
-        recoveries(&fold(&rows, &flipped, &PinnedWaits::default()).unwrap()),
+        recoveries(&records.fold(&flipped, &PinnedWaits::default()).unwrap()),
         vec![Recovery::Interrupt, Recovery::Interrupt]
     );
 }
@@ -280,6 +280,12 @@ fn a_second_final_of_a_call_is_refused() {
         None,
     )
     .unwrap();
+    let initial = rows(&tx);
+    let count = initial.rows.len();
+    let mut records = RunRecords::new(initial);
+    records
+        .fold(&PolicyView::default(), &PinnedWaits::default())
+        .unwrap();
     settle(
         &mut tx,
         &members[0],
@@ -288,8 +294,11 @@ fn a_second_final_of_a_call_is_refused() {
         None,
     )
     .unwrap();
+    let mut appended = rows(&tx);
+    appended.rows.drain(..count);
+    records.extend(appended, Vec::new());
     assert_eq!(
-        fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()),
+        records.fold(&PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::SecondFinal(ToolCallId::fixture("a")))
     );
 }

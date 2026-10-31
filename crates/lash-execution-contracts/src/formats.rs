@@ -16,7 +16,8 @@ use crate::EngineStateFormat;
 
 /// The format of a run record's body: the RoundFact node (kind 21) each
 /// record names, and the admission, start, outcome, retry and presentation
-/// bodies it holds. Bodies carry no stamp of their own: the record's actor
+/// bodies it holds, together with a process's driver state beside those
+/// records. These carry no stamp of their own: the record's actor
 /// carries this version in its format set, so only a node that decodes them
 /// claims it (ADR 0106 §1).
 ///
@@ -28,6 +29,8 @@ use crate::EngineStateFormat;
 ///         cover(StoredBody, CallBody),
 ///         path = "crates/lash-core-execution/src/runtime/actor/round/transcript.rs",
 ///         cover(TurnTranscript, TranscriptEntry),
+///         path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs",
+///         cover(Driver, InFlight, Pinned, StoredWaitId, Blocked, Immediate),
 ///     ),
 /// )
 /// version_surface = "drain"
