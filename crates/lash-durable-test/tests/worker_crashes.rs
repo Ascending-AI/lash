@@ -793,7 +793,7 @@ async fn a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_withou
 
 /// A cell that completes a call and then computes for several slices.
 const CALL_THEN_LOOP: &str = "const first = await tools.countCall({}); let n = 0; \
-     for (let i = 0; i < 500000; i = i + 1) { n = n + 1; } await control.finish({ first, n });";
+     for (let i = 0; i < 10000; i = i + 1) { n = n + 1; } await control.finish({ first, n });";
 
 /// The ends of the cell's execution a follower of `updates` reads, up to
 /// and including its first completed one. A gap is lost continuity, which
@@ -843,7 +843,10 @@ async fn cell_ends(
 /// key: the store refused the second as a conflicting redelivery and
 /// rotated its incarnation, which reset every follower's replay.
 async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tier) {
-    let receipts = lash::vm::WorkerService::default().with_worker_receipts();
+    // Reach the kill hook across small slices without approaching the CPU limit.
+    let mut config = lash::vm::WorkerService::default().config().clone();
+    config.tuning.slice = 10_000;
+    let receipts = lash::vm::WorkerService::new(config).with_worker_receipts();
     let runs = Arc::new(AtomicUsize::new(0));
     // The cell's worker and the calls it was sent since the call ran: the
     // first hands it the call's outcome and a slice of the loop, and the
@@ -932,7 +935,7 @@ async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tie
     );
     assert_eq!(
         output.finished().map(|(_, value)| value),
-        Some(&serde_json::json!({ "first": { "result": "counted" }, "n": 500000 }))
+        Some(&serde_json::json!({ "first": { "result": "counted" }, "n": 10000 }))
     );
     let head = world.core.observation_cursor(
         &session_id,
