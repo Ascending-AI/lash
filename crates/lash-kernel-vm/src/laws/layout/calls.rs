@@ -32,6 +32,7 @@ const FORMATTED_APPEND: &str = "let build = fn(n) { let text = \"\" let i = 0 wh
 const FORMATTED_MISS: &str = "let build = fn() { let text = \"old\" set text = text.concat(text, text.join([\"field=\", 1, \"; suffix\"], \"\")) return text } return apply build()";
 
 thread_local! {
+    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
     static CHECKPOINT_EXITS: std::cell::RefCell<crate::machine::islands::witness::Counts> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     // PreparedLibrary is an immutable, shareable fixture. Cold reopen still
     // constructs its own library in Embedder::reopen.
@@ -243,6 +244,16 @@ fn observe_source_or_register(
     let precise_constructions = crate::machine::islands::witness::precise_constructions();
     let precise_bindings = crate::machine::islands::witness::precise_bindings();
     let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
+    let replay = crate::machine::islands::witness::source_replay_publications();
+    if mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS) {
+        SOURCE_REPLAY_PUBLICATIONS.with(|total| {
+            let mut counts = total.get();
+            for (sum, count) in counts.iter_mut().zip(replay) {
+                *sum += count;
+            }
+            total.set(counts);
+        });
+    }
     let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
@@ -512,6 +523,7 @@ fn observe_source_or_register(
 /// layout, including arity, type, depth, memory and missing-binding exits.
 #[test]
 fn direct_call_entry_agrees() {
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 4]));
     CHECKPOINT_EXITS.with_borrow_mut(|counts| counts.clear());
     let definition = |signature: &str, body: &str| {
         let function = format!(
@@ -867,6 +879,13 @@ fn direct_call_entry_agrees() {
                 }
                 comparisons += 1;
             }
+        }
+        if body == SOURCE_SCOPED_BINDINGS {
+            let replay = SOURCE_REPLAY_PUBLICATIONS.with(|total| total.get());
+            assert!(
+                replay.iter().all(|count| *count > 0),
+                "finite charge prefixes must publish their leaves, ordinary/shared bindings and constructors before their unchanged typed stop: {replay:?}"
+            );
         }
         for memory in [8192, 16384] {
             let bounds = Bounds { memory, ..bounds };

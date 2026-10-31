@@ -175,77 +175,21 @@ impl KernelMachine {
                 Op::Region { region, total } => {
                     pc = self.enter_region(running, region, total, pc)?;
                 }
-                Op::Const { dst, c } => {
-                    let value = inside!(
-                        self,
-                        running,
-                        pc,
-                        self.literal(&running.stream.consts[c.ix()])
-                    );
-                    if self.publish_source_leaf(running, source_pc, value)? {
-                        self.source_complete_joins(running.stream, source_pc)?;
-                        continue;
-                    }
-                    self.put(at(dst), value);
-                }
-                Op::Local { dst, local } => {
-                    let value =
-                        inside!(self, running, pc, self.read_local(task, running.exe, local));
-                    if self.publish_source_leaf(running, source_pc, value)? {
-                        self.source_complete_joins(running.stream, source_pc)?;
-                        continue;
-                    }
-                    self.put(at(dst), value);
-                }
-                Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
-                    if inside!(
-                        self,
-                        running,
-                        pc,
-                        self.publish_source_binding(running, source_pc)
-                    ) {
-                        continue;
-                    }
-                    let value = self.take(at(src));
-                    inside!(
-                        self,
-                        running,
-                        pc,
-                        self.bind(
-                            task,
-                            local.at,
-                            matches!(op, Op::LetBindShared { .. }),
-                            value
-                        )
-                    );
-                }
-                Op::LetEnd { local } => {
-                    inside!(self, running, pc, self.frame(task))
-                        .set_slot(local.at, SlotState::Empty);
-                }
-                Op::Session { dst, name } => {
-                    let name = &running.stream.names[name.ix()];
-                    let value = match inside!(self, running, pc, self.session_get(name)) {
-                        Some(value) => value,
-                        None => return Err(self.exit(running, pc, unbound_variable(name))),
-                    };
-                    self.put(at(dst), value);
-                }
-                Op::MakeTuple { .. }
+                Op::Const { .. }
+                | Op::Local { .. }
+                | Op::Session { .. }
+                | Op::LetBind { .. }
+                | Op::LetBindShared { .. }
+                | Op::LetEnd { .. }
+                | Op::MakeTuple { .. }
                 | Op::MakeList { .. }
                 | Op::MakeSet { .. }
                 | Op::MakeMap { .. }
                 | Op::MakeRecord { .. } => {
-                    if inside!(
-                        self,
-                        running,
-                        pc,
-                        self.publish_source_construction(running, source_pc)
-                    ) {
+                    if inside!(self, running, pc, self.in_region(running, source_pc)) {
                         self.source_complete_joins(running.stream, source_pc)?;
                         continue;
                     }
-                    inside!(self, running, pc, self.in_region_rare(running, op));
                 }
                 Op::Unbound { .. }
                 | Op::Field { .. }
@@ -480,12 +424,22 @@ impl KernelMachine {
                 region,
             });
             for op_at in pc..stop {
-                let op = running.stream.ops[op_at];
-                if let Err(exit) = self.in_region(running, op) {
-                    self.leave_region(running.stream, op_at as u32);
-                    return Err(exit);
+                let accepted = match self.in_region(running, op_at as u32) {
+                    Ok(accepted) => accepted,
+                    Err(exit) => {
+                        self.leave_region(running.stream, op_at as u32);
+                        return Err(exit);
+                    }
+                };
+                if accepted {
+                    self.source_complete_joins(running.stream, op_at as u32)?;
+                    #[cfg(any(test, feature = "testing"))]
+                    crate::machine::islands::witness::source_replay_published(
+                        running.stream.ops[op_at],
+                    );
+                } else {
+                    self.source_complete(running.stream, op_at as u32)?;
                 }
-                self.source_complete(running.stream, op_at as u32)?;
             }
             pc = stop;
             let mut limit = self.bounds.charge_limit;
@@ -556,22 +510,39 @@ impl KernelMachine {
 
     /// The ops that stand in a charge region: they charge nothing of their
     /// own. The common ones run here; the rest in
-    /// [`Self::in_region_rare`].
+    /// [`Self::in_region_rare`]. Both ordinary execution and charge replay use
+    /// this path. A published journal already consumed and installed its bank
+    /// receipts, so the caller applies only the checked source joins.
     #[inline(always)]
-    fn in_region(&mut self, running: &Running<'_>, op: Op) -> Eval<()> {
+    fn in_region(&mut self, running: &Running<'_>, pc: u32) -> Eval<bool> {
+        let op = running.stream.ops[pc as usize];
         let task = running.task;
         match op {
             Op::Const { dst, c } => {
                 let value = self.literal(&running.stream.consts[c.ix()])?;
+                if self.publish_source_leaf(running, pc, value)? {
+                    return Ok(true);
+                }
                 self.put(at(dst), value);
             }
             Op::Local { dst, local } => {
                 let value = self.read_local(task, running.exe, local)?;
+                if self.publish_source_leaf(running, pc, value)? {
+                    return Ok(true);
+                }
                 self.put(at(dst), value);
             }
-            Op::LetBind { local, src } => {
+            Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
+                if self.publish_source_binding(running, pc)? {
+                    return Ok(true);
+                }
                 let value = self.take(at(src));
-                self.bind(task, local.at, false, value)?;
+                self.bind(
+                    task,
+                    local.at,
+                    matches!(op, Op::LetBindShared { .. }),
+                    value,
+                )?;
             }
             Op::LetEnd { local } => {
                 self.frame(task)?.set_slot(local.at, SlotState::Empty);
@@ -584,9 +555,19 @@ impl KernelMachine {
                 };
                 self.put(at(dst), value);
             }
+            Op::MakeTuple { .. }
+            | Op::MakeList { .. }
+            | Op::MakeSet { .. }
+            | Op::MakeMap { .. }
+            | Op::MakeRecord { .. } => {
+                if self.publish_source_construction(running, pc)? {
+                    return Ok(true);
+                }
+                self.in_region_rare(running, op)?;
+            }
             op => self.in_region_rare(running, op)?,
         }
-        Ok(())
+        Ok(false)
     }
 
     #[inline(never)]
@@ -594,10 +575,6 @@ impl KernelMachine {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         match op {
             Op::Unbound { name, .. } => unbound(&stream.names[name.ix()]),
-            Op::LetBindShared { local, src } => {
-                let value = self.take(at(src));
-                Ok(self.bind(task, local.at, true, value)?)
-            }
             Op::Field { at: r, field } => {
                 let r = at(r);
                 self.read_field(r, &stream.fields[field.ix()], r)

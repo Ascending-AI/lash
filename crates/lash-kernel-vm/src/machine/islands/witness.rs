@@ -71,6 +71,7 @@ thread_local! {
     static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static EMPTY_TUPLE_CONSTRUCTIONS: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
     static PRECISE_CONSTRUCTIONS: std::cell::Cell<[u64;5]> = const { std::cell::Cell::new([0;5]) };
+    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
     static SCOPED_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_SOURCE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -93,6 +94,7 @@ pub(crate) fn begin() {
     PRECISE_CONSTRUCTIONS.with(|counts| counts.set([0; 5]));
     PRECISE_BINDINGS.with(|counts| counts.set([0; 2]));
     SCOPED_BINDINGS.with(|counts| counts.set([0; 2]));
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 4]));
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
     TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
     TABLE_CONSTRUCTIONS.with(|counts| counts.set([0; 3]));
@@ -338,5 +340,30 @@ pub(in crate::machine) fn scoped_binding_published(shared: bool) {
         let mut next = counts.get();
         next[usize::from(shared)] += 1;
         counts.set(next);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn source_replay_publications() -> [u64; 4] {
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.replace([0; 4]))
+}
+
+pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
+    use lash_kernel_exec::Op;
+    let index = match op {
+        Op::Const { .. } | Op::Local { .. } => 0,
+        Op::LetBind { .. } => 1,
+        Op::LetBindShared { .. } => 2,
+        Op::MakeTuple { .. }
+        | Op::MakeList { .. }
+        | Op::MakeSet { .. }
+        | Op::MakeMap { .. }
+        | Op::MakeRecord { .. } => 3,
+        _ => unreachable!("a replay publication has a prepared source operation"),
+    };
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| {
+        let mut counts = total.get();
+        counts[index] += 1;
+        total.set(counts);
     });
 }
