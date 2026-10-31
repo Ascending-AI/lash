@@ -161,7 +161,6 @@ table lash_effect_admissions
   primary-key (exec_key, effect_id)
   foreign-key (admission_ref) references lash_blobs (hash) on delete restrict
 table lash_environment_heads
-  column head_json text not-null
   column root_ref bytea not-null
   column session_id text not-null
   column written_epoch bigint not-null

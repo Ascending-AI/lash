@@ -15,10 +15,9 @@ crate::statements! {
             WHERE owner_id = ?1 AND state = 'preparing' AND actor_key = ?2 AND preparing_epoch = ?3";
         retire = "UPDATE environment_owners SET state = 'retired', body_json = NULL
             WHERE owner_id = ?1 AND state <> 'retired'";
-        head = "SELECT head_json FROM environment_heads WHERE session_id = ?1";
-        head_put = "INSERT INTO environment_heads (session_id, head_json, root_ref, written_epoch)
-            VALUES (?1, ?2, ?3, ?4) ON CONFLICT (session_id) DO UPDATE
-            SET head_json = excluded.head_json, root_ref = excluded.root_ref, written_epoch = excluded.written_epoch";
+        head_put = "INSERT INTO environment_heads (session_id, root_ref, written_epoch)
+            VALUES (?1, ?2, ?3) ON CONFLICT (session_id) DO UPDATE
+            SET root_ref = excluded.root_ref, written_epoch = excluded.written_epoch";
         head_remove = "DELETE FROM environment_heads WHERE session_id = ?1 RETURNING root_ref";
         head_root = "SELECT root_ref FROM environment_heads WHERE session_id = ?1";
         actor_epoch = "SELECT epoch FROM actors WHERE actor_key = ?1";

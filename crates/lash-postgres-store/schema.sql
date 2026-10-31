@@ -1331,7 +1331,6 @@ CREATE TABLE IF NOT EXISTS lash_environment_owners (
 );
 CREATE TABLE IF NOT EXISTS lash_environment_heads (
     session_id TEXT PRIMARY KEY,
-    head_json TEXT NOT NULL,
     root_ref BYTEA NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     written_epoch BIGINT NOT NULL
 );

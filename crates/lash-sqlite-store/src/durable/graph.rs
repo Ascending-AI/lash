@@ -147,7 +147,6 @@ CREATE TABLE IF NOT EXISTS environment_owners (
 );
 CREATE TABLE IF NOT EXISTS environment_heads (
     session_id TEXT PRIMARY KEY,
-    head_json TEXT NOT NULL,
     root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     written_epoch INTEGER NOT NULL
 );

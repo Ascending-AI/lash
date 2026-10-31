@@ -60,11 +60,29 @@ pub(super) fn head(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> Answer<Option<EnvironmentHead>> {
-    let text: Option<String> = tx
-        .prepare_cached(ENV.head.sql())?
-        .query_row([session.as_str()], |r| r.get(0))
+    let root: Option<String> = tx
+        .prepare_cached(ENV.head_root.sql())?
+        .query_row([session.as_str()], |r| crate::codec::hash_column(r, 0))
         .optional()?;
-    Ok(text.as_deref().map(env::decode).transpose())
+    let Some(root) = root else {
+        return Ok(Ok(None));
+    };
+    let root = match super::node_ref(&root) {
+        Ok(root) => root,
+        Err(error) => return Ok(Err(error)),
+    };
+    let limits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+    let nodes = match super::graph::walk(tx, root, &limits)? {
+        Ok(nodes) => nodes,
+        Err(error) => return Ok(Err(error.into())),
+    };
+    let graph = RunFacts {
+        nodes,
+        read_limits: limits,
+        ..Default::default()
+    };
+    let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(&graph, limits);
+    Ok(env::decode_head(&mut decoder, root).map(Some))
 }
 fn enqueue(tx: &Connection, owner: &VersionOwnerId, retired: bool) -> rusqlite::Result<()> {
     let cleanup = if retired {
@@ -322,14 +340,9 @@ pub(super) fn apply(
                     Ok(r) => r,
                     Err(e) => return Ok(Err(e)),
                 };
-                let json = match env::json(next) {
-                    Ok(j) => j,
-                    Err(e) => return Ok(Err(e)),
-                };
                 tx.prepare_cached(ENV.head_put.sql())?
                     .execute(rusqlite::params![
                         session.as_str(),
-                        json,
                         &root.0[..],
                         commit.epoch.0
                     ])?;
@@ -383,7 +396,7 @@ impl EnvironmentStore for SqliteDurableStore {
         session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Option<EnvironmentHead>, DurableError> {
         let session = session.clone();
-        self.query(move |tx| head(tx, &session)).await
+        self.read(move |tx| head(tx, &session)).await
     }
     async fn retire_abandoned_environment(
         &self,

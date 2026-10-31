@@ -378,6 +378,25 @@ pub fn decode_round(
     Ok(round)
 }
 
+/// Decode only the head and its storage nodes, including the typed lifetime
+/// anchor. The version's environment body is not part of this graph closure.
+pub fn decode_head(
+    decoder: &mut lash_core_store::checkpoint_graph::GraphDecoder<'_>,
+    id: NodeId,
+) -> Result<EnvironmentHead, DurableError> {
+    let logical = decoder.logical_body(id, NodeKind::ENVIRONMENT_HEAD)?;
+    let mut input = TokenReader::new(&logical);
+    input.expect_struct(2).map_err(corrupt)?;
+    let head: EnvironmentHead = decode(input.text().map_err(corrupt)?)?;
+    let child = NodeId::from(input.child().map_err(corrupt)?);
+    input.finish().map_err(corrupt)?;
+    if child != version_node(&head.round())? {
+        return Err(EnvironmentRefusal::Content.into());
+    }
+    decoder.logical_body(child, NodeKind::ENVIRONMENT_VERSION)?;
+    Ok(head)
+}
+
 /// Encoded owner-row mutations, including a preparation's immutable body.
 /// The obligation row is part of the same planned mutation budget.
 pub(crate) fn measure_write(

@@ -269,7 +269,7 @@ impl GraphTier for Tier {
                 session,
                 root: Some(root),
             } => (
-                "INSERT INTO environment_heads(session_id,head_json,root_ref,written_epoch) VALUES (?1,'{}',?2,0)",
+                "INSERT INTO environment_heads(session_id,root_ref,written_epoch) VALUES (?1,?2,0)",
                 vec![text(session.as_str()), hex(&root)],
             ),
             ForeignWrite::EnvironmentHead {

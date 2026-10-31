@@ -72,12 +72,24 @@ async fn head(
     tx: &mut PgConnection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> Result<Option<EnvironmentHead>, DurableError> {
-    let text: Option<String> = crate::observed_sql::query_scalar(ENV.head.sql())
+    let root: Option<crate::keys::Key> = crate::observed_sql::query_scalar(ENV.head_root.sql())
         .bind(session.as_str())
-        .fetch_optional(crate::observed_sql::executor(tx))
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    text.as_deref().map(env::decode).transpose()
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let root = super::node_ref(&root)?;
+    let limits = lash_durable::domain::graph::OWNER_READ_LIMITS;
+    let nodes = super::graph::walk_within(tx, &[root], &limits, None).await?;
+    let graph = lash_durable::domain::RunFacts {
+        nodes,
+        read_limits: limits,
+        ..Default::default()
+    };
+    let mut decoder = lash_core_store::checkpoint_graph::GraphDecoder::new(&graph, limits);
+    env::decode_head(&mut decoder, root).map(Some)
 }
 async fn enqueue(
     tx: &mut PgConnection,
@@ -377,7 +389,6 @@ pub(super) async fn apply(
                 let root = env::stage_head(&mut env::staging(), next)?;
                 crate::observed_sql::query(ENV.head_put.sql())
                     .bind(session.as_str())
-                    .bind(env::json(next)?)
                     .bind(&root.0[..])
                     .bind(commit.epoch.0)
                     .execute(crate::observed_sql::executor(&mut *tx))
@@ -443,7 +454,7 @@ impl EnvironmentStore for PostgresDurableStore {
         &self,
         session: &lash_kernel_value::identity::SessionId,
     ) -> Result<Option<EnvironmentHead>, DurableError> {
-        self.read(|tx| Box::pin(head(tx, session))).await
+        self.read_snapshot(|tx| Box::pin(head(tx, session))).await
     }
     async fn retire_abandoned_environment(
         &self,
