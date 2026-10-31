@@ -75,7 +75,8 @@ crate::statements! {
         /// is `?3`, head revision `?5` at `?6` and transcript `?7`, on the
         /// session's published head as its window (FIG-5931, FIG-6606): the
         /// head's revision, read by the statement itself. No window when the
-        /// session has no head. No row when the run is not unfinished.
+        /// session has no head. Returns the run and whether it holds call
+        /// cancellation requests. No row when the run is not unfinished.
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
@@ -88,7 +89,8 @@ crate::statements! {
                      WHERE head.session_id = ?1)
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
-             RETURNING run";
+             RETURNING run, EXISTS (SELECT 1 FROM tool_call_cancel_requests
+                 WHERE session_id = ?1 AND run = ?2) AS has_call_cancels";
 
         /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot,
         /// working execution and receipt.

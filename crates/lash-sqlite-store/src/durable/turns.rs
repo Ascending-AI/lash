@@ -111,7 +111,8 @@ lash_store_sql::statements! {
                      WHERE head.session_id = ?1)
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL AND ?7 IS NULL
-             RETURNING run";
+             RETURNING run, EXISTS (SELECT 1 FROM tool_call_cancel_requests
+                 WHERE session_id = ?1 AND run = ?2) AS has_call_cancels";
     }
 }
 static SQLITE_SQL: LazyLock<SqliteTurnStatements> =
@@ -442,15 +443,15 @@ pub(super) fn apply(
                         commit.now.0,
                         transcript.map(|transcript| transcript.0),
                     ],
-                    |_| Ok(()),
+                    |row| row.get::<_, bool>(1),
                 )
                 .optional()?;
-            if ended.is_none() {
+            let Some(has_call_cancels) = ended else {
                 return refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
                 });
-            }
+            };
             if let Some(revision) = head_revision {
                 crate::revisions::record_terminal_conn(tx, session, *revision, commit.now)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
@@ -504,11 +505,13 @@ pub(super) fn apply(
             for record in super::run_records::delete_turn(tx, session, run)? {
                 commit.retired.stored(record);
             }
-            cached_execute(
-                tx,
-                SQL.delete_call_cancels.sql(),
-                rusqlite::params![session.as_str(), run.as_str()],
-            )?;
+            if has_call_cancels {
+                cached_execute(
+                    tx,
+                    SQL.delete_call_cancels.sql(),
+                    rusqlite::params![session.as_str(), run.as_str()],
+                )?;
+            }
             cached_execute(
                 tx,
                 SQL.delete_cancel.sql(),
