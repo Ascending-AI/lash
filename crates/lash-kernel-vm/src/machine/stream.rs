@@ -234,6 +234,10 @@ impl KernelMachine {
                 }
                 Op::Operator { lib, args } => {
                     self.close_region(running.stream);
+                    if self.publish_source_native(running, source_pc)? {
+                        self.source_complete_joins(running, source_pc)?;
+                        continue;
+                    }
                     let lib = LibId(lib.0);
                     let start = at(args.start);
                     match self

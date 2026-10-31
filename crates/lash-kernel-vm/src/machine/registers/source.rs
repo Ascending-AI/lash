@@ -244,7 +244,8 @@ impl Operands {
             | Op::Closure { .. }
             | Op::Field { .. }
             | Op::Index { .. }
-            | Op::Call { .. }),
+            | Op::Call { .. }
+            | Op::Operator { .. }),
         ) = stream.ops.get(pc as usize)
         else {
             return Ok(None);

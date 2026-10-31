@@ -177,7 +177,7 @@ pub(in crate::machine::islands) fn construction_published() {
 pub(crate) fn native_read_publications() -> u64 {
     NATIVE_READ_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn native_read_published() {
+pub(in crate::machine) fn native_read_published() {
     NATIVE_READ_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 
@@ -233,7 +233,7 @@ pub(in crate::machine) fn session_published() {
 pub(crate) fn prepared_native_publications() -> u64 {
     PREPARED_NATIVE_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn prepared_native_published() {
+pub(in crate::machine) fn prepared_native_published() {
     PREPARED_NATIVE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 

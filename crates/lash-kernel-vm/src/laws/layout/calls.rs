@@ -398,6 +398,14 @@ fn observe_source_or_register(
             "precise native text consumers must publish join, repeat and slice: {native_texts}"
         );
         assert!(
+            native_reads >= 2,
+            "precise native length and aliased reads must publish their real input/output journal: {native_reads}"
+        );
+        assert!(
+            prepared_natives >= 3,
+            "precise prepared unary, binary and minimum answers must publish their actual source exit: {prepared_natives}"
+        );
+        assert!(
             native_lists >= 2,
             "precise native list consumers must publish both actual copies: {native_lists}"
         );

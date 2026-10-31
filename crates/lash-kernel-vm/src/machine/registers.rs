@@ -435,6 +435,7 @@ impl Registers {
             lash_kernel_exec::Op::Field { .. }
                 | lash_kernel_exec::Op::Index { .. }
                 | lash_kernel_exec::Op::Call { .. }
+                | lash_kernel_exec::Op::Operator { .. }
         ) {
             for (reg, _, value) in output.inputs() {
                 if !self.get(reg.ix()).is_some_and(|actual| actual.same(value)) {

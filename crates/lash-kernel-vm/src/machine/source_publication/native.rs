@@ -29,7 +29,7 @@ impl<'bank> StoragePreparation for NativeResult<'bank, '_> {
         actual: Program,
     ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
         let Some(PreparedStorage {
-            registration,
+            mut registration,
             storage,
             actual,
         }) = self.recipe.prepare(arena, actual)?
@@ -39,12 +39,17 @@ impl<'bank> StoragePreparation for NativeResult<'bank, '_> {
         let [event] = actual.events() else {
             return Err(malformed("precise native lost its prepared event"));
         };
-        let [(_, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(page))] =
-            event.outputs.as_slice()
-        else {
+        let [(_, output)] = event.outputs.as_slice() else {
             return Err(malformed("precise native lost its canonical output"));
         };
-        let holding = Holding::from_page(self.heap.pages(), page)?;
+        use lash_kernel_state::kernel_internals::logical::PublicationValue;
+        let holding = match output {
+            PublicationValue::Page(page) => Holding::from_page(self.heap.pages(), page)?,
+            PublicationValue::Native(value) => {
+                Holding::from_native(registration.arena(), self.heap.pages(), value)?
+            }
+            _ => return Err(malformed("precise native has another output recipe")),
+        };
         Ok(Some(PreparedStorage {
             registration,
             storage: PreparedNativeResult {
@@ -72,7 +77,8 @@ impl KernelMachine {
         running: &Running<'_>,
         pc: u32,
     ) -> Result<bool, Halt> {
-        let Op::Call { lib, args } = running.stream.ops[pc as usize] else {
+        let (Op::Call { lib, args } | Op::Operator { lib, args }) = running.stream.ops[pc as usize]
+        else {
             return Ok(false);
         };
         let lib = LibId(lib.0);
@@ -89,16 +95,6 @@ impl KernelMachine {
         }
         let text = function.text_join()
             || function.header.signature.result == lash_kernel_value::Type::Text;
-        let collection = matches!(
-            function.header.signature.result,
-            lash_kernel_value::Type::List(_)
-                | lash_kernel_value::Type::Map(_)
-                | lash_kernel_value::Type::Set(_)
-                | lash_kernel_value::Type::Record(_)
-        );
-        if !text && !collection {
-            return Ok(false);
-        }
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
@@ -141,17 +137,14 @@ impl KernelMachine {
                 &arena.semantics(),
             )) {
                 Ok(Some(contract))
-                    if collection && native_storage::collection::supports(&contract) =>
-                {
-                    contract
-                }
-                Ok(Some(contract))
-                    if text
-                        && contract.exit == doc::NativeResourceExit::Returned
-                        && contract.output.origin == doc::NativeResourceOrigin::Immutable
-                        && contract.events.iter().all(|event| {
-                            matches!(event, doc::NativeResourceEvent::Scratch { .. })
-                        }) =>
+                    if contract.exit == doc::NativeResourceExit::Returned
+                        && (native_storage::collection::supports(&contract)
+                            || (!matches!(
+                                contract.output.origin,
+                                doc::NativeResourceOrigin::Fresh(_)
+                            ) && contract.events.iter().all(|event| {
+                                matches!(event, doc::NativeResourceEvent::Scratch { .. })
+                            }))) =>
                 {
                     contract
                 }
@@ -160,6 +153,7 @@ impl KernelMachine {
                 _ => return Ok(false),
             }
         };
+        let collection = native_storage::collection::supports(&contract);
         let Some(called) = room::CheckedRoom::native(function.specialization.function, &contract)
         else {
             return Ok(false);
@@ -217,7 +211,7 @@ impl KernelMachine {
                     room: physical_room,
                 },
             )
-        } else {
+        } else if text {
             native_storage::NativeStorage::Text(native_storage::text::TextNative {
                 function,
                 args: values.clone(),
@@ -225,6 +219,49 @@ impl KernelMachine {
                 charging: self.charging,
                 limits: self.limits,
                 room: physical_room,
+            })
+        } else {
+            let active = self
+                .tasks
+                .get_mut(running.task.0 as usize)?
+                .ok_or_else(|| fault("no task"))?
+                .frames
+                .len()
+                - usize::from(running.task == doc::TaskId::MAIN && self.session_cell);
+            let known = function
+                .specialization
+                .prepared
+                .as_ref()
+                .and_then(|(entry, _)| {
+                    if active as u64 + u64::from(entry.depth()) > u64::from(self.bounds.call_depth)
+                        || !function.header.signature.params.iter().zip(&values).all(
+                            |(param, value)| {
+                                (param.optional && matches!(value, doc::Value::Absent))
+                                    || crate::compile::import_result_fits(&param.ty, *value)
+                            },
+                        )
+                    {
+                        return None;
+                    }
+                    let answer = entry.answer(&values, self.charging)?;
+                    (crate::compile::scalar(&answer.value)
+                        && crate::compile::import_result_fits(
+                            &function.header.signature.result,
+                            answer.value,
+                        ))
+                    .then_some((answer.value, entry.depth()))
+                });
+            native_storage::NativeStorage::Value(native_storage::value::ValueNative {
+                function,
+                args: values.clone(),
+                output,
+                at: at.clone(),
+                release: release.clone(),
+                ledger: self.logical.ledger(),
+                heap: &self.heap,
+                charging: self.charging,
+                limits: self.limits,
+                known,
             })
         };
         let document = running
@@ -358,15 +395,22 @@ impl KernelMachine {
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
                 let value = prepared.storage.value();
-                completion = Some((prepared.storage.units(), prepared.storage.work()));
+                completion = Some((
+                    prepared.storage.units(),
+                    prepared.storage.work(),
+                    prepared.storage.known(),
+                ));
                 prepared.storage.publish(arena);
                 prepared.bank.publish(value, prepared.holding);
             },
         )?;
         drop(arena);
         if published {
-            let (units, work) =
+            let (units, work, known) =
                 completion.ok_or_else(|| malformed("native publication has no completion"))?;
+            if known {
+                self.observe(crate::observe::Event::NativeFast);
+            }
             self.observe(crate::observe::Event::GuardWork(work));
             if self.charging {
                 self.observe(crate::observe::Event::FormulaEnter(lib));
@@ -380,8 +424,12 @@ impl KernelMachine {
                 crate::machine::islands::witness::native_collection_published(
                     self.regs[args.start.ix()],
                 );
-            } else {
+            } else if text {
                 crate::machine::islands::witness::native_text_published();
+            } else if known {
+                crate::machine::islands::witness::prepared_native_published();
+            } else {
+                crate::machine::islands::witness::native_read_published();
             }
         }
         self.observe(crate::observe::Event::NativeExit);
