@@ -21,19 +21,34 @@ pub(super) async fn count_non_terminal_processes(
     })
 }
 
-pub(super) async fn collect_non_terminal_records(
+pub(super) async fn live_reference_summary(
     registry: &PostgresProcessRegistry,
-) -> Result<Vec<ProcessRecord>, PluginError> {
-    let rows = crate::observed_sql::query(process_sql().process.collect_non_terminal_records.sql())
-        .fetch_all(crate::observed_sql::executor(&registry.pool))
-        .await
-        .map_err(plugin_sqlx_error)?;
-    let mut records = Vec::with_capacity(rows.len());
+) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
+    let rows =
+        crate::observed_sql::query(process_sql().process_postgres.live_reference_summary.sql())
+            .fetch_all(crate::observed_sql::executor(&registry.pool))
+            .await
+            .map_err(plugin_sqlx_error)?;
+    let mut summaries = Vec::with_capacity(rows.len());
     for row in rows {
-        let json: String = row.get(0);
-        records.push(serde_json::from_str(&json).map_err(process_decode_error)?);
+        let definition_json: Option<String> = row.get(0);
+        let env_ref: Option<String> = row.get(1);
+        let count: i64 = row.get(2);
+        summaries.push(ProcessLiveReferenceView {
+            definition_id: definition_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(process_decode_error)?,
+            env_ref: env_ref.map(lash_execution_contracts::process::ProcessEnvRef::new),
+            process_count: usize::try_from(count).map_err(|_| {
+                PluginError::Session(format!(
+                    "PostgreSQL live-reference count {count} does not fit usize"
+                ))
+            })?,
+        });
     }
-    Ok(records)
+    Ok(summaries)
 }
 
 pub(super) async fn list_non_terminal_processes_page(

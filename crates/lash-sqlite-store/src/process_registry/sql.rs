@@ -42,6 +42,16 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only SQLite issues.
     pub(crate) struct ProcessSqliteStatements @ "process" {
+        /// Only the live definition/environment keys and their counts, in the
+        /// public summary's order. First process id breaks equal sort keys.
+        live_reference_summary = "WITH reference_keys AS (
+             SELECT process_id, json_extract(execution_json, '$.identity.definition_id') AS definition_json,
+                    json_extract(execution_json, '$.input.launch.env') AS env_ref
+             FROM processes WHERE {{live_process_status(status)}}
+         ) SELECT definition_json, env_ref, COUNT(*) FROM reference_keys
+         GROUP BY definition_json, env_ref
+         ORDER BY COALESCE(definition_json, ''), COALESCE(env_ref, ''), MIN(process_id)";
+
         /// Environment bytes by reference without executable reconstruction.
         select_environment_bytes = "SELECT b.content FROM artifact_refs a LEFT JOIN blobs b ON b.hash = a.blob_ref WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
 

@@ -145,8 +145,7 @@ impl lash_execution_contracts::process::ProcessQuery for SqliteProcessRegistry {
         &self,
     ) -> Result<Vec<ProcessLiveReferenceView>, lash_execution_contracts::plugin_error::PluginError>
     {
-        let records = pages::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceView::from_records(records.iter()))
+        pages::live_reference_summary(self).await
     }
 
     async fn count_non_terminal_processes(

@@ -30,25 +30,43 @@ pub(super) async fn count_non_terminal_processes(
         .map_err(process_sqlite_error)?
 }
 
-pub(super) async fn collect_non_terminal_records(
+pub(super) async fn live_reference_summary(
     registry: &SqliteProcessRegistry,
-) -> Result<Vec<ProcessRecord>, lash_execution_contracts::plugin_error::PluginError> {
+) -> Result<Vec<ProcessLiveReferenceView>, lash_execution_contracts::plugin_error::PluginError> {
     registry
         .conn
         .call(|conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare(process_sql().process.collect_non_terminal_records.sql())
+                    .prepare_cached(process_sql().process_sqlite.live_reference_summary.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
-                    .query_map([], |row| row.get::<_, String>(0))
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })
                     .map_err(process_sqlite_error)?;
-                let mut records = Vec::new();
+                let mut summaries = Vec::new();
                 for row in rows {
-                    let json = row.map_err(process_sqlite_error)?;
-                    records.push(serde_json::from_str(&json).map_err(process_decode_error)?);
+                    let (definition_json, env_ref, count) = row.map_err(process_sqlite_error)?;
+                    summaries.push(ProcessLiveReferenceView {
+                        definition_id: definition_json
+                            .as_deref()
+                            .map(serde_json::from_str)
+                            .transpose()
+                            .map_err(process_decode_error)?,
+                        env_ref: env_ref.map(lash_execution_contracts::process::ProcessEnvRef::new),
+                        process_count: usize::try_from(count).map_err(|_| {
+                            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                                "SQLite live-reference count {count} does not fit usize"
+                            ))
+                        })?,
+                    });
                 }
-                Ok(records)
+                Ok(summaries)
             })())
         })
         .await

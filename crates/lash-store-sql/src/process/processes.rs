@@ -79,11 +79,5 @@ crate::statements! {
              SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4, execution_json = ?5
              WHERE process_id = ?1";
 
-        /// Every live process, whole. The unpaged read behind the in-memory
-        /// registry rebuild; the paged non-terminal scans are backend-only because
-        /// SQLite pins them to a partial index by name.
-        collect_non_terminal_records = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
-                         WHERE {{live_process_status(status)}}
-                         ORDER BY process_id ASC";
     }
 }

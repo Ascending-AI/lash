@@ -184,8 +184,7 @@ impl lash_execution_contracts::process::ProcessQuery for PostgresProcessRegistry
     }
 
     async fn live_reference_summary(&self) -> Result<Vec<ProcessLiveReferenceView>, PluginError> {
-        let records = pages::collect_non_terminal_records(self).await?;
-        Ok(ProcessLiveReferenceView::from_records(records.iter()))
+        pages::live_reference_summary(self).await
     }
 
     async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {

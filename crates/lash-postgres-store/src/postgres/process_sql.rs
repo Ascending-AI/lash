@@ -42,6 +42,16 @@ const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
 lash_store_sql::statements! {
     /// `processes` statements only PostgreSQL issues.
     pub(crate) struct ProcessPostgresStatements @ "process" {
+        /// Only the live definition/environment keys and their counts, in the
+        /// public summary's order. First process id breaks equal sort keys.
+        live_reference_summary = "WITH reference_keys AS (
+             SELECT process_id, NULLIF((execution_json::json #> '{identity,definition_id}')::text, 'null') AS definition_json,
+                    execution_json::json #>> '{input,launch,env}' AS env_ref
+             FROM processes WHERE {{live_process_status(status)}}
+         ) SELECT definition_json, env_ref, COUNT(*) FROM reference_keys
+         GROUP BY definition_json, env_ref
+         ORDER BY COALESCE(definition_json, '') COLLATE \"C\", COALESCE(env_ref, '') COLLATE \"C\", MIN(process_id)";
+
         /// Environment bytes by reference without executable reconstruction.
         select_environment_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2";
 

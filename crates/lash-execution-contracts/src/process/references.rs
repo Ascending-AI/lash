@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::ProcessDefinitionId;
@@ -17,22 +19,23 @@ impl ProcessLiveReferenceView {
         records: impl IntoIterator<Item = &'record ProcessRecord>,
     ) -> Vec<Self> {
         let mut summaries: Vec<Self> = Vec::new();
+        let mut groups = BTreeMap::new();
         for record in records {
             if record.is_terminal() {
                 continue;
             }
-            if let Some(summary) = summaries.iter_mut().find(|summary| {
-                summary.definition_id == record.identity.definition_id
-                    && summary.env_ref.as_ref() == record.env_ref()
-            }) {
-                summary.process_count += 1;
-            } else {
-                summaries.push(Self {
-                    definition_id: record.identity.definition_id.clone(),
-                    env_ref: record.env_ref().cloned(),
-                    process_count: 1,
+            let index = *groups
+                .entry((record.identity.definition_id.as_ref(), record.env_ref()))
+                .or_insert_with(|| {
+                    let index = summaries.len();
+                    summaries.push(Self {
+                        definition_id: record.identity.definition_id.clone(),
+                        env_ref: record.env_ref().cloned(),
+                        process_count: 0,
+                    });
+                    index
                 });
-            }
+            summaries[index].process_count += 1;
         }
         summaries.sort_by_key(live_reference_sort_key);
         summaries
