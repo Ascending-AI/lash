@@ -22,6 +22,9 @@ pub(super) trait StoragePreparation {
         actual: Program,
     ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault>;
     fn allowance(_: &Self::Prepared, _: &mut Allowance) {}
+    fn facts(_: &Self::Prepared, _: &mut LeafExecution) -> Result<(), HeapFault> {
+        Ok(())
+    }
 }
 pub(super) struct Reserve<F>(pub(super) F);
 impl<F, S> StoragePreparation for Reserve<F>
@@ -293,6 +296,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(false);
         };
         S::allowance(&storage, &mut prefix.allowance);
+        S::facts(&storage, &mut prefix.facts)?;
         let safe_point = self.charged;
         let resources = SourceResources {
             charged: &mut self.charged,

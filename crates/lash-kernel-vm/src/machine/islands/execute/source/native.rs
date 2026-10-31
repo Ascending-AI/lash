@@ -1,4 +1,5 @@
 //! Native results publish their canonical occurrences and logical scratch.
+mod list;
 mod text;
 use super::*;
 use crate::admission::Allowance;
@@ -59,10 +60,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         prepared: bool,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
+        let list = !prepared
+            && matches!(
+                function.header.signature.result,
+                lash_kernel_value::Type::List(_)
+            );
         let text = !prepared
             && (matches!(site.direct(self.exe), Some(Direct::TextJoin))
                 || function.header.signature.result == lash_kernel_value::Type::Text);
         if (!prepared
+            && !list
             && !text
             && !matches!(
                 site.direct(self.exe),
@@ -149,12 +156,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             self.arena.objects(),
             &self.arena.semantics(),
         )) {
+            Ok(Some(contract)) if list && list::supports(&contract) => contract,
             Ok(Some(contract))
-                if (contract.events.is_empty()
-                    || ((text || prepared)
-                        && contract.events.iter().all(|event| {
-                            matches!(event, doc::NativeResourceEvent::Scratch { .. })
-                        })))
+                if !list
+                    && (contract.events.is_empty()
+                        || ((text || prepared)
+                            && contract.events.iter().all(|event| {
+                                matches!(event, doc::NativeResourceEvent::Scratch { .. })
+                            })))
                     && contract.exit == doc::NativeResourceExit::Returned
                     && (!(text || prepared)
                         || contract.output.origin == doc::NativeResourceOrigin::Immutable) =>
@@ -179,7 +188,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             (Some(Direct::Member(_)), _) => self.membership(site, args),
             _ => None,
         });
-        if answer.is_none() && !text {
+        if answer.is_none() && !text && !list {
             return Ok(ValuePublication::Unavailable);
         }
         let scratch = contract
@@ -250,6 +259,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .events()
             .next()
             .ok_or_else(|| malformed("native read event disappeared"))?;
+        let release = event.inputs.clone();
         let facts = LeafExecution(
             [(
                 at.clone(),
@@ -396,6 +406,38 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     *result = storage.value;
                 },
             )?
+        } else if list {
+            let room = self.memory.then(|| {
+                self.ceiling
+                    .saturating_sub(self.register_bytes)
+                    .saturating_sub(self.arena.held())
+                    .saturating_sub(self.transient)
+            });
+            let prepare = list::ListNative {
+                function,
+                args: args.to_vec(),
+                output,
+                at: prefix.start.at.clone(),
+                release,
+                ledger: std::rc::Rc::clone(&store),
+                heap: self.heap,
+                charging: self.charging,
+                limits: self.limits,
+                room,
+            };
+            let result = &mut frame.regs[site.reg as usize];
+            self.publish_source_prepared(
+                frame.state.callee,
+                activation,
+                prefix,
+                make,
+                prepare,
+                |arena, _, edits, storage| {
+                    debug_assert!(edits.is_empty());
+                    storage.batch.publish(arena);
+                    *result = storage.value;
+                },
+            )?
         } else {
             self.publish_source(frame.state.callee, activation, prefix, make, |_, edits| {
                 debug_assert!(edits.is_empty())
@@ -405,6 +447,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if published {
             if prepared {
                 crate::machine::islands::witness::prepared_native_published();
+            } else if list {
+                crate::machine::islands::witness::native_list_published();
             } else if text {
                 crate::machine::islands::witness::native_text_published();
             } else {

@@ -161,6 +161,35 @@ impl Ledger {
                     Ok(())
                 })?;
         }
+        self.release_cost_protecting(arena, heap, inputs, pending)
+    }
+    /// A detached wrapper preserves the exact child graph of its prospective
+    /// canonical body without introducing synthetic owner occurrences.
+    pub fn release_cost_preserving_body(
+        &self,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        body: &VirtualBody,
+    ) -> Result<u64, HeapFault> {
+        let access = heap.pages();
+        let mut pending = Vec::new();
+        body.holding(heap, arena)?.each_edge(access, &mut |edge| {
+            if let Identity::Object(entity) = edge.target {
+                pending.push(entity);
+            }
+            Ok(())
+        })?;
+        self.release_cost_protecting(arena, heap, inputs, pending)
+    }
+    fn release_cost_protecting(
+        &self,
+        arena: &mut Arena,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        mut pending: Vec<EntityId>,
+    ) -> Result<u64, HeapFault> {
+        let access = heap.pages();
         let mut protected = BTreeSet::new();
         let mut fresh = BTreeSet::new();
         while let Some(entity) = pending.pop() {

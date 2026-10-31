@@ -61,7 +61,7 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
             _ => 0,
         },
         Value::Tuple(handle) | Value::List(handle) | Value::Set(handle) | Value::Record(handle) => {
-            arena.len(*handle)?
+            return Ok(sequence_size(arena.len(*handle)?));
         }
         Value::Error(handle) => match arena.body(*handle)? {
             Body::Error(error) => {
@@ -73,6 +73,11 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
         _ => 0,
     };
     Ok(extent.saturating_add(1))
+}
+
+/// The canonical shallow size of a sequence, resident or detached.
+pub(crate) fn sequence_size(len: u64) -> u64 {
+    len.saturating_add(1)
 }
 
 /// The size of a value the arena holds nothing of (`K-CHG-004`): a word,

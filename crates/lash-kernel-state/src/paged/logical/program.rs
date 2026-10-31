@@ -62,7 +62,11 @@ pub enum VirtualBody {
     Record(Vec<(PageValue, PageValue)>),
 }
 impl VirtualBody {
-    fn holding(&self, heap: &PagedHeap, arena: &mut Arena) -> Result<Holding, HeapFault> {
+    pub(super) fn holding(
+        &self,
+        heap: &PagedHeap,
+        arena: &mut Arena,
+    ) -> Result<Holding, HeapFault> {
         use lash_kernel_doc::heap::PageReader;
         let access = heap.pages();
         let mut body = Holding::scalar(Cost::OBJECT);

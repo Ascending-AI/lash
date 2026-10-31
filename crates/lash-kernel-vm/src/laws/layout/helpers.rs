@@ -99,6 +99,15 @@ pub(in crate::laws) fn helper_probes(
             .register(length, lash_kernel_lib::native("list.len"))
             .unwrap(),
     ));
+    let copy = lash_kernel_doc::parse_definition(
+        "function resident.copy(xs: List(Any)) -> List(Any)\nkernel 1\ncharge sum(1, size(xs), size(result))\nnative\n",
+    ).unwrap();
+    out.push((
+        "resident.copy",
+        registry
+            .register(copy, lash_kernel_lib::native("list.copy"))
+            .unwrap(),
+    ));
     let add = out.iter().find(|(name, _)| *name == "flat.add").unwrap().1;
     let kind = out.iter().find(|(name, _)| *name == "kind").unwrap().1;
     let same = out.iter().find(|(name, _)| *name == "same").unwrap().1;
