@@ -87,22 +87,6 @@ pub(super) struct InFlight {
     /// answer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) resolves: bool,
-    /// The policy its admission pinned.
-    pub(super) policy: lash_kernel_value::tool_contract::ExecutionPolicy,
-    /// Its limit's expiry, as admitted: never refreshed.
-    pub(super) limit_expires_at: u64,
-    /// Its limit's longest slice in milliseconds, as admitted.
-    pub(super) limit_max_slice_ms: u64,
-}
-
-impl InFlight {
-    /// The limit its admission recorded.
-    pub(super) fn limit(&self) -> lash_protocol_types::ExecutionLimit {
-        lash_protocol_types::ExecutionLimit {
-            expires_at: self.limit_expires_at,
-            max_slice: std::time::Duration::from_millis(self.limit_max_slice_ms),
-        }
-    }
 }
 
 /// One pinned key.

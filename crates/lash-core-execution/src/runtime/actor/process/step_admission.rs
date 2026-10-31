@@ -370,10 +370,6 @@ impl ProcessActivation {
                 run,
                 member,
                 call,
-                policy: admitted.policy,
-                limit_expires_at: admitted.limit.expires_at,
-                limit_max_slice_ms: u64::try_from(admitted.limit.max_slice.as_millis())
-                    .unwrap_or(u64::MAX),
                 request,
                 target: admitted.target,
                 operation: admitted.operation,
@@ -391,8 +387,8 @@ impl ProcessActivation {
                     step.call.clone(),
                     admitted.tool,
                     step_request_material(process, &step),
-                    step.policy,
-                    step.limit(),
+                    admitted.policy,
+                    admitted.limit,
                     admitted.park,
                 )
                 .with_binding(admitted.binding)
