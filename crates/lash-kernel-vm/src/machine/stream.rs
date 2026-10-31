@@ -197,9 +197,27 @@ impl KernelMachine {
                     }
                     self.put(at(dst), value);
                 }
-                Op::LetBind { local, src } => {
+                Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
+                    if inside!(
+                        self,
+                        running,
+                        pc,
+                        self.publish_source_binding(running, source_pc)
+                    ) {
+                        continue;
+                    }
                     let value = self.take(at(src));
-                    inside!(self, running, pc, self.bind(task, local.at, false, value));
+                    inside!(
+                        self,
+                        running,
+                        pc,
+                        self.bind(
+                            task,
+                            local.at,
+                            matches!(op, Op::LetBindShared { .. }),
+                            value
+                        )
+                    );
                 }
                 Op::LetEnd { local } => {
                     inside!(self, running, pc, self.frame(task))
@@ -229,8 +247,7 @@ impl KernelMachine {
                     }
                     inside!(self, running, pc, self.in_region_rare(running, op));
                 }
-                Op::LetBindShared { .. }
-                | Op::Unbound { .. }
+                Op::Unbound { .. }
                 | Op::Field { .. }
                 | Op::Index { .. }
                 | Op::Closure { .. }

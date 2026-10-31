@@ -19,6 +19,7 @@ const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empt
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 // K-CHG-001: an unpaid source region cannot publish a captured closure.
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
+const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { let ordinary = let(alias = value, alias) let captured = let(shared = [value], let(get = fn() { return shared }, apply get())) return [ordinary, captured] } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
@@ -241,6 +242,7 @@ fn observe_source_or_register(
     let empty_tuples = crate::machine::islands::witness::empty_tuple_constructions();
     let precise_constructions = crate::machine::islands::witness::precise_constructions();
     let precise_bindings = crate::machine::islands::witness::precise_bindings();
+    let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
     let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
@@ -295,6 +297,18 @@ fn observe_source_or_register(
         assert!(
             cell_constructions > 0,
             "the precise shared binding must publish its prepared cell with the actual RHS transfer"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_SCOPED_BINDINGS)
+    {
+        assert!(
+            scoped_bindings.iter().all(|count| *count > 0),
+            "ordinary and captured expression bindings must publish at their actual source Test: {scoped_bindings:?}"
         );
     }
     if mode != Mode::Source
@@ -535,6 +549,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_CELL,
+        SOURCE_SCOPED_BINDINGS,
         SOURCE_CLOSURE_PREFIX,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
@@ -644,6 +659,7 @@ fn direct_call_entry_agrees() {
             || body == READ_ADD_WRITE
             || body == SOURCE_BAD_MEMBER
             || body == SOURCE_CELL
+            || body == SOURCE_SCOPED_BINDINGS
             || body == SOURCE_CLOSURE_PREFIX
             || body == SOURCE_MEMBER
             || body == SOURCE_CONSTRUCTION
@@ -665,7 +681,8 @@ fn direct_call_entry_agrees() {
                 Mode::Source,
             );
             assert_eq!(plain, source_only, "source oracle: {body}");
-            if body == SOURCE_CONSTRUCTION || body == SOURCE_CELL {
+            if body == SOURCE_CONSTRUCTION || body == SOURCE_CELL || body == SOURCE_SCOPED_BINDINGS
+            {
                 assert_eq!(
                     observe_source_or_register(
                         &source,
@@ -712,6 +729,15 @@ fn direct_call_entry_agrees() {
                 )
             );
         }
+        if body == SOURCE_SCOPED_BINDINGS {
+            assert_eq!(
+                reference.end,
+                format!(
+                    "finished {:?}",
+                    Datum::List(vec![int(7), Datum::List(vec![int(7)])])
+                )
+            );
+        }
         assert_eq!(plain.end, reference.end, "untaped result: {body}");
         assert_eq!(
             plain,
@@ -743,6 +769,7 @@ fn direct_call_entry_agrees() {
             READ_ADD_WRITE,
             SOURCE_MEMBER,
             SOURCE_CELL,
+            SOURCE_SCOPED_BINDINGS,
             SOURCE_CONSTRUCTION,
             SOURCE_SESSION,
             SOURCE_UNIT,
@@ -796,6 +823,7 @@ fn direct_call_entry_agrees() {
             READ_ADD_WRITE,
             SOURCE_MEMBER,
             SOURCE_CELL,
+            SOURCE_SCOPED_BINDINGS,
             SOURCE_CLOSURE_PREFIX,
             SOURCE_BAD_MEMBER,
             SOURCE_CONSTRUCTION,
@@ -871,6 +899,7 @@ fn direct_call_entry_agrees() {
         READ_ADD_WRITE,
         SOURCE_MEMBER,
         SOURCE_CELL,
+        SOURCE_SCOPED_BINDINGS,
         SOURCE_BAD_MEMBER,
         SOURCE_CONSTRUCTION,
         SOURCE_SESSION,
@@ -913,6 +942,7 @@ fn direct_call_entry_agrees() {
                 || body == READ_ADD_WRITE
                 || body == SOURCE_BAD_MEMBER
                 || body == SOURCE_CELL
+                || body == SOURCE_SCOPED_BINDINGS
                 || body == SOURCE_MEMBER
                 || body == SOURCE_CONSTRUCTION
                 || body == SOURCE_SESSION

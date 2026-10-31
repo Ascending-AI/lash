@@ -71,6 +71,7 @@ thread_local! {
     static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static EMPTY_TUPLE_CONSTRUCTIONS: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
     static PRECISE_CONSTRUCTIONS: std::cell::Cell<[u64;5]> = const { std::cell::Cell::new([0;5]) };
+    static SCOPED_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_SOURCE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -91,6 +92,7 @@ pub(crate) fn begin() {
     EMPTY_TUPLE_CONSTRUCTIONS.with(|counts| counts.set([0; 2]));
     PRECISE_CONSTRUCTIONS.with(|counts| counts.set([0; 5]));
     PRECISE_BINDINGS.with(|counts| counts.set([0; 2]));
+    SCOPED_BINDINGS.with(|counts| counts.set([0; 2]));
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
     TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
     TABLE_CONSTRUCTIONS.with(|counts| counts.set([0; 3]));
@@ -322,6 +324,19 @@ pub(in crate::machine) fn precise_binding_published(value: lash_kernel_doc::Valu
     PRECISE_BINDINGS.with(|counts| {
         let mut next = counts.get();
         next[usize::from(value.handle().is_some())] += 1;
+        counts.set(next);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn scoped_bindings() -> [u64; 2] {
+    SCOPED_BINDINGS.with(|counts| counts.replace([0; 2]))
+}
+
+pub(in crate::machine) fn scoped_binding_published(shared: bool) {
+    SCOPED_BINDINGS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(shared)] += 1;
         counts.set(next);
     });
 }

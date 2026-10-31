@@ -57,10 +57,15 @@ impl KernelMachine {
         pc: u32,
     ) -> Result<bool, Halt> {
         let op = running.stream.ops[pc as usize];
-        let (Op::Bind { local, src } | Op::BindShared { local, src }) = op else {
+        let (Op::Bind { local, src }
+        | Op::BindShared { local, src }
+        | Op::LetBind { local, src }
+        | Op::LetBindShared { local, src }) = op
+        else {
             return Ok(false);
         };
-        let shared = matches!(op, Op::BindShared { .. });
+        let shared = matches!(op, Op::BindShared { .. } | Op::LetBindShared { .. });
+        let scoped = matches!(op, Op::LetBind { .. } | Op::LetBindShared { .. });
         // Compatibility eligibility until guest admission uses logical authority
         // on every path. This estimate never supplies a logical price.
         if shared && self.arena.borrow().sequence_bound(1) > self.capacity_headroom() {
@@ -97,12 +102,17 @@ impl KernelMachine {
                 frame.link,
             )
         };
-        let Ok(unpaid) = source.next_after_commit(site) else {
+        let successor = if scoped {
+            source.first_event(&site.child(1))
+        } else {
+            source.next_after_commit(site)
+        };
+        let Ok(unpaid) = successor else {
             return Ok(false);
         };
         let at = Point {
             site: (**site).clone(),
-            phase: Phase::Commit,
+            phase: if scoped { Phase::Test } else { Phase::Commit },
         };
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
@@ -270,6 +280,9 @@ impl KernelMachine {
                 self.storage.value_moves += 1;
             }
             crate::machine::islands::witness::precise_binding_published(value);
+            if scoped {
+                crate::machine::islands::witness::scoped_binding_published(shared);
+            }
         }
         Ok(published)
     }
