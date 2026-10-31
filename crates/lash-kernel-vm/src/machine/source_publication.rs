@@ -1,4 +1,5 @@
 //! The source frontier, resource admission and semantic journal share one commit.
+pub(in crate::machine) mod construction;
 mod leaf;
 use super::session::Session;
 use crate::admission::{Allowance, SourceResources};

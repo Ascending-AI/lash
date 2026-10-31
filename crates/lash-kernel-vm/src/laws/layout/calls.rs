@@ -236,6 +236,7 @@ fn observe_source_or_register(
     let prepared_natives = crate::machine::islands::witness::prepared_native_publications();
     let native_lists = crate::machine::islands::witness::native_list_publications();
     let native_tables = crate::machine::islands::witness::native_table_publications();
+    let precise_constructions = crate::machine::islands::witness::precise_constructions();
     let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
@@ -251,6 +252,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_CONSTRUCTION)
     {
+        assert!(
+            precise_constructions.iter().all(|count| *count > 0) && precise_constructions[1] >= 2,
+            "precise list, nested tuple, map, set and record constructors must publish their prepared bodies: {precise_constructions:?}"
+        );
         assert!(
             precise_source > 0,
             "the precise executor must publish actual source leaf acquisition before installing its register value"

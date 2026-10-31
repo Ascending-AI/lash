@@ -1,13 +1,11 @@
 //! Source collections own their normalized graph before storage is installed.
-mod storage;
 use super::*;
 use crate::admission::Allowance;
-use lash_kernel_state::kernel_internals::logical::{
-    JournalEvent, Program, PublicationValue as PV, VirtualBody, VirtualEntity,
-};
+use crate::machine::source_publication::construction::storage;
+use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
-    ExitKind, Measure, Phase as SourcePhase, Point,
+    ExitKind, Phase as SourcePhase, Point,
     publication::{Occurrence, Position as SourcePosition},
 };
 

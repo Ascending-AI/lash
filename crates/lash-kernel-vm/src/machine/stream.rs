@@ -211,15 +211,25 @@ impl KernelMachine {
                     };
                     self.put(at(dst), value);
                 }
+                Op::MakeTuple { .. }
+                | Op::MakeList { .. }
+                | Op::MakeSet { .. }
+                | Op::MakeMap { .. }
+                | Op::MakeRecord { .. } => {
+                    if inside!(
+                        self,
+                        running,
+                        pc,
+                        self.publish_source_construction(running, source_pc)
+                    ) {
+                        continue;
+                    }
+                    inside!(self, running, pc, self.in_region_rare(running, op));
+                }
                 Op::LetBindShared { .. }
                 | Op::Unbound { .. }
                 | Op::Field { .. }
                 | Op::Index { .. }
-                | Op::MakeTuple { .. }
-                | Op::MakeList { .. }
-                | Op::MakeSet { .. }
-                | Op::MakeMap { .. }
-                | Op::MakeRecord { .. }
                 | Op::Closure { .. }
                 | Op::Pin { .. } => {
                     inside!(self, running, pc, self.in_region_rare(running, op));

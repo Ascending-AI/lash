@@ -92,6 +92,36 @@ impl PreparedLeaf<'_> {
     }
 }
 
+pub(super) struct PreparedConstruction<'a> {
+    registers: &'a mut Registers,
+    construction: source::Construction,
+}
+impl PreparedConstruction<'_> {
+    pub(super) fn owner(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
+        self.construction.owner()
+    }
+    pub(super) fn owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
+        self.construction.owners()
+    }
+    pub(super) fn values(&self) -> Vec<Value> {
+        self.construction.values()
+    }
+    pub(super) fn publish(
+        self,
+        value: Value,
+        holding: lash_kernel_state::kernel_internals::logical::Holding,
+    ) {
+        for reg in self.construction.registers() {
+            self.registers.take(reg.ix(), Value::Null);
+        }
+        let output = self.construction.reg_index();
+        self.registers.put(output, value);
+        self.registers
+            .source
+            .publish_construction(self.construction, value, holding);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Registers {
     values: Vec<Value>,
@@ -258,6 +288,28 @@ impl Registers {
         self.clear_range(values.len()..self.extent);
         self.extent = values.len();
         Ok(())
+    }
+
+    pub(super) fn prepare_source_construction(
+        &mut self,
+        stream: &crate::compile::Stream,
+        pc: u32,
+    ) -> Result<Option<PreparedConstruction<'_>>, HeapFault> {
+        let Some(reg) = stream.ops.get(pc as usize).and_then(|op| op.writes()) else {
+            return Ok(None);
+        };
+        if reg.ix() >= self.extent {
+            return Err(HeapFault::Malformed(
+                "source construction output is outside its admitted register window".into(),
+            ));
+        }
+        let Some(construction) = self.source.prepare_construction(stream, pc)? else {
+            return Ok(None);
+        };
+        Ok(Some(PreparedConstruction {
+            registers: self,
+            construction,
+        }))
     }
 
     pub(super) fn prepare_source_leaf(

@@ -1,23 +1,28 @@
 //! A constructor's normalized detached body is its canonical publication recipe.
-use super::super::publication::{PreparedStorage, StoragePreparation, native_fault};
-use super::*;
-use lash_kernel_state::{
-    arena::PreparedBatch,
-    kernel_internals::logical::{Holding, Ledger, RootValue},
+use crate::compile::room::{self, Measure, Point};
+use crate::machine::source_publication::{
+    LeafExecution, PreparedStorage, StoragePreparation, malformed, native_fault,
 };
-
-pub(super) struct Construction<'a> {
-    pub(super) object: doc::NewObject,
-    pub(super) output: Owner,
-    pub(super) at: Point,
-    pub(super) release: Box<[room::Owner]>,
-    pub(super) ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
-    pub(super) depth_limit: usize,
-    pub(super) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
+use lash_kernel_doc::{self as doc, Value, heap::HeapFault};
+use lash_kernel_state::{
+    arena::{Arena, PreparedBatch},
+    kernel_internals::logical::{
+        Holding, Ledger, Owner, Program, PublicationValue as PV, RootValue, VirtualBody,
+        VirtualEntity,
+    },
+};
+pub(in crate::machine) struct Construction<'a> {
+    pub(in crate::machine) object: doc::NewObject,
+    pub(in crate::machine) output: Owner,
+    pub(in crate::machine) at: Point,
+    pub(in crate::machine) release: Box<[room::Owner]>,
+    pub(in crate::machine) ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
+    pub(in crate::machine) depth_limit: usize,
+    pub(in crate::machine) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
 }
-pub(super) struct Prepared {
-    pub(super) batch: PreparedBatch,
-    pub(super) value: Value,
+pub(in crate::machine) struct Prepared {
+    pub(in crate::machine) batch: PreparedBatch,
+    pub(in crate::machine) value: Value,
     at: Point,
     release: Box<[room::Owner]>,
     obligation: (Measure, u64),
