@@ -1,12 +1,12 @@
 //! A native's fresh shallow collection installs with its canonical source graph.
 use super::*;
+use crate::machine::source_publication::{PreparedStorage, StoragePreparation, native_fault};
 use lash_kernel_state::{
     arena::PreparedBatch,
     kernel_internals::logical::{Ledger, VirtualBody, VirtualEntity},
 };
-use publication::{PreparedStorage, StoragePreparation, native_fault};
 
-pub(super) fn supports(contract: &doc::NativeResourceContract) -> bool {
+pub(in crate::machine) fn supports(contract: &doc::NativeResourceContract) -> bool {
     let doc::NativeResourceOrigin::Fresh(output) = contract.output.origin else {
         return false;
     };
@@ -43,23 +43,24 @@ pub(super) fn supports(contract: &doc::NativeResourceContract) -> bool {
     entity
 }
 
-pub(super) struct CollectionNative<'a> {
-    pub(super) function: &'a crate::compile::Lib,
-    pub(super) args: Vec<Value>,
-    pub(super) output: Owner,
-    pub(super) at: Point,
-    pub(super) release: Box<[room::Owner]>,
-    pub(super) ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
-    pub(super) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
-    pub(super) charging: bool,
-    pub(super) limits: lash_kernel_value::data_limits::KernelDataLimits,
-    pub(super) room: Option<u64>,
+pub(in crate::machine) struct CollectionNative<'a> {
+    pub(in crate::machine) function: &'a crate::compile::Lib,
+    pub(in crate::machine) args: Vec<Value>,
+    pub(in crate::machine) output: Owner,
+    pub(in crate::machine) at: Point,
+    pub(in crate::machine) release: Box<[room::Owner]>,
+    pub(in crate::machine) ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
+    pub(in crate::machine) heap: &'a lash_kernel_state::kernel_internals::PagedHeap,
+    pub(in crate::machine) charging: bool,
+    pub(in crate::machine) limits: lash_kernel_value::data_limits::KernelDataLimits,
+    pub(in crate::machine) room: Option<u64>,
 }
 
-pub(super) struct PreparedCollection {
-    pub(super) batch: PreparedBatch,
-    pub(super) value: Value,
-    units: u64,
+pub(in crate::machine) struct PreparedCollection {
+    pub(in crate::machine) batch: PreparedBatch,
+    pub(in crate::machine) value: Value,
+    pub(in crate::machine) units: u64,
+    pub(in crate::machine) work: u64,
     released: u64,
     at: Point,
     release: Box<[room::Owner]>,
@@ -195,6 +196,7 @@ impl StoragePreparation for CollectionNative<'_> {
                 batch,
                 value,
                 units,
+                work: counter.spent(),
                 released,
                 at: self.at,
                 release: self.release,

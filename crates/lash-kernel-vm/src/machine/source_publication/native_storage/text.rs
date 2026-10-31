@@ -1,20 +1,21 @@
 //! A native's detached text and canonical page recipe share one registration.
 use super::*;
+use crate::machine::source_publication::{PreparedStorage, StoragePreparation, native_fault};
 use lash_kernel_state::arena::PreparedBatch;
-use publication::{PreparedStorage, StoragePreparation, native_fault};
 
-pub(super) struct TextNative<'a> {
-    pub(super) function: &'a crate::compile::Lib,
-    pub(super) args: Vec<Value>,
-    pub(super) output: Owner,
-    pub(super) charging: bool,
-    pub(super) limits: lash_kernel_value::data_limits::KernelDataLimits,
-    pub(super) room: Option<u64>,
+pub(in crate::machine) struct TextNative<'a> {
+    pub(in crate::machine) function: &'a crate::compile::Lib,
+    pub(in crate::machine) args: Vec<Value>,
+    pub(in crate::machine) output: Owner,
+    pub(in crate::machine) charging: bool,
+    pub(in crate::machine) limits: lash_kernel_value::data_limits::KernelDataLimits,
+    pub(in crate::machine) room: Option<u64>,
 }
-pub(super) struct PreparedText {
-    pub(super) batch: PreparedBatch,
-    pub(super) value: Value,
-    units: u64,
+pub(in crate::machine) struct PreparedText {
+    pub(in crate::machine) batch: PreparedBatch,
+    pub(in crate::machine) value: Value,
+    pub(in crate::machine) units: u64,
+    pub(in crate::machine) work: u64,
 }
 
 impl StoragePreparation for TextNative<'_> {
@@ -124,6 +125,7 @@ impl StoragePreparation for TextNative<'_> {
                 batch,
                 value,
                 units,
+                work: counter.spent(),
             },
             actual,
         }))

@@ -185,7 +185,7 @@ pub(in crate::machine::islands) fn native_read_published() {
 pub(crate) fn native_text_publications() -> u64 {
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn native_text_published() {
+pub(in crate::machine) fn native_text_published() {
     NATIVE_TEXT_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 
@@ -249,7 +249,7 @@ pub(in crate::machine::islands) fn native_list_published() {
 pub(crate) fn native_table_publications() -> [u64; 3] {
     NATIVE_TABLE_PUBLICATIONS.with(|counts| counts.replace([0; 3]))
 }
-pub(in crate::machine::islands) fn native_collection_published(value: lash_kernel_doc::Value) {
+pub(in crate::machine) fn native_collection_published(value: lash_kernel_doc::Value) {
     use lash_kernel_doc::Value;
     let index = match value {
         Value::List(_) => {

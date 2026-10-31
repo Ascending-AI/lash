@@ -393,6 +393,18 @@ fn observe_source_or_register(
             precise_scopes > 0,
             "the source nested scope must publish its genuine owner release before clearing bindings"
         );
+        assert!(
+            native_texts >= 3,
+            "precise native text consumers must publish join, repeat and slice: {native_texts}"
+        );
+        assert!(
+            native_lists >= 2,
+            "precise native list consumers must publish both actual copies: {native_lists}"
+        );
+        assert!(
+            native_tables.iter().all(|count| *count > 0),
+            "precise map, set and record copies must publish their canonical graph: {native_tables:?}"
+        );
     }
     if layout == Layout(0)
         && !taped

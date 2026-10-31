@@ -1,8 +1,7 @@
 //! Native results publish their canonical occurrences and logical scratch.
-mod collection;
-mod text;
 use super::*;
 use crate::admission::Allowance;
+use crate::machine::source_publication::native_storage::{collection, text};
 use lash_kernel_state::kernel_internals::logical::{
     JournalEvent, Program, PublicationValue as PV, RootValue, ScratchEvent, Slot,
 };

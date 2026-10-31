@@ -251,6 +251,10 @@ impl KernelMachine {
                 }
                 Op::Call { lib, args } => {
                     self.close_region(running.stream);
+                    if self.publish_source_native(running, source_pc)? {
+                        self.source_complete_joins(running, source_pc)?;
+                        continue;
+                    }
                     let (lib, count) = (LibId(lib.0), args.len as usize);
                     self.call_answered(task, running.exe, lib, at(args.start), count)?;
                 }

@@ -10,6 +10,8 @@ mod join;
 mod leaf;
 mod literal;
 pub(in crate::machine) mod literal_storage;
+mod native;
+pub(in crate::machine) mod native_storage;
 mod occurrence;
 mod read;
 use occurrence::source_loops;
