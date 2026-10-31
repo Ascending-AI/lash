@@ -59,7 +59,7 @@ async fn a_resumed_cells_failure_is_located_by_its_stored_map() {
             .expect("the cell ends with its task running");
         assert!(
             matches!(
-                &failure.defect,
+                failure.defect(),
                 Some(lash_core::CellDefect::TasksOutstanding { unfinished, .. })
                     if unfinished.len() == 1
             ),
@@ -74,7 +74,7 @@ async fn a_resumed_cells_failure_is_located_by_its_stored_map() {
                 failure.message
             );
         } else {
-            let Some(lash_core::CellDefect::TasksOutstanding { unfinished, .. }) = &failure.defect
+            let Some(lash_core::CellDefect::TasksOutstanding { unfinished, .. }) = failure.defect()
             else {
                 unreachable!("the typed task failure was checked above");
             };

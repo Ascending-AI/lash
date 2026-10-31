@@ -23,8 +23,8 @@ pub mod profile;
 mod read_fact;
 mod redacted;
 pub use read_fact::{
-    ReadFact, ReadFailure, ReadPanic, ReadResult, ToolCallExecution, ToolReadCaller,
-    ToolReadIdentity,
+    ReadFact, ReadFailure, ReadPanic, ReadResult, ToolCallClassification, ToolCallExecution,
+    ToolReadCaller, ToolReadIdentity,
 };
 mod result_fit;
 mod retained_output;
@@ -92,9 +92,9 @@ pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput, Re
 pub use run_aggregate::RunAggregateWakePolicy;
 pub use session::{
     BindingChanges, CallResultSummary, CellConsumption, CellControl, CellDefect, CellFailure,
-    CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord, CellResource,
-    DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall,
-    ExecutedCallOutcome, ExecutionBoundFact, TextProjectionMetadata,
+    CellFailureCause, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint, CellRecord,
+    CellResource, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
+    ExecutedCall, ExecutedCallOutcome, ExecutionBoundFact, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

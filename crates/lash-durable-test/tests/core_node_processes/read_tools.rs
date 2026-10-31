@@ -543,9 +543,9 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
         .iter()
         .map(|event| {
             serde_json::json!({
-                "type":event["type"], "execution":event["execution"],
-                "caller":event["read"]["caller"], "ordinal":event["read"]["ordinal"],
-                "name":event["name"], "provider":event["read"]["provider"],
+                "type":event["type"], "classification":event["classification"]["kind"],
+                "caller":event["classification"]["read"]["caller"], "ordinal":event["classification"]["read"]["ordinal"],
+                "name":event["name"], "provider":event["classification"]["read"]["provider"],
                 "args":event["args"], "outcome":event["output"]["outcome"]["status"],
             })
         })
@@ -557,7 +557,7 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
             ("tool_call_returned", serde_json::json!("success")),
         ] {
             expected.push(serde_json::json!({
-                "type":kind, "execution":"read", "caller":{"kind":"process", "process_id":process},
+                "type":kind, "classification":"unrecorded_read", "caller":{"kind":"process", "process_id":process},
                 "ordinal":ordinal, "name":LOOKUP_TOOL,
                 "provider":{"registry":"process", "owner":KNOWLEDGE.component(), "key":"tools"},
                 "args":{"topic":topic}, "outcome":outcome,
@@ -599,7 +599,7 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
     let (_, core) =
         super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-history", build);
     let saved_reads = core.processes().saved_reads(&process).await.unwrap();
-    assert_eq!(saved_reads.iter().map(|record| serde_json::to_value(lash_protocol_types::Durable(record)).unwrap()["read"]["ordinal"].clone()).collect::<Vec<_>>(), [serde_json::json!(1),serde_json::json!(2)], "a terminal process lists its saved reads without its old replay store");
+    assert_eq!(saved_reads.iter().map(|record| serde_json::to_value(lash_protocol_types::Durable(record)).unwrap()["classification"]["read"]["ordinal"].clone()).collect::<Vec<_>>(), [serde_json::json!(1),serde_json::json!(2)], "a terminal process lists its saved reads without its old replay store");
     for event in activities
         .iter()
         .filter(|event| event["type"] == "tool_call_returned")
@@ -612,9 +612,15 @@ async fn a_sessionless_workflow_streams_reads_across_a_park_on_sqlite_memory() {
             .unwrap()
             .expect("the caller's save retains the live read row");
         let identity = serde_json::to_value(lash_protocol_types::Durable(&saved)).unwrap();
-        assert_eq!(identity["execution"], "read");
-        assert_eq!(identity["read"]["caller"], event["read"]["caller"]);
-        assert_eq!(identity["read"]["ordinal"], event["read"]["ordinal"]);
+        assert_eq!(identity["classification"]["kind"], "unrecorded_read");
+        assert_eq!(
+            identity["classification"]["read"]["caller"],
+            event["classification"]["read"]["caller"]
+        );
+        assert_eq!(
+            identity["classification"]["read"]["ordinal"],
+            event["classification"]["read"]["ordinal"]
+        );
         assert_eq!(
             saved_reads.iter().find(|record| record.call_id == id),
             Some(&saved),

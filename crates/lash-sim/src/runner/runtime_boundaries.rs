@@ -220,8 +220,7 @@ impl RuntimeBoundaryHarness {
         let scripted = RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(ToolAttemptLaunch::Done {
                 record: Box::new(ToolCallRecord {
-                    execution: Default::default(),
-                    read: None,
+                    classification: Default::default(),
                     call_id: lash_core::ToolCallId::fixture(&event.boundary_id),
                     provider_call_id: None,
                     tool: tool_name.clone(),

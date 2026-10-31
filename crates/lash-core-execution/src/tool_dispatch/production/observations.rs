@@ -74,8 +74,7 @@ impl ProductionToolHandlers<'_> {
         }
         output = self.with_expiry_evidence(call_id, output);
         Ok(ToolCallRecord {
-            execution: Default::default(),
-            read: None,
+            classification: Default::default(),
             call_id: call_id.clone(),
             provider_call_id: prepared.call.provider_call_id,
             tool: prepared.call.tool_name,

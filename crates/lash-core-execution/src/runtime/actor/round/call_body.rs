@@ -48,7 +48,7 @@ impl TokenCodec for StoredBody {
                 tool: &self.record.tool,
                 args: &self.record.args,
                 output: &self.record.output,
-                read: self.record.read.as_deref(),
+                read: self.record.classification.read(),
             },
             self.answer,
             out,
@@ -67,8 +67,9 @@ impl TokenCodec for StoredBody {
         let output = decode_output(input, &answer)?;
         Ok(Self {
             record: crate::ToolCallRecord {
-                execution: Default::default(),
-                read: decode_opt_tree(input)?.map(Box::new),
+                classification: lash_protocol_types::ToolCallClassification::Recorded {
+                    read: decode_opt_tree(input)?.map(Box::new),
+                },
                 call_id,
                 provider_call_id,
                 tool,
@@ -93,7 +94,7 @@ impl CallBody {
             &self.record.tool,
             &self.record.args,
             &self.record.output,
-            self.record.read.as_deref(),
+            self.record.classification.read(),
         )
     }
 

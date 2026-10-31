@@ -355,22 +355,17 @@ fn trace_cell_failure(
         return failure.clone();
     }
     use lash_kernel_value::json_schema::SchemaAdmissionError;
-    crate::CellFailure {
-        kind: failure.kind,
-        message: String::new(),
-        worker_limit: failure.worker_limit,
-        tool_call_limit: failure.tool_call_limit,
-        exec_failure: failure.exec_failure,
-        bound: failure.bound.clone(),
-        read_panic: failure.read_panic.as_ref().map(|panic| {
-            Box::new(lash_protocol_types::ReadPanic {
+    use lash_protocol_types::CellFailureCause as Cause;
+    let cause = match &failure.cause {
+        Cause::ReadPanic { panic, bound } => Cause::ReadPanic {
+            panic: Box::new(lash_protocol_types::ReadPanic {
                 tool_name: panic.tool_name.clone(),
                 message: String::new(),
-            })
-        }),
-        defect: failure.defect.clone(),
-        schema_admission: failure.schema_admission.as_deref().map(|error| {
-            Box::new(match error {
+            }),
+            bound: bound.clone(),
+        },
+        Cause::SchemaAdmission { error, bound } => Cause::SchemaAdmission {
+            error: Box::new(match error.as_ref() {
                 SchemaAdmissionError::InvalidKind { actual } => {
                     SchemaAdmissionError::InvalidKind { actual: *actual }
                 }
@@ -392,8 +387,14 @@ fn trace_cell_failure(
                         message: String::new(),
                     }
                 }
-            })
-        }),
+            }),
+            bound: bound.clone(),
+        },
+        cause => cause.clone(),
+    };
+    crate::CellFailure {
+        cause,
+        message: String::new(),
         feedback: failure
             .feedback
             .iter()

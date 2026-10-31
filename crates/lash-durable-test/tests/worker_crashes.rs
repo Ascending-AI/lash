@@ -562,7 +562,7 @@ async fn worker_limit_case(tier: Tier, limit: Limit) {
         .collect();
     assert_eq!(failures.len(), 1, "one refused cell: {failures:?}");
     assert_eq!(
-        serde_json::to_value(failures[0].worker_limit).expect("a limit encodes"),
+        serde_json::to_value(failures[0].worker_limit()).expect("a limit encodes"),
         limit.typed(),
         "the refusal carries the typed limit: {:?}",
         failures[0]

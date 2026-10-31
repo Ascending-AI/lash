@@ -1110,7 +1110,7 @@ async fn a_misspelled_approval_is_refused_without_parking() {
     let Some(lash::transcript::CellOutcome::Failed(failure)) = results.first() else {
         panic!("the misspelled operation must be refused: {results:?}");
     };
-    assert_eq!(failure.kind, lash::plugins::CellFailureKind::Program);
+    assert_eq!(failure.kind(), lash::plugins::CellFailureKind::Program);
     assert!(
         failure.message.contains("TS_OPERATION_SPELLING"),
         "{failure:?}"

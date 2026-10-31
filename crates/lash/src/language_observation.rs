@@ -46,14 +46,13 @@ impl LanguageObservationPublisher {
         if self.closed.load(Ordering::Acquire) {
             return;
         }
-        let read = match &event {
-            lash_core::TurnEvent::ToolCallStarted {
-                read: Some(read), ..
-            }
-            | lash_core::TurnEvent::ToolCallReturned {
-                read: Some(read), ..
-            } => read,
+        let classification = match &event {
+            lash_core::TurnEvent::ToolCallStarted { classification, .. }
+            | lash_core::TurnEvent::ToolCallReturned { classification, .. } => classification,
             _ => return,
+        };
+        let Some(read) = classification.read() else {
+            return;
         };
         let lash_core::ToolReadCaller::Process { process_id } = &read.caller else {
             return;

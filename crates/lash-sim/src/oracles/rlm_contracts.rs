@@ -796,7 +796,7 @@ pub(super) fn require_rlm_trajectory_error(
         .and_then(|result| result.failure().cloned());
     match (expected, recorded) {
         (Some((kind, message)), Some(failure))
-            if failure.kind == kind && failure.message == message =>
+            if failure.kind() == kind && failure.message == message =>
         {
             Ok(())
         }

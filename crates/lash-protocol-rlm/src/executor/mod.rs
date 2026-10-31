@@ -992,11 +992,13 @@ async fn run_linked_cell(
         };
         if let Some(panic) = &collected.read_panic {
             state.rollback_code_execution();
-            let mut failure = lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Host,
+            let failure = lash_core::CellFailure::from_cause(
+                lash_core::CellFailureCause::ReadPanic {
+                    panic: Box::new(panic.clone()),
+                    bound: None,
+                },
                 panic.message.clone(),
             );
-            failure.read_panic = Some(Box::new(panic.clone()));
             return respond(lash_core::CellOutcome::Failed(failure));
         }
         let end = match run {
@@ -1026,11 +1028,13 @@ async fn run_linked_cell(
         // A cell over `max_tool_calls` fails with the limit, at the call that
         // met it, whatever its program made of the refusal.
         if let Some(exceeded) = collected.tool_call_limit {
-            let mut failure = lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Program,
+            let failure = lash_core::CellFailure::from_cause(
+                lash_core::CellFailureCause::ToolCallLimit {
+                    exceeded,
+                    bound: None,
+                },
                 exceeded.to_string(),
             );
-            failure.tool_call_limit = Some(exceeded);
             return respond(lash_core::CellOutcome::Failed(failure));
         }
         match end {
@@ -1111,8 +1115,10 @@ async fn run_linked_cell(
         }
     };
     let mut response = answer();
-    if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
-        failure.bound = bound_fact.or_else(|| failure.bound.take());
+    if let lash_core::CellOutcome::Failed(failure) = &mut response.result
+        && let Some(bound) = bound_fact
+    {
+        failure.set_bound(bound);
     }
     response.consumption = if recorded {
         host.graph.lock_recover().state.consumption.clone()
@@ -1128,39 +1134,13 @@ async fn run_linked_cell(
     if !recorded && let Some(limit) = library_bound {
         response.consumption.push(lash_core::CellConsumption {
             resource: lash_core::CellResource::LibraryWork,
-            consumed: None,
             observed: None,
             limit,
         });
     }
     if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
-        if failure.bound.is_none()
-            && let Some(limit) = failure.worker_limit
-        {
-            let observed = |resource| {
-                response
-                    .consumption
-                    .iter()
-                    .find(|reading| reading.resource == resource)
-                    .and_then(|reading| reading.observed)
-            };
-            failure.bound = lash_core::facade_support::worker_bound_fact(
-                limit,
-                &bounds,
-                lash_core::facade_support::BoundReadings {
-                    charged: observed(lash_core::CellResource::Charges),
-                    memory: observed(lash_core::CellResource::MemoryBytes),
-                    worker_cpu_nanos: services
-                        .workers
-                        .execution_budget()
-                        .and_then(|budget| budget.cpu())
-                        .map(|cpu| u64::try_from(cpu.as_nanos()).unwrap_or(u64::MAX)),
-                    held_wall_nanos: observed(lash_core::CellResource::HeldWallNanos),
-                },
-            )
-            .map(Box::new);
-        }
-        host.graph.lock_recover().state.bound = failure.bound.clone();
+        consumption::attach_worker_bound(failure, &response.consumption, services, &bounds);
+        host.graph.lock_recover().state.bound = failure.bound().cloned().map(Box::new);
     }
     host.graph.lock_recover().state.consumption = response.consumption.clone();
     let consumption = response.consumption.clone();
@@ -1617,8 +1597,13 @@ fn worker_setup_failure(
     {
         let mut response =
             exec_setup_failure_or_stop(state, ctx, crate::feedback::worker_limit_failure(*limit));
-        if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
-            failure.worker_limit = Some(*limit);
+        if let lash_core::CellOutcome::Failed(failure) = &mut response.result
+            && failure.kind() == lash_core::CellFailureKind::Host
+        {
+            failure.cause = lash_core::CellFailureCause::WorkerSetupStopped {
+                limit: *limit,
+                bound: None,
+            };
         }
         return response;
     }

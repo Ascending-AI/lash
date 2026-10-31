@@ -222,8 +222,7 @@ impl RuntimeExecutionContext<'_> {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(activity_id),
                 event: TurnEvent::ToolCallStarted {
-                    execution: crate::ToolCallExecution::Recorded,
-                    read: None,
+                    classification: crate::ToolCallClassification::Recorded { read: None },
                     call_id: ids.call_id.clone(),
                     provider_call_id: ids.provider_call_id.clone(),
                     name: name.to_string(),
@@ -380,8 +379,7 @@ impl RuntimeExecutionContext<'_> {
             self.emit_tool_intent_outcome_activities(call_key, call_id, &outcome.intent_outcomes);
 
             let record = ToolCallRecord {
-                execution: Default::default(),
-                read: None,
+                classification: Default::default(),
                 call_id: ids.call_id.clone(),
                 provider_call_id: ids.provider_call_id.clone(),
                 tool: outcome.record.tool.clone(),
@@ -461,8 +459,7 @@ impl RuntimeExecutionContext<'_> {
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(tool_activity_id(&record.call_id)),
                 event: TurnEvent::ToolCallReturned {
-                    execution: crate::ToolCallExecution::Recorded,
-                    read: None,
+                    classification: crate::ToolCallClassification::Recorded { read: None },
                     call_id: record.call_id.clone(),
                     provider_call_id: record.provider_call_id.clone(),
                     name: record.tool.clone(),
@@ -535,8 +532,9 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
     ) {
         let record = ToolCallRecord {
-            execution: Default::default(),
-            read: completed.read.clone(),
+            classification: lash_protocol_types::ToolCallClassification::Recorded {
+                read: completed.read.clone(),
+            },
             call_id: completed.call_id.clone(),
             provider_call_id: completed.provider_call_id.clone(),
             tool: completed.tool_name.clone(),

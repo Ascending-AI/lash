@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_model::SessionStreamEvent;
+use lash_protocol_types::ToolCallClassification;
 use lash_protocol_types::sync::MutexExt;
 use lash_vocabulary::identity::RunId;
 use std::collections::HashMap;
@@ -297,10 +298,7 @@ pub enum TurnEvent {
         graph_key: Option<String>,
     },
     ToolCallStarted {
-        #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
-        execution: ToolCallExecution,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        read: Option<Box<ToolReadMetadata>>,
+        classification: ToolCallClassification<ToolReadMetadata>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
@@ -315,10 +313,7 @@ pub enum TurnEvent {
     },
     /// The live tool return. Retractable until its outcome commits (ADR 0122).
     ToolCallReturned {
-        #[serde(default, skip_serializing_if = "ToolCallExecution::is_recorded")]
-        execution: ToolCallExecution,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        read: Option<Box<ToolReadMetadata>>,
+        classification: ToolCallClassification<ToolReadMetadata>,
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.

@@ -105,8 +105,7 @@ async fn legal_tool_identities_remain_visible_in_call_ledger_projections() {
     .unwrap();
     let output = crate::ToolCallOutput::success(serde_json::json!({"found": true}));
     let expected = crate::ToolCallRecord {
-        execution: Default::default(),
-        read: None,
+        classification: Default::default(),
         call_id: answered.clone(),
         provider_call_id: None,
         tool: "tools.lookup".to_owned(),

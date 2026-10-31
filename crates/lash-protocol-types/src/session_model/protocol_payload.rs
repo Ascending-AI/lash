@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn serializing_encoded_protocol_json_does_not_rebuild_a_tree() {
         let mut value = serde_json::json!({
-            "consumption": [{"resource":"charges", "consumed":7, "limit":40}],
+            "consumption": [{"resource":"charges", "observed":7, "limit":40}],
             "text": "line\nwith quotes \" and Unicode λ",
             "values": [null, true, -2, 1.5]
         });

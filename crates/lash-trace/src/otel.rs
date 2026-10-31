@@ -1238,7 +1238,7 @@ impl<'a> Projection<'a> {
                 };
                 cell_attributes(record, outcome, Some(tool_calls.len()), out);
                 if let lash_protocol_types::CellOutcome::Failed(failure) = result
-                    && let Some(bound) = failure.bound.as_deref()
+                    && let Some(bound) = failure.bound()
                 {
                     execution_bound_attributes(bound, out);
                 }
@@ -1278,7 +1278,7 @@ impl<'a> Projection<'a> {
                         if let Some((consumed, limit, observed)) = keys {
                             let integer = |value| i64::try_from(value).unwrap_or(i64::MAX);
                             out.push(limit.value(integer(reading.limit)));
-                            if let Some(value) = reading.consumed {
+                            if let Some(value) = reading.consumed() {
                                 out.push(consumed.value(integer(value)));
                             }
                             if let Some(value) = reading.observed {
@@ -1289,10 +1289,10 @@ impl<'a> Projection<'a> {
                 }
                 if let Some(error) = result.failure() {
                     let reason = error
-                        .exec_failure
+                        .exec_failure()
                         .as_ref()
                         .map(crate::wire_tag)
-                        .unwrap_or_else(|| crate::wire_tag(&error.kind));
+                        .unwrap_or_else(|| crate::wire_tag(&error.kind()));
                     out.push(A::ErrorType.value(reason));
                 }
             }
@@ -1390,12 +1390,12 @@ fn execution_bound_attributes(
     out: &mut Vec<KeyValue>,
 ) {
     let integer = |value| i64::try_from(value).unwrap_or(i64::MAX);
-    out.push(A::ExecutionBoundResource.value(crate::wire_tag(&fact.resource)));
-    out.push(A::ExecutionBoundLimit.value(integer(fact.limit)));
-    if let Some(observed) = fact.observed {
+    out.push(A::ExecutionBoundResource.value(crate::wire_tag(&fact.reading.resource)));
+    out.push(A::ExecutionBoundLimit.value(integer(fact.reading.limit)));
+    if let Some(observed) = fact.reading.observed {
         out.push(A::ExecutionBoundObserved.value(integer(observed)));
     }
-    if let Some(consumed) = fact.consumed {
+    if let Some(consumed) = fact.reading.consumed() {
         out.push(A::ExecutionBoundConsumed.value(integer(consumed)));
     }
     if let Some(function) = &fact.function {

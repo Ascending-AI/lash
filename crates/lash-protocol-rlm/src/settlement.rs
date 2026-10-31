@@ -100,9 +100,9 @@ pub(crate) fn settle_execution(
             record
                 .read_facts
                 .extend(response.tool_calls.iter().filter_map(|call| {
-                    let read = call.read.as_ref()?;
+                    let read = call.classification.read()?;
                     Some(lash_protocol_types::ReadFact {
-                        execution: call.execution,
+                        execution: call.classification.execution(),
                         caller: read.caller.clone(),
                         provider: read.provider.clone(),
                         ordinal: read.ordinal,
@@ -149,10 +149,10 @@ pub(crate) fn settle_execution(
     }
 
     if let CellOutcome::Failed(failure) = &record.result
-        && let Some(panic) = &failure.read_panic
+        && let Some(panic) = failure.read_panic()
     {
         let stop = lash_protocol_types::TurnStop::ReadPanicked {
-            panic: panic.as_ref().clone(),
+            panic: panic.clone(),
         };
         actions.push(DriverAction::AppendEvents(commit(record)));
         actions.push(DriverAction::EndStep {

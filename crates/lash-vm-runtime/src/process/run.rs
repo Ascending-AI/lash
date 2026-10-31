@@ -1501,10 +1501,11 @@ mod tests {
                 failure.cause.as_deref(),
                 Some(&lash_core::ToolFailureCause::ExecutionBound {
                     fact: lash_core::ExecutionBoundFact {
-                        resource: lash_core::CellResource::WorkerCpuNanos,
-                        limit: 100_000_000,
-                        observed,
-                        consumed: observed,
+                        reading: lash_core::CellConsumption {
+                            resource: lash_core::CellResource::WorkerCpuNanos,
+                            limit: 100_000_000,
+                            observed,
+                        },
                         function: None,
                         site: None
                     },

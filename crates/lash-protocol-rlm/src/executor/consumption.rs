@@ -28,13 +28,6 @@ pub(super) fn snapshot(
     let mut add = |resource, observed: Option<u64>, limit| {
         values.push(CellConsumption {
             resource,
-            consumed: observed.map(|used| {
-                if resource == R::Charges {
-                    used.min(limit)
-                } else {
-                    used
-                }
-            }),
             observed,
             limit,
         });
@@ -111,7 +104,7 @@ pub(super) fn snapshot(
             host.ctx.max_tool_calls().get() as u64,
         );
     }
-    if let Some(limit) = failure.and_then(|failure| failure.worker_limit) {
+    if let Some(limit) = failure.and_then(|failure| failure.worker_limit()) {
         use lash_vm_client::WorkerLimit as W;
         let size = match limit {
             W::EffectValue { size, bound } => Some((R::EffectValueBytes, size, bound)),
@@ -124,10 +117,41 @@ pub(super) fn snapshot(
                 .iter_mut()
                 .find(|reading| reading.resource == resource)
         {
-            reading.consumed = Some(used);
             reading.observed = Some(used);
             reading.limit = limit;
         }
     }
     values
+}
+
+pub(super) fn attach_worker_bound(
+    failure: &mut CellFailure,
+    readings: &[CellConsumption],
+    services: &CellServices,
+    bounds: &Bounds,
+) {
+    if let Some(limit) = failure.worker_limit().filter(|_| failure.bound().is_none()) {
+        let observed = |resource| {
+            readings
+                .iter()
+                .find(|reading| reading.resource == resource)
+                .and_then(|reading| reading.observed)
+        };
+        if let Some(bound) = lash_core::facade_support::worker_bound_fact(
+            limit,
+            bounds,
+            lash_core::facade_support::BoundReadings {
+                charged: observed(CellResource::Charges),
+                memory: observed(CellResource::MemoryBytes),
+                worker_cpu_nanos: services
+                    .workers
+                    .execution_budget()
+                    .and_then(|budget| budget.cpu())
+                    .map(|cpu| u64::try_from(cpu.as_nanos()).unwrap_or(u64::MAX)),
+                held_wall_nanos: observed(CellResource::HeldWallNanos),
+            },
+        ) {
+            failure.set_bound(Box::new(bound));
+        }
+    }
 }

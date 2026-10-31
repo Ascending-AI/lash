@@ -129,35 +129,68 @@ pub enum CellFailureKind {
     Host,
 }
 
+/// The primary failure owns its classification and any accompanying bound evidence.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CellFailureCause {
+    Unclassified {
+        kind: CellFailureKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    WorkerLimit {
+        limit: crate::worker_limit::WorkerLimit,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    /// Setup stopped with its owner after the worker reported this limit.
+    WorkerSetupStopped {
+        limit: crate::worker_limit::WorkerLimit,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    ToolCallLimit {
+        exceeded: crate::session_model::ToolCallLimitExceeded,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    ExecFailure {
+        reason: ExecCodeFailureReason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    ReadPanic {
+        panic: Box<crate::ReadPanic>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    SchemaAdmission {
+        error: Box<lash_kernel_value::json_schema::SchemaAdmissionError>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    Defect {
+        defect: CellDefect,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bound: Option<Box<ExecutionBoundFact>>,
+    },
+    Bound {
+        fact: Box<ExecutionBoundFact>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        worker_limit: Option<crate::worker_limit::WorkerLimit>,
+    },
+}
+
 /// Structured failure returned by a code executor.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct CellFailure {
-    pub kind: CellFailureKind,
+    pub cause: CellFailureCause,
     pub message: String,
-    /// The measured run limit, kept typed through the plugin and host result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_limit: Option<crate::worker_limit::WorkerLimit>,
-    /// The session's `max_tool_calls` refusal, when that is why the cell
-    /// failed (FIG-4546), kept typed through the plugin and host result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_limit: Option<crate::session_model::ToolCallLimitExceeded>,
-    /// Why the `exec_code` effect failed before the executor produced a
-    /// response, when that is the failure: the closed reason, kept typed
-    /// through the protocol driver and the trajectory it records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec_failure: Option<ExecCodeFailureReason>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub read_panic: Option<Box<crate::ReadPanic>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound: Option<Box<ExecutionBoundFact>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema_admission: Option<Box<lash_kernel_value::json_schema::SchemaAdmissionError>>,
-    /// The rule of a session's cells the program broke, when that is why
-    /// the cell failed, kept typed through the plugin and host result.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub defect: Option<CellDefect>,
     /// Each pure repair callback's identity and answer, in registration order,
     /// including empty answers. Retained with the failure for replay and attribution.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -208,44 +241,104 @@ pub enum CellDefect {
 
 impl CellFailure {
     pub fn new(kind: CellFailureKind, message: impl Into<String>) -> Self {
+        Self::from_cause(
+            CellFailureCause::Unclassified { kind, bound: None },
+            message,
+        )
+    }
+
+    pub fn from_cause(cause: CellFailureCause, message: impl Into<String>) -> Self {
         Self {
-            kind,
+            cause,
             message: message.into(),
-            worker_limit: None,
-            tool_call_limit: None,
-            exec_failure: None,
-            read_panic: None,
-            bound: None,
-            schema_admission: None,
-            defect: None,
             feedback: Vec::new(),
         }
     }
 
-    pub fn with_defect(mut self, defect: CellDefect) -> Self {
-        self.defect = Some(defect);
-        self
+    pub fn kind(&self) -> CellFailureKind {
+        match &self.cause {
+            CellFailureCause::Unclassified { kind, .. } => *kind,
+            CellFailureCause::WorkerLimit { limit, .. } => match limit {
+                crate::worker_limit::WorkerLimit::Cpu { .. }
+                | crate::worker_limit::WorkerLimit::Deadline { .. }
+                | crate::worker_limit::WorkerLimit::Memory { .. }
+                | crate::worker_limit::WorkerLimit::Wall { .. }
+                | crate::worker_limit::WorkerLimit::HostRead { .. } => CellFailureKind::Policy,
+                _ => CellFailureKind::Program,
+            },
+            CellFailureCause::Bound { .. } => CellFailureKind::Policy,
+            CellFailureCause::WorkerSetupStopped { .. }
+            | CellFailureCause::ExecFailure { .. }
+            | CellFailureCause::ReadPanic { .. } => CellFailureKind::Host,
+            CellFailureCause::ToolCallLimit { .. }
+            | CellFailureCause::SchemaAdmission { .. }
+            | CellFailureCause::Defect { .. } => CellFailureKind::Program,
+        }
     }
 
-    pub fn with_schema_admission(
-        mut self,
-        source: lash_kernel_value::json_schema::SchemaAdmissionError,
-    ) -> Self {
-        self.schema_admission = Some(Box::new(source));
-        self
+    pub fn bound(&self) -> Option<&ExecutionBoundFact> {
+        match &self.cause {
+            CellFailureCause::Bound { fact, .. } => Some(fact),
+            CellFailureCause::Unclassified { bound, .. }
+            | CellFailureCause::WorkerLimit { bound, .. }
+            | CellFailureCause::WorkerSetupStopped { bound, .. }
+            | CellFailureCause::ToolCallLimit { bound, .. }
+            | CellFailureCause::ExecFailure { bound, .. }
+            | CellFailureCause::ReadPanic { bound, .. }
+            | CellFailureCause::SchemaAdmission { bound, .. }
+            | CellFailureCause::Defect { bound, .. } => bound.as_deref(),
+        }
     }
 
-    pub fn with_worker_limit(mut self, limit: crate::worker_limit::WorkerLimit) -> Self {
-        self.worker_limit = Some(limit);
-        self
+    pub fn set_bound(&mut self, evidence: Box<ExecutionBoundFact>) {
+        match &mut self.cause {
+            CellFailureCause::Bound { fact, .. } => *fact = evidence,
+            CellFailureCause::Unclassified { bound, .. }
+            | CellFailureCause::WorkerLimit { bound, .. }
+            | CellFailureCause::WorkerSetupStopped { bound, .. }
+            | CellFailureCause::ToolCallLimit { bound, .. }
+            | CellFailureCause::ExecFailure { bound, .. }
+            | CellFailureCause::ReadPanic { bound, .. }
+            | CellFailureCause::SchemaAdmission { bound, .. }
+            | CellFailureCause::Defect { bound, .. } => *bound = Some(evidence),
+        }
     }
 
-    pub fn with_tool_call_limit(
-        mut self,
-        exceeded: crate::session_model::ToolCallLimitExceeded,
-    ) -> Self {
-        self.tool_call_limit = Some(exceeded);
-        self
+    pub fn worker_limit(&self) -> Option<crate::worker_limit::WorkerLimit> {
+        match &self.cause {
+            CellFailureCause::WorkerLimit { limit, .. }
+            | CellFailureCause::WorkerSetupStopped { limit, .. } => Some(*limit),
+            CellFailureCause::Bound { worker_limit, .. } => *worker_limit,
+            _ => None,
+        }
+    }
+
+    pub fn tool_call_limit(&self) -> Option<crate::session_model::ToolCallLimitExceeded> {
+        match &self.cause {
+            CellFailureCause::ToolCallLimit { exceeded, .. } => Some(*exceeded),
+            _ => None,
+        }
+    }
+
+    pub fn exec_failure(&self) -> Option<ExecCodeFailureReason> {
+        match &self.cause {
+            CellFailureCause::ExecFailure { reason, .. } => Some(*reason),
+            _ => None,
+        }
+    }
+
+    pub fn read_panic(&self) -> Option<&crate::ReadPanic> {
+        match &self.cause {
+            CellFailureCause::ReadPanic { panic, .. } => Some(panic),
+            _ => None,
+        }
+    }
+
+    pub fn defect(&self) -> Option<&CellDefect> {
+        match &self.cause {
+            CellFailureCause::Defect { defect, .. } => Some(defect),
+            _ => None,
+        }
     }
 }
 
@@ -288,10 +381,13 @@ impl ExecCodeFailure {
 /// failure of the cell; the closed reason travels with it.
 impl From<ExecCodeFailure> for CellFailure {
     fn from(failure: ExecCodeFailure) -> Self {
-        Self {
-            exec_failure: Some(failure.reason),
-            ..Self::new(CellFailureKind::Host, failure.message)
-        }
+        Self::from_cause(
+            CellFailureCause::ExecFailure {
+                reason: failure.reason,
+                bound: None,
+            },
+            failure.message,
+        )
     }
 }
 
@@ -544,13 +640,24 @@ pub enum CellResource {
 #[serde(deny_unknown_fields)]
 pub struct CellConsumption {
     pub resource: CellResource,
-    /// Budget consumed. Charges saturate at the budget; `observed` retains
-    /// the raw kernel charge, including the refused crossing unit.
-    /// None means Lash has no meter for this bound, or no receipt arrived.
-    pub consumed: Option<u64>,
     pub limit: u64,
-    /// The raw meter reading, which can pass the bound.
+    /// The raw meter reading, which can pass the bound. None means no
+    /// meter or receipt was available.
     pub observed: Option<u64>,
+}
+
+impl CellConsumption {
+    /// The budget consumed by this reading. Charges saturate at the limit;
+    /// every other resource preserves the raw observation.
+    pub fn consumed(&self) -> Option<u64> {
+        self.observed.map(|used| {
+            if self.resource == CellResource::Charges {
+                used.min(self.limit)
+            } else {
+                used
+            }
+        })
+    }
 }
 
 /// The bound that ended a kernel execution, with only the receipts received.
@@ -558,10 +665,7 @@ pub struct CellConsumption {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct ExecutionBoundFact {
-    pub resource: CellResource,
-    pub limit: u64,
-    pub observed: Option<u64>,
-    pub consumed: Option<u64>,
+    pub reading: CellConsumption,
     pub function: Option<lash_kernel_value::names::FunctionName>,
     pub site: Option<Box<lash_kernel_value::sites::Site>>,
 }
@@ -794,9 +898,8 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CellOutcome::Failed(failure)).expect("encode"),
             serde_json::json!({"kind": "failed", "value": {
-                "kind": "host",
+                "cause": { "type": "exec_failure", "reason": "executor_unavailable" },
                 "message": "code execution is not available in this session",
-                "exec_failure": "executor_unavailable",
             }})
         );
         let call_id = crate::ToolCallId::fixture("call-1");

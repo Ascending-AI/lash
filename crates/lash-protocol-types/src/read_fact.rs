@@ -19,9 +19,55 @@ pub enum ToolCallExecution {
     Read,
 }
 
-impl ToolCallExecution {
-    pub fn is_recorded(&self) -> bool {
-        *self == Self::Recorded
+/// A recorded call may carry read identity. An unrecorded read always does.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToolCallClassification<M> {
+    Recorded {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        read: Option<Box<M>>,
+    },
+    UnrecordedRead {
+        read: Box<M>,
+    },
+}
+
+impl<M> Default for ToolCallClassification<M> {
+    fn default() -> Self {
+        Self::Recorded { read: None }
+    }
+}
+
+impl<M> ToolCallClassification<M> {
+    pub fn read(&self) -> Option<&M> {
+        match self {
+            Self::Recorded { read } => read.as_deref(),
+            Self::UnrecordedRead { read } => Some(read),
+        }
+    }
+
+    pub fn into_read(self) -> Option<Box<M>> {
+        match self {
+            Self::Recorded { read } => read,
+            Self::UnrecordedRead { read } => Some(read),
+        }
+    }
+
+    pub fn execution(&self) -> ToolCallExecution {
+        match self {
+            Self::Recorded { .. } => ToolCallExecution::Recorded,
+            Self::UnrecordedRead { .. } => ToolCallExecution::Read,
+        }
+    }
+
+    /// A retained read fact already has identity, whichever admission ran it.
+    pub fn from_read(execution: ToolCallExecution, read: Box<M>) -> Self {
+        match execution {
+            ToolCallExecution::Recorded => Self::Recorded { read: Some(read) },
+            ToolCallExecution::Read => Self::UnrecordedRead { read },
+        }
     }
 }
 
@@ -97,14 +143,16 @@ pub struct ReadFact {
 impl ReadFact {
     pub fn record(&self) -> crate::ToolCallRecord {
         crate::ToolCallRecord {
-            execution: self.execution,
-            read: Some(Box::new(crate::ToolReadIdentity {
-                caller: self.caller.clone(),
-                provider: self.provider.clone(),
-                ordinal: self.ordinal,
-                site: self.site.clone(),
-                origin: self.origin.clone(),
-            })),
+            classification: ToolCallClassification::from_read(
+                self.execution,
+                Box::new(crate::ToolReadIdentity {
+                    caller: self.caller.clone(),
+                    provider: self.provider.clone(),
+                    ordinal: self.ordinal,
+                    site: self.site.clone(),
+                    origin: self.origin.clone(),
+                }),
+            ),
             call_id: self.call_id.clone(),
             provider_call_id: None,
             tool: self.tool.clone(),

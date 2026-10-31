@@ -1086,8 +1086,7 @@ fn answer_cell(
             prints_retained: None,
             calls: Vec::new(),
             tool_calls: vec![lash_core::ToolCallRecord {
-                execution: Default::default(),
-                read: None,
+                classification: Default::default(),
                 call_id: lash_core::ToolCallId::fixture("demo-call"),
                 provider_call_id: None,
                 tool: tool.into(),

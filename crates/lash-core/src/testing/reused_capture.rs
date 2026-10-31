@@ -108,8 +108,7 @@ async fn seeded(
     let mut graph = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     let body = CallBody {
         record: crate::ToolCallRecord {
-            execution: Default::default(),
-            read: None,
+            classification: Default::default(),
             call_id: crate::ToolCallId::fixture("retired-lookup"),
             provider_call_id: None,
             tool: "tools.app_lookup".into(),

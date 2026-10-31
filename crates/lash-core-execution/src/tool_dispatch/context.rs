@@ -268,8 +268,7 @@ pub(super) fn outcome(
     result: super::retry::NormalizedToolOutput,
 ) -> ToolDispatchOutcome {
     let record = ToolCallRecord {
-        execution: Default::default(),
-        read: None,
+        classification: Default::default(),
         call_id: ids.call_id.clone(),
         provider_call_id: ids.provider_call_id.clone(),
         tool: tool_name,

@@ -453,8 +453,9 @@ impl ProductionToolHandlers<'_> {
         self.context.emit_tool_call_returned_activity(
             call.call_id.as_str(),
             &ToolCallRecord {
-                execution: Default::default(),
-                read: completed.read.clone(),
+                classification: lash_protocol_types::ToolCallClassification::Recorded {
+                    read: completed.read.clone(),
+                },
                 call_id: completed.call_id.clone(),
                 provider_call_id: completed.provider_call_id.clone(),
                 tool: completed.tool_name.clone(),
@@ -793,8 +794,9 @@ pub(super) async fn present_resolved(
     context.emit_tool_call_returned_activity(
         call.call_id.as_str(),
         &ToolCallRecord {
-            execution: Default::default(),
-            read: completed.read.clone(),
+            classification: lash_protocol_types::ToolCallClassification::Recorded {
+                read: completed.read.clone(),
+            },
             call_id: completed.call_id.clone(),
             provider_call_id: completed.provider_call_id.clone(),
             tool: completed.tool_name.clone(),
@@ -924,8 +926,9 @@ pub(super) fn member_record(
         &completed.intent_outcomes,
     );
     ToolCallRecord {
-        execution: Default::default(),
-        read: completed.read,
+        classification: lash_protocol_types::ToolCallClassification::Recorded {
+            read: completed.read,
+        },
         call_id: completed.call_id,
         provider_call_id: completed.provider_call_id,
         tool: completed.tool_name,

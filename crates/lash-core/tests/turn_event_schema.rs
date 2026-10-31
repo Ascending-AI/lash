@@ -191,7 +191,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 }],
                 "result": {
                     "kind": "failed",
-                    "value": { "kind": "program", "message": "boom" },
+                    "value": { "cause": { "type": "unclassified", "kind": "program" }, "message": "boom" },
                 },
                 "duration_ms": 5,
                 "tool_call_ids": [lash_core::ToolCallId::fixture("call-1").as_str()],
@@ -259,7 +259,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 }],
                 "result": {
                     "kind": "failed",
-                    "value": { "kind": "program", "message": "boom" },
+                    "value": { "cause": { "type": "unclassified", "kind": "program" }, "message": "boom" },
                 },
                 "duration_ms": 5,
                 "tool_call_ids": [lash_core::ToolCallId::fixture("call-1").as_str()],
@@ -299,7 +299,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options present)",
             TurnEvent::ToolCallStarted {
-                execution: lash_core::ToolCallExecution::Recorded, read: None,
+                classification: lash_core::ToolCallClassification::Recorded { read: None },
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
@@ -308,6 +308,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_call_started",
+                "classification": { "kind": "recorded" },
                 "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "provider_call_id": "provider-1",
                 "name": "read_file",
@@ -318,7 +319,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_started (all options absent)",
             TurnEvent::ToolCallStarted {
-                execution: lash_core::ToolCallExecution::Recorded, read: None,
+                classification: lash_core::ToolCallClassification::Recorded { read: None },
                 call_id: lash_core::ToolCallId::fixture("call-2"),
                 provider_call_id: None,
                 name: "read_file".to_string(),
@@ -327,6 +328,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_call_started",
+                "classification": { "kind": "recorded" },
                 "call_id": lash_core::ToolCallId::fixture("call-2").as_str(),
                 "name": "read_file",
                 "args": { "path": "x" },
@@ -335,7 +337,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "tool_call_returned (all options present, success)",
             TurnEvent::ToolCallReturned {
-                execution: lash_core::ToolCallExecution::Recorded, read: None,
+                classification: lash_core::ToolCallClassification::Recorded { read: None },
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
@@ -346,6 +348,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             },
             json!({
                 "type": "tool_call_returned",
+                "classification": { "kind": "recorded" },
                 "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "provider_call_id": "provider-1",
                 "name": "read_file",
@@ -493,7 +496,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 tool_call_ids: None,
                 graph_key: None,
             },
-            json!({"type":"code_block_completed","consumption":[],"language":"python","result":{"kind":"failed","value":{"kind":"host","message":"invocation failed"}}}),
+            json!({"type":"code_block_completed","consumption":[],"language":"python","result":{"kind":"failed","value":{"cause":{"type":"unclassified","kind":"host"},"message":"invocation failed"}}}),
         ),
         (
             "finished",

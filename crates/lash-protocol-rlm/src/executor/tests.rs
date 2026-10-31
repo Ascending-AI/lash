@@ -956,12 +956,12 @@ async fn a_cell_that_ends_with_an_unjoined_task_observes_the_typed_error() {
     let Some(lash_core::CellDefect::TasksOutstanding {
         unfinished,
         unobserved,
-    }) = &failure.defect
+    }) = failure.defect()
     else {
         panic!("expected the tasks-outstanding defect, got {failure:?}");
     };
     assert_eq!((unfinished.len(), unobserved.len()), (1, 0));
-    assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
+    assert_eq!(failure.kind(), lash_core::CellFailureKind::Program);
     assert!(
         failure.message.starts_with(crate::CELL_TASKS_OUTSTANDING)
             && failure.message.contains("Still running (1)")
@@ -998,8 +998,8 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
     )
     .await;
     let failure = second.error().expect("the throw ends the cell");
-    assert_eq!(failure.defect, None, "{failure:?}");
-    assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
+    assert_eq!(failure.defect(), None, "{failure:?}");
+    assert_eq!(failure.kind(), lash_core::CellFailureKind::Program);
     assert!(
         failure.message.contains("unsupported format in row 3"),
         "{}",
@@ -1056,7 +1056,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
     let failure = refused
         .error()
         .expect("the dialect refuses an unknown call");
-    assert_eq!(failure.defect, None, "{failure:?}");
+    assert_eq!(failure.defect(), None, "{failure:?}");
     assert!(
         !failure.message.contains(crate::SESSION_BINDING_NOT_CARRIED),
         "{}",
@@ -1233,17 +1233,17 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
     )
     .await;
     assert_eq!(
-        first.error().and_then(|f| f.worker_limit),
+        first.error().and_then(|f| f.worker_limit()),
         Some(lash_vm_client::WorkerLimit::Fuel)
     );
     let fact = first
         .error()
-        .and_then(|failure| failure.bound.as_deref())
+        .and_then(|failure| failure.bound())
         .expect("a charge stop retains its structured bound");
-    assert_eq!(fact.resource, lash_core::CellResource::Charges);
-    assert_eq!(fact.limit, instruction_limit);
-    assert_eq!(fact.observed, Some(instruction_limit + 1));
-    assert_eq!(fact.consumed, Some(instruction_limit));
+    assert_eq!(fact.reading.resource, lash_core::CellResource::Charges);
+    assert_eq!(fact.reading.limit, instruction_limit);
+    assert_eq!(fact.reading.observed, Some(instruction_limit + 1));
+    assert_eq!(fact.reading.consumed(), Some(instruction_limit));
     assert_eq!(
         fact.function.as_ref().map(|name| name.as_str()),
         Some("main")
@@ -1256,7 +1256,7 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
         })
     ));
     assert_eq!(
-        again.error().and_then(|failure| failure.bound.as_deref()),
+        again.error().and_then(|failure| failure.bound()),
         Some(fact),
         "a saved instruction end retains its fact"
     );
@@ -1269,13 +1269,21 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
             .unwrap_or(serde_json::Value::Null)
     };
     let charge = reading("charges");
-    assert_eq!(charge["consumed"], instruction_limit);
+    assert_eq!(charge["observed"], instruction_limit + 1);
+    assert_eq!(
+        first
+            .consumption
+            .iter()
+            .find(|reading| reading.resource == lash_core::CellResource::Charges)
+            .and_then(|reading| reading.consumed()),
+        Some(instruction_limit),
+    );
     assert_eq!(charge["limit"], instruction_limit);
     let cpu = reading("worker_cpu_nanos");
     let cpu_bound = u64::try_from(cpu_limit.as_nanos()).unwrap();
     assert_eq!(cpu["limit"], cpu_bound);
     assert!(
-        cpu["consumed"]
+        cpu["observed"]
             .as_u64()
             .is_some_and(|used| used < cpu_bound)
     );
@@ -1306,7 +1314,7 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
     )
     .await;
     assert_eq!(
-        response.error().and_then(|f| f.worker_limit),
+        response.error().and_then(|f| f.worker_limit()),
         Some(lash_vm_client::WorkerLimit::Cpu {
             bound_ms: 3_600_000
         }),
@@ -1324,20 +1332,23 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
     assert_eq!(charge.limit, instruction_limit);
     assert!(
         charge
-            .consumed
+            .consumed()
             .is_some_and(|used| used > 0 && used < instruction_limit)
     );
     let cpu = reading(lash_core::CellResource::WorkerCpuNanos);
     assert_eq!(cpu.limit, cpu_bound);
-    assert!(cpu.consumed.is_some_and(|used| used >= cpu_bound));
+    assert!(cpu.consumed().is_some_and(|used| used >= cpu_bound));
     let fact = response
         .error()
-        .and_then(|failure| failure.bound.as_deref())
+        .and_then(|failure| failure.bound())
         .expect("a worker CPU stop retains its structured bound");
-    assert_eq!(fact.resource, lash_core::CellResource::WorkerCpuNanos);
-    assert_eq!(fact.limit, cpu_bound);
-    assert_eq!(fact.observed, cpu.observed);
-    assert_eq!(fact.consumed, cpu.consumed);
+    assert_eq!(
+        fact.reading.resource,
+        lash_core::CellResource::WorkerCpuNanos
+    );
+    assert_eq!(fact.reading.limit, cpu_bound);
+    assert_eq!(fact.reading.observed, cpu.observed);
+    assert_eq!(fact.reading.consumed(), cpu.consumed());
     assert_eq!(fact.function, None);
     assert_eq!(
         fact.site, None,
@@ -1391,11 +1402,11 @@ async fn charge_and_memory_facts_locate_the_statement_that_stopped() {
             )
             .await;
             let failure = first.error().expect("the program hits its bound");
-            let Some(fact) = failure.bound.as_deref() else {
+            let Some(fact) = failure.bound() else {
                 panic!("python={python}, memory={memory}: {failure:?}");
             };
             assert_eq!(
-                fact.resource,
+                fact.reading.resource,
                 if memory {
                     lash_core::CellResource::MemoryBytes
                 } else {
@@ -1424,9 +1435,7 @@ async fn charge_and_memory_facts_locate_the_statement_that_stopped() {
             )
             .await;
             assert_eq!(
-                restored
-                    .error()
-                    .and_then(|failure| failure.bound.as_deref()),
+                restored.error().and_then(|failure| failure.bound()),
                 Some(fact),
                 "the saved fact keeps its exact function and site"
             );
@@ -1455,14 +1464,12 @@ async fn a_memory_stop_retains_its_structured_fact_on_reopening() {
     .await;
     let fact = memory
         .error()
-        .and_then(|failure| failure.bound.as_deref())
+        .and_then(|failure| failure.bound())
         .expect("a memory stop retains its bound");
-    assert_eq!(fact.resource, lash_core::CellResource::MemoryBytes);
-    assert_eq!(fact.limit, 1024 * 1024);
+    assert_eq!(fact.reading.resource, lash_core::CellResource::MemoryBytes);
+    assert_eq!(fact.reading.limit, 1024 * 1024);
     assert_eq!(
-        restored
-            .error()
-            .and_then(|failure| failure.bound.as_deref()),
+        restored.error().and_then(|failure| failure.bound()),
         Some(fact),
         "a saved memory end retains the exact fact"
     );
@@ -1484,7 +1491,7 @@ async fn a_memory_stop_retains_its_structured_fact_on_reopening() {
         .unwrap();
     assert!(
         charge
-            .consumed
+            .consumed()
             .is_some_and(|used| used > 0 && used < charge.limit)
     );
 }

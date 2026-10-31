@@ -1030,7 +1030,7 @@ pub(super) fn call_outcome(
     let model_return =
         lash_protocol_types::ModelToolReturn::from_output(record.tool.clone(), &record.output);
     lash_vm_broker::round_graph::CallOutcome {
-        read: record.read.clone(),
+        read: record.classification.read().cloned().map(Box::new),
         call_id: record.call_id.clone(),
         admission: Some(admission),
         args: record.args.clone(),

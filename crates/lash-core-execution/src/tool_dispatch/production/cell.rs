@@ -287,8 +287,9 @@ fn cell_answer(
 fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolInvocationReply {
     let completed = cell_answer(call, output);
     let record = ToolCallRecord {
-        execution: Default::default(),
-        read: completed.read.clone(),
+        classification: lash_protocol_types::ToolCallClassification::Recorded {
+            read: completed.read.clone(),
+        },
         call_id: completed.call_id.clone(),
         provider_call_id: completed.provider_call_id.clone(),
         tool: completed.tool_name.clone(),
@@ -433,7 +434,9 @@ impl CellMembers {
         let CellMember::Tool(call) = member;
         let mut answer = reply(&call.pending(), output);
         if let Some(record) = &mut answer.record {
-            record.read.clone_from(&call.read);
+            record.classification = crate::ToolCallClassification::Recorded {
+                read: call.read.clone(),
+            };
         }
         answer
     }
@@ -499,8 +502,9 @@ impl MemberBodies for CellMembers {
                 .collect::<Vec<_>>();
             let completed = cell_answer(&pending, output);
             let record = ToolCallRecord {
-                execution: Default::default(),
-                read: call.read.clone(),
+                classification: lash_protocol_types::ToolCallClassification::Recorded {
+                    read: call.read.clone(),
+                },
                 call_id: completed.call_id,
                 provider_call_id: completed.provider_call_id,
                 tool: completed.tool_name,

@@ -37,8 +37,8 @@ async fn failures_keep_their_causes_and_name_the_work() {
     )
     .await;
     let failure = second.error().expect("the raise ends the cell");
-    assert_eq!(failure.defect, None);
-    assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
+    assert_eq!(failure.defect(), None);
+    assert_eq!(failure.kind(), lash_core::CellFailureKind::Program);
     assert!(
         failure
             .message
@@ -54,7 +54,7 @@ async fn failures_keep_their_causes_and_name_the_work() {
     )
     .await;
     let failure = refused.error().expect("an unknown binding is refused");
-    assert_eq!(failure.defect, None);
+    assert_eq!(failure.defect(), None);
     assert!(
         failure.message.contains("PY_UNKNOWN_NAME"),
         "{}",
@@ -76,7 +76,7 @@ async fn failures_keep_their_causes_and_name_the_work() {
     let failure = response
         .error()
         .expect("the repeat passes the memory bound");
-    assert_eq!(failure.kind, lash_core::CellFailureKind::Policy);
+    assert_eq!(failure.kind(), lash_core::CellFailureKind::Policy);
     assert!(
         // FIG-6678 names the admitting operation, independently of its
         // generated plan's nested calls.

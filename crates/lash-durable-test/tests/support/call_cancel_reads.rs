@@ -123,8 +123,8 @@ pub(super) async fn attribution(turn: &CellTurn) -> Vec<String> {
                 return Err(format!("one archival authority for {}", fact.call_id));
             };
             let read = record
-                .read
-                .as_ref()
+                .classification
+                .read()
                 .ok_or("the admitted read lost its attribution")?;
             if **record != fact.record()
                 || fact.execution != lash_core::ToolCallExecution::Recorded

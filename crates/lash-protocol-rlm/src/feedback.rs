@@ -82,15 +82,19 @@ pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFa
             "A read the host answers while the cell runs took too long; call the tool as an awaited effect instead of a read, or ask for less.",
         ),
         other => {
-            return CellFailure::new(CellFailureKind::Program, other.to_string())
-                .with_worker_limit(other);
+            return CellFailure::from_cause(
+                lash_core::CellFailureCause::WorkerLimit {
+                    limit: other,
+                    bound: None,
+                },
+                other.to_string(),
+            );
         }
     };
-    CellFailure::new(
-        CellFailureKind::Policy,
+    CellFailure::from_cause(
+        lash_core::CellFailureCause::WorkerLimit { limit, bound: None },
         format!("{CELL_BOUND_EXCEEDED}: {what} (limit {bound})\n{repair}"),
     )
-    .with_worker_limit(limit)
 }
 
 /// How a worker that died running a cell ended, as its supervisor saw it
@@ -413,33 +417,43 @@ impl CellObservation {
                 for repair in &refusal.repairs {
                     message.push_str(&format!("\nInstead: {repair}"));
                 }
-                let mut failure = CellFailure::new(
-                    if refusal.kind() == lash_kernel_dialect::DiagnosticKind::Refusal {
-                        CellFailureKind::Policy
-                    } else {
-                        CellFailureKind::Program
-                    },
-                    message,
-                );
-                if let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing { shadowing, span } = &refusal.reason {
-                    failure = failure.with_defect(CellDefect::NamespaceShadowedByLocal {
-                        shadowing: shadowing.clone(),
-                        span: span.map(|span| (span.start, span.end)),
-                    });
-                }
-                failure
+                let cause = if let lash_kernel_dialect::DiagnosticReason::NamespaceShadowing {
+                    shadowing,
+                    span,
+                } = &refusal.reason
+                {
+                    lash_core::CellFailureCause::Defect {
+                        defect: CellDefect::NamespaceShadowedByLocal {
+                            shadowing: shadowing.clone(),
+                            span: span.map(|span| (span.start, span.end)),
+                        },
+                        bound: None,
+                    }
+                } else {
+                    lash_core::CellFailureCause::Unclassified {
+                        kind: if refusal.kind() == lash_kernel_dialect::DiagnosticKind::Refusal {
+                            CellFailureKind::Policy
+                        } else {
+                            CellFailureKind::Program
+                        },
+                        bound: None,
+                    }
+                };
+                CellFailure::from_cause(cause, message)
             }
-            Self::BindingNotCarried { binding, why } => CellFailure::new(
-                CellFailureKind::Program,
+            Self::BindingNotCarried { binding, why } => CellFailure::from_cause(
+                lash_core::CellFailureCause::Defect {
+                    defect: CellDefect::BindingNotCarried {
+                        binding: binding.clone(),
+                    },
+                    bound: None,
+                },
                 format!(
                     "{SESSION_BINDING_NOT_CARRIED}: `{binding}` was bound by an earlier {noun} and was not kept: {why}. So `{binding}` is not bound here. {repair}",
                     noun = vocabulary.cell_noun,
                     repair = vocabulary.not_carried_repair,
                 ),
-            )
-            .with_defect(CellDefect::BindingNotCarried {
-                binding: binding.clone(),
-            }),
+            ),
             Self::Uncaught(value) => CellFailure::new(
                 CellFailureKind::Program,
                 format!("uncaught {}", datum_text(value)),
@@ -468,11 +482,15 @@ impl CellObservation {
                     ));
                 }
                 message.push_str(&format!("\n{}", vocabulary.unjoined_task_repair));
-                CellFailure::new(CellFailureKind::Program, message).with_defect(
-                    CellDefect::TasksOutstanding {
-                        unfinished: unfinished.iter().map(task_label).collect(),
-                        unobserved: unobserved.iter().map(task_label).collect(),
+                CellFailure::from_cause(
+                    lash_core::CellFailureCause::Defect {
+                        defect: CellDefect::TasksOutstanding {
+                            unfinished: unfinished.iter().map(task_label).collect(),
+                            unobserved: unobserved.iter().map(task_label).collect(),
+                        },
+                        bound: None,
                     },
+                    message,
                 )
             }
             Self::Deadlock { waiting } => CellFailure::new(
@@ -503,10 +521,7 @@ impl CellObservation {
                         None,
                     ),
                     Bound::JoinMembers => ("too many tasks were awaited together".to_owned(), None),
-                    Bound::Guard { .. } => (
-                        "work limit exceeded".to_owned(),
-                        None,
-                    ),
+                    Bound::Guard { .. } => ("work limit exceeded".to_owned(), None),
                     Bound::Effects => (
                         "the cell started too many tool calls and sleeps over its life".to_owned(),
                         None,
@@ -516,7 +531,9 @@ impl CellObservation {
                         None,
                     ),
                 };
-                let function = exceeded.function.as_ref()
+                let function = exceeded
+                    .function
+                    .as_ref()
                     .map(|name| format!(" in library function `{name}`"))
                     .unwrap_or_default();
                 let location = exceeded.site.as_deref().and_then(|site| {
@@ -533,23 +550,40 @@ impl CellObservation {
                     Some(format!(" in guest function `{definition}` at line {line}, column {column}\n  {text}"))
                 }).unwrap_or_default();
                 let repair = match exceeded.bound {
-                    Bound::Charge => "Reduce the computation or split it across smaller cells to fit the instruction budget.",
+                    Bound::Charge => {
+                        "Reduce the computation or split it across smaller cells to fit the instruction budget."
+                    }
                     Bound::Memory => "Keep fewer or smaller values live to fit the memory limit.",
-                    Bound::Guard { .. } => "Reduce the function's input or split its work into smaller calls to fit its work limit.",
-                    Bound::CallDepth => "Reduce nested calls or replace recursion with an iterative computation.",
-                    Bound::LiveTasks => "Start fewer tasks at once and await them before starting more.",
-                    Bound::RequestsPerPark => "Start fewer tool calls and sleeps at once; await some before starting more.",
+                    Bound::Guard { .. } => {
+                        "Reduce the function's input or split its work into smaller calls to fit its work limit."
+                    }
+                    Bound::CallDepth => {
+                        "Reduce nested calls or replace recursion with an iterative computation."
+                    }
+                    Bound::LiveTasks => {
+                        "Start fewer tasks at once and await them before starting more."
+                    }
+                    Bound::RequestsPerPark => {
+                        "Start fewer tool calls and sleeps at once; await some before starting more."
+                    }
                     Bound::JoinMembers => "Await fewer tasks together, in smaller groups.",
-                    Bound::Effects => "Split the work across several cells, each starting fewer tool calls and sleeps.",
-                    Bound::CheckpointBytes => "Split the work across several cells, and keep fewer or smaller values live across tool calls and sleeps.",
+                    Bound::Effects => {
+                        "Split the work across several cells, each starting fewer tool calls and sleeps."
+                    }
+                    Bound::CheckpointBytes => {
+                        "Split the work across several cells, and keep fewer or smaller values live across tool calls and sleeps."
+                    }
                 };
-                let mut failure = CellFailure::new(
-                    CellFailureKind::Policy,
-                    format!("{CELL_BOUND_EXCEEDED}: {what}{function} (limit {}){location}\n{repair}", exceeded.limit),
-                );
-                failure.worker_limit = limit;
-                failure.bound = Some(Box::new(lash_core::facade_support::bound_fact(exceeded, None)));
-                failure
+                CellFailure::from_cause(
+                    lash_core::CellFailureCause::Bound {
+                        fact: Box::new(lash_core::facade_support::bound_fact(exceeded, None)),
+                        worker_limit: limit,
+                    },
+                    format!(
+                        "{CELL_BOUND_EXCEEDED}: {what}{function} (limit {}){location}\n{repair}",
+                        exceeded.limit
+                    ),
+                )
             }
         }
     }
@@ -627,7 +661,7 @@ pub(crate) fn render(failure: &CellFailure, cell_noun: &str) -> String {
     format!(
         "{}\n\n{}",
         failure.message,
-        imperative(failure.kind, cell_noun)
+        imperative(failure.kind(), cell_noun)
     )
 }
 
@@ -685,7 +719,7 @@ mod tests {
                 ).as_str()),
             );
             assert_eq!(
-                failure.worker_limit,
+                failure.worker_limit(),
                 Some(lash_vm_client::WorkerLimit::Heap)
             );
         }
@@ -765,7 +799,7 @@ mod tests {
                 failure.message
             );
             assert_eq!(
-                failure.worker_limit,
+                failure.worker_limit(),
                 Some(lash_vm_client::WorkerLimit::Depth)
             );
             let stale = observation.failure(

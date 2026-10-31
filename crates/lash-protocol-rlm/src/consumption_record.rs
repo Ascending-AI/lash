@@ -74,9 +74,8 @@ fn resource(tag: u64) -> Result<CellResource, TokenError> {
 pub(crate) fn encode(values: &[CellConsumption], out: &mut TokenWriter) {
     out.seq(values.len() as u64);
     for value in values {
-        out.seq(4);
+        out.seq(3);
         out.unsigned(tag(value.resource));
-        value.consumed.map(Reading).encode(out);
         out.unsigned(value.limit);
         value.observed.map(Reading).encode(out);
     }
@@ -86,10 +85,9 @@ pub(crate) fn decode(input: &mut TokenReader<'_>) -> Result<Vec<CellConsumption>
     let count = input.seq()?;
     let mut values = Vec::new();
     for _ in 0..count {
-        input.expect_struct(4)?;
+        input.expect_struct(3)?;
         values.push(CellConsumption {
             resource: resource(input.unsigned()?)?,
-            consumed: Option::<Reading>::decode(input)?.map(|value| value.0),
             limit: input.unsigned()?,
             observed: Option::<Reading>::decode(input)?.map(|value| value.0),
         });
@@ -144,13 +142,11 @@ mod tests {
             let values = vec![
                 CellConsumption {
                     resource: CellResource::WorkerCpuNanos,
-                    consumed: Some(actual),
                     limit: u64::MAX,
                     observed: Some(actual),
                 },
                 CellConsumption {
                     resource: CellResource::CallDepth,
-                    consumed: None,
                     limit: 1024,
                     observed: None,
                 },

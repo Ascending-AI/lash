@@ -660,8 +660,7 @@ mod tests {
                 None,
                 crate::tool_dispatch::ToolDispatchOutcome {
                     record: crate::ToolCallRecord {
-                        execution: Default::default(),
-                        read: None,
+                        classification: Default::default(),
                         call_id: lash_core_execution::ToolCallId::fixture("start-child"),
                         provider_call_id: None,
                         tool: "start_process".to_string(),

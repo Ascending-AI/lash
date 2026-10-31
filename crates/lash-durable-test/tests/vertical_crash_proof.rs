@@ -1250,7 +1250,6 @@ fn protocol_records(history: &[lash_core::SessionHistoryRecord]) -> Vec<serde_js
                 let mut cell = cell.as_ref().clone();
                 for reading in &mut cell.consumption {
                     if reading.resource == lash_core::CellResource::WorkerCpuNanos {
-                        reading.consumed = reading.consumed.map(|_| 0);
                         reading.observed = reading.observed.map(|_| 0);
                     }
                 }

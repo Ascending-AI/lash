@@ -303,8 +303,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 call_id: Some(lash_core::ToolCallId::fixture("replayed-call")),
             }],
             tool_calls: vec![lash_core::ToolCallRecord {
-                execution: Default::default(),
-                read: None,
+                classification: Default::default(),
                 call_id: lash_core::ToolCallId::fixture("replayed-call"),
                 provider_call_id: None,
                 tool: "attachment_tool".to_string(),
@@ -631,8 +630,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             ],
             tool_calls: vec![
                 lash_core::ToolCallRecord {
-                    execution: Default::default(),
-                    read: None,
+                    classification: Default::default(),
                     call_id: lash_core::ToolCallId::fixture("fanout-ok"),
                     provider_call_id: None,
                     tool: "ok".to_string(),
@@ -640,8 +638,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
                 },
                 lash_core::ToolCallRecord {
-                    execution: Default::default(),
-                    read: None,
+                    classification: Default::default(),
                     call_id: lash_core::ToolCallId::fixture("fanout-fail"),
                     provider_call_id: None,
                     tool: "fail".to_string(),
@@ -653,8 +650,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                     )),
                 },
                 lash_core::ToolCallRecord {
-                    execution: Default::default(),
-                    read: None,
+                    classification: Default::default(),
                     call_id: lash_core::ToolCallId::fixture("fanout-cancel"),
                     provider_call_id: None,
                     tool: "stop".to_string(),
@@ -1450,9 +1446,8 @@ fn an_exec_failure_reaches_the_trajectory_with_its_closed_reason() {
             serde_json::json!({
                 "kind": "failed",
                 "value": {
-                    "kind": "host",
+                    "cause": { "type": "exec_failure", "reason": spelling },
                     "message": "the executor did not answer",
-                    "exec_failure": spelling,
                 },
             })
         );
@@ -1477,7 +1472,7 @@ fn a_failed_cell_is_recorded_typed_and_its_guidance_is_rendered_at_projection() 
         serde_json::json!({
             "kind": "failed",
             "value": {
-                "kind": "program",
+                "cause": { "type": "unclassified", "kind": "program" },
                 "message": "unknown binding `missing_name`",
             },
         })

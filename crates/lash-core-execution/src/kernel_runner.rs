@@ -168,18 +168,12 @@ fn make_bound_fact(
     function: Option<lash_kernel_value::names::FunctionName>,
     site: Option<Box<lash_kernel_value::sites::Site>>,
 ) -> lash_protocol_types::ExecutionBoundFact {
-    let consumed = observed.map(|used| {
-        if resource == lash_protocol_types::CellResource::Charges {
-            used.min(limit)
-        } else {
-            used
-        }
-    });
     lash_protocol_types::ExecutionBoundFact {
-        resource,
-        limit,
-        observed,
-        consumed,
+        reading: lash_protocol_types::CellConsumption {
+            resource,
+            limit,
+            observed,
+        },
         function,
         site,
     }

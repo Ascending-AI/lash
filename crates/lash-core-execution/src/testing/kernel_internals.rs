@@ -253,8 +253,7 @@ pub async fn complete_tool_output(
             None,
             crate::tool_dispatch::ToolDispatchOutcome {
                 record: crate::ToolCallRecord {
-                    execution: Default::default(),
-                    read: None,
+                    classification: Default::default(),
                     call_id,
                     provider_call_id: None,
                     tool: tool.to_string(),

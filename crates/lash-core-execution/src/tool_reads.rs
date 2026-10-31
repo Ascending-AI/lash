@@ -180,8 +180,9 @@ pub async fn observe_tool_read<T>(
     let call_id = read.call_id();
     if let Some(observe) = observe {
         observe(crate::TurnEvent::ToolCallStarted {
-            execution: crate::ToolCallExecution::Read,
-            read: Some(Box::new(read.clone())),
+            classification: crate::ToolCallClassification::UnrecordedRead {
+                read: Box::new(read.clone()),
+            },
             call_id: call_id.clone(),
             provider_call_id: None,
             name: name.clone(),
@@ -195,7 +196,6 @@ pub async fn observe_tool_read<T>(
         read.elapsed_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
         read.answer_bytes = answer_bytes;
         observe(crate::TurnEvent::ToolCallReturned {
-            execution: crate::ToolCallExecution::Read,
             call_id,
             provider_call_id: None,
             name,
@@ -203,7 +203,9 @@ pub async fn observe_tool_read<T>(
             output,
             duration_ms: Some(read.elapsed_us / 1000),
             graph_key: read.graph_key(),
-            read: Some(Box::new(read)),
+            classification: crate::ToolCallClassification::UnrecordedRead {
+                read: Box::new(read),
+            },
         });
     }
     result

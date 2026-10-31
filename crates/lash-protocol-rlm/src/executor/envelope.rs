@@ -224,8 +224,9 @@ pub(super) fn load_cell(
                 graph.installed.insert(*outcome);
                 LedgerCallState::Completed {
                     record: Box::new(lash_core::ToolCallRecord {
-                        execution: Default::default(),
-                        read: call.read,
+                        classification: lash_protocol_types::ToolCallClassification::Recorded {
+                            read: call.read,
+                        },
                         call_id: loaded.call_id,
                         provider_call_id: loaded.provider_call_id,
                         tool: loaded.tool_name,

@@ -374,8 +374,8 @@ pub use lash_core::{
 };
 /// Code-executor request, response, and runtime capability context.
 pub use lash_core::{
-    CellDefect, CellFailure, CellFailureKind, CellFailureRepair, ExecRequest, ExecResponse,
-    RuntimeExecutionContext,
+    CellDefect, CellFailure, CellFailureCause, CellFailureKind, CellFailureRepair, ExecRequest,
+    ExecResponse, RuntimeExecutionContext,
 };
 pub use lash_core::{CompletedToolCall, PluginOptions};
 /// Executable identity and terminal rendering returned by protocol integrators.

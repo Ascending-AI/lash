@@ -35,7 +35,7 @@ impl Crash {
                     };
                     cell.result
                         .failure()
-                        .and_then(|failure| failure.tool_call_limit)
+                        .and_then(|failure| failure.tool_call_limit())
                 })
                 .collect::<Vec<_>>();
             if limits != [expected] {

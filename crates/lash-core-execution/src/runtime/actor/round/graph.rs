@@ -721,7 +721,7 @@ impl CallOutcome {
         }
         let record = CallBody::load(decoder, stored.body)?.record;
         Ok(Self {
-            read: record.read,
+            read: record.classification.into_read(),
             call_id: record.call_id,
             admission: stored.admission,
             args: record.args,

@@ -482,7 +482,7 @@ async fn runtime_stopped_cell_failure_agrees_live_committed_and_reopened() -> Re
         .expect("the cell completion committed");
     assert_eq!(returned, completed);
     assert!(
-        matches!(&returned, lash_core::CellOutcome::Failed(failure) if failure.exec_failure == Some(lash_core::ExecCodeFailureReason::RuntimeStopped)),
+        matches!(&returned, lash_core::CellOutcome::Failed(failure) if failure.exec_failure() == Some(lash_core::ExecCodeFailureReason::RuntimeStopped)),
         "{returned:?}"
     );
     drop(session);

@@ -633,8 +633,12 @@ impl TraceEvent {
                             f,
                         );
                     }
-                    if let Some(admission) = error.schema_admission.as_deref_mut() {
-                        match admission {
+                    if let lash_protocol_types::CellFailureCause::SchemaAdmission {
+                        error: admission,
+                        ..
+                    } = &mut error.cause
+                    {
+                        match admission.as_mut() {
                             lash_kernel_value::json_schema::SchemaAdmissionError::Compilation {
                                 message,
                                 ..

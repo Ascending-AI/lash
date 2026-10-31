@@ -426,7 +426,8 @@ pub use lash_core::store::{
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
 };
 pub use lash_core::{
-    ExecutionBoundFact, ReadFact, ReadPanic, ToolCallExecution, ToolReadCaller, ToolReadMetadata,
+    ExecutionBoundFact, ReadFact, ReadPanic, ToolCallClassification, ToolCallExecution,
+    ToolReadCaller, ToolReadMetadata,
 };
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
 /// validated at compile time.

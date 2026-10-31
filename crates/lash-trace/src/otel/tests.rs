@@ -813,7 +813,6 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
             TraceEvent::ExecCodeCompleted {
                 consumption: vec![lash_protocol_types::CellConsumption {
                     resource: lash_protocol_types::CellResource::Charges,
-                    consumed: Some(17),
                     limit: 17,
                     observed: Some(18),
                 }],
@@ -881,7 +880,6 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 .find(|a| a.key.as_str() == "lash.cell.consumption")
                 .unwrap();
             let decoded: serde_json::Value = serde_json::from_str(&encoded.value.as_str()).unwrap();
-            assert_eq!(decoded[0]["consumed"], 17);
             assert_eq!(decoded[0]["observed"], 18);
         }
         assert_eq!(span.name, name);

@@ -1347,7 +1347,10 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
             .read_turn_tool_calls(&turns[0].turn_id)
             .await
             .unwrap();
-        let reads: Vec<_> = calls.iter().filter(|call| call.read.is_some()).collect();
+        let reads: Vec<_> = calls
+            .iter()
+            .filter(|call| call.classification.read().is_some())
+            .collect();
         let expected_tool = if mode == "standard" {
             "reference-document-read"
         } else {
@@ -1365,7 +1368,7 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
         );
         for (call, page) in reads.iter().zip(&expected_pages) {
             assert_eq!(call.tool, expected_tool);
-            let read = call.read.as_ref().unwrap();
+            let read = call.classification.read().unwrap();
             assert_eq!(
                 read.provider,
                 lash_vocabulary::providers::ToolProviderHandle::new(
@@ -1380,7 +1383,7 @@ if (pages.length > 3) await tools.lookup({document:{id:'never'}});"#,
                     | (lash_core::ToolReadCaller::CodeBlock { .. }, "rlm")
             ));
             assert_eq!(
-                call.execution,
+                call.classification.execution(),
                 if mode == "standard" {
                     lash_core::ToolCallExecution::Read
                 } else {

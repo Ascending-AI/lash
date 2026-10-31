@@ -620,8 +620,7 @@ fn runtime_failure_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
-            execution: Default::default(),
-            read: None,
+            classification: Default::default(),
             call_id: call.call_id.clone(),
             provider_call_id: call.provider_call_id.clone(),
             tool: call.tool_name.clone(),

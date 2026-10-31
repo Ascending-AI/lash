@@ -99,7 +99,7 @@ pub use language_execution::{
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_protocol_types::llm::types::GenerationReceipt;
 pub use lash_protocol_types::{
-    CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
+    CellFailure, CellFailureCause, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
 use lash_protocol_types::{llm::types::LlmOutputPart, llm::types::LlmProviderTraceDirection};
 

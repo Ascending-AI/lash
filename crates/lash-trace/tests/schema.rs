@@ -1589,10 +1589,13 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
         let TraceEvent::ExecCodeCompleted { result, .. } = &mut event else {
             unreachable!()
         };
-        *result = lash_protocol_types::CellOutcome::Failed(
-            lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, COMPILATION)
-                .with_schema_admission(diagnostic),
-        );
+        *result = lash_protocol_types::CellOutcome::Failed(lash_trace::CellFailure::from_cause(
+            lash_trace::CellFailureCause::SchemaAdmission {
+                error: Box::new(diagnostic),
+                bound: None,
+            },
+            COMPILATION,
+        ));
         let record = fixture_record(TraceContext::default().for_session("s1"), event);
         let captured = record
             .clone()
@@ -1614,10 +1617,13 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
         assert_eq!(omitted["duration_ms"], 12);
         assert_eq!(omitted["output_chars"], 11);
         assert_eq!(omitted["observation_count"], 2);
-        assert_eq!(omitted["result"]["value"]["kind"], "program");
-        assert_eq!(omitted["result"]["value"]["schema_admission"]["kind"], kind);
+        let failure: lash_trace::CellFailure =
+            serde_json::from_value(omitted["result"]["value"].clone())
+                .expect("typed omitted failure");
+        assert_eq!(failure.kind(), lash_trace::CellFailureKind::Program);
+        assert_eq!(omitted["result"]["value"]["cause"]["error"]["kind"], kind);
         assert_eq!(
-            omitted["result"]["value"]["schema_admission"]["schema_path"],
+            omitted["result"]["value"]["cause"]["error"]["schema_path"],
             path
         );
         assert_eq!(

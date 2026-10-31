@@ -377,10 +377,11 @@ fn process_and_cell_execution_spans_retain_the_terminal_bound() {
     let meter = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
     let fact = lash::ExecutionBoundFact {
-        resource: lash_protocol_types::CellResource::MemoryBytes,
-        limit: 100,
-        observed: Some(101),
-        consumed: Some(101),
+        reading: lash_protocol_types::CellConsumption {
+            resource: lash_protocol_types::CellResource::MemoryBytes,
+            limit: 100,
+            observed: Some(101),
+        },
         function: Some(lash_kernel_value::names::FunctionName::new("text.concat").unwrap()),
         site: None,
     };
@@ -395,11 +396,13 @@ fn process_and_cell_execution_spans_retain_the_terminal_bound() {
         "failure": TraceToolFailure::new(&terminal, lash_trace::ContentPolicy::standard()),
     }))
     .unwrap();
-    let mut failure = lash_protocol_types::CellFailure::new(
-        lash_protocol_types::CellFailureKind::Policy,
+    let failure = lash_protocol_types::CellFailure::from_cause(
+        lash_protocol_types::CellFailureCause::Bound {
+            fact: Box::new(fact),
+            worker_limit: None,
+        },
         "bound",
     );
-    failure.bound = Some(Box::new(fact));
     let events = [
         (
             TraceSpanKind::Process,

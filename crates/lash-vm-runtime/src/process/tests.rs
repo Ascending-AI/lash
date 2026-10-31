@@ -761,9 +761,9 @@ fn a_process_charge_bound_retains_limit_observation_and_consumption() {
         else {
             panic!("the process retains its bound: {failure:?}");
         };
-        assert_eq!(fact.resource, lash_core::CellResource::Charges);
-        assert_eq!(fact.limit, 100);
-        assert_eq!(fact.observed, charged);
-        assert_eq!(fact.consumed, charged.map(|_| 100));
+        assert_eq!(fact.reading.resource, lash_core::CellResource::Charges);
+        assert_eq!(fact.reading.limit, 100);
+        assert_eq!(fact.reading.observed, charged);
+        assert_eq!(fact.reading.consumed(), charged.map(|_| 100));
     }
 }

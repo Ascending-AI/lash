@@ -1138,7 +1138,7 @@ fn assert_cell_limit_refusal(
             };
             cell.result
                 .failure()
-                .and_then(|failure| failure.tool_call_limit)
+                .and_then(|failure| failure.tool_call_limit())
         })
         .collect::<Vec<_>>();
     assert_eq!(

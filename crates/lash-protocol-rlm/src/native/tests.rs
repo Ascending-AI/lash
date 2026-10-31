@@ -313,8 +313,7 @@ pub(super) fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResp
         tool_calls: finish
             .iter()
             .map(|value| lash_core::ToolCallRecord {
-                execution: Default::default(),
-                read: None,
+                classification: Default::default(),
                 call_id: call_id.clone(),
                 provider_call_id: None,
                 tool: crate::FINISH_TOOL_NAME.to_string(),
@@ -1178,8 +1177,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             call_id: Some(lash_core::ToolCallId::fixture("terminal-call")),
         });
         exec.tool_calls.push(lash_core::ToolCallRecord {
-            execution: Default::default(),
-            read: None,
+            classification: Default::default(),
             call_id: lash_core::ToolCallId::fixture("terminal-call"),
             provider_call_id: None,
             tool: "app_lookup".into(),

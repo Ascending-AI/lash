@@ -538,7 +538,7 @@ impl ReadTurn {
         };
         if call.call_id.as_ref() != Some(&fact.call_id)
             || !matches!(&call.outcome, lash_core::ExecutedCallOutcome::Failed { code, .. } if code == &failure.code)
-            || !matches!(&cell.result, lash_core::CellOutcome::Failed(error) if error.kind == lash_core::CellFailureKind::Program)
+            || !matches!(&cell.result, lash_core::CellOutcome::Failed(error) if error.kind() == lash_core::CellFailureKind::Program)
         {
             return Err(format!(
                 "the guest did not receive the Read timeout: {cell:?}"
@@ -956,22 +956,21 @@ impl Scenario for ReadTurn {
                     return Err(format!("the bound cell succeeded: {:?}", cell.result));
                 };
                 let fact = failure
-                    .bound
-                    .as_ref()
+                    .bound()
                     .ok_or("the cell lost structured bound evidence")?;
                 if self.cell == Cell::BoundMemory {
-                    if fact.resource != lash_core::CellResource::MemoryBytes
-                        || fact.limit != 1024 * 1024
+                    if fact.reading.resource != lash_core::CellResource::MemoryBytes
+                        || fact.reading.limit != 1024 * 1024
                     {
                         return Err(format!("KERNEL-BOUND-FACT: {fact:?}"));
                     }
                     let meter = cell
                         .consumption
                         .iter()
-                        .find(|reading| reading.resource == fact.resource)
+                        .find(|reading| reading.resource == fact.reading.resource)
                         .ok_or("the saved memory receipt")?;
-                    if fact.observed != meter.observed
-                        || fact.consumed != meter.consumed
+                    if fact.reading.observed != meter.observed
+                        || fact.reading.consumed() != meter.consumed()
                         || fact.function.as_ref().map(|name| name.as_str()) != Some("text.concat")
                     {
                         return Err(format!(
@@ -980,10 +979,10 @@ impl Scenario for ReadTurn {
                     }
                     return Ok(());
                 }
-                if fact.resource != lash_core::CellResource::Charges
-                    || fact.limit != 100
-                    || fact.observed != Some(101)
-                    || fact.consumed != Some(100)
+                if fact.reading.resource != lash_core::CellResource::Charges
+                    || fact.reading.limit != 100
+                    || fact.reading.observed != Some(101)
+                    || fact.reading.consumed() != Some(100)
                 {
                     return Err(format!("KERNEL-BOUND-FACT: {fact:?}"));
                 }
@@ -1065,14 +1064,14 @@ impl Scenario for ReadTurn {
                     for (slot,x) in [(0,1),(2,2)] {
                         let record = records.iter().find(|record| record.call_id == returned[slot]).ok_or("a saved read slot is not hydrated")?;
                         let saved = serde_json::to_value(lash_protocol_types::Durable(record)).map_err(|error| error.to_string())?;
-                        if saved["execution"] != "read" || saved["read"]["ordinal"] != if slot == 0 { 1 } else { 2 }
-                            || saved["read"]["caller"]["kind"] != "model_round" {
+                        if saved["classification"]["kind"] != "unrecorded_read" || saved["classification"]["read"]["ordinal"] != if slot == 0 { 1 } else { 2 }
+                            || saved["classification"]["read"]["caller"]["kind"] != "model_round" {
                             return Err(format!("MODEL-READ-HISTORY-IDENTITY: {saved}"));
                         }
                         if let Some(live) = &live {
                             let event = live.iter().find(|event| event["type"] == "tool_call_returned" && event["call_id"] == record.call_id.as_str()).ok_or("the model read emitted its live row")?;
                             for key in ["caller", "provider", "ordinal", "site", "origin"] {
-                                if saved["read"][key] != event["read"][key] { return Err(format!("the model read lost its live {key}")); }
+                                if saved["classification"]["read"][key] != event["classification"]["read"][key] { return Err(format!("the model read lost its live {key}")); }
                             }
                         }
                         let answer = self.world.answers(x);
@@ -1128,7 +1127,7 @@ impl Scenario for ReadTurn {
                     let [call] = calls.as_slice() else { return Err(format!("one terminal Read call: {calls:?}")); };
                     if !matches!(&call.output.outcome, lash_core::ToolCallOutcome::Failure(failure)
                         if matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::ReadPanicked { panic }) if panic.message == "reader invariant failed"))
-                        || call.read.is_none() {
+                        || call.classification.read().is_none() {
                         return Err(format!("READ-PANIC-TYPED: {call:?}"));
                     }
                     if !self.world.writes().is_empty() { return Err("a guest continued after a reader panic".into()); }
