@@ -1085,10 +1085,10 @@ pub(crate) enum Stop {
 pub(crate) async fn run_bounded(
     cx: &ActorContext,
     admitted: &AdmittedExecution,
-    body: ToolBody,
+    body: MemberBody,
     member_cancel: &CancellationToken,
     stop_grace: std::time::Duration,
-) -> Result<SettledOutput, Stop> {
+) -> Result<MemberOutcome, Stop> {
     // The admission may have been acknowledged after the node paused past
     // its self-stop deadline: by then the actor's new owner may have
     // settled it, so its body never starts here.

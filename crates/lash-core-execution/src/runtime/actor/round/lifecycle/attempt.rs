@@ -1,9 +1,8 @@
 //! Runs one admitted attempt under its call decision scope.
 
 use super::super::decision;
-use super::super::{ToolBody, run_bounded};
+use super::super::run_bounded;
 use super::*;
-use std::sync::{Mutex, PoisonError};
 use tracing::Instrument as _;
 
 impl Lifecycle {
@@ -34,49 +33,11 @@ impl Lifecycle {
             retained,
         );
         let attempt = async move {
-            type Carried = (
-                Vec<StoreLocalEffect>,
-                Option<crate::ProcessId>,
-                Option<DurableInstant>,
-                Option<CapacityVerdict>,
-                Option<StepCandidate>,
-                super::super::SettlementIntent,
-            );
-            let carried: Arc<Mutex<Carried>> = Arc::default();
-            let slot = Arc::clone(&carried);
-            let tool_body: ToolBody = Box::new(move |token| {
-                Box::pin(async move {
-                    let result = body(token).await;
-                    *slot.lock().unwrap_or_else(PoisonError::into_inner) = (
-                        result.store_local,
-                        result.terminal,
-                        result.timer,
-                        result.capacity,
-                        result.candidate,
-                        result.settlement,
-                    );
-                    result.output
-                })
-            });
-            let result = run_bounded(&cx, &execution, tool_body, &cancel, stop_grace)
+            let result = run_bounded(&cx, &execution, body, &cancel, stop_grace)
                 .await
-                .and_then(|output| {
-                    let (store_local, terminal, timer, capacity, candidate, settlement) =
-                        std::mem::take(
-                            &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
-                        );
-                    match capacity {
-                        Some(verdict) if honours_capacity => Err(Stop::Capacity(verdict)),
-                        _ => Ok(MemberOutcome {
-                            output,
-                            store_local,
-                            terminal,
-                            timer,
-                            capacity: None,
-                            candidate,
-                            settlement,
-                        }),
-                    }
+                .and_then(|mut outcome| match outcome.capacity.take() {
+                    Some(verdict) if honours_capacity => Err(Stop::Capacity(verdict)),
+                    _ => Ok(outcome),
                 });
             Finished {
                 id: execution.id().clone(),
