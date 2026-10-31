@@ -40,9 +40,9 @@ use lash_durable::domain::{
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, ClaimPurpose,
     Claimed, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads, DurableStore,
-    Epoch, Fenced, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite, MailKind,
-    MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner,
-    Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
+    Epoch, Fenced, HeartbeatOutcome, MailAnswer, MailCommit, MailDomainWrite, MailRefusal, MailSeq,
+    MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner, Reaped, Release,
+    StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
 use lash_store_sql::durable::session_mail::SessionMailStatements;
@@ -1219,7 +1219,12 @@ impl DurableStore for SqliteDurableStore {
             .await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
         lash_core_ids::operational_metrics::sql::owner_state_read(
             lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
         );
@@ -1232,95 +1237,103 @@ impl DurableStore for SqliteDurableStore {
             ),
             lash_durable::ActorKind::Process => None,
         };
-        // One statement: its own snapshot holds the actor, its mail and a
-        // session's unfinished turn with the cancel it accepted.
-        self.readers
-            .next()
-            .call(move |connection| {
-                let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
-                let mut rows = statement.query(rusqlite::params![
-                    actor.as_str(),
-                    session
-                        .as_ref()
-                        .map(lash_kernel_value::identity::SessionId::as_str)
-                ])?;
-                let mut opened: Option<(OpenedActor, Option<_>)> = None;
-                let mut requests = Vec::new();
-                while let Some(row) = rows.next()? {
-                    let (opened, _) = match &mut opened {
-                        Some(opened) => opened,
-                        None => {
-                            let current = Epoch(row.get(0)?);
-                            let state: String = row.get(1)?;
-                            if current != epoch || state != ActorState::Owned.as_str() {
-                                return Ok(Err(DurableError::OwnershipLost(Fenced {
-                                    actor: actor.clone(),
-                                    held: epoch,
-                                    current: Some(current),
-                                })));
-                            }
-                            let turn = match row.get::<_, Option<String>>(9)? {
-                                Some(_) => Some((
-                                    turns::StoredTurn::read(row, 9)?,
-                                    row.get::<_, Option<String>>(24)?
-                                        .map(|_| turns::StoredCancel::read(row, 24))
-                                        .transpose()?,
-                                )),
-                                None => None,
-                            };
-                            requests =
-                                match run_records::call_cancels(&actor, row.get_ref(29)?.as_str()?)
-                                {
-                                    Ok(requests) => requests,
-                                    Err(error) => return Ok(Err(error)),
-                                };
-                            opened.insert((
-                                OpenedActor {
-                                    actor: actor.clone(),
-                                    epoch,
-                                    revision: StateRevision(row.get(2)?),
-                                    acked: MailSeq(row.get(3)?),
-                                    seen: MailSeq(row.get(4)?),
-                                    mail: Vec::new(),
-                                    at,
-                                    turn_cancel: None,
-                                },
-                                turn,
-                            ))
-                        }
-                    };
-                    if let Some(seq) = row.get::<_, Option<i64>>(5)?
-                        && seq <= opened.seen.0
-                    {
-                        opened.mail.push(Mail {
-                            seq: MailSeq(seq),
-                            kind: MailKind::new(row.get::<_, String>(6)?),
-                            body: row.get(7)?,
-                            appended_at: DurableInstant(row.get(8)?),
-                        });
-                    }
+        self.query(move |connection| {
+            let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
+            let mut rows = statement.query(rusqlite::params![
+                actor.as_str(),
+                session
+                    .as_ref()
+                    .map(lash_kernel_value::identity::SessionId::as_str),
+                i64::try_from(max_mail_bytes).unwrap_or(i64::MAX),
+                OpenedActor::MAIL_PAGE_ROWS,
+                lash_durable::domain::SESSION_CLOSE_MAIL
+            ])?;
+            let Some(row) = rows.next()? else {
+                return Ok(Err(DurableError::OwnershipLost(Fenced {
+                    actor,
+                    held: epoch,
+                    current: None,
+                })));
+            };
+            let state: String = row.get(1)?;
+            let revision = match lash_durable::fenced_read::validate_authority(
+                &actor,
+                epoch,
+                None,
+                Some((Epoch(row.get(0)?), &state, StateRevision(row.get(2)?))),
+            ) {
+                Ok(revision) => revision,
+                Err(error) => return Ok(Err(error)),
+            };
+            let turn = match row.get::<_, Option<String>>(5)? {
+                Some(_) => Some((
+                    turns::StoredTurn::read(row, 5)?,
+                    row.get::<_, Option<String>>(20)?
+                        .map(|_| turns::StoredCancel::read(row, 20))
+                        .transpose()?,
+                )),
+                None => None,
+            };
+            let requests = match run_records::call_cancels(&actor, row.get_ref(25)?.as_str()?) {
+                Ok(requests) => requests,
+                Err(error) => return Ok(Err(error)),
+            };
+            let turn_cancel = if let (Some((turn, cancel)), Some(session)) = (turn, &session) {
+                match turn.decode(session, |run| {
+                    Ok(cancel.map(|cancel| cancel.decode(session, run)).transpose())
+                })? {
+                    Ok(row) => row.cancel,
+                    Err(error) => return Ok(Err(error)),
                 }
-                let Some((mut opened, turn)) = opened else {
-                    return Ok(Err(DurableError::OwnershipLost(Fenced {
-                        actor,
-                        held: epoch,
-                        current: None,
-                    })));
-                };
-                // The turn is decoded and refused as the turn read does.
-                if let (Some((turn, cancel)), Some(session)) = (turn, &session) {
-                    let decoded = turn.decode(session, |run| {
-                        Ok(cancel.map(|cancel| cancel.decode(session, run)).transpose())
-                    })?;
-                    opened.turn_cancel = match decoded {
-                        Ok(row) => row.cancel,
-                        Err(error) => return Ok(Err(error)),
-                    };
-                }
-                Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
-            })
-            .await
-            .map_err(store_failure)?
+            } else {
+                None
+            };
+            let opened = OpenedActor {
+                actor,
+                epoch,
+                revision,
+                acked: MailSeq(row.get(3)?),
+                seen: MailSeq(row.get(4)?),
+                mail: Vec::new(),
+                close_requested: row.get(27)?,
+                at,
+                turn_cancel,
+            };
+            Ok(opened
+                .with_mail_page(row.get_ref(26)?.as_str()?, max_mail_bytes)
+                .map(|opened| ActorTx::opened(opened).with_call_cancels(requests)))
+        })
+        .await
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+    ) -> Result<(), DurableError> {
+        let actor = actor.clone();
+        self.query(move |connection| {
+            let row = connection
+                .prepare_cached(SQL.actor.authority.sql())?
+                .query_row([actor.as_str()], |row| {
+                    Ok((
+                        Epoch(row.get(0)?),
+                        row.get::<_, String>(1)?,
+                        StateRevision(row.get(2)?),
+                    ))
+                })
+                .optional()?;
+            Ok(lash_durable::fenced_read::validate_authority(
+                &actor,
+                epoch,
+                Some(expected),
+                row.as_ref()
+                    .map(|(epoch, state, revision)| (*epoch, state.as_str(), *revision)),
+            )
+            .map(|_| ()))
+        })
+        .await
     }
 
     async fn begin_retained(
@@ -1332,108 +1345,67 @@ impl DurableStore for SqliteDurableStore {
     ) -> Result<ActorTx, DurableError> {
         let actor = actor.clone();
         let at = self.instant()?;
-        let capacity = i64::try_from(max_mail_bytes).unwrap_or(i64::MAX);
-        self.readers
-            .next()
-            .call(move |connection| {
-                let mut statement = connection.prepare_cached(SQL.sqlite.open_retained.sql())?;
-                let mut rows = statement.query(rusqlite::params![
-                    actor.as_str(),
-                    (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id()),
-                    capacity
-                ])?;
-                let mut opened: Option<OpenedActor> = None;
-                let mut requests = Vec::new();
-                let mut partial = false;
-                while let Some(row) = rows.next()? {
-                    if opened.is_none() {
-                        let current = Epoch(row.get(0)?);
-                        let state: String = row.get(1)?;
-                        if current != epoch || state != ActorState::Owned.as_str() {
-                            return Ok(Err(DurableError::OwnershipLost(Fenced {
-                                actor,
-                                held: epoch,
-                                current: Some(current),
-                            })));
-                        }
-                        if StateRevision(row.get(2)?) != expected {
-                            return Ok(Err(DurableError::RevisionConflict {
-                                actor: actor.clone(),
-                                epoch,
-                                expected,
-                                actual: StateRevision(row.get(2)?),
-                            }));
-                        }
-                        let turn_cancel = if let Some(run) = row.get::<_, Option<String>>(11)? {
-                            let session = lash_kernel_value::identity::SessionId::try_from(
-                                actor.id().to_owned(),
-                            )
-                            .map_err(|error| {
-                                rusqlite::Error::ToSqlConversionFailure(Box::new(error))
-                            })?;
-                            let run = lash_vocabulary::identity::TurnId::try_from(run).map_err(
-                                |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
-                            )?;
-                            match turns::StoredCancel::read(row, 12)?.decode(&session, &run) {
-                                Ok(cancel) => Some(cancel),
-                                Err(error) => return Ok(Err(error)),
-                            }
-                        } else {
-                            None
-                        };
-                        requests =
-                            match run_records::call_cancels(&actor, row.get_ref(17)?.as_str()?) {
-                                Ok(requests) => requests,
-                                Err(error) => return Ok(Err(error)),
-                            };
-                        opened = Some(OpenedActor {
-                            actor: actor.clone(),
-                            epoch,
-                            revision: expected,
-                            acked: MailSeq(row.get(3)?),
-                            seen: MailSeq(row.get(4)?),
-                            mail: Vec::new(),
-                            at,
-                            turn_cancel,
-                        });
-                    }
-                    let Some(opened) = opened.as_mut() else {
-                        continue;
-                    };
-                    if let Some(seq) = row.get::<_, Option<i64>>(5)? {
-                        if let Some(body) = row.get::<_, Option<String>>(9)? {
-                            opened.mail.push(Mail {
-                                seq: MailSeq(seq),
-                                kind: MailKind::new(row.get::<_, String>(8)?),
-                                body,
-                                appended_at: DurableInstant(row.get(10)?),
-                            });
-                        } else {
-                            partial = true;
-                            if opened.mail.is_empty() && max_mail_bytes > 0 {
-                                return Ok(Err(DurableError::MailboxItemTooLarge {
-                                    actor: actor.clone(),
-                                    bytes: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(u64::MAX),
-                                    limit: max_mail_bytes,
-                                }));
-                            }
-                        }
-                    }
+        self.query(move |connection| {
+            let mut statement = connection.prepare_cached(SQL.sqlite.open_retained.sql())?;
+            let mut rows = statement.query(rusqlite::params![
+                actor.as_str(),
+                (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id()),
+                i64::try_from(max_mail_bytes).unwrap_or(i64::MAX),
+                OpenedActor::MAIL_PAGE_ROWS,
+                lash_durable::domain::SESSION_CLOSE_MAIL
+            ])?;
+            let Some(row) = rows.next()? else {
+                return Ok(Err(DurableError::OwnershipLost(Fenced {
+                    actor,
+                    held: epoch,
+                    current: None,
+                })));
+            };
+            let state: String = row.get(1)?;
+            let revision = match lash_durable::fenced_read::validate_authority(
+                &actor,
+                epoch,
+                Some(expected),
+                Some((Epoch(row.get(0)?), &state, StateRevision(row.get(2)?))),
+            ) {
+                Ok(revision) => revision,
+                Err(error) => return Ok(Err(error)),
+            };
+            let turn_cancel = if let Some(run) = row.get::<_, Option<String>>(5)? {
+                let session =
+                    lash_kernel_value::identity::SessionId::try_from(actor.id().to_owned())
+                        .map_err(|error| {
+                            rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                        })?;
+                let run = lash_vocabulary::identity::TurnId::try_from(run)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                match turns::StoredCancel::read(row, 6)?.decode(&session, &run) {
+                    Ok(cancel) => Some(cancel),
+                    Err(error) => return Ok(Err(error)),
                 }
-                let Some(mut opened) = opened else {
-                    return Ok(Err(DurableError::OwnershipLost(Fenced {
-                        actor,
-                        held: epoch,
-                        current: None,
-                    })));
-                };
-                if partial {
-                    opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
-                }
-                Ok(Ok(ActorTx::opened(opened).with_call_cancels(requests)))
-            })
-            .await
-            .map_err(store_failure)?
+            } else {
+                None
+            };
+            let requests = match run_records::call_cancels(&actor, row.get_ref(11)?.as_str()?) {
+                Ok(requests) => requests,
+                Err(error) => return Ok(Err(error)),
+            };
+            let opened = OpenedActor {
+                actor,
+                epoch,
+                revision,
+                acked: MailSeq(row.get(3)?),
+                seen: MailSeq(row.get(4)?),
+                mail: Vec::new(),
+                close_requested: row.get(13)?,
+                at,
+                turn_cancel,
+            };
+            Ok(opened
+                .with_mail_page(row.get_ref(12)?.as_str()?, max_mail_bytes)
+                .map(|opened| ActorTx::opened(opened).with_call_cancels(requests)))
+        })
+        .await
     }
 
     async fn begin_process_retained(
@@ -1451,8 +1423,9 @@ impl DurableStore for SqliteDurableStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
-        self.open_process_view(actor, epoch).await
+        self.open_process_view(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

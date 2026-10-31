@@ -232,7 +232,7 @@ pub async fn checkpoint_lease_handoffs_are_atomic(tier: &dyn PageTier) -> LawOut
         &[leaf],
     );
     let first = Candidate { root, fresh };
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.lease_root(RootOwner::Exec(exec.clone()), exec_root(root).id, 60_000);
     let receipt = publish_in(
         store,
@@ -249,11 +249,11 @@ pub async fn checkpoint_lease_handoffs_are_atomic(tier: &dyn PageTier) -> LawOut
     ensure!(lease.root == exec_root(root).id, "leased another root");
     store.read_pages(&lease, &[leaf]).await?;
 
-    let mut abandoned = store.begin(&owner.actor, owner.epoch).await?;
+    let mut abandoned = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     abandoned.release_root_lease(lease.id);
     drop(abandoned);
     store.read_pages(&lease, &[leaf]).await?;
-    let mut refused = store.begin(&owner.actor, owner.epoch).await?;
+    let mut refused = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     refused.release_root_lease(lease.id);
     refused.lease_root(RootOwner::Exec(exec.clone()), NodeId([0xa9; 32]), 60_000);
     ensure!(
@@ -266,7 +266,7 @@ pub async fn checkpoint_lease_handoffs_are_atomic(tier: &dyn PageTier) -> LawOut
     let mut fresh = BTreeMap::new();
     let next = page(&mut fresh, NodeKind::CHECKPOINT_ROOT, "handoff next", &[]);
     let second = Candidate { root: next, fresh };
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.lease_root(RootOwner::Exec(exec.clone()), exec_root(next).id, 60_000);
     tx.release_root_lease(lease.id);
     let receipt = publish_in(

@@ -123,7 +123,7 @@ async fn a_release_to_waiting_racing_mail_never_loses_the_wakeup() {
     assert_eq!(claimed.len(), actors.len());
     for claimed in claimed {
         let mut tx = store
-            .begin(&claimed.actor, claimed.epoch)
+            .begin(&claimed.actor, claimed.epoch, u64::MAX)
             .await
             .expect("open the owner's transaction");
         tx.give_up(Release::Waiting { next_due: None });
@@ -170,7 +170,7 @@ async fn a_reap_racing_owner_commits_has_one_winner_per_actor() {
     for claimed in &claimed {
         append(&store, &[&claimed.actor]).await.expect("mail");
         let mut tx = store
-            .begin(&claimed.actor, claimed.epoch)
+            .begin(&claimed.actor, claimed.epoch, u64::MAX)
             .await
             .expect("open the owner's transaction");
         tx.ack_seen();
@@ -335,7 +335,7 @@ async fn a_claim_racing_the_reap_of_its_boot_leaves_no_actor_owned_by_it() {
     for claimed in &claimed {
         assert!(
             matches!(
-                store.begin(&claimed.actor, claimed.epoch).await,
+                store.begin(&claimed.actor, claimed.epoch, u64::MAX).await,
                 Err(DurableError::OwnershipLost(_))
             ),
             "the reaped boot still opens {} at its claimed epoch",
@@ -587,10 +587,12 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
                         .extend(claimed.iter().map(|c| (c.actor.clone(), c.epoch)));
                 }
                 for claimed in claimed {
-                    let mut tx =
-                        retry_contended(|| store.begin(&claimed.actor, claimed.epoch), &retries)
-                            .await
-                            .expect("a claimer owns what it claimed");
+                    let mut tx = retry_contended(
+                        || store.begin(&claimed.actor, claimed.epoch, u64::MAX),
+                        &retries,
+                    )
+                    .await
+                    .expect("a claimer owns what it claimed");
                     tx.ack_seen().give_up(Release::Idle);
                     retry_contended(|| store.commit(tx.clone(), LABEL), &retries)
                         .await
@@ -757,7 +759,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         let store = store.clone();
         let epoch = epoch_of(name);
         async move {
-            let mut tx = store.begin(&actor(name), epoch).await?;
+            let mut tx = store.begin(&actor(name), epoch, u64::MAX).await?;
             for write in writes {
                 tx.write(write);
             }

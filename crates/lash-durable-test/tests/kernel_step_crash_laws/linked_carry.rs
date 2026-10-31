@@ -202,7 +202,7 @@ impl Fixture {
             CommitId::mint(),
         )
         .unwrap();
-        let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
+        let mut tx = store.begin(&actor, claim.epoch, u64::MAX).await.unwrap();
         tx.stage_all(staging).write(write);
         store
             .commit(tx, CommitLabel::new("law.park"))

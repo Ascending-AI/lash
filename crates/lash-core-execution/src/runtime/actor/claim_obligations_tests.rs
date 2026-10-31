@@ -42,6 +42,7 @@ fn opened() -> ActorTx {
         acked: MailSeq(0),
         seen: MailSeq(0),
         mail: Vec::new(),
+        close_requested: false,
         at: DurableInstant(0),
         turn_cancel: None,
     })

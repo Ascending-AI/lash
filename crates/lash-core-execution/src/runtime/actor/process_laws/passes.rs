@@ -307,7 +307,7 @@ pub async fn a_once_process_body_survives_one_revision_conflict(backend: &Backen
             let store = Arc::clone(&store);
             async move {
                 if intervene {
-                    let winner = store.begin(tx.actor(), tx.epoch()).await?;
+                    let winner = store.begin(tx.actor(), tx.epoch(), u64::MAX).await?;
                     store
                         .commit(winner, CommitLabel::new("law.intervene"))
                         .await?;
@@ -392,7 +392,7 @@ pub async fn a_process_terminal_retires_its_optional_execution_debt(
         ensure!(claim.actor == key, "claimed another process");
         let resolutions = backend.stores().execution_resolutions();
         if linked {
-            let mut tx = store.begin(&key, claim.epoch).await?;
+            let mut tx = store.begin(&key, claim.epoch, u64::MAX).await?;
             let requirements = ClaimRequirements {
                 providers: [lash_vocabulary::providers::ToolProviderHandle::new(
                     lash_vocabulary::claims::RegistryKind::Process,
@@ -416,7 +416,7 @@ pub async fn a_process_terminal_retires_its_optional_execution_debt(
                 "registration lost its debt"
             );
         }
-        let mut tx = store.begin(&key, claim.epoch).await?;
+        let mut tx = store.begin(&key, claim.epoch, u64::MAX).await?;
         let outcome = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({})));
         super::super::process::record_terminal(&mut tx, &process, &outcome)?;
         store.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
@@ -436,7 +436,7 @@ pub async fn a_process_terminal_retires_its_optional_execution_debt(
                 .all(|(actor, debt)| actor != &key || debt.is_empty()),
             "terminal retained materialized claim debt"
         );
-        let mut cascade = store.begin(&key, claim.epoch).await?;
+        let mut cascade = store.begin(&key, claim.epoch, u64::MAX).await?;
         cascade.give_up(lash_durable::Release::Terminal);
         store
             .commit(cascade, CommitLabel::new("law.terminal.cascade"))
@@ -643,13 +643,13 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
     };
     // Public nonretained commits keep the same receipt contract; PostgreSQL
     // can use its generated function for this authority-only transition.
-    let plain = store.begin(&key, claim.epoch).await?;
+    let plain = store.begin(&key, claim.epoch, u64::MAX).await?;
     let plain = store.commit(plain, CommitLabel::PROCESS_ADVANCE).await?;
     ensure!(
         plain.process_views.is_empty(),
         "a nonretained commit invented a view"
     );
-    let (mut tx, view) = store.open_process(&key, claim.epoch).await?;
+    let (mut tx, view) = store.open_process(&key, claim.epoch, u64::MAX).await?;
     let expected = tx.revision();
     tx.retain_process(view.clone());
     // Neither registry event changes actor revision; both must survive capture.
@@ -667,7 +667,7 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
         .map_err(|error| LawBroken(error.to_string()))?;
     cancel(&backend, &process).await?;
     ensure!(
-        store.begin(&key, claim.epoch).await?.revision() == expected,
+        store.begin(&key, claim.epoch, u64::MAX).await?.revision() == expected,
         "external control moved actor authority"
     );
     let (_, frontier) = store
@@ -703,7 +703,7 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
         None,
     )?;
     let receipt = store.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-    let (_, actual) = store.open_process(&key, claim.epoch).await?;
+    let (_, actual) = store.open_process(&key, claim.epoch, u64::MAX).await?;
     ensure!(
         receipt.process_views == vec![actual.clone()],
         "receipt differs from stored postimage: {receipt:?} vs {actual:?}"
@@ -720,12 +720,12 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
             "an incomplete/extra process receipt was adopted"
         );
     }
-    let mut next = store.begin(&key, claim.epoch).await?;
+    let mut next = store.begin(&key, claim.epoch, u64::MAX).await?;
     next.retain_process(actual);
     let output = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({})));
     super::super::process::record_terminal(&mut next, &process, &output)?;
     let receipt = store.commit(next, CommitLabel::PROCESS_TERMINAL).await?;
-    let (_, actual) = store.open_process(&key, claim.epoch).await?;
+    let (_, actual) = store.open_process(&key, claim.epoch, u64::MAX).await?;
     ensure!(
         receipt.process_views == vec![actual],
         "terminal receipt differs from stored postimage"

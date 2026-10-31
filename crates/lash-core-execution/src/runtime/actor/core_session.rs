@@ -101,18 +101,9 @@ impl ActorContext {
                     .await?;
             }
             // Include obligation hydration in the same revision bracket as the head.
-            let checked = self
-                .durable()?
-                .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
+            self.durable()?
+                .revalidate(self.actor(), self.epoch(), tx.revision())
                 .await?;
-            if checked.revision() != tx.revision() {
-                return Err(DurableError::RevisionConflict {
-                    actor: self.actor().clone(),
-                    epoch: self.epoch(),
-                    expected: tx.revision(),
-                    actual: checked.revision(),
-                });
-            }
             *self.inner.session_projection.lock().await? = Some(owner_state::OwnerState::loaded(
                 self.actor().clone(),
                 self.epoch(),
@@ -148,7 +139,19 @@ impl ActorContext {
         use lash_core_store::store::{
             RuntimeStore, SessionStore, WindowSelector, load_session_window_state,
         };
-        let tx = self.durable()?.begin(self.actor(), self.epoch()).await?;
+        let tx = self
+            .durable()?
+            .begin(
+                self.actor(),
+                self.epoch(),
+                self.backend()
+                    .config()
+                    .settings()
+                    .graph_reads
+                    .owner()
+                    .total_bytes,
+            )
+            .await?;
         if tx.revision() != basis {
             acknowledged = classify_owner_reads(OwnerReadClass::Recovery, async {
                 let id = acknowledged.head.session_id.clone();
@@ -193,18 +196,9 @@ impl ActorContext {
                 )
                 .await?;
         }
-        let checked = self
-            .durable()?
-            .begin_retained(self.actor(), self.epoch(), tx.revision(), 0)
+        self.durable()?
+            .revalidate(self.actor(), self.epoch(), tx.revision())
             .await?;
-        if checked.revision() != tx.revision() {
-            return Err(DurableError::RevisionConflict {
-                actor: self.actor().clone(),
-                epoch: self.epoch(),
-                expected: tx.revision(),
-                actual: checked.revision(),
-            });
-        }
         Ok((tx.revision(), acknowledged))
     }
 }

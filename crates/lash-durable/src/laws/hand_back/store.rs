@@ -90,8 +90,30 @@ impl DurableStore for ObservedStore {
         self.inner.owned(node).await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        let answer = self.inner.begin(actor, epoch).await;
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let answer = self.inner.begin(actor, epoch, max_mail_bytes).await;
+        let lost = match &answer {
+            Err(DurableError::OwnershipLost(fenced)) => Some((fenced.held, fenced.current)),
+            _ => None,
+        };
+        if lost.is_some() {
+            let _ = self.begins.send((epoch, lost));
+        }
+        answer
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &crate::ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+    ) -> Result<(), crate::DurableError> {
+        let answer = self.inner.revalidate(actor, epoch, expected).await;
         let lost = match &answer {
             Err(DurableError::OwnershipLost(fenced)) => Some((fenced.held, fenced.current)),
             _ => None,
@@ -139,8 +161,9 @@ impl DurableStore for ObservedStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, crate::domain::ProcessView), DurableError> {
-        let answer = self.inner.open_process(actor, epoch).await;
+        let answer = self.inner.open_process(actor, epoch, max_mail_bytes).await;
         let lost = match &answer {
             Err(DurableError::OwnershipLost(fenced)) => Some((fenced.held, fenced.current)),
             _ => None,

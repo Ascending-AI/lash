@@ -1371,7 +1371,7 @@ async fn settled_payload_reuse() {
     let claimed = database.claim(&lease, 1).await.unwrap();
     assert_eq!(claimed.len(), 1);
     let epoch = claimed[0].epoch;
-    let mut tx = database.begin(&actor(), epoch).await.unwrap();
+    let mut tx = database.begin(&actor(), epoch, u64::MAX).await.unwrap();
     let drafts = (0..18)
         .map(|index| {
             ExecutionDraft::new(
@@ -1493,7 +1493,7 @@ async fn settled_payload_reuse() {
         );
     }
     // A new settlement changes only its own image, never earlier members'.
-    let mut tx = database.begin(&actor(), epoch).await.unwrap();
+    let mut tx = database.begin(&actor(), epoch, u64::MAX).await.unwrap();
     let next = RunSeq(RUN.0 + 1);
     let changed_draft = members[0].draft().clone();
     // A different run may reuse this call's pinned request.

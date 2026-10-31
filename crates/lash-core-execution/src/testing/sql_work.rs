@@ -189,7 +189,7 @@ pub async fn owner_commit(stores: &dyn StoreSet) -> crate::facade_support::sql::
     let claimed = durable.claim(&node, 1).await.expect("claim");
     assert_eq!(claimed[0].actor, actor);
     let tx = durable
-        .begin(&actor, claimed[0].epoch)
+        .begin(&actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("begin owner");
     let identity = crate::facade_support::sql::OwnerIdentity {

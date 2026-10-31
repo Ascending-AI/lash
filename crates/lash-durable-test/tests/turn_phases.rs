@@ -1878,7 +1878,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     // The turn is admitted and its model phase commits the checkpoint.
     let epoch = claim_and_admit(&backend, database.as_ref(), &session(), &run()).await;
     let mut tx = database
-        .begin(&actor(), epoch)
+        .begin(&actor(), epoch, u64::MAX)
         .await
         .expect("the owner begins");
     let checkpoint = checkpoint
@@ -1998,7 +1998,10 @@ async fn claim_and_admit(
         .unwrap();
     let claimed = database.claim(&lease, 1).await.unwrap();
     assert_eq!(claimed.len(), 1, "the woken session was not claimed");
-    let mut tx = database.begin(&actor, claimed[0].epoch).await.unwrap();
+    let mut tx = database
+        .begin(&actor, claimed[0].epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
         session: session.clone(),
         run: run.clone(),
@@ -2106,7 +2109,7 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
         let session = SessionId::try_from(format!("terminal-{kind}")).unwrap();
         let epoch = admit_running_turn(&backend, database.as_ref(), &session, &run()).await;
         let actor = ActorKey::session(session.as_str()).unwrap();
-        let mut tx = database.begin(&actor, epoch).await.unwrap();
+        let mut tx = database.begin(&actor, epoch, u64::MAX).await.unwrap();
         tx.write(DomainWrite::Turn(TurnWrite::Terminal {
             session: session.clone(),
             run: run(),

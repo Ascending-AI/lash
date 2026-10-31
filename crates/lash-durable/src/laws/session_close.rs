@@ -32,7 +32,7 @@ pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) 
         })
     };
 
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(step(SessionCloseStep::Cancel));
     match store.commit(tx, LABEL).await {
         Err(DurableError::Domain(DomainRefusal::SessionNotClosing { session })) => {
@@ -49,7 +49,7 @@ pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) 
         "a refused step wrote a close row"
     );
 
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(write(SessionCloseWrite::Begin {
         session: id.clone(),
     }));
@@ -65,7 +65,7 @@ pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) 
     );
 
     let revision = store.actor(&actor).await?.map(|snapshot| snapshot.revision);
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(step(SessionCloseStep::Revoke));
     match store.commit(tx, LABEL).await {
         Err(DurableError::Domain(DomainRefusal::SessionCloseOutOfOrder {
@@ -86,7 +86,7 @@ pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) 
     );
 
     for done in SessionCloseStep::ALL {
-        let mut tx = store.begin(&actor, epoch).await?;
+        let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
         tx.write(step(done));
         if done == SessionCloseStep::Cancel {
             // A second close request drained while closing is the same close.

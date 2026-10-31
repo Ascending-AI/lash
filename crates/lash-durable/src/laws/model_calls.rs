@@ -30,7 +30,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
     let nodes = std::sync::Mutex::new(std::collections::BTreeMap::new());
     let nodes = &nodes;
     let commit = |write: TurnWrite| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         if let TurnWrite::Advance { phase, .. } = &write {
             let node = nodes
                 .lock()
@@ -146,7 +146,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     let (actor, id, run) = (&actor, &id, &run);
     let commit = |write: TurnWrite,
                   node: Option<lash_core_store::checkpoint_graph::EncodedNode>| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         tx.stage(node);
         tx.write(DomainWrite::Turn(write));
         store.commit(tx, LABEL).await.map(|_| ())
@@ -304,7 +304,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     // Answer invalidates the cached roots; each Advance consumes its cache.
     let (transient, transient_node) = super::tagged_node("receipt-transient");
     let (final_root, final_node) = super::tagged_node("receipt-final");
-    let mut tx = store.begin(actor, epoch).await?;
+    let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([third_node.clone(), transient_node]);
     tx.write(DomainWrite::Turn(answer(third)));
     tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
@@ -320,7 +320,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     // A new transaction begins with populated fenced roots. The first
     // Advance must consume those roots before the second Advance runs.
     let (middle, middle_node) = super::tagged_node("receipt-middle");
-    let mut tx = store.begin(actor, epoch).await?;
+    let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([middle_node, final_node]);
     tx.write(DomainWrite::Turn(advance(PhaseAdvance::Tools {
         run: RunSeq(3),
@@ -365,7 +365,7 @@ pub async fn a_receipt_stands_beside_its_model_phase_until_the_next_phase(
     // A refusal after an increment and an advance rolls back both the phase
     // and the retirements; the final closure must remain readable.
     let (rolled_back, rolled_back_node) = super::tagged_node("receipt-rolled-back");
-    let mut tx = store.begin(actor, epoch).await?;
+    let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([rolled_back_node, third_node]);
     tx.write(DomainWrite::Turn(TurnWrite::AddToolCalls {
         session: id.clone(),
@@ -459,7 +459,7 @@ pub async fn a_turn_counts_its_tool_admissions_atomically(store: &dyn DurableSto
     create(store, std::slice::from_ref(&actor)).await?;
     let owner = node(store, "tool-count-owner").await?;
     let epoch = store.claim(&owner, 1).await?[0].epoch;
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: id.clone(),
         run: run.clone(),
@@ -487,12 +487,12 @@ pub async fn a_turn_counts_its_tool_admissions_atomically(store: &dyn DurableSto
             calls,
         })
     };
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(increment(2));
     tx.write(increment(3));
     store.commit(tx, LABEL).await?;
     ensure!(count().await? == 5, "the commit lost an increment");
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(increment(7));
     // A receipt is refused outside a model phase, after the increment ran.
     let (root, body) = super::tagged_node("refused-tool-count");

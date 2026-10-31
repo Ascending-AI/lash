@@ -522,7 +522,10 @@ async fn test_parks_are_typed_fenced_and_redrivable(
         Err(DurableError::OwnershipLost(_))
     ));
     assert_eq!(store.actor(&session_actor).await.unwrap().unwrap(), before);
-    let mut tx = store.begin(&session_actor, claim.epoch).await.unwrap();
+    let mut tx = store
+        .begin(&session_actor, claim.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.ack_seen().give_up(Release::Idle);
     store
         .commit(tx, CommitLabel::SESSION_RELEASE)
@@ -571,7 +574,10 @@ async fn test_parks_are_typed_fenced_and_redrivable(
         Err(DurableError::OwnershipLost(_))
     ));
     assert_eq!(store.actor(&process_actor).await.unwrap().unwrap(), before);
-    let mut tx = store.begin(&process_actor, claim.epoch).await.unwrap();
+    let mut tx = store
+        .begin(&process_actor, claim.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.ack_seen().give_up(Release::Waiting { next_due: None });
     store
         .commit(tx, CommitLabel::PROCESS_ADVANCE)
@@ -714,7 +720,7 @@ async fn test_parks_are_typed_fenced_and_redrivable(
         .acquire_idle_for_testing(&writer, &session_actor, row.epoch)
         .await
         .unwrap();
-    let mut tx = store.begin(&session_actor, epoch).await.unwrap();
+    let mut tx = store.begin(&session_actor, epoch, u64::MAX).await.unwrap();
     tx.give_up(Release::Terminal);
     store
         .commit(tx, CommitLabel::SESSION_RELEASE)

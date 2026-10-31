@@ -54,7 +54,7 @@ async fn admitted() -> World {
         .await
         .unwrap();
     let epoch = store.claim(&node, 1).await.unwrap()[0].epoch;
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: SessionId::from(SESSION),
         run: TurnId::from(RUN),
@@ -142,7 +142,7 @@ async fn actor_begin_reads_one_snapshot_of_cancellation() {
     let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
         "actor.begin",
         "sqlite",
-        world.store.begin(&world.actor, world.epoch),
+        world.store.begin(&world.actor, world.epoch, u64::MAX),
     )
     .await;
     let tx = answer.unwrap();
@@ -157,7 +157,10 @@ async fn actor_begin_reads_one_snapshot_of_cancellation() {
         (1, 1),
         "the open is one statement"
     );
-    assert_eq!(receipt.rows_returned, 2, "one row per pending mail");
+    assert_eq!(
+        receipt.rows_returned, 1,
+        "the owner payload is returned once"
+    );
     assert_eq!(
         receipt.sqlite_work.map(|work| work.fullscan_steps),
         Some(0),
@@ -170,11 +173,19 @@ async fn actor_begin_reads_one_snapshot_of_cancellation() {
 #[tokio::test]
 async fn a_cancel_accepted_between_two_begins_reaches_the_second() {
     let world = admitted().await;
-    let first = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let first = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(first.turn_cancel(), None);
     let after_step = cancel("after-step", TurnCancelMode::AfterStep);
     world.ask(after_step.clone()).await;
-    let second = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let second = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(first.turn_cancel(), None, "an open is a snapshot");
     assert_eq!(second.turn_cancel(), Some(&after_step));
     let immediate = cancel("immediate", TurnCancelMode::Immediate);
@@ -182,7 +193,11 @@ async fn a_cancel_accepted_between_two_begins_reaches_the_second() {
     escalated.escalate_to(&immediate);
     world.ask(immediate).await;
     world.append("law.note").await;
-    let third = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let third = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(second.turn_cancel(), Some(&after_step));
     assert_eq!(third.turn_cancel(), Some(&escalated));
     assert_eq!(
@@ -198,7 +213,11 @@ async fn a_cancel_accepted_between_two_begins_reaches_the_second() {
 #[tokio::test]
 async fn a_close_racing_an_open_reaches_the_next_open() {
     let world = admitted().await;
-    let mut open = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let mut open = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     assert!(open.mail().is_empty());
     let request = cancel("closing", TurnCancelMode::Immediate);
     world.append(SESSION_CLOSE_MAIL).await;
@@ -211,7 +230,11 @@ async fn a_close_racing_an_open_reaches_the_next_open() {
         .await
         .unwrap();
     assert_eq!(committed.turn_cancel.as_ref(), Some(&request));
-    let next = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let next = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(next.turn_cancel(), Some(&request));
     assert!(
         next.mail()
@@ -222,23 +245,78 @@ async fn a_close_racing_an_open_reaches_the_next_open() {
     );
 }
 
+/// L-FRONTIER-CONTROL: a close remains visible beyond the delivered prefix,
+/// and acknowledging that prefix never consumes the later close request.
+#[tokio::test]
+async fn a_close_beyond_the_mail_page_remains_visible_and_unacknowledged() {
+    let world = admitted().await;
+    let mut mail = MailTx::new();
+    for _ in 0..=lash_durable::OpenedActor::MAIL_PAGE_ROWS {
+        mail.append(world.actor.clone(), MailKind::new("law.note"), "");
+    }
+    mail.append(world.actor.clone(), MailKind::new(SESSION_CLOSE_MAIL), "");
+    world
+        .store
+        .commit_mail(mail, CommitLabel::new("law.close.backlog"))
+        .await
+        .unwrap();
+    let mut page = world
+        .store
+        .begin(&world.actor, world.epoch, 4)
+        .await
+        .unwrap();
+    assert!(
+        page.mail()
+            .iter()
+            .any(|mail| mail.kind.as_str() == "law.note")
+    );
+    assert!(
+        !page
+            .mail()
+            .iter()
+            .any(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
+    );
+    assert!(page.close_requested());
+    page.ack_seen();
+    let committed = world
+        .store
+        .commit(page, CommitLabel::new("law.close.prefix"))
+        .await
+        .unwrap();
+    let next = world
+        .store
+        .begin_retained(&world.actor, world.epoch, committed.revision, 0)
+        .await
+        .unwrap();
+    assert!(next.close_requested());
+    assert!(
+        next.mail()
+            .iter()
+            .any(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
+    );
+}
+
 /// An open at an epoch the actor no longer holds is refused with the
 /// current epoch, before the turn is read; the new owner reads the
 /// cancel.
 #[tokio::test]
 async fn an_ownership_change_fences_the_open_before_the_turn() {
     let world = admitted().await;
-    let mut tx = world.store.begin(&world.actor, world.epoch).await.unwrap();
+    let mut tx = world
+        .store
+        .begin(&world.actor, world.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.ack_seen().give_up(Release::Idle);
     world
         .store
         .commit(tx, CommitLabel::new("law.release"))
         .await
         .unwrap();
-    let fenced = lost(world.store.begin(&world.actor, world.epoch).await);
+    let fenced = lost(world.store.begin(&world.actor, world.epoch, u64::MAX).await);
     let released = fenced.current.expect("the released actor stands");
     assert!(released > world.epoch, "a release bumps the epoch");
-    let fenced = lost(world.store.begin(&world.actor, released).await);
+    let fenced = lost(world.store.begin(&world.actor, released, u64::MAX).await);
     assert_eq!(
         (fenced.held, fenced.current),
         (released, Some(released)),
@@ -250,12 +328,16 @@ async fn an_ownership_change_fences_the_open_before_the_turn() {
     assert_eq!(claimed.len(), 1, "the cancel readied the session");
     let next = claimed[0].epoch;
     assert!(next > released);
-    let fenced = lost(world.store.begin(&world.actor, world.epoch).await);
+    let fenced = lost(world.store.begin(&world.actor, world.epoch, u64::MAX).await);
     assert_eq!((fenced.held, fenced.current), (world.epoch, Some(next)));
-    let tx = world.store.begin(&world.actor, next).await.unwrap();
+    let tx = world
+        .store
+        .begin(&world.actor, next, u64::MAX)
+        .await
+        .unwrap();
     assert_eq!(tx.turn_cancel(), Some(&request));
     let absent = ActorKey::session("actor-open-absent").unwrap();
-    let fenced = lost(world.store.begin(&absent, next).await);
+    let fenced = lost(world.store.begin(&absent, next, u64::MAX).await);
     assert_eq!(fenced.current, None);
 }
 
@@ -277,7 +359,7 @@ async fn a_corrupt_stored_turn_refuses_the_open_with_the_turn_reads_cause() {
     let read = world.store.turn(&session).await.unwrap_err();
     let opened = world
         .store
-        .begin(&world.actor, world.epoch)
+        .begin(&world.actor, world.epoch, u64::MAX)
         .await
         .unwrap_err();
     assert!(
@@ -292,7 +374,7 @@ async fn a_corrupt_stored_turn_refuses_the_open_with_the_turn_reads_cause() {
     let fenced = lost(
         world
             .store
-            .begin(&world.actor, Epoch(world.epoch.0 + 1))
+            .begin(&world.actor, Epoch(world.epoch.0 + 1), u64::MAX)
             .await,
     );
     assert_eq!(fenced.current, Some(world.epoch));
@@ -304,7 +386,7 @@ async fn a_corrupt_stored_turn_refuses_the_open_with_the_turn_reads_cause() {
     let read = corrupt_iteration.store.turn(&session).await.unwrap_err();
     let opened = corrupt_iteration
         .store
-        .begin(&corrupt_iteration.actor, corrupt_iteration.epoch)
+        .begin(&corrupt_iteration.actor, corrupt_iteration.epoch, u64::MAX)
         .await
         .unwrap_err();
     assert_eq!(format!("{opened:?}"), format!("{read:?}"));

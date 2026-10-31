@@ -785,7 +785,7 @@ impl BackendRunner {
                 let owner =
                     lash_core_store::environment::VersionOwner::preparing(body.id().clone());
                 let mut tx = store
-                    .begin(&actor, epoch)
+                    .begin(&actor, epoch, u64::MAX)
                     .await
                     .map_err(|e| StoreError::Backend(e.to_string()))?;
                 tx.write(DomainWrite::Environment(EnvironmentWrite::Prepare {
@@ -822,7 +822,7 @@ impl BackendRunner {
                         .map_err(|e| StoreError::Backend(e.to_string()))?
                 );
                 let mut tx = store
-                    .begin(&actor, epoch)
+                    .begin(&actor, epoch, u64::MAX)
                     .await
                     .map_err(|e| StoreError::Backend(e.to_string()))?;
                 tx.write(DomainWrite::Environment(EnvironmentWrite::Abort {

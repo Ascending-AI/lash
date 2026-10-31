@@ -982,6 +982,7 @@ CREATE TABLE IF NOT EXISTS lash_actor_mail (
     appended_at_ms BIGINT NOT NULL,
     PRIMARY KEY (actor_key, seq)
 );
+CREATE INDEX IF NOT EXISTS idx_lash_actor_mail_kind_seq ON lash_actor_mail(actor_key, kind, seq);
 
 -- Run records (I0, FIG-5194; statements: V0, then L4): the RunLedger
 -- records as rows, keyed by (owner, run, ordinal), the second fence. An

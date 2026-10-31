@@ -219,8 +219,41 @@ impl DurableStore for RecordedStore {
         owned
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        let opened = self.inner.begin(actor, epoch).await;
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let opened = self.inner.begin(actor, epoch, max_mail_bytes).await;
+        if let Err(error) = &opened {
+            let outcome = match error {
+                DurableError::OwnershipLost(_) => "ownership_lost",
+                _ => "failed",
+            };
+            report(
+                &self.node,
+                Event::BeginRefused {
+                    actor: actor.to_string(),
+                    epoch: epoch.0,
+                    outcome: outcome.to_owned(),
+                    error: error.to_string(),
+                },
+            );
+        }
+        opened
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+    ) -> Result<(), lash_durable::DurableError> {
+        if actor.kind() == lash_durable::ActorKind::Process {
+            return self.inner.revalidate(actor, epoch, expected).await;
+        }
+        let opened = self.inner.revalidate(actor, epoch, expected).await;
         if let Err(error) = &opened {
             let outcome = match error {
                 DurableError::OwnershipLost(_) => "ownership_lost",
@@ -287,8 +320,9 @@ impl DurableStore for RecordedStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
-        let opened = self.inner.open_process(actor, epoch).await;
+        let opened = self.inner.open_process(actor, epoch, max_mail_bytes).await;
         if let Err(error) = &opened {
             let outcome = match error {
                 DurableError::OwnershipLost(_) => "ownership_lost",

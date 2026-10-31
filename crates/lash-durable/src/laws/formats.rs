@@ -108,7 +108,7 @@ pub async fn a_node_claims_only_actors_whose_formats_it_decodes(
             && claimed[0].purpose == ClaimPurpose::CancelOnly,
         "the older node's claim of cancelled undecodable actors was {claimed:?}"
     );
-    let mut end = store.begin(&process, claimed[0].epoch).await?;
+    let mut end = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     end.ack_seen().give_up(Release::Terminal);
     store.commit(end, CommitLabel::new("law.end")).await?;
     super::ensure!(
@@ -134,7 +134,9 @@ pub async fn a_node_claims_only_actors_whose_formats_it_decodes(
             && claimed[0].purpose == ClaimPurpose::Run,
         "the newer node did not claim the actor in the older set: {claimed:?}"
     );
-    let mut stamp = store.begin(&older_session, claimed[0].epoch).await?;
+    let mut stamp = store
+        .begin(&older_session, claimed[0].epoch, u64::MAX)
+        .await?;
     stamp.stamp_formats(new()).give_up(Release::Ready);
     store.commit(stamp, CommitLabel::new("law.stamp")).await?;
     let snapshot = store
@@ -209,7 +211,7 @@ pub async fn a_draining_node_claims_nothing_and_releases_ready(
         store.claim(&draining, 8).await?.is_empty(),
         "a draining node claimed"
     );
-    let mut release = store.begin(&first, claimed[0].epoch).await?;
+    let mut release = store.begin(&first, claimed[0].epoch, u64::MAX).await?;
     release.give_up(Release::Ready);
     store.commit(release, CommitLabel::DRAIN_RELEASE).await?;
     super::ensure!(
@@ -269,7 +271,7 @@ pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
     };
     let process = lash_vocabulary::identity::ProcessId::fixture("listed-b");
     for claim in &claimed {
-        let mut tx = store.begin(&claim.actor, claim.epoch).await?;
+        let mut tx = store.begin(&claim.actor, claim.epoch, u64::MAX).await?;
         if claim.actor == first {
             for exec in [
                 cell(&session, &run, "cell-2"),

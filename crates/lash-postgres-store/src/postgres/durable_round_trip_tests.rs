@@ -215,7 +215,10 @@ async fn a_turn_admission_stays_within_its_round_trip_budget() {
     let input = accept(&owned, "admitted").await;
     let run = TurnId::from("round-trips-turn");
     let (_, trips) = round_trips(async {
-        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
         admit(&mut tx, &owned, &run, input);
         store
             .commit(tx, CommitLabel::TURN_ADMIT)
@@ -250,15 +253,23 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
     let store = owned.storage.durable_store();
     let input = accept(&owned, "model-start").await;
     let run = TurnId::from("round-trips-turn");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     admit(&mut tx, &owned, &run, input);
     store
         .commit(tx, CommitLabel::TURN_ADMIT)
         .await
         .expect("admit the turn");
 
-    let (mut tx, opened) =
-        round_trips(async { store.begin(&owned.actor, owned.epoch).await.expect("open") }).await;
+    let (mut tx, opened) = round_trips(async {
+        store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open")
+    })
+    .await;
     assert!(tx.turn_cancel().is_none(), "no cancel was requested");
     model_start(&mut tx, &owned, &run, 1);
     let (committed, commit_trips) = round_trips(async {
@@ -305,7 +316,10 @@ async fn a_round_outcome_stays_within_its_round_trip_budget() {
     let call =
         lash_protocol_types::ToolCallId::parse(&format!("tc_{}", "ab".repeat(32))).expect("call");
     let (_, trips) = round_trips(async {
-        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
         let record = staged(&mut tx, NodeKind::ROUND_FACT, "outcome");
         tx.write(DomainWrite::RunFact(RunFactWrite::Append {
             owner: OwnerKey::Turn(owned.session.clone(), TurnId::from("round-trips-turn")),
@@ -352,14 +366,20 @@ async fn a_vm_park_stays_within_its_round_trip_budget() {
         }));
         root
     };
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     let first = park(&mut tx, "first park", None);
     store
         .commit(tx, CommitLabel::CELL_SNAPSHOT)
         .await
         .expect("the first park");
     let (_, trips) = round_trips(async {
-        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
         park(&mut tx, "second park", Some((1, first)));
         store
             .commit(tx, CommitLabel::CELL_SNAPSHOT)
@@ -392,7 +412,10 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
     let store = owned.storage.durable_store();
     let input = accept(&owned, "turn-commit").await;
     let run = TurnId::from("round-trips-turn");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     admit(&mut tx, &owned, &run, input);
     store
         .commit(tx, CommitLabel::TURN_ADMIT)
@@ -472,7 +495,10 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
     let encoded = lash_core_store::store::encode_session_commit(&head).expect("encode");
     let scope = lash_durable::domain::ScopeKey::Turn(owned.session.clone(), run.clone());
     let (_, trips) = round_trips(async {
-        let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
         match encoded.descriptor {
             Some(descriptor) => {
                 tx.stage([descriptor]);
@@ -565,7 +591,10 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     let store = owned.storage.durable_store();
     let input = accept(&owned, "boundaries").await;
     let run = TurnId::from("round-trips-turn");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     admit(&mut tx, &owned, &run, input);
     store
         .commit(tx, CommitLabel::TURN_ADMIT)
@@ -605,7 +634,10 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
             prefix: Some(prefix.hash),
         }));
     };
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     tx.set_requires(vec!["model-component".into()]);
     record_prompt(&mut tx, 1);
     model_start(&mut tx, &owned, &run, 1);
@@ -617,7 +649,10 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     }));
     let (started, start) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
     started.expect("model.start");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     let answer = staged(&mut tx, NodeKind::TURN_CONTENT, "answer");
     tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Answered {
         key: key.clone(),
@@ -629,7 +664,10 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     }));
     let (answered, answer_trips) = round_trips(store.commit(tx, CommitLabel::MODEL_ANSWER)).await;
     answered.expect("answer");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     tx.set_requires(vec!["tool-component".into()]);
     let record = staged(&mut tx, NodeKind::TURN_CONTENT, "sealed model call");
     tx.write(DomainWrite::ModelCall(ModelCallWrite {
@@ -649,7 +687,10 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     }));
     let (done, done_trips) = round_trips(store.commit(tx, CommitLabel::MODEL_DONE)).await;
     done.expect("model.done");
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
     tx.set_requires(vec!["model-component".into()]);
     record_prompt(&mut tx, 2);
     model_start(&mut tx, &owned, &run, 2);
@@ -680,7 +721,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     // A different immutable root must refuse before the later (also invalid)
     // phase write, and the failed call must roll its requirement stamp back.
     let mut tx = store
-        .begin(&owned.actor, owned.epoch)
+        .begin(&owned.actor, owned.epoch, u64::MAX)
         .await
         .expect("open collision");
     tx.set_requires(vec!["must-not-publish".into()]);
@@ -715,7 +756,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
     // Held-text hints never vouch for retention: a reclaimed forest must
     // be installed again from its supplied bodies through the direct form.
     let mut tx = store
-        .begin(&owned.actor, owned.epoch)
+        .begin(&owned.actor, owned.epoch, u64::MAX)
         .await
         .expect("open release");
     tx.write(DomainWrite::Prompt(
@@ -729,7 +770,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
         .await
         .expect("release texts");
     let mut tx = store
-        .begin(&owned.actor, owned.epoch)
+        .begin(&owned.actor, owned.epoch, u64::MAX)
         .await
         .expect("open re-record");
     record_prompt(&mut tx, 3);
@@ -749,7 +790,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
             },
         };
         let mut tx = store
-            .begin(&owned.actor, owned.epoch)
+            .begin(&owned.actor, owned.epoch, u64::MAX)
             .await
             .expect("open prompt refusal");
         tx.write(DomainWrite::Prompt(
@@ -805,7 +846,7 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
         };
         texts.push(text.clone());
         let mut tx = store
-            .begin(&owned.actor, owned.epoch)
+            .begin(&owned.actor, owned.epoch, u64::MAX)
             .await
             .expect("open frontier");
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
@@ -853,7 +894,10 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
         let mut late = Vec::new();
         for turn in 1_usize..=1000 {
             if compacted && turn > 1 && (turn - 1).is_multiple_of(100) {
-                let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+                let mut tx = store
+                    .begin(&owned.actor, owned.epoch, u64::MAX)
+                    .await
+                    .unwrap();
                 tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
                     session: owned.session.clone(),
                 }));
@@ -895,7 +939,10 @@ async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
             .unwrap();
             let (chunked, texts) = owner.chunk(&template);
             let run = TurnId::parse(format!("owner-{compacted}-{rebuilt}-{turn}")).unwrap();
-            let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+            let mut tx = store
+                .begin(&owned.actor, owned.epoch, u64::MAX)
+                .await
+                .unwrap();
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: PromptCallKey {
                     session: owned.session.clone(),
@@ -998,7 +1045,10 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
         if turn == 14 {
             held = Some((chunked.clone(), texts.clone(), template, run.clone()));
         }
-        let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: PromptCallKey {
                 session: owned.session.clone(),
@@ -1023,7 +1073,10 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
         store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
     }
     let (chunked, texts, exact, run) = held.unwrap();
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
         session: owned.session.clone(),
     }));
@@ -1052,7 +1105,10 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
             .unwrap(),
         exact
     );
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Settle {
         session: owned.session.clone(),
         run,
@@ -1086,7 +1142,10 @@ async fn held_prompt_links_survive_carries_until_the_last_reader_settles() {
             ordinal: 1,
         },
     };
-    let mut tx = store.begin(&owned.actor, owned.epoch).await.unwrap();
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: call.clone(),
         snapshot: None,

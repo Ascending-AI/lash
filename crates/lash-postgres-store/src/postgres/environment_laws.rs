@@ -123,7 +123,7 @@ async fn env_corrupt_owner_refuses_retirement() {
         version: owner.version().clone(),
         input_frontier: Default::default(),
     };
-    let mut tx = tier.store.begin(&actor, epoch).await.unwrap();
+    let mut tx = tier.store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Environment(
         EnvironmentWrite::prepare(owner.clone(), &body).unwrap(),
     ));
@@ -133,7 +133,7 @@ async fn env_corrupt_owner_refuses_retirement() {
         .unwrap();
     let mut nodes = env::staging();
     env::stage_head(&mut nodes, &head).unwrap();
-    let mut tx = tier.store.begin(&actor, epoch).await.unwrap();
+    let mut tx = tier.store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.stage(nodes.into_nodes().into_values());
     tx.write(DomainWrite::Environment(EnvironmentWrite::Publish {
         owner: owner.id().clone(),
@@ -146,7 +146,7 @@ async fn env_corrupt_owner_refuses_retirement() {
         .commit(tx, CommitLabel::new("law.env.corrupt.publish"))
         .await
         .unwrap();
-    let mut tx = tier.store.begin(&actor, epoch).await.unwrap();
+    let mut tx = tier.store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Environment(EnvironmentWrite::Head {
         expected: Some(head.clone()),
         head: None,

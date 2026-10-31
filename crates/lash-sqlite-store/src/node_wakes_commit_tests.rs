@@ -29,7 +29,7 @@ async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
         })
     };
     clear().await.unwrap();
-    let tx = store.begin(&key, claimed.epoch).await.unwrap();
+    let tx = store.begin(&key, claimed.epoch, u64::MAX).await.unwrap();
     store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
     let hints = || {
         store.conn.read(|c| {
@@ -45,7 +45,7 @@ async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
         0,
         "an unchanged follow snapshot is not hinted again"
     );
-    let mut tx = store.begin(&key, claimed.epoch).await.unwrap();
+    let mut tx = store.begin(&key, claimed.epoch, u64::MAX).await.unwrap();
     tx.give_up(lash_durable::Release::Idle);
     store
         .commit(tx, CommitLabel::SESSION_RELEASE)
@@ -63,7 +63,7 @@ async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
         .await
         .unwrap();
     let claimed = store.claim(&node, 1).await.unwrap().pop().unwrap();
-    let mut tx = store.begin(&key, claimed.epoch).await.unwrap();
+    let mut tx = store.begin(&key, claimed.epoch, u64::MAX).await.unwrap();
     tx.write(lash_durable::DomainWrite::ActorPark {
         reason_json: Some("{}".to_owned()),
     });

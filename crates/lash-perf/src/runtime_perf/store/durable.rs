@@ -82,8 +82,22 @@ impl DurableStore for RuntimePerfDurableStore {
         self.inner.owned(node).await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        self.inner.begin(actor, epoch).await
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner.begin(actor, epoch, max_mail_bytes).await
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+    ) -> Result<(), lash_durable::DurableError> {
+        self.inner.revalidate(actor, epoch, expected).await
     }
 
     async fn begin_retained(
@@ -117,8 +131,9 @@ impl DurableStore for RuntimePerfDurableStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
-        self.inner.open_process(actor, epoch).await
+        self.inner.open_process(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

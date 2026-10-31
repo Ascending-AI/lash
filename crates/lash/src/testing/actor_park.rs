@@ -97,7 +97,7 @@ async fn park(
         let epoch = store
             .acquire_idle_for_testing(&node, &actor, row.epoch)
             .await?;
-        let mut tx = store.begin(&actor, epoch).await?;
+        let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
         tx.write(DomainWrite::ActorPark {
             reason_json: Some(reason_json),
         });

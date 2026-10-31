@@ -62,7 +62,7 @@ async fn predicate_law(backend: Backend) {
             .into_iter()
             .find(|row| row.actor == actor)
             .unwrap();
-        let mut tx = store.begin(&actor, claimed.epoch).await.unwrap();
+        let mut tx = store.begin(&actor, claimed.epoch, u64::MAX).await.unwrap();
         tx.set_requires(if case == "run" || case == "not-due" {
             Vec::new()
         } else {
@@ -251,7 +251,7 @@ async fn retained_expiry_check_attribution_survives_removal() {
         .unwrap();
     let epoch = store.claim(&writer, 1).await.unwrap()[0].epoch;
     let owner = OwnerKey::Turn("expiry-attribution".into(), "recorded-run".into());
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: "expiry-attribution".into(),
         run: "recorded-run".into(),

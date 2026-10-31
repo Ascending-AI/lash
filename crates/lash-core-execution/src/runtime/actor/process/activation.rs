@@ -703,7 +703,7 @@ impl ProcessActivation {
         if restoring {
             owned
                 .store()
-                .begin_process_retained(owned.actor(), owned.epoch(), tx.revision(), 0)
+                .revalidate(owned.actor(), owned.epoch(), tx.revision())
                 .await?;
             self.probe.owner_read(
                 owned.actor(),

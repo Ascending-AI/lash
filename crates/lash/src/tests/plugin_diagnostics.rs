@@ -107,7 +107,7 @@ async fn recorded_attribution_survives_removal() {
     };
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1024 * 1024)));
     let record = fact.stage(&mut staging).unwrap();
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: "retained-attribution".into(),
         run: "recorded-run".into(),

@@ -143,7 +143,7 @@ impl ModelLedger {
         let owner = ModelCallId::turn_owner(&SURFACE_RUN_ID.into());
         let mut timeline = Vec::new();
         let mut tx = store
-            .begin(&actor, epoch)
+            .begin(&actor, epoch, u64::MAX)
             .await
             .expect("begin reservations");
         for ordinal in 1..=2 {
@@ -172,7 +172,7 @@ impl ModelLedger {
         }
         timeline.push(format!("reserved={pins:?}"));
         let mut tx = store
-            .begin(&actor, epoch)
+            .begin(&actor, epoch, u64::MAX)
             .await
             .expect("begin accepted tail");
         tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Answered {
@@ -201,7 +201,10 @@ impl ModelLedger {
         assert_eq!(recovered, fact(2, false));
         self.expected = vec![fact(1, true), fact(2, false)];
         let mut graph = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-        let mut tx = store.begin(&actor, epoch).await.expect("begin recovery");
+        let mut tx = store
+            .begin(&actor, epoch, u64::MAX)
+            .await
+            .expect("begin recovery");
         for (ordinal, fact) in [(1, &self.expected[0]), (2, &recovered)] {
             tx.write(DomainWrite::ModelCall(ModelCallWrite {
                 key: key(ordinal),

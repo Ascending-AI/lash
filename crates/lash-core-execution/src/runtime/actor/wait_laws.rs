@@ -583,6 +583,7 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
             owner_retention: backend.config().settings().owner_retention,
             claim_batch: 4,
             retirement: backend.config().settings().retirement,
+            graph_reads: backend.config().settings().graph_reads,
         },
         Arc::new(SettleOnClaim {
             backend: backend.clone(),

@@ -897,7 +897,7 @@ async fn run_grouped_child(cut: &str, database: &Path) {
     let mut owners = Vec::new();
     for claim in &claimed {
         let owner = store
-            .begin(&claim.actor, claim.epoch)
+            .begin(&claim.actor, claim.epoch, u64::MAX)
             .await
             .expect("open the owner");
         report(&format!("owns {} {}", claim.actor, owner.revision().0));

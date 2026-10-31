@@ -84,4 +84,5 @@ CREATE TABLE IF NOT EXISTS actor_mail (
     appended_at_ms INTEGER NOT NULL,
     PRIMARY KEY (actor_key, seq)
 );
+CREATE INDEX IF NOT EXISTS idx_actor_mail_kind_seq ON actor_mail(actor_key, kind, seq);
 ";

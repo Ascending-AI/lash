@@ -19,7 +19,7 @@ async fn park(
         claimed.len() == 1 && &claimed[0].actor == actor,
         "{actor} was not the one claim: {claimed:?}"
     );
-    let mut tx = store.begin(actor, claimed[0].epoch).await?;
+    let mut tx = store.begin(actor, claimed[0].epoch, u64::MAX).await?;
     tx.write(DomainWrite::ActorPark {
         reason_json: Some(park.to_owned()),
     });

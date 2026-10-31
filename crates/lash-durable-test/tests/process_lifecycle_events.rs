@@ -837,6 +837,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 owner_retention: node_backend.config().settings().owner_retention,
                 claim_batch: 1,
                 retirement: lash_durable::RetirementSettings::standard(),
+                graph_reads: node_backend.config().settings().graph_reads,
             },
             Arc::new(MeasuredActivation {
                 inner,

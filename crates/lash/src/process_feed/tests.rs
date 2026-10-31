@@ -293,7 +293,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
     let claims = durable.claim(&node, 1).await.expect("claim process");
     assert_eq!(claims.len(), 1);
     let mut tx = durable
-        .begin(&actor, claims[0].epoch)
+        .begin(&actor, claims[0].epoch, u64::MAX)
         .await
         .expect("actor transaction");
     let reason = lash_execution_contracts::park::ProcessParkReason::UnknownEngine {

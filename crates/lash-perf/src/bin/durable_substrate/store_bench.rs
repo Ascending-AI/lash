@@ -164,7 +164,7 @@ async fn claim(
                 let at = Instant::now();
                 let mut tx = node
                     .store
-                    .begin(&claimed.actor, claimed.epoch)
+                    .begin(&claimed.actor, claimed.epoch, u64::MAX)
                     .await
                     .map_err(|error| anyhow::anyhow!("begin: {error}"))?;
                 tx.give_up(Release::Waiting {
@@ -232,7 +232,7 @@ async fn fence(report: &Report, url: &str, count: usize, seconds: u64) -> Result
             let at = Instant::now();
             let mut tx = node
                 .store
-                .begin(&claimed.actor, claimed.epoch)
+                .begin(&claimed.actor, claimed.epoch, u64::MAX)
                 .await
                 .map_err(|error| anyhow::anyhow!("begin: {error}"))?;
             tx.ack_seen();

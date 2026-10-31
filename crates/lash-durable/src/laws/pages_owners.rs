@@ -45,7 +45,7 @@ pub async fn a_step_outcome_owns_its_candidate(tier: &dyn PageTier) -> LawOutcom
         let actor = owner.actor.clone();
         let epoch = owner.epoch;
         async move {
-            let mut tx = store.begin(&actor, epoch).await?;
+            let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
             tx.stage([record.clone()]);
             tx.write(DomainWrite::RunFact(RunFactWrite::Append {
                 owner: facts.clone(),
@@ -150,7 +150,7 @@ pub async fn a_pruned_step_outcome_frees_exactly_its_unshared_pages(
     let candidate = Candidate { root, fresh };
     let manifest = candidate.manifest(None, CommitId::mint());
     let record = encoded(NodeKind::FROZEN_VALUE, "prune outcome", &[root]);
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.stage([record.clone()]);
     tx.write(DomainWrite::RunFact(RunFactWrite::Append {
         owner: facts.clone(),
@@ -179,7 +179,7 @@ pub async fn a_pruned_step_outcome_frees_exactly_its_unshared_pages(
         deleted == 0,
         "retirement deleted {deleted} nodes a live step outcome owns"
     );
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.write(DomainWrite::RunFact(RunFactWrite::Prune {
         owner: facts,
         before: RunSeq(1),
@@ -307,7 +307,7 @@ pub async fn a_host_read_never_descends_into_a_heap_page(tier: &dyn PageTier) ->
     );
     // An owner whose root is a heap page is never hydrated.
     let other = owner.exec("hydrate-page");
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.stage([
         candidate.fresh[&leaf].clone(),
         candidate.fresh[&root].clone(),

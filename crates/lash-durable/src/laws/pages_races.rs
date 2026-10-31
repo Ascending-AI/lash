@@ -455,7 +455,7 @@ async fn publish(
     let manifest = candidate.manifest(base.map(|(_, root)| root), CommitId::mint());
     let summary = lash_core_store::checkpoint_graph::stage::CandidateManifest::summary(&manifest);
     let root = exec_root(candidate.root);
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.stage([root.clone()]);
     tx.stage(puts.iter().map(|(_, admission)| admission.clone()));
     for (effect, expected) in removes {
@@ -502,7 +502,7 @@ async fn admit(
     removes: &[(EffectKey, NodeId)],
     puts: &[(EffectKey, EncodedNode)],
 ) -> Result<(), DurableError> {
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.stage(puts.iter().map(|(_, admission)| admission.clone()));
     for (effect, expected) in removes {
         tx.write(DomainWrite::EffectAdmission(EffectAdmissionWrite::Remove {

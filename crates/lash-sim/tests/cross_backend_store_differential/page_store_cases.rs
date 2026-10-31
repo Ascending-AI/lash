@@ -154,7 +154,7 @@ async fn publish(
 ) -> Result<(NodeId, CommitId, NodeId), DurableError> {
     let summary = manifest.summary;
     let exec_root = page(NodeKind::FROZEN_VALUE, "exec root", &[summary.root]);
-    let mut tx = store.begin(actor, epoch).await?;
+    let mut tx = store.begin(actor, epoch, u64::MAX).await?;
     tx.stage([exec_root.clone()]);
     tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
         exec: exec.clone(),
@@ -283,7 +283,10 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
         .expect("lease the first root");
     // FIG-7084: the owner's adjacent transaction takes the next lease
     // and releases the previous one with one atomic acknowledgement.
-    let mut handoff = store.begin(&actor, epoch).await.expect("open the handoff");
+    let mut handoff = store
+        .begin(&actor, epoch, u64::MAX)
+        .await
+        .expect("open the handoff");
     handoff.lease_root(RootOwner::Exec(exec.clone()), first_exec, 60_000);
     handoff.release_root_lease(lease.id);
     let receipt = store

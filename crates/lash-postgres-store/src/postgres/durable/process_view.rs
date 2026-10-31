@@ -5,8 +5,7 @@ use std::sync::LazyLock;
 
 use lash_durable::domain::{ExecKey, ProcessRegistryRow, ProcessView};
 use lash_durable::{
-    ActorKey, ActorState, ActorTx, DurableError, DurableInstant, Epoch, Fenced, Mail, MailKind,
-    MailSeq, OpenedActor, StateRevision,
+    ActorKey, ActorTx, DurableError, Epoch, Fenced, MailSeq, OpenedActor, StateRevision,
 };
 use lash_store_sql::Dialect;
 use lash_vocabulary::identity::ProcessId;
@@ -20,83 +19,72 @@ lash_store_sql::statements! {
     /// is the server's, read in the statement.
     struct ProcessViewStatements @ "durable_postgres_process_view" {
         /// Process actor `?1`'s epoch, state, revision and mailbox
-        /// positions, one row per pending mail, each with the server's
-        /// clock, process `?2`'s actor row, its registry record (or the
+        /// positions and one bounded page, with the server's clock,
+        /// process `?2`'s actor row, its registry record (or the
         /// tombstone of a pruned one) and execution root `?3`'s row.
-        open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms,
+        open = lash_store_sql::mailbox_query!("?4", "?5", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
                     p.state_rev, p.driver_json, p.cancel_requested_at_ms, p.status,
                     p.cascade_cursor, p.written_epoch, p.published_event_sequence,
                     (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)),
                     t.terminal_label, t.pruned_at_ms,
-                    s.rev, s.root_ref, s.written_epoch, s.commit_id
+                    s.rev, s.root_ref, s.written_epoch, s.commit_id,
+                    COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text
              FROM actors a
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN processes p ON p.process_id = ?2
              LEFT JOIN process_tombstones t ON t.process_id = ?2
              LEFT JOIN exec_snapshots s ON s.exec_key = ?3
-             WHERE a.actor_key = ?1
-             ORDER BY m.seq";
+             WHERE a.actor_key = ?1");
         control = "SELECT (lifecycle_json::jsonb -> 'cancel_request')::text,
                     (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
                     (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
                     (lifecycle_json::jsonb -> 'external_ref')::text
              FROM processes WHERE process_id = ?1 FOR UPDATE";
         /// Authority, bounded pending mail and current cancellation only.
-        frontier = "WITH pending AS (
-                SELECT seq, kind, body, appended_at_ms,
-                       SUM(octet_length(body)) OVER (ORDER BY seq) AS bytes,
-                       octet_length(body) AS body_bytes
-                FROM actor_mail WHERE actor_key = ?1
-                  AND seq > (SELECT acked_seq FROM actors WHERE actor_key = ?1)
-             )
-             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, CASE WHEN m.bytes <= ?3 THEN m.body END,
-                    m.appended_at_ms, m.bytes, m.body_bytes, (p.lifecycle_json::jsonb -> 'cancel_request')::text,
+        frontier = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    (p.lifecycle_json::jsonb -> 'cancel_request')::text,
                     (p.lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
                     (p.lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
-                    (p.lifecycle_json::jsonb -> 'external_ref')::text, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+                    (p.lifecycle_json::jsonb -> 'external_ref')::text,
+                    COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
              FROM actors a
              LEFT JOIN processes p ON p.process_id = ?2
-             LEFT JOIN pending m ON m.bytes - m.body_bytes <= ?3
-             WHERE a.actor_key = ?1 ORDER BY m.seq";
+             WHERE a.actor_key = ?1");
     }
 }
 
 static SQL: LazyLock<ProcessViewStatements> =
     LazyLock::new(|| ProcessViewStatements::render(Dialect::postgres()));
 
-/// The view's columns in an open row: the process row from 10, the
-/// registry record and tombstone from 17, the execution root from 20.
+/// The process row starts at 6, the registry at 13 and the execution root at 16.
 fn view_of(row: &PgRow, process: &ProcessId, exec: &ExecKey) -> Result<ProcessView, DurableError> {
     let registry = match (
-        get::<Option<String>>(row, 17)?,
-        get::<Option<String>>(row, 18)?,
+        get::<Option<String>>(row, 13)?,
+        get::<Option<String>>(row, 14)?,
     ) {
         (Some(record), _) => ProcessRegistryRow::Retained(record),
         (None, Some(terminal_label)) => ProcessRegistryRow::Pruned {
             terminal_label,
-            pruned_at_ms: get(row, 19)?,
+            pruned_at_ms: get(row, 15)?,
         },
         (None, None) => ProcessRegistryRow::Absent,
     };
-    let root = match get::<Option<i64>>(row, 20)? {
+    let root = match get::<Option<i64>>(row, 16)? {
         None => None,
         Some(rev) => {
-            let root: String = crate::keys::get(row, 21).map_err(sqlx_failure)?;
-            let commit_id: Vec<u8> = row.try_get(23).map_err(sqlx_failure)?;
+            let root: String = crate::keys::get(row, 17).map_err(sqlx_failure)?;
+            let commit_id: Vec<u8> = row.try_get(19).map_err(sqlx_failure)?;
             Some(snapshots::row_of(
                 exec.clone(),
                 rev,
                 &root,
-                get(row, 22)?,
+                get(row, 18)?,
                 &commit_id,
             )?)
         }
     };
     Ok(ProcessView {
-        row: processes::actor_row(row, 10, process)?,
+        row: processes::actor_row(row, 6, process)?,
         registry,
         root,
     })
@@ -107,6 +95,7 @@ impl PostgresDurableStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, ProcessView), DurableError> {
         if actor.kind() != lash_durable::ActorKind::Process {
             return Err(corrupt("process actor", actor.as_str()));
@@ -115,7 +104,7 @@ impl PostgresDurableStore {
             ProcessId::parse(actor.id()).map_err(|_| corrupt("process id", actor.id()))?;
         let exec = ExecKey::Process(process.clone());
         let stored = exec.stored();
-        let rows = self
+        let row = self
             .read(|connection| {
                 let stored = stored.clone();
                 Box::pin(async move {
@@ -123,53 +112,44 @@ impl PostgresDurableStore {
                         .bind(actor.as_str())
                         .bind(actor.id())
                         .bind(stored)
-                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .bind(i64::try_from(max_mail_bytes).unwrap_or(i64::MAX))
+                        .bind(OpenedActor::MAIL_PAGE_ROWS)
+                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
                         .await
                         .map_err(sqlx_failure)
                 })
             })
             .await?;
-        let Some(first) = rows.first() else {
+        let Some(row) = row else {
             return Err(DurableError::OwnershipLost(Fenced {
                 actor: actor.clone(),
                 held: epoch,
                 current: None,
             }));
         };
-        let current = Epoch(get(first, 0)?);
-        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
-            return Err(DurableError::OwnershipLost(Fenced {
-                actor: actor.clone(),
-                held: epoch,
-                current: Some(current),
-            }));
-        }
-        let view = view_of(first, &process, &exec)?;
-        let mut opened = OpenedActor {
+        let state: String = get(&row, 1)?;
+        let revision = lash_durable::fenced_read::validate_authority(
+            actor,
+            epoch,
+            None,
+            Some((Epoch(get(&row, 0)?), &state, StateRevision(get(&row, 2)?))),
+        )?;
+        let view = view_of(&row, &process, &exec)?;
+        let opened = OpenedActor {
             actor: actor.clone(),
             epoch,
-            revision: StateRevision(get(first, 2)?),
-            acked: MailSeq(get(first, 3)?),
-            seen: MailSeq(get(first, 4)?),
+            revision,
+            acked: MailSeq(get(&row, 3)?),
+            seen: MailSeq(get(&row, 4)?),
             mail: Vec::new(),
-            at: self.instant_or(get(first, 9)?)?,
+            close_requested: false,
+            at: self.instant_or(get(&row, 5)?)?,
             turn_cancel: None,
-        };
-        for row in &rows {
-            if let Some(seq) = get::<Option<i64>>(row, 5)? {
-                opened.mail.push(Mail {
-                    seq: MailSeq(seq),
-                    kind: MailKind::new(get::<String>(row, 6)?),
-                    body: get(row, 7)?,
-                    appended_at: DurableInstant(get(row, 8)?),
-                });
-            }
         }
+        .with_mail_page(&get::<String>(&row, 20)?, max_mail_bytes)?;
         Ok((ActorTx::opened(opened), view))
     }
-}
 
-impl PostgresDurableStore {
     pub(super) async fn process_frontier(
         &self,
         actor: &ActorKey,
@@ -180,92 +160,57 @@ impl PostgresDurableStore {
         if actor.kind() != lash_durable::ActorKind::Process {
             return Err(corrupt("process actor", actor.as_str()));
         }
-        let limit = i64::try_from(max_mail_bytes).unwrap_or(i64::MAX);
-        let rows = self
+        let row = self
             .read(|connection| {
                 Box::pin(async move {
                     crate::observed_sql::query(SQL.frontier.sql())
                         .bind(actor.as_str())
                         .bind(actor.id())
-                        .bind(limit)
-                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .bind(i64::try_from(max_mail_bytes).unwrap_or(i64::MAX))
+                        .bind(OpenedActor::MAIL_PAGE_ROWS)
+                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
                         .await
                         .map_err(sqlx_failure)
                 })
             })
             .await?;
-        let Some(first) = rows.first() else {
+        let Some(row) = row else {
             return Err(DurableError::OwnershipLost(Fenced {
                 actor: actor.clone(),
                 held: epoch,
                 current: None,
             }));
         };
-        let current = Epoch(get(first, 0)?);
-        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
-            return Err(DurableError::OwnershipLost(Fenced {
-                actor: actor.clone(),
-                held: epoch,
-                current: Some(current),
-            }));
-        }
-        let revision = StateRevision(get(first, 2)?);
-        if revision != expected {
-            return Err(DurableError::RevisionConflict {
-                actor: actor.clone(),
-                epoch,
-                expected,
-                actual: revision,
-            });
-        }
-        let cancel = get::<Option<String>>(first, 11)?
+        let state: String = get(&row, 1)?;
+        let revision = lash_durable::fenced_read::validate_authority(
+            actor,
+            epoch,
+            Some(expected),
+            Some((Epoch(get(&row, 0)?), &state, StateRevision(get(&row, 2)?))),
+        )?;
+        let cancel = get::<Option<String>>(&row, 5)?
             .filter(|json| json != "null")
             .map(|json| serde_json::from_str(&json).map_err(|_| corrupt("process cancel", &json)))
             .transpose()?;
-        let mut opened = OpenedActor {
+        let frontier = lash_durable::domain::ProcessFrontier {
+            cancel,
+            last_event_sequence: super::integer::<u64>(get::<Option<i64>>(&row, 6)?.unwrap_or(0))?,
+            updated_at_ms: super::integer::<u64>(get::<Option<i64>>(&row, 7)?.unwrap_or(0))?,
+            external_ref: get::<Option<String>>(&row, 8)?.filter(|json| json != "null"),
+        };
+        let opened = OpenedActor {
             actor: actor.clone(),
             epoch,
             revision,
-            acked: MailSeq(get(first, 3)?),
-            seen: MailSeq(get(first, 4)?),
+            acked: MailSeq(get(&row, 3)?),
+            seen: MailSeq(get(&row, 4)?),
             mail: Vec::new(),
-            at: self.instant_or(get(first, 15)?)?,
+            close_requested: false,
+            at: self.instant_or(get(&row, 10)?)?,
             turn_cancel: None,
-        };
-        for row in &rows {
-            if let Some(seq) = get::<Option<i64>>(row, 5)? {
-                // octet_length is int4; SUM returns int8.
-                let bytes: i64 = get(row, 9)?;
-                if bytes > limit {
-                    if max_mail_bytes > 0 && opened.mail.is_empty() {
-                        return Err(DurableError::MailboxItemTooLarge {
-                            actor: actor.clone(),
-                            bytes: super::integer::<u64>(get::<i32>(row, 10)?)?,
-                            limit: max_mail_bytes,
-                        });
-                    }
-                    opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
-                    break;
-                }
-                opened.mail.push(Mail {
-                    seq: MailSeq(seq),
-                    kind: MailKind::new(get::<String>(row, 6)?),
-                    body: get(row, 7)?,
-                    appended_at: DurableInstant(get(row, 8)?),
-                });
-            }
         }
-        Ok((
-            ActorTx::opened(opened),
-            lash_durable::domain::ProcessFrontier {
-                last_event_sequence: super::integer::<u64>(
-                    get::<Option<i64>>(first, 12)?.unwrap_or(0),
-                )?,
-                updated_at_ms: super::integer::<u64>(get::<Option<i64>>(first, 13)?.unwrap_or(0))?,
-                external_ref: get::<Option<String>>(first, 14)?.filter(|json| json != "null"),
-                cancel,
-            },
-        ))
+        .with_mail_page(&get::<String>(&row, 9)?, max_mail_bytes)?;
+        Ok((ActorTx::opened(opened), frontier))
     }
 }
 

@@ -134,6 +134,7 @@ pub async fn serve(
             owner_retention: settings.owner_retention,
             claim_batch: settings.claim_batch,
             retirement: settings.retirement,
+            graph_reads: settings.graph_reads,
         },
         activation,
     )

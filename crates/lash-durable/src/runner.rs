@@ -124,6 +124,8 @@ pub struct RunnerConfig {
     pub claim_batch: usize,
     /// The node's page retirement and its backpressure.
     pub retirement: RetirementSettings,
+    /// Read budgets supplied to each owner, including its cold mailbox page.
+    pub graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
 }
 
 impl RunnerConfig {
@@ -156,6 +158,7 @@ impl RunnerConfig {
             owner_retention: settings.owner_retention,
             claim_batch: settings.claim_batch,
             retirement: settings.retirement,
+            graph_reads: settings.graph_reads,
         }
     }
 }
@@ -400,6 +403,7 @@ pub struct Owned {
     idle: std::time::Duration,
     drain: Drain,
     liveness: Liveness,
+    max_mail_bytes: u64,
     acknowledged_commits: std::sync::atomic::AtomicU64,
     turn_profile: Option<lash_core_ids::operational_metrics::turn::Context>,
 }
@@ -505,7 +509,7 @@ impl Owned {
     /// [`DurableError::OwnershipLost`] once the actor is someone else's.
     pub async fn begin(&self) -> Result<ActorTx, DurableError> {
         self.store
-            .begin(&self.claimed.actor, self.claimed.epoch)
+            .begin(&self.claimed.actor, self.claimed.epoch, self.max_mail_bytes)
             .await
     }
 
@@ -1343,7 +1347,10 @@ impl Runner {
     /// is ([`DurableError::OwnershipLost`]). A draining node records it among
     /// the drain's releases.
     async fn hand_back(&self, actor: &ActorKey, epoch: Epoch) -> Result<(), DurableError> {
-        let mut tx = self.store.begin(actor, epoch).await?;
+        let mut tx = self
+            .store
+            .begin(actor, epoch, self.config.graph_reads.owner().total_bytes)
+            .await?;
         let commit = if self.drain.started() {
             let effects = CommitEffects::of(&tx);
             (effects, self.drain.release(self.store.as_ref(), tx).await?)
@@ -1387,6 +1394,7 @@ impl Runner {
             idle,
             drain: self.drain.clone(),
             liveness: self.liveness.clone(),
+            max_mail_bytes: self.config.graph_reads.owner().total_bytes,
             acknowledged_commits: std::sync::atomic::AtomicU64::new(0),
             turn_profile,
         };

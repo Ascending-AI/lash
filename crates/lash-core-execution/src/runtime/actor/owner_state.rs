@@ -596,6 +596,7 @@ mod tests {
             acked: lash_durable::MailSeq(0),
             seen: lash_durable::MailSeq(0),
             mail: Vec::new(),
+            close_requested: false,
             at: lash_durable::DurableInstant(0),
             turn_cancel: None,
         })

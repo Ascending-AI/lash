@@ -1050,7 +1050,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
         .expect("create");
     let claimed = store.claim(&node, 1).await.expect("claim");
     let mut tx = store
-        .begin(&actor, claimed[0].epoch)
+        .begin(&actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("open actor");
     for ordinal in 0..2 {
@@ -1089,7 +1089,7 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
                 .await
                 .expect("commit grouped outcomes");
             let mut tx = store
-                .begin(&actor, claimed[0].epoch)
+                .begin(&actor, claimed[0].epoch, u64::MAX)
                 .await
                 .expect("open turn commit");
             tx.give_up(Release::Idle);

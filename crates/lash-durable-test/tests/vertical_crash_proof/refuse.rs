@@ -67,7 +67,7 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
         .acquire_idle_for_testing(&writer, &actor(), snapshot.epoch)
         .await
         .unwrap();
-    let mut tx = database.begin(&actor(), epoch).await.unwrap();
+    let mut tx = database.begin(&actor(), epoch, u64::MAX).await.unwrap();
     let limits = DecodeLimits::within_total(u64::MAX);
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     let (graph, old, root, write) = match damage {

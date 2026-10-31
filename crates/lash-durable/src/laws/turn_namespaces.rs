@@ -43,12 +43,12 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
     let epoch = store.claim(&owner, 1).await?[0].epoch;
     let (actor, id, run) = (&actor, &id, &run);
     let commit = |write: TurnWrite| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         tx.write(DomainWrite::Turn(write));
         store.commit(tx, LABEL).await
     };
     let write = |entry: NamespaceEntry, values: RunValuesWrite| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         tx.write_namespaces(
             id,
             run,

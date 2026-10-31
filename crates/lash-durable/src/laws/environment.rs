@@ -83,7 +83,10 @@ async fn prepare(tier: &dyn EnvironmentTier, owned: &Owned) -> Result<VersionOwn
     )
     .map_err(broken)?;
     let owner = VersionOwner::preparing(body.id().clone());
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.write(write(EnvironmentWrite::prepare(owner.clone(), &body)?));
     tier.store()
         .commit(tx, CommitLabel::new("law.env.prepare"))
@@ -98,7 +101,10 @@ async fn publish(
     let head = head(owner);
     let mut nodes = env::staging();
     env::stage_head(&mut nodes, &head)?;
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.stage(nodes.into_nodes().into_values());
     tx.write(write(EnvironmentWrite::Publish {
         owner: owner.id().clone(),
@@ -127,7 +133,10 @@ async fn reader(
 ) -> Result<NodeId, DurableError> {
     let mut nodes = env::staging();
     let root = env::stage_round(&mut nodes, &head(owner).round())?;
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.stage(nodes.into_nodes().into_values());
     tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
         exec: exec(owned, name),
@@ -147,7 +156,10 @@ async fn remove_reader(
     name: &str,
     root: NodeId,
 ) -> LawOutcome {
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.write(DomainWrite::ExecRoot(ExecRootWrite::Retire {
         exec: exec(owned, name),
         expected: root,
@@ -158,7 +170,10 @@ async fn remove_reader(
     Ok(())
 }
 async fn clear(tier: &dyn EnvironmentTier, owned: &Owned, owner: &VersionOwner) -> LawOutcome {
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.write(write(EnvironmentWrite::Head {
         expected: Some(head(owner)),
         head: None,
@@ -274,7 +289,10 @@ pub async fn env_prepare(tier: &dyn EnvironmentTier) -> LawOutcome {
     let owned = owned(tier, "env-prepare").await?;
     let body = assemble(None, []).map_err(broken)?;
     let refused = VersionOwner::preparing(body.id().clone());
-    let mut too_small = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut too_small = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     too_small.write(write(EnvironmentWrite::prepare(refused.clone(), &body)?));
     too_small.within(lash_core_store::checkpoint_graph::GraphCommitBudget {
         encoded_bytes: lash_core_store::checkpoint_graph::ExplicitLimit::new(1),
@@ -303,7 +321,10 @@ pub async fn env_prepare(tier: &dyn EnvironmentTier) -> LawOutcome {
     );
     let aborted = prepare(tier, &owned).await?;
     let package = retained_package(tier, &aborted).await?;
-    let mut abort = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut abort = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     abort.write(write(EnvironmentWrite::Abort {
         owner: aborted.id().clone(),
     }));
@@ -325,7 +346,10 @@ pub async fn env_prepare(tier: &dyn EnvironmentTier) -> LawOutcome {
             .await?,
         "live preparation retired"
     );
-    let mut tx = tier.store().begin(&owned.actor, owned.epoch).await?;
+    let mut tx = tier
+        .store()
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await?;
     tx.give_up(crate::Release::Ready);
     tier.store()
         .commit(tx, CommitLabel::new("law.env.crash_prepare"))

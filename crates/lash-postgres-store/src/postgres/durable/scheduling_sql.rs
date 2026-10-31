@@ -134,36 +134,23 @@ lash_store_sql::statements! {
         /// for an earlier session of the same boot to end.
         hold_liveness = "SELECT pg_advisory_lock(1818325864, hashtext(?1))";
 
-        /// The owner's open of actor `?1`: its row, its pending mail oldest
-        /// first, the database clock and, when `?2` names its session, that
-        /// session's unfinished turn's accepted cancel request, in one read.
-        /// It also reads what a head commit of that session plans on
-        /// (FIG-5942): the published head's revision and leaf, the leaf's
-        /// generation, frame and liveness, and every plugin writer range.
-        /// External-frontier-only refresh, with body bytes bounded before transfer.
-        open_retained = "WITH page AS MATERIALIZED (
-                SELECT m.seq, octet_length(m.body) AS bytes,
-                    sum(octet_length(m.body)) OVER (ORDER BY m.seq) AS total
-                FROM actor_mail m JOIN actors a ON a.actor_key = m.actor_key
-                WHERE a.actor_key = ?1 AND m.seq > a.acked_seq)
-             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
+        /// Actor `?1`'s authority, one bounded mail page, the database clock
+        /// and session `?2`'s fresh cancellation and close controls, in one
+        /// snapshot. The retained owner payload is not reloaded.
+        open_retained = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
-                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
-                    COALESCE((SELECT jsonb_agg(jsonb_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason)
-                                               ORDER BY q.run, q.call_id)
-                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text
+                    (SELECT COALESCE(json_agg(json_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason) ORDER BY q.run, q.call_id), '[]'::json)::text FROM tool_call_cancel_requests q WHERE q.session_id = ?2),
+                    COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text,
+                    (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
+                        WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
+                          AND close_mail.seq > a.acked_seq)), (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
              FROM actors a
-             LEFT JOIN page p ON p.total - p.bytes <= ?3
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
-                 AND p.total <= ?3 AND ?3 > 0
              LEFT JOIN session_runs r ON r.session_id = ?2
                  AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
              LEFT JOIN turn_cancel_requests c ON c.session_id = r.session_id AND c.turn_id = r.run
-             WHERE a.actor_key = ?1 ORDER BY p.seq";
+             WHERE a.actor_key = ?1");
 
-        open = "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms,
+        open = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
                     h.head_revision, v.leaf_node_id, leaf.generation, leaf.frame_node_id,
@@ -172,9 +159,12 @@ lash_store_sql::statements! {
                        FROM fleet_plugin_writers), v.config_ref,
                     COALESCE((SELECT jsonb_agg(jsonb_build_array(q.run, q.call_id, q.request_id, q.origin, q.reason)
                                                ORDER BY q.run, q.call_id)
-                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text
+                              FROM tool_call_cancel_requests q WHERE q.session_id = ?2), '[]'::jsonb)::text,
+                    COALESCE((SELECT json_agg(json_build_array(seq, kind, body, appended_at_ms, body_bytes) ORDER BY seq) FROM mail_page), '[]'::json)::text,
+                    (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
+                        WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
+                          AND close_mail.seq > a.acked_seq))
              FROM actors a
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN session_runs r ON r.session_id = ?2 AND r.admission_json IS NOT NULL
                  AND r.terminal_kind IS NULL
              LEFT JOIN turn_phases p ON p.session_id = r.session_id AND p.run = r.run
@@ -184,7 +174,7 @@ lash_store_sql::statements! {
                  AND v.head_revision = h.head_revision
              LEFT JOIN graph_nodes leaf ON leaf.node_id = v.leaf_node_id
              WHERE a.actor_key = ?1
-             ORDER BY m.seq";
+            ");
 
         /// A transaction's first statement after its fenced `BEGIN`: the
         /// epoch the writer fence admits (no row when the fleet record is

@@ -232,6 +232,7 @@ impl SimNodes {
                     }),
                 claim_batch: self.config.max_active,
                 retirement: lash_durable::RetirementSettings::standard(),
+                graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy::standard(),
             },
             Arc::new(InstallingActivation {
                 inner: activation,

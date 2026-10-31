@@ -640,7 +640,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     let retire = unpin;
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.stage(staging.into_nodes().into_values());
@@ -658,7 +658,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
 
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.write(retire("retired", retired));
@@ -708,7 +708,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     // child's edges must be read on the next level, after the parent goes.
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.write(pin("shared", shared));
@@ -718,7 +718,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
         .unwrap();
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.write(retire("manifest", pinned));
@@ -771,7 +771,7 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
     let root = encode("changed root", &leaves);
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.stage(staging.into_nodes().into_values());
@@ -788,7 +788,7 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
 
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.write(unpin("changed", root));
@@ -855,7 +855,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
         for (attempt, absent) in [(0, size), (1, 0)] {
             let mut tx = tier
                 .store
-                .begin(&actor, Epoch(identity.epoch))
+                .begin(&actor, Epoch(identity.epoch), u64::MAX)
                 .await
                 .unwrap();
             tx.stage(nodes.values().cloned());
@@ -936,7 +936,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
                 }
                 let mut tx = tier
                     .store
-                    .begin(&actor, Epoch(identity.epoch))
+                    .begin(&actor, Epoch(identity.epoch), u64::MAX)
                     .await
                     .unwrap();
                 tx.stage(mixed.values().cloned());
@@ -1100,7 +1100,7 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
     let manifest = Listed::new(checkpoint.id, commit, vec![leaf, checkpoint]);
     let mut tx = tier
         .store
-        .begin(&actor, Epoch(identity.epoch))
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
         .await
         .unwrap();
     tx.stage([exec_root.clone(), effect_node.clone()]);

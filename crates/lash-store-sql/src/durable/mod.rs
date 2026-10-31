@@ -29,6 +29,7 @@
 
 pub mod environment;
 pub mod graph;
+pub mod mailbox;
 pub mod model_calls;
 pub mod packages;
 pub mod pages;
@@ -96,6 +97,9 @@ crate::statements! {
 crate::statements! {
     /// `actors` statements both backends issue verbatim.
     pub struct ActorStatements @ "durable_actor" {
+        /// Only ownership and revision, without reading mailbox or owner payload.
+        authority = "SELECT epoch, state, state_revision FROM actors WHERE actor_key = ?1";
+
         /// Create actor `?1` of kind `?2` in format set `?3`, ready at `?4`.
         /// No row when it exists.
         create = "INSERT INTO actors

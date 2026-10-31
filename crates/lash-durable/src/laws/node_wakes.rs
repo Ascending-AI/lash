@@ -119,7 +119,7 @@ pub async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie(
             .is_empty(),
         "a boot whose lock is held was reaped"
     );
-    let mut zombie = store.begin(&held_actor, claimed[0].epoch).await?;
+    let mut zombie = store.begin(&held_actor, claimed[0].epoch, u64::MAX).await?;
     zombie.ack_seen().give_up(Release::Idle);
 
     drop(feed);

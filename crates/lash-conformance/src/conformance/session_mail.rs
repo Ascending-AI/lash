@@ -107,7 +107,7 @@ async fn claim_and_drain(backend: &Backend, lease: &NodeLease, actor: &ActorKey)
         .find(|claimed| &claimed.actor == actor)
         .expect("the woken session actor is claimable");
     let mut tx = durable
-        .begin(actor, claimed.epoch)
+        .begin(actor, claimed.epoch, u64::MAX)
         .await
         .expect("open the owner transaction");
     let cx = ActorContext::new(

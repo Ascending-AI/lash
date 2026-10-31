@@ -508,7 +508,7 @@ async fn child(path: &Path, case: &corpus::Case, mode: &str) {
         use std::io::{BufRead as _, Write as _};
         let actor = lash_durable::ActorKey::process(process.as_str()).unwrap();
         let row = database.actor(&actor).await.unwrap().unwrap();
-        let tx = database.begin(&actor, row.epoch).await.unwrap();
+        let tx = database.begin(&actor, row.epoch, u64::MAX).await.unwrap();
         println!("DQ-OPENED");
         std::io::stdout().flush().unwrap();
         let mut signal = String::new();

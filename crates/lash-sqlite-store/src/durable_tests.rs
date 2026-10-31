@@ -157,7 +157,7 @@ async fn a_claim_batches_mutations_without_losing_selected_facts() {
         assert_eq!(initial.len(), count);
         for (index, actor) in actors.iter().enumerate() {
             let grant = initial.iter().find(|claim| &claim.actor == actor).unwrap();
-            let mut tx = store.begin(actor, grant.epoch).await.unwrap();
+            let mut tx = store.begin(actor, grant.epoch, u64::MAX).await.unwrap();
             match index % 4 {
                 0 => {
                     tx.give_up(Release::Waiting {
@@ -468,7 +468,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
             .expect("the actor was claimed")
     };
     let mut stale = store
-        .begin(&lost, epoch(&lost))
+        .begin(&lost, epoch(&lost), u64::MAX)
         .await
         .expect("open the soon-stale owner");
     // OWNER-REFUSAL-ORDER: request preparation may find malformed content,
@@ -482,7 +482,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
         },
     ));
     let mut give_up = store
-        .begin(&lost, epoch(&lost))
+        .begin(&lost, epoch(&lost), u64::MAX)
         .await
         .expect("open the owner");
     give_up.give_up(Release::Idle);
@@ -503,7 +503,7 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
         "the woken actor is claimed under a new epoch"
     );
     let current = store
-        .begin(&live, epoch(&live))
+        .begin(&live, epoch(&live), u64::MAX)
         .await
         .expect("open the live owner");
     let revision = |actor: &ActorKey| {
@@ -693,7 +693,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         };
         let ((), receipt) =
             lash_core_ids::operational_metrics::sql::collect("model.start", "sqlite", async {
-                let mut tx = store.begin(&actor, epoch).await.unwrap();
+                let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
                 tx.write(write);
                 store
                     .commit(tx, CommitLabel::new("model.start"))
@@ -768,7 +768,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
                 .unwrap()
                 .request_texts,
         );
-        let mut tx = store.begin(&actor, epoch).await.unwrap();
+        let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
         let ModelCallId::Turn { run, .. } = &call.call else {
             unreachable!()
         };
@@ -796,7 +796,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             "settlement loses the reusable history prefix"
         );
     }
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
         session: session.clone(),
     }));
@@ -822,7 +822,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             ordinal: 1,
         },
     };
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(admission_record(call.clone(), None, &template, &response, None).unwrap());
     store
         .commit(tx, CommitLabel::new("model.start"))
@@ -834,7 +834,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         .unwrap()
         .unwrap()
         .request_texts;
-    let mut tx = store.begin(&actor, epoch).await.unwrap();
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Release {
         session,
         run: None,
@@ -925,7 +925,7 @@ mod lo_root_retirement_sql_is_depth_independent {
                 },
             };
             let mut tx = store
-                .begin(&actor, lash_durable::Epoch(identity.epoch))
+                .begin(&actor, lash_durable::Epoch(identity.epoch), u64::MAX)
                 .await
                 .unwrap();
             for (run, request_texts) in [("whole", request_texts), ("held", vec![held].into())] {
@@ -953,7 +953,7 @@ mod lo_root_retirement_sql_is_depth_independent {
             let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
             for run in ["whole", "held"] {
                 let mut tx = store
-                    .begin(&actor, lash_durable::Epoch(identity.epoch))
+                    .begin(&actor, lash_durable::Epoch(identity.epoch), u64::MAX)
                     .await
                     .unwrap();
                 tx.write(DomainWrite::Prompt(PromptWrite::Release {
@@ -1049,7 +1049,10 @@ async fn prompt_text_reads_are_batched_in_request_order() {
             .map(|text| BlobRef::for_content(text).0)
             .to_vec(),
     });
-    let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+    let mut tx = store
+        .begin(&actor, Epoch(identity.epoch), u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
             session: lash_kernel_value::identity::SessionId::from("sql-work-owner"),
@@ -1186,7 +1189,7 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
         let grant = durable.claim(&node, 1).await.unwrap().pop().unwrap();
         assert_eq!(
             durable
-                .begin(&actor, grant.epoch)
+                .begin(&actor, grant.epoch, u64::MAX)
                 .await
                 .unwrap()
                 .revision()
@@ -1374,7 +1377,7 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
             1
         );
         let mut release = durable
-            .begin(&dirty_actor, dirty_grant.epoch)
+            .begin(&dirty_actor, dirty_grant.epoch, u64::MAX)
             .await
             .unwrap();
         release.ack_seen().give_up(lash_durable::Release::Idle);
@@ -1394,8 +1397,8 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
 
         // Admission planned under the old grant cannot publish after a direct
         // write advanced the relinquished actor. Its graph/head stays untouched.
-        let mut stale = durable.begin(&actor, grant.epoch).await.unwrap();
-        let mut release = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut stale = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
+        let mut release = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         release.ack_seen().give_up(lash_durable::Release::Idle);
         durable
             .commit(release, lash_durable::CommitLabel::new("law.release-idle"))
@@ -1513,7 +1516,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             durable.actor(&actor).await.unwrap().unwrap().revision,
             before.revision
         );
-        let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         tx.write(DomainWrite::ActorPark {
             reason_json: Some("diagnostic park".into()),
         });
@@ -1547,7 +1550,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             durable.actor(&actor).await.unwrap().unwrap().park,
             before.park
         );
-        let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         let seen = tx.seen();
         tx.ack_seen().give_up(Release::Parked);
         durable
@@ -1569,7 +1572,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             parked_revision.0 + 1
         );
         let grant = durable.claim(&node, 1).await.unwrap().pop().unwrap();
-        let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         assert_eq!(
             tx.seen().0,
             seen.0 + 1,
@@ -1587,7 +1590,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             SessionCloseStep::Revoke,
             SessionCloseStep::EndScope,
         ] {
-            let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+            let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
             tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
                 session: session.clone(),
                 step,
@@ -1595,12 +1598,12 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             durable.commit(tx, step.label()).await.unwrap();
         }
         // A draft whose grant was released cannot reach Artifacts either.
-        let mut stale = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut stale = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         stale.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
             session: session.clone(),
             step: SessionCloseStep::Artifacts,
         }));
-        let mut release = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut release = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         release.ack_seen().give_up(Release::Idle);
         durable
             .commit(release, CommitLabel::new("law.release-close"))
@@ -1632,7 +1635,10 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             .await
             .unwrap();
         let foreign_grant = durable.claim(&node, 1).await.unwrap().pop().unwrap();
-        let mut tx = durable.begin(&foreign, foreign_grant.epoch).await.unwrap();
+        let mut tx = durable
+            .begin(&foreign, foreign_grant.epoch, u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
             session: session.clone(),
             step: SessionCloseStep::Artifacts,
@@ -1654,7 +1660,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
         ));
         // Failure after deletion but before the transaction commits rolls all
         // artifacts and the recorded step back together.
-        let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
             session: session.clone(),
             step: SessionCloseStep::Artifacts,
@@ -1677,7 +1683,7 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
             durable.session_close(&session).await.unwrap().unwrap().done,
             Some(SessionCloseStep::EndScope)
         );
-        let mut tx = durable.begin(&actor, grant.epoch).await.unwrap();
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
         tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
             session: session.clone(),
             step: SessionCloseStep::Artifacts,

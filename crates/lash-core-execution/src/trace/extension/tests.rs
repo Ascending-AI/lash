@@ -850,6 +850,7 @@ fn an_unanchored_cell_sheds_whole_extension_spans_past_its_hold() {
             acked: lash_durable::MailSeq(0),
             seen: lash_durable::MailSeq(0),
             mail: Vec::new(),
+            close_requested: false,
             at: lash_durable::DurableInstant(0),
             turn_cancel: None,
         }),

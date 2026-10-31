@@ -335,7 +335,7 @@ async fn persisted(
         CommitId::mint(),
     )
     .unwrap();
-    let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
+    let mut tx = store.begin(&actor, claim.epoch, u64::MAX).await.unwrap();
     tx.stage_all(staging).write(write);
     store
         .commit(tx, CommitLabel::new("law.accept"))
@@ -512,7 +512,7 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
         .await
         .unwrap();
     let claim = store.claim(&older, 1).await.unwrap().remove(0);
-    let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
+    let mut tx = store.begin(&actor, claim.epoch, u64::MAX).await.unwrap();
     tx.set_requires(requirements.tokens().collect())
         .give_up(Release::Ready);
     store
@@ -530,7 +530,10 @@ pub(super) async fn rolling_nodes(tier: super::served::Tier) {
     let claimed = store.claim(&capable, 1).await.unwrap();
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].actor, actor);
-    let mut tx = store.begin(&actor, claimed[0].epoch).await.unwrap();
+    let mut tx = store
+        .begin(&actor, claimed[0].epoch, u64::MAX)
+        .await
+        .unwrap();
     let archive = lash_kernel_value::HelperLibraryId::of_members([fixture.helper]);
     requirements.machine.helpers = lash_kernel_value::claims::HelperRequirements::new(
         [(archive, 2)].into(),

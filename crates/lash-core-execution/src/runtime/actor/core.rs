@@ -838,7 +838,7 @@ impl ActorContext {
                             })?;
                             let turn = self.durable_reads()?.turn(&id).await?;
                             self.durable()?
-                                .begin_retained(self.actor(), self.epoch(), committed.revision, 0)
+                                .revalidate(self.actor(), self.epoch(), committed.revision)
                                 .await?;
                             Ok::<_, DurableError>((loaded, turn))
                         },
@@ -1153,7 +1153,20 @@ impl ActorContext {
                         )
                         .await
                 }
-                None => self.durable()?.begin(self.actor(), self.epoch()).await,
+                None => {
+                    self.durable()?
+                        .begin(
+                            self.actor(),
+                            self.epoch(),
+                            self.backend()
+                                .config()
+                                .settings()
+                                .graph_reads
+                                .owner()
+                                .total_bytes,
+                        )
+                        .await
+                }
             };
             match opened {
                 Ok(tx) => break tx,

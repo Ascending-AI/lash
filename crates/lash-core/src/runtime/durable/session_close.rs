@@ -370,24 +370,18 @@ pub(super) async fn close_pass(
     tracing: Option<&crate::trace::TraceRuntime>,
 ) -> Result<Closing, TurnError> {
     let mut tx = cx.begin().await?;
-    if let Some(seq) = tx
-        .mail()
-        .iter()
-        .filter(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
-        .map(|mail| mail.seq)
-        .max()
-    {
-        begin_session_close(&mut tx, session);
-        tx.ack_through(seq);
-        cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN).await?;
-        return Ok(Closing::Ran(Pass::Again));
-    }
-    if !cx
+    let closing = cx
         .durable_reads()?
         .session_close(session)
         .await?
-        .is_some_and(|close| !close.is_tombstone())
-    {
+        .is_some_and(|close| !close.is_tombstone());
+    if tx.close_requested() && !closing {
+        begin_session_close(&mut tx, session);
+        tx.ack_seen();
+        cx.commit(tx, CommitLabel::SESSION_CLOSE_BEGIN).await?;
+        return Ok(Closing::Ran(Pass::Again));
+    }
+    if !closing {
         return Ok(Closing::Not(Box::new(tx)));
     }
     let observed = tx.seen();

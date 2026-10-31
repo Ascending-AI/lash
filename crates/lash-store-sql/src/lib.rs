@@ -318,8 +318,8 @@ impl Rendered {
     }
 }
 
-/// Every statement is a single string literal in neutral form, so the set is
-/// readable as SQL. The generated type has
+/// Every statement is a string literal or compile-time expansion in neutral
+/// form, so the set remains readable as SQL. The generated type has
 /// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
 /// constructor a backend calls exactly once.
 ///
@@ -341,7 +341,7 @@ macro_rules! statements {
         $vis:vis struct $set:ident @ $family:literal {
             $(
                 $(#[$statement_meta:meta])*
-                $field:ident = $sql:literal;
+                $field:ident = $sql:expr;
             )*
         }
     ) => {

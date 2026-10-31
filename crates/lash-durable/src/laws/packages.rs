@@ -119,7 +119,7 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
         claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::Run,
         "an actor requiring nothing was not claimed to run: {claimed:?}"
     );
-    let mut record_write = store.begin(&process, claimed[0].epoch).await?;
+    let mut record_write = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     record_write
         .set_requires(requires.clone())
         .give_up(Release::Ready);
@@ -167,7 +167,7 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
         adopted.len() == 1 && adopted[0].purpose == ClaimPurpose::CancelOnly,
         "the lacking owner's recovery read {adopted:?}"
     );
-    let mut back = store.begin(&process, claimed[0].epoch).await?;
+    let mut back = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     back.ack_seen().give_up(Release::Ready);
     store.commit(back, CommitLabel::new("law.back")).await?;
 
@@ -186,7 +186,7 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     );
     // The record shrinks once the work that reached the native settles:
     // the lacking node runs it again.
-    let mut settle = store.begin(&process, claimed[0].epoch).await?;
+    let mut settle = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     settle
         .set_requires(
             ObligationToken::for_requirements(&ClaimRequirements {
@@ -279,7 +279,7 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
         claimed.len() == 1,
         "the new actor was claimed as {claimed:?}"
     );
-    let mut first = store.begin(&process, claimed[0].epoch).await?;
+    let mut first = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     first
         .set_requires(tokens(&kernel_only))
         .give_up(Release::Ready);
@@ -296,7 +296,7 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
     );
     let (root, staged) = super::tagged_node(&exec.stored());
     let (stale, _) = super::tagged_node("never-put");
-    let mut refused = store.begin(&process, claimed[0].epoch).await?;
+    let mut refused = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     refused.set_requires(tokens(&with_native)).stage([staged]);
     refused.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
         exec: exec.clone(),
@@ -320,7 +320,7 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
         stored == vec![(process.clone(), tokens(&kernel_only))],
         "a refused commit moved the record: {stored:?}"
     );
-    let mut release = store.begin(&process, claimed[0].epoch).await?;
+    let mut release = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     release.give_up(Release::Ready);
     store
         .commit(release, CommitLabel::new("law.release"))
@@ -334,7 +334,7 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
     );
 
     let (root, staged) = super::tagged_node(&exec.stored());
-    let mut landed = store.begin(&process, claimed[0].epoch).await?;
+    let mut landed = store.begin(&process, claimed[0].epoch, u64::MAX).await?;
     landed.set_requires(tokens(&with_native)).stage([staged]);
     landed.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
         exec,
@@ -427,7 +427,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
         requirements: ClaimRequirements::default(),
     };
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.register_execution(registration.clone())
         .set_requires(shared.tokens().collect());
     store
@@ -437,7 +437,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         resolutions.requirements(&actor).await? == discovery,
         "unresolved use lost discovery debt"
     );
-    let revision = store.begin(&actor, epoch).await?.revision();
+    let revision = store.begin(&actor, epoch, u64::MAX).await?.revision();
     let definition = ToolDefinition::raw(
         "tool:resolved",
         "wip.lookup",
@@ -536,7 +536,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         match result {
             Err(DurableError::ResolutionRevisionConflict { .. }) => {
                 let owner = ResolutionOwner {
-                    expected_revision: store.begin(&actor, epoch).await?.revision(),
+                    expected_revision: store.begin(&actor, epoch, u64::MAX).await?.revision(),
                     ..owner.clone()
                 };
                 resolutions.commit(&owner, candidate.clone()).await
@@ -575,7 +575,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         actual == expected,
         "winning target debt differs: {actual:?} != {expected:?}"
     );
-    let after = store.begin(&actor, epoch).await?.revision();
+    let after = store.begin(&actor, epoch, u64::MAX).await?.revision();
     super::ensure!(
         after.0 == revision.0 + 2,
         "each fenced resolution acknowledgement must advance authority, including Existing: {after:?}"
@@ -598,11 +598,11 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "existing winner did not return the complete fenced acknowledgement: {acknowledgement:?}"
     );
     super::ensure!(
-        store.begin(&actor, epoch).await?.revision() == acknowledgement.actor.revision,
+        store.begin(&actor, epoch, u64::MAX).await?.revision() == acknowledgement.actor.revision,
         "the acknowledgement differs from committed authority"
     );
     // Normal owner record replacement cannot erase a live resolved target.
-    let mut replace = store.begin(&actor, epoch).await?;
+    let mut replace = store.begin(&actor, epoch, u64::MAX).await?;
     replace.set_requires(Vec::new());
     store
         .commit(replace, CommitLabel::new("law.resolution.protected"))
@@ -634,7 +634,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     );
     let mut carried = winner.clone();
     carried.key.use_ = successor_use;
-    let mut adoption = store.begin(&actor, epoch).await?;
+    let mut adoption = store.begin(&actor, epoch, u64::MAX).await?;
     adoption
         .adopt_execution(successor)
         .seed_resolution(carried.clone());
@@ -649,7 +649,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     conflicting.entry = ResolutionEntry::Refused {
         note: "replacement".into(),
     };
-    let mut refused_seed = store.begin(&actor, epoch).await?;
+    let mut refused_seed = store.begin(&actor, epoch, u64::MAX).await?;
     let before_seed = refused_seed.revision();
     refused_seed
         .seed_resolution(conflicting)
@@ -670,13 +670,13 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "conflicting inherited pin answered {refused:?}"
     );
     super::ensure!(
-        store.begin(&actor, epoch).await?.revision() == before_seed
+        store.begin(&actor, epoch, u64::MAX).await?.revision() == before_seed
             && resolutions.load(&carried.key).await? == Some(carried),
         "refused seed changed the actor or winner"
     );
     let mut no_live_uses = registration.clone();
     no_live_uses.uses.clear();
-    let mut prune = store.begin(&actor, epoch).await?;
+    let mut prune = store.begin(&actor, epoch, u64::MAX).await?;
     prune.adopt_execution(no_live_uses);
     store
         .commit(prune, CommitLabel::new("law.resolution.dead_use"))
@@ -693,7 +693,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             .all(|(key, debt)| key != &actor || debt.is_empty()),
         "effective actor projection retained dead target debt"
     );
-    let mut ended = store.begin(&actor, epoch).await?;
+    let mut ended = store.begin(&actor, epoch, u64::MAX).await?;
     ended
         .end_execution(registration.execution.clone())
         .set_requires(Vec::new());
@@ -711,7 +711,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
     let mut fresh = registration.clone();
     fresh.execution = ExecutionId("process:resolution-owner:fresh".into());
     fresh.uses.insert(successor_use, fresh.uses[&use_].clone());
-    let mut admit = store.begin(&actor, epoch).await?;
+    let mut admit = store.begin(&actor, epoch, u64::MAX).await?;
     admit.register_execution(fresh.clone());
     store
         .commit(admit, CommitLabel::new("law.resolution.fresh"))
@@ -720,7 +720,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         process_view: None,
         actor: actor.clone(),
         epoch,
-        expected_revision: store.begin(&actor, epoch).await?.revision(),
+        expected_revision: store.begin(&actor, epoch, u64::MAX).await?.revision(),
     };
     let mut unavailable = candidate.clone();
     unavailable.key.execution = fresh.execution.clone();
@@ -741,7 +741,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         note: "later answer".into(),
     };
     let fresh_owner = ResolutionOwner {
-        expected_revision: store.begin(&actor, epoch).await?.revision(),
+        expected_revision: store.begin(&actor, epoch, u64::MAX).await?.revision(),
         ..fresh_owner
     };
     super::ensure!(
@@ -753,7 +753,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
         "one negative winner erased another unresolved use's overlapping discovery debt"
     );
     fresh.uses.remove(&successor_use);
-    let mut prune = store.begin(&actor, epoch).await?;
+    let mut prune = store.begin(&actor, epoch, u64::MAX).await?;
     prune.adopt_execution(fresh);
     store
         .commit(prune, CommitLabel::new("law.resolution.prune_discovery"))
@@ -770,7 +770,7 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             .all(|(key, debt)| key != &actor || debt.is_empty()),
         "last discovery debt remained in the materialized claim filter"
     );
-    let mut release = store.begin(&actor, epoch).await?;
+    let mut release = store.begin(&actor, epoch, u64::MAX).await?;
     release.give_up(Release::Ready);
     store
         .commit(release, CommitLabel::new("law.resolution.release"))
@@ -1116,6 +1116,7 @@ pub async fn lo_process_frontier_preserves_unexamined_mail(store: &dyn DurableSt
     let actor = ActorKey::process("frontier-owner").map_err(|e| LawBroken(e.to_string()))?;
     let mut mail = MailTx::new();
     mail.create_actor(actor.clone(), FormatSet::new("law:packages"));
+    mail.append(actor.clone(), MailKind::new("empty"), "");
     mail.append(actor.clone(), MailKind::new("first"), "1234");
     mail.append(actor.clone(), MailKind::new("second"), "5678");
     store
@@ -1123,25 +1124,35 @@ pub async fn lo_process_frontier_preserves_unexamined_mail(store: &dyn DurableSt
         .await?;
     let claimed = store.claim(&writer, 1).await?;
     let epoch = claimed[0].epoch;
-    let revision = store.begin(&actor, epoch).await?.revision();
-    let (control, frontier) = store
+    let revision = store.begin(&actor, epoch, u64::MAX).await?.revision();
+    store.revalidate(&actor, epoch, revision).await?;
+    let (empty_page, frontier) = store
         .begin_process_retained(&actor, epoch, revision, 0)
         .await?;
     super::ensure!(
-        control.mail().is_empty() && !control.woken() && frontier.cancel.is_none(),
-        "control probe consumed pending mail"
+        empty_page.mail().len() == 1
+            && empty_page.mail()[0].body.is_empty()
+            && frontier.cancel.is_none(),
+        "a zero-byte page must preserve empty-body mail"
     );
     let (mut tx, _) = store
         .begin_process_retained(&actor, epoch, revision, 4)
         .await?;
     super::ensure!(
-        tx.mail().len() == 1 && tx.mail()[0].body == "1234",
+        tx.mail().len() == 2 && tx.mail()[0].body.is_empty() && tx.mail()[1].body == "1234",
         "frontier materialized beyond its page"
     );
     tx.ack_seen();
     let receipt = store
         .commit(tx, CommitLabel::new("law.frontier.ack"))
         .await?;
+    super::ensure!(
+        matches!(
+            store.revalidate(&actor, epoch, revision).await,
+            Err(DurableError::RevisionConflict { .. })
+        ),
+        "authority revalidation accepted a stale revision"
+    );
     super::ensure!(
         matches!(
             store

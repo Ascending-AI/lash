@@ -739,7 +739,10 @@ mod tests {
         let mut late = early.clone();
         for turn in 1_usize..=1000 {
             if compacted && turn > 1 && (turn - 1).is_multiple_of(100) {
-                let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+                let mut tx = store
+                    .begin(&actor, Epoch(identity.epoch), u64::MAX)
+                    .await
+                    .unwrap();
                 tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
                     session: session.clone(),
                 }));
@@ -789,7 +792,10 @@ mod tests {
             .unwrap();
             let (chunked, texts) = owner.chunk(&template);
             let run = TurnId::parse(format!("history-{turn}")).unwrap();
-            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            let mut tx = store
+                .begin(&actor, Epoch(identity.epoch), u64::MAX)
+                .await
+                .unwrap();
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: PromptCallKey {
                     session: session.clone(),
@@ -949,7 +955,10 @@ mod tests {
             if turn == 14 {
                 held = Some((chunked.clone(), texts.clone(), template, run.clone()));
             }
-            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            let mut tx = store
+                .begin(&actor, Epoch(identity.epoch), u64::MAX)
+                .await
+                .unwrap();
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: PromptCallKey {
                     session: session.clone(),
@@ -981,7 +990,10 @@ mod tests {
                 ordinal: 1,
             },
         };
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
             session: session.clone(),
         }));
@@ -1019,7 +1031,10 @@ mod tests {
                 .unwrap(),
             exact
         );
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
             session: session.clone(),
             run,
@@ -1053,7 +1068,10 @@ mod tests {
                 ordinal: 1,
             },
         };
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: call.clone(),
             snapshot: None,
@@ -1248,7 +1266,10 @@ mod tests {
             text: hash.to_owned().into(),
             children: Vec::new(),
         };
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         for ordinal in 1..=131 {
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: call(ordinal),
@@ -1341,7 +1362,10 @@ mod tests {
             ["shared", "unique-131", "request", "prefix"]
         );
         // Settling the last request does not erase previously expired identities.
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
             session: session.clone(),
             run: TurnId::from("settled"),
@@ -1357,7 +1381,10 @@ mod tests {
             [text("prefix")],
             "the current lowering prefix keeps its own independent reference"
         );
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: call(1),
             snapshot: None,

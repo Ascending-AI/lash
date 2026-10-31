@@ -27,9 +27,7 @@
 //! mails the switch's task as a next-turn input ([`follow_on_mail`]), so the
 //! follow-on is ordinary mail the session's next drain admits (ADR 0101 §3).
 
-use lash_durable::domain::{
-    MailBatchKind, MailInput, SESSION_CLOSE_MAIL, SessionMailWrite, SessionMailbox,
-};
+use lash_durable::domain::{MailBatchKind, MailInput, SessionMailWrite, SessionMailbox};
 use lash_durable::{ActorTx, DomainWrite, DurableError};
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
@@ -114,7 +112,7 @@ pub enum SessionMailError {
 
 /// Drain the session's mailbox on `tx`, binding what it admits under the
 /// epoch, and return what the activation must do. A run of next-turn input
-/// takes as many inputs as `batching` selects. The whole mailbox is
+/// takes as many inputs as `batching` selects. The delivered mail prefix is
 /// acknowledged: what it signalled is now in the drain's answer or still
 /// open in its table for the next drain.
 ///
@@ -129,18 +127,9 @@ pub async fn drain_session_mail(
     let session = SessionId::parse(cx.actor().id())
         .map_err(|error| SessionMailError::Undecodable(format!("session actor id: {error}")))?;
     let mailbox = cx.backend().durable().session_mailbox(&session).await?;
-    let close_mail = tx
-        .mail()
-        .iter()
-        .find(|mail| mail.kind.as_str() == SESSION_CLOSE_MAIL)
-        .map(|mail| mail.body.clone());
-    let close = match close_mail {
-        Some(request_json) => Some(SessionCloseRequest { request_json }),
-        None if mailbox.closing => Some(SessionCloseRequest {
-            request_json: String::new(),
-        }),
-        None => None,
-    };
+    let close = (tx.close_requested() || mailbox.closing).then(|| SessionCloseRequest {
+        request_json: String::new(),
+    });
     let admit = match admission(&mailbox)? {
         Some(Head::Run(admitted)) => Some(admitted),
         Some(Head::Input { run, inputs }) => {

@@ -1,9 +1,7 @@
 //! A warm owner's authority and bounded external mailbox/control frontier.
-
 use super::{PostgresDurableStore, SQL, corrupt, get, sqlx_failure, turns};
 use lash_durable::{
-    ActorKey, ActorState, ActorTx, DurableError, DurableInstant, Epoch, Fenced, Mail, MailKind,
-    MailSeq, OpenedActor, StateRevision,
+    ActorKey, ActorTx, DurableError, Epoch, Fenced, MailSeq, OpenedActor, StateRevision,
 };
 
 impl PostgresDurableStore {
@@ -15,44 +13,37 @@ impl PostgresDurableStore {
         max_mail_bytes: u64,
     ) -> Result<ActorTx, DurableError> {
         let session = (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id());
-        let rows = self
+        let row = self
             .read(|connection| {
                 Box::pin(async move {
                     crate::observed_sql::query(SQL.postgres.open_retained.sql())
                         .bind(actor.as_str())
                         .bind(session)
                         .bind(i64::try_from(max_mail_bytes).unwrap_or(i64::MAX))
-                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .bind(OpenedActor::MAIL_PAGE_ROWS)
+                        .bind(lash_durable::domain::SESSION_CLOSE_MAIL)
+                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
                         .await
                         .map_err(sqlx_failure)
                 })
             })
             .await?;
-        let Some(first) = rows.first() else {
+        let Some(row) = row else {
             return Err(DurableError::OwnershipLost(Fenced {
                 actor: actor.clone(),
                 held: epoch,
                 current: None,
             }));
         };
-        let current = Epoch(get(first, 0)?);
-        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
-            return Err(DurableError::OwnershipLost(Fenced {
-                actor: actor.clone(),
-                held: epoch,
-                current: Some(current),
-            }));
-        }
-        if StateRevision(get(first, 2)?) != expected {
-            return Err(DurableError::RevisionConflict {
-                actor: actor.clone(),
-                epoch,
-                expected,
-                actual: StateRevision(get(first, 2)?),
-            });
-        }
-        let turn_cancel =
-            if let (Some(session), Some(run)) = (session, get::<Option<String>>(first, 11)?) {
+        let state: String = get(&row, 1)?;
+        let revision = lash_durable::fenced_read::validate_authority(
+            actor,
+            epoch,
+            Some(expected),
+            Some((Epoch(get(&row, 0)?), &state, StateRevision(get(&row, 2)?))),
+        )?;
+        let turn_cancel = match (session, get::<Option<String>>(&row, 5)?) {
+            (Some(session), Some(run)) => {
                 let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
                 let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
@@ -61,52 +52,29 @@ impl PostgresDurableStore {
                     &session,
                     &run,
                     (
-                        get(first, 12)?,
-                        get(first, 13)?,
-                        get(first, 14)?,
-                        get(first, 15)?,
-                        get(first, 16)?,
+                        get(&row, 6)?,
+                        get(&row, 7)?,
+                        get(&row, 8)?,
+                        get(&row, 9)?,
+                        get(&row, 10)?,
                     ),
                 )?)
-            } else {
-                None
-            };
-        let mut opened = OpenedActor {
+            }
+            _ => None,
+        };
+        let requests = super::run_records::call_cancels(actor, &get::<String>(&row, 11)?)?;
+        let opened = OpenedActor {
             actor: actor.clone(),
             epoch,
-            revision: expected,
-            acked: MailSeq(get(first, 3)?),
-            seen: MailSeq(get(first, 4)?),
+            revision,
+            acked: MailSeq(get(&row, 3)?),
+            seen: MailSeq(get(&row, 4)?),
             mail: Vec::new(),
-            at: self.instant_or(get(first, 17)?)?,
+            close_requested: get(&row, 13)?,
+            at: self.instant_or(get(&row, 14)?)?,
             turn_cancel,
-        };
-        let mut partial = false;
-        for row in &rows {
-            if let Some(seq) = get::<Option<i64>>(row, 5)? {
-                if let Some(body) = get::<Option<String>>(row, 9)? {
-                    opened.mail.push(Mail {
-                        seq: MailSeq(seq),
-                        kind: MailKind::new(get::<String>(row, 8)?),
-                        body,
-                        appended_at: DurableInstant(get(row, 10)?),
-                    });
-                } else {
-                    partial = true;
-                    if opened.mail.is_empty() && max_mail_bytes > 0 {
-                        return Err(DurableError::MailboxItemTooLarge {
-                            actor: actor.clone(),
-                            bytes: u64::try_from(get::<i64>(row, 6)?).unwrap_or(u64::MAX),
-                            limit: max_mail_bytes,
-                        });
-                    }
-                }
-            }
         }
-        if partial {
-            opened.seen = opened.mail.last().map_or(opened.acked, |mail| mail.seq);
-        }
-        let requests = super::run_records::call_cancels(actor, &get::<String>(first, 18)?)?;
+        .with_mail_page(&get::<String>(&row, 12)?, max_mail_bytes)?;
         Ok(ActorTx::opened(opened).with_call_cancels(requests))
     }
 }

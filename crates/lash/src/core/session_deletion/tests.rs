@@ -153,7 +153,7 @@ impl DurableReads for CloseDuringRead {
         let observed = self.inner.session_close(session).await?;
         if self.armed.swap(false, Ordering::SeqCst) {
             assert!(observed.is_none(), "the close had not begun at this read");
-            let mut tx = self.inner.begin(&self.actor, self.epoch).await?;
+            let mut tx = self.inner.begin(&self.actor, self.epoch, u64::MAX).await?;
             lash_core::runtime::durable::session_close::begin_session_close(&mut tx, session);
             tx.ack_seen();
             self.inner
@@ -264,8 +264,18 @@ impl DurableStore for CloseDuringRead {
         &self,
         actor: &ActorKey,
         epoch: lash_core::durable_port::Epoch,
+        max_mail_bytes: u64,
     ) -> Result<ActorTx, DurableError> {
-        self.inner.begin(actor, epoch).await
+        self.inner.begin(actor, epoch, max_mail_bytes).await
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+    ) -> Result<(), lash_durable::DurableError> {
+        self.inner.revalidate(actor, epoch, expected).await
     }
 
     async fn begin_retained(
@@ -299,8 +309,9 @@ impl DurableStore for CloseDuringRead {
         &self,
         actor: &ActorKey,
         epoch: lash_core::durable_port::Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
-        self.inner.open_process(actor, epoch).await
+        self.inner.open_process(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

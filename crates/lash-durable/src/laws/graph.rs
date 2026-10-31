@@ -241,7 +241,7 @@ async fn owner_commit(
     writes: Vec<DomainWrite>,
 ) -> Result<(), DurableError> {
     let store = tier.store();
-    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     tx.stage(nodes.into_values());
     for write in writes {
         tx.write(write);
@@ -363,7 +363,7 @@ pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nod
     .map_err(|error| refused("check prepared config", error))?;
     let mut missing = tier
         .store()
-        .begin(&owner.actor, owner.epoch)
+        .begin(&owner.actor, owner.epoch, u64::MAX)
         .await
         .map_err(|error| refused("begin missing", error))?;
     missing.require_exact(std::sync::Arc::new(expected.clone()));
@@ -388,7 +388,7 @@ pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nod
 
     let mut install = tier
         .store()
-        .begin(&owner.actor, owner.epoch)
+        .begin(&owner.actor, owner.epoch, u64::MAX)
         .await
         .map_err(|error| refused("begin install", error))?;
     install.stage_all(nodes);
@@ -399,7 +399,7 @@ pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nod
         .map_err(|error| refused("install", error))?;
     let mut later = tier
         .store()
-        .begin(&owner.actor, owner.epoch)
+        .begin(&owner.actor, owner.epoch, u64::MAX)
         .await
         .map_err(|error| refused("begin later", error))?;
     later.require_exact(std::sync::Arc::new(expected.clone()));
@@ -424,7 +424,7 @@ pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nod
     .await;
     let mut conflict = tier
         .store()
-        .begin(&owner.actor, owner.epoch)
+        .begin(&owner.actor, owner.epoch, u64::MAX)
         .await
         .map_err(|error| refused("begin conflict", error))?;
     conflict.require_exact(std::sync::Arc::new(expected));
@@ -1344,7 +1344,7 @@ pub async fn an_owner_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphT
     ];
     for (bytes, rows, refusal) in budgets {
         let store = tier.store();
-        let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+        let mut tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
         tx.stage(nodes.values().cloned());
         for write in &writes {
             tx.write(write.clone());

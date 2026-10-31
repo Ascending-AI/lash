@@ -1077,7 +1077,10 @@ mod tests {
             if sample == 2 {
                 store.audit_orphans().await.unwrap();
             }
-            let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+            let mut tx = store
+                .begin(&actor, Epoch(identity.epoch), u64::MAX)
+                .await
+                .unwrap();
             tx.stage(graph.nodes().values().cloned());
             let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 format!("install-{sample}"),

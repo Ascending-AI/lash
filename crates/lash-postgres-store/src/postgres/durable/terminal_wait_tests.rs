@@ -143,7 +143,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
 
     // The target's own scope holds a wait, which the test then locks.
     let mut tx = store
-        .begin(&target_actor, target_epoch)
+        .begin(&target_actor, target_epoch, u64::MAX)
         .await
         .expect("open the target");
     let (held, _) = waits::pin(
@@ -184,7 +184,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
         let target_actor = target_actor.clone();
         let outcome = outcome.clone();
         async move {
-            let mut tx = store.begin(&target_actor, target_epoch).await?;
+            let mut tx = store.begin(&target_actor, target_epoch, u64::MAX).await?;
             record_terminal(&mut tx, &target, &outcome)?;
             tx.ack_seen();
             store.commit(tx, CommitLabel::new("law.terminal")).await
@@ -201,7 +201,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
     // The awaiter pins its wait on the target and commits it, then checks
     // whether the target ended.
     let mut tx = store
-        .begin(&awaiter_actor, awaiter_epoch)
+        .begin(&awaiter_actor, awaiter_epoch, u64::MAX)
         .await
         .expect("open the awaiter");
     let (wait, _) = waits::pin(

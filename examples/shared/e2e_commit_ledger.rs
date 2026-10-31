@@ -628,8 +628,22 @@ impl DurableStore for LedgerStore {
         self.inner.owned(node).await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        self.inner.begin(actor, epoch).await
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner.begin(actor, epoch, max_mail_bytes).await
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash::durable::ActorKey,
+        epoch: lash::durable::Epoch,
+        expected: lash::durable::StateRevision,
+    ) -> Result<(), lash::durable::DurableError> {
+        self.inner.revalidate(actor, epoch, expected).await
     }
 
     async fn begin_retained(
@@ -660,8 +674,9 @@ impl DurableStore for LedgerStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, ProcessView), DurableError> {
-        self.inner.open_process(actor, epoch).await
+        self.inner.open_process(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

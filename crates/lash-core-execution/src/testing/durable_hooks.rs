@@ -510,9 +510,39 @@ impl DurableStore for DurableCommitHook {
         self.inner.owned(node).await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
         self.count("begin");
-        self.inner.begin(actor, epoch).await
+        self.inner.begin(actor, epoch, max_mail_bytes).await
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash_durable::ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+    ) -> Result<(), lash_durable::DurableError> {
+        if actor.kind() == lash_durable::ActorKind::Process {
+            self.count("begin_process_retained");
+            return self.inner.revalidate(actor, epoch, expected).await;
+        }
+        self.count("begin");
+        let hook = self.retained_begin.lock_recover().clone();
+        if let Some(hook) = hook {
+            hook(expected).await;
+        }
+        let result = self.inner.revalidate(actor, epoch, expected).await;
+        if matches!(result, Err(DurableError::RevisionConflict { .. })) {
+            self.count("retained_revision_conflict");
+            if CONTROL_OBSERVATION.try_with(|()| ()).is_ok() {
+                self.count("control_observation_revision_conflict");
+            }
+        }
+        result
     }
 
     async fn begin_retained(
@@ -560,6 +590,7 @@ impl DurableStore for DurableCommitHook {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
         self.count("open_process");
         *self
@@ -567,7 +598,7 @@ impl DurableStore for DurableCommitHook {
             .lock_recover()
             .entry(actor.clone())
             .or_default() += 1;
-        self.inner.open_process(actor, epoch).await
+        self.inner.open_process(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

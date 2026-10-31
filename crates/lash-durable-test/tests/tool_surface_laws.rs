@@ -711,7 +711,7 @@ async fn claimed_requirements(
             requires = Some(claim.requires.clone());
         }
         let mut tx = store
-            .begin(&claim.actor, claim.epoch)
+            .begin(&claim.actor, claim.epoch, u64::MAX)
             .await
             .expect("open the probe's transaction");
         tx.give_up(Release::Ready);

@@ -387,7 +387,7 @@ async fn a_contended_durable_commit_retries_and_commits_once() {
     .await;
 
     let mut tx = store
-        .begin(&claimed[0].actor, claimed[0].epoch)
+        .begin(&claimed[0].actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("open the owner's transaction");
     tx.give_up(Release::Idle);
@@ -527,7 +527,7 @@ async fn give_up(
     assert_eq!(&claimed[0].actor, target, "the owner claims its actor");
     let before = revision(plain, target).await;
     let mut tx = store
-        .begin(&claimed[0].actor, claimed[0].epoch)
+        .begin(&claimed[0].actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("open the owner's transaction");
     tx.give_up(Release::Idle);

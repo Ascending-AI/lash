@@ -86,7 +86,7 @@ pub async fn an_abandoned_activation_hands_back_only_its_original_grant(
         "the successor did not replace the held grant: {claims:?}"
     );
     let current = claims[0].epoch;
-    let mut open = inner.begin(&actor, current).await?;
+    let mut open = inner.begin(&actor, current, u64::MAX).await?;
     ensure!(
         open.mail().len() == 1 && open.mail()[0].body == "successor mail",
         "the successor lacks its pending mail"
@@ -115,7 +115,7 @@ pub async fn an_abandoned_activation_hands_back_only_its_original_grant(
         inner.actor(&actor).await? == before,
         "the old hand-back changed its successor's snapshot"
     );
-    let check = inner.begin(&actor, current).await?;
+    let check = inner.begin(&actor, current, u64::MAX).await?;
     ensure!(
         check.mail() == open.mail(),
         "the old hand-back changed its successor's mail"
@@ -123,7 +123,11 @@ pub async fn an_abandoned_activation_hands_back_only_its_original_grant(
     open.ack_seen();
     inner.commit(open, LABEL).await?;
     ensure!(
-        inner.begin(&actor, current).await?.mail().is_empty(),
+        inner
+            .begin(&actor, current, u64::MAX)
+            .await?
+            .mail()
+            .is_empty(),
         "the already-open successor transaction did not commit"
     );
     Ok(())

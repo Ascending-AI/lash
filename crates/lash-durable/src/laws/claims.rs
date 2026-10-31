@@ -53,7 +53,9 @@ pub async fn a_replaced_boot_adopts_none_of_its_successors_actors(
             "replacement and reclaim did not each bump the epoch: {prior:?}, {claim:?}"
         );
     }
-    let mut tx = store.begin(&released[0].actor, released[0].epoch).await?;
+    let mut tx = store
+        .begin(&released[0].actor, released[0].epoch, u64::MAX)
+        .await?;
     tx.give_up(Release::Idle);
     store.commit(tx, LABEL).await?;
     ensure!(
@@ -97,7 +99,7 @@ pub async fn progress_before_an_empty_ready_release_resets_failed_activations(
     let owner = node(store, "progress-owner").await?;
     let first = store.claim(&owner, 1).await?;
     ensure!(first.len() == 1, "the fresh actor was not claimed");
-    let mut tx = store.begin(&actor, first[0].epoch).await?;
+    let mut tx = store.begin(&actor, first[0].epoch, u64::MAX).await?;
     tx.give_up(Release::Ready);
     store.commit(tx, LABEL).await?;
     let second = store.claim(&owner, 1).await?;
@@ -108,7 +110,7 @@ pub async fn progress_before_an_empty_ready_release_resets_failed_activations(
         "the no-progress control did not increment: {before:?}"
     );
     append(store, &actor, "committed progress").await?;
-    let mut tx = store.begin(&actor, second[0].epoch).await?;
+    let mut tx = store.begin(&actor, second[0].epoch, u64::MAX).await?;
     ensure!(
         tx.mail().len() == 1 && tx.mail()[0].body == "committed progress",
         "the progress mail was not read"
@@ -119,7 +121,7 @@ pub async fn progress_before_an_empty_ready_release_resets_failed_activations(
         consumed.revision.0 == before.revision.0 + 1 && consumed.state == ActorState::Owned,
         "consumption changed the grant: {consumed:?}"
     );
-    let mut tx = store.begin(&actor, second[0].epoch).await?;
+    let mut tx = store.begin(&actor, second[0].epoch, u64::MAX).await?;
     ensure!(
         tx.mail().is_empty() && !tx.advances(),
         "the hand-back was not empty"
@@ -140,7 +142,7 @@ pub async fn progress_before_an_empty_ready_release_resets_failed_activations(
             && after.revision == released.revision,
         "the empty hand-back erased progress or consumption: {after:?}"
     );
-    let mut tx = store.begin(&actor, third[0].epoch).await?;
+    let mut tx = store.begin(&actor, third[0].epoch, u64::MAX).await?;
     ensure!(
         tx.mail().is_empty(),
         "acknowledged mail returned on reclaim"
@@ -197,7 +199,7 @@ pub async fn claims_take_the_oldest_eligible_actors_first(
             .iter()
             .find(|claim| &claim.actor == actor)
             .ok_or_else(|| LawBroken("missing setup grant".into()))?;
-        let mut tx = store.begin(actor, grant.epoch).await?;
+        let mut tx = store.begin(actor, grant.epoch, u64::MAX).await?;
         let release = match index {
             0 => Release::Waiting {
                 next_due: Some(DurableInstant(base + 10)),
@@ -236,7 +238,7 @@ pub async fn claims_take_the_oldest_eligible_actors_first(
         .iter()
         .find(|claim| claim.actor == actors[3])
         .ok_or_else(|| LawBroken("missing new-ready grant".into()))?;
-    let mut tx = store.begin(&actors[3], grant.epoch).await?;
+    let mut tx = store.begin(&actors[3], grant.epoch, u64::MAX).await?;
     tx.give_up(Release::Ready);
     store.commit(tx, LABEL).await?;
     advance(Duration::from_millis(10));
@@ -337,7 +339,7 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
             .iter()
             .find(|claim| &claim.actor == actor)
             .ok_or_else(|| LawBroken("missing setup grant".into()))?;
-        let mut tx = store.begin(actor, grant.epoch).await?;
+        let mut tx = store.begin(actor, grant.epoch, u64::MAX).await?;
         tx.set_requires(required);
         tx.give_up(Release::Ready);
         store.commit(tx, LABEL).await?;

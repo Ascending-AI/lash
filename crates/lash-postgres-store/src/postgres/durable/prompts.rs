@@ -761,7 +761,10 @@ mod tests {
             text: hash.to_owned().into(),
             children: Vec::new(),
         };
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         for ordinal in 1..=131 {
             tx.write(DomainWrite::Prompt(PromptWrite::Record {
                 call: call(ordinal),
@@ -916,7 +919,10 @@ mod tests {
             .await
             .unwrap();
         // Settling the last request does not erase previously expired identities.
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
             session: session.clone(),
             run: TurnId::from("settled"),
@@ -994,7 +1000,10 @@ mod tests {
             [text("prefix")],
             "the current lowering prefix keeps its own independent reference"
         );
-        let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
+        let mut tx = store
+            .begin(&actor, Epoch(identity.epoch), u64::MAX)
+            .await
+            .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Record {
             call: call(1),
             snapshot: None,

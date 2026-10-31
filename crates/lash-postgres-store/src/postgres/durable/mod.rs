@@ -42,9 +42,9 @@ use std::sync::{Arc, LazyLock};
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, ClaimPurpose,
     Claimed, CommitCapacity, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableStore,
-    Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite,
-    MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor,
-    Owner, Reaped, StateRevision, StoreFailure, StoreFailureKind, Woken,
+    Epoch, Fenced, FormatSet, HeartbeatOutcome, MailAnswer, MailCommit, MailDomainWrite,
+    MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor, Owner,
+    Reaped, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::processes::{ActorParkStatements, ProcessActorStatements};
@@ -1285,90 +1285,114 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
         lash_core_ids::operational_metrics::sql::owner_state_read(
             lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
         );
-        let session = match actor.kind() {
-            lash_durable::ActorKind::Session => Some(actor.id()),
-            lash_durable::ActorKind::Process => None,
-        };
-        let rows = self
+        let session = (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id());
+        let row = self
             .read(|connection| {
                 Box::pin(async move {
                     crate::observed_sql::query(SQL.postgres.open.sql())
                         .bind(actor.as_str())
                         .bind(session)
-                        .fetch_all(crate::observed_sql::executor(&mut **connection))
+                        .bind(i64::try_from(max_mail_bytes).unwrap_or(i64::MAX))
+                        .bind(OpenedActor::MAIL_PAGE_ROWS)
+                        .bind(lash_durable::domain::SESSION_CLOSE_MAIL)
+                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
                         .await
                         .map_err(sqlx_failure)
                 })
             })
             .await?;
-        let Some(first) = rows.first() else {
+        let Some(row) = row else {
             return Err(DurableError::OwnershipLost(Fenced {
                 actor: actor.clone(),
                 held: epoch,
                 current: None,
             }));
         };
-        let current = Epoch(get(first, 0)?);
-        if current != epoch || get::<String>(first, 1)? != ActorState::Owned.as_str() {
-            return Err(DurableError::OwnershipLost(Fenced {
-                actor: actor.clone(),
-                held: epoch,
-                current: Some(current),
-            }));
-        }
-        let turn_cancel = match (session, get::<Option<String>>(first, 10)?) {
+        let state: String = get(&row, 1)?;
+        let revision = lash_durable::fenced_read::validate_authority(
+            actor,
+            epoch,
+            None,
+            Some((Epoch(get(&row, 0)?), &state, StateRevision(get(&row, 2)?))),
+        )?;
+        let turn_cancel = match (session, get::<Option<String>>(&row, 6)?) {
             (Some(session), Some(run)) => {
                 let session = lash_kernel_value::identity::SessionId::try_from(session.to_owned())
                     .map_err(|_| corrupt("session id", session))?;
                 let run = lash_vocabulary::identity::TurnId::try_from(run.clone())
                     .map_err(|_| corrupt("turn id", &run))?;
-                let stored = (
-                    get(first, 11)?,
-                    get(first, 12)?,
-                    get(first, 13)?,
-                    get(first, 14)?,
-                    get(first, 15)?,
-                );
-                Some(turns::decode_cancel(&session, &run, stored)?)
+                Some(turns::decode_cancel(
+                    &session,
+                    &run,
+                    (
+                        get(&row, 7)?,
+                        get(&row, 8)?,
+                        get(&row, 9)?,
+                        get(&row, 10)?,
+                        get(&row, 11)?,
+                    ),
+                )?)
             }
             _ => None,
         };
-        let at = self.instant_or(get(first, 9)?)?;
-        // What a session's owner read of its head: the hint its one-call
-        // head commit plans on (FIG-5942).
         if session.is_some()
-            && let Some(facts) = head_commit::SessionFacts::of(first, 16)
+            && let Some(facts) = head_commit::SessionFacts::of(&row, 12)
         {
             self.pools
                 .session_hints
                 .note((actor.as_str().to_owned(), epoch.0), facts);
         }
-        let mut opened = OpenedActor {
+        let requests = run_records::call_cancels(actor, &get::<String>(&row, 19)?)?;
+        let opened = OpenedActor {
             actor: actor.clone(),
             epoch,
-            revision: StateRevision(get(first, 2)?),
-            acked: MailSeq(get(first, 3)?),
-            seen: MailSeq(get(first, 4)?),
+            revision,
+            acked: MailSeq(get(&row, 3)?),
+            seen: MailSeq(get(&row, 4)?),
             mail: Vec::new(),
-            at,
+            close_requested: get(&row, 21)?,
+            at: self.instant_or(get(&row, 5)?)?,
             turn_cancel,
-        };
-        for row in &rows {
-            if let Some(seq) = get::<Option<i64>>(row, 5)? {
-                opened.mail.push(Mail {
-                    seq: MailSeq(seq),
-                    kind: MailKind::new(get::<String>(row, 6)?),
-                    body: get(row, 7)?,
-                    appended_at: DurableInstant(get(row, 8)?),
-                });
-            }
         }
-        let requests = run_records::call_cancels(actor, &get::<String>(first, 23)?)?;
+        .with_mail_page(&get::<String>(&row, 20)?, max_mail_bytes)?;
         Ok(ActorTx::opened(opened).with_call_cancels(requests))
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+    ) -> Result<(), DurableError> {
+        let row: Option<(i64, String, i64)> = self
+            .read(|connection| {
+                Box::pin(async move {
+                    crate::observed_sql::query_as(SQL.actor.authority.sql())
+                        .bind(actor.as_str())
+                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
+                        .await
+                        .map_err(sqlx_failure)
+                })
+            })
+            .await?;
+        lash_durable::fenced_read::validate_authority(
+            actor,
+            epoch,
+            Some(expected),
+            row.as_ref().map(|(epoch, state, revision)| {
+                (Epoch(*epoch), state.as_str(), StateRevision(*revision))
+            }),
+        )
+        .map(|_| ())
     }
 
     async fn begin_retained(
@@ -1397,8 +1421,9 @@ impl DurableStore for PostgresDurableStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
-        self.open_process_view(actor, epoch).await
+        self.open_process_view(actor, epoch, max_mail_bytes).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

@@ -1018,7 +1018,7 @@ async fn crash_claims(
                 .durable()
                 .acquire_idle_for_testing(&lease, &key, snapshot.epoch)
                 .await?;
-            let mut tx = backend.durable().begin(&key, epoch).await?;
+            let mut tx = backend.durable().begin(&key, epoch, u64::MAX).await?;
             ensure!(tx.mail().is_empty(), "quiet peer {peer} has pending mail");
             let next_due = backend
                 .durable()

@@ -532,7 +532,7 @@ async fn unserved_law(
         .ok_or_else(|| {
             PluginHarnessError::Worker("writer did not claim certification actor".into())
         })?;
-    let mut tx = store.begin(&actor, owned.epoch).await?;
+    let mut tx = store.begin(&actor, owned.epoch, u64::MAX).await?;
     tx.set_requires(vec![token.clone()]);
     tx.give_up(Release::Ready);
     store.commit(tx, CommitLabel::TURN_ADMIT).await?;

@@ -301,7 +301,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
     let claimed = database.claim(&lease, 1).await.expect("claim");
     assert_eq!(claimed.len(), 1);
     let mut tx = database
-        .begin(&actor, claimed[0].epoch)
+        .begin(&actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("transaction");
     tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
@@ -323,7 +323,7 @@ async fn cancelling_a_settled_operation_answers_unknown_or_revoked() {
         .await
         .expect("admitted");
     let mut tx = database
-        .begin(&actor, claimed[0].epoch)
+        .begin(&actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("terminal transaction");
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {

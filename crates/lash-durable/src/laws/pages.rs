@@ -375,7 +375,7 @@ async fn publish_at(
     publication: &Publication<'_>,
     manifest: Box<dyn CandidateManifest>,
 ) -> Result<CandidateReceipt, DurableError> {
-    let tx = store.begin(actor, epoch).await?;
+    let tx = store.begin(actor, epoch, u64::MAX).await?;
     publish_in(store, tx, publication, manifest).await
 }
 
@@ -1402,7 +1402,7 @@ pub async fn an_ownership_transfer_fences_the_old_activation(tier: &dyn PageTier
     let old_lease = store
         .acquire_root_lease(lease_request(&owner, &exec, first_exec, 60_000))
         .await?;
-    let old_tx = store.begin(&owner.actor, owner.epoch).await?;
+    let old_tx = store.begin(&owner.actor, owner.epoch, u64::MAX).await?;
     // The old node lets go; another claims the actor at a later epoch.
     store.release_node(&owner.node).await?;
     let successor = node(store, "pages-transfer-successor").await?;

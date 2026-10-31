@@ -104,6 +104,7 @@ pub struct ActorTx {
     acked: MailSeq,
     seen: MailSeq,
     mail: Vec<Mail>,
+    close_requested: bool,
     opened_at: DurableInstant,
     turn_cancel: Option<TurnCancelRequest>,
     call_cancels: Vec<crate::domain::ToolCallCancelRequest>,
@@ -134,16 +135,77 @@ pub struct OpenedActor {
     pub revision: StateRevision,
     /// The mailbox position the owner last acknowledged.
     pub acked: MailSeq,
-    /// The newest mailbox position: every append and every wake takes one.
+    /// The acknowledgement frontier of this page. Unread mail stays beyond it.
     pub seen: MailSeq,
     /// The pending mail, oldest first.
     pub mail: Vec<Mail>,
+    /// A pending session close, read independently of the delivered mail page.
+    pub close_requested: bool,
     /// The store's clock at the read: the instant a row the owner records
     /// before its work starts takes, such as a model call's deadline.
     pub at: DurableInstant,
     /// For a session actor, the cancel request its unfinished turn
     /// accepted, read with the actor; `None` for any other actor.
     pub turn_cancel: Option<TurnCancelRequest>,
+}
+
+impl OpenedActor {
+    /// Maximum candidate rows in one owner mailbox page, including a refusal row.
+    pub const MAIL_PAGE_ROWS: i64 = 256;
+
+    /// Decode a byte-bounded page and retain only its delivered acknowledgement
+    /// frontier. An empty body fits a zero-byte budget; revalidation uses no page.
+    pub fn with_mail_page(
+        mut self,
+        json: &str,
+        max_bytes: u64,
+    ) -> Result<Self, crate::DurableError> {
+        type Row = (i64, String, Option<String>, i64, u64);
+        let corrupt = |detail: String| {
+            crate::DurableError::Store(crate::StoreFailure {
+                code: None,
+                kind: crate::StoreFailureKind::Corrupt,
+                message: format!("actor mailbox page: {detail}"),
+            })
+        };
+        let rows: Vec<Row> =
+            serde_json::from_str(json).map_err(|error| corrupt(error.to_string()))?;
+        if rows.len() > Self::MAIL_PAGE_ROWS as usize {
+            return Err(corrupt("candidate row limit exceeded".into()));
+        }
+        self.mail = Vec::with_capacity(rows.len());
+        let mut previous = self.acked;
+        let mut partial = false;
+        for (seq, kind, body, appended_at, bytes) in rows {
+            if seq <= previous.0 || seq > self.seen.0 {
+                return Err(corrupt(
+                    "mail is outside the observed sequence range".into(),
+                ));
+            }
+            previous = MailSeq(seq);
+            let Some(body) = body else {
+                if self.mail.is_empty() && max_bytes > 0 {
+                    return Err(crate::DurableError::MailboxItemTooLarge {
+                        actor: self.actor,
+                        bytes,
+                        limit: max_bytes,
+                    });
+                }
+                partial = true;
+                break;
+            };
+            self.mail.push(Mail {
+                seq: MailSeq(seq),
+                kind: MailKind::new(kind),
+                body,
+                appended_at: DurableInstant(appended_at),
+            });
+        }
+        if partial || self.mail.len() == Self::MAIL_PAGE_ROWS as usize {
+            self.seen = self.mail.last().map_or(self.acked, |mail| mail.seq);
+        }
+        Ok(self)
+    }
 }
 
 impl ActorTx {
@@ -163,6 +225,7 @@ impl ActorTx {
             acked: read.acked,
             seen: read.seen,
             mail: read.mail,
+            close_requested: read.close_requested,
             opened_at: read.at,
             turn_cancel: read.turn_cancel,
             call_cancels: Vec::new(),
@@ -279,24 +342,29 @@ impl ActorTx {
         self.revision
     }
 
-    /// The newest mailbox position the fenced read saw.
+    /// The acknowledgement frontier of the delivered page.
     #[must_use]
     pub fn seen(&self) -> MailSeq {
         self.seen
     }
 
-    /// Whether anything was appended or woke the actor since the owner last
-    /// acknowledged, as of the fenced read. A wake takes a mailbox position
-    /// without a mail row, so this can be true with no [`Self::mail`].
+    /// Whether this page has an unacknowledged frontier. Wake-only positions
+    /// can make this true with no [`Self::mail`].
     #[must_use]
     pub fn woken(&self) -> bool {
         self.seen > self.acked
     }
 
-    /// The pending mail as of the fenced read, oldest first.
+    /// The delivered pending-mail prefix, oldest first.
     #[must_use]
     pub fn mail(&self) -> &[Mail] {
         &self.mail
+    }
+
+    /// Whether a session close is pending, including beyond this mail page.
+    #[must_use]
+    pub fn close_requested(&self) -> bool {
+        self.close_requested
     }
 
     /// The store's clock at the fenced read: what an owner records as the

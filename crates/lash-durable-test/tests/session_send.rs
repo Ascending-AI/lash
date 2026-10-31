@@ -541,7 +541,10 @@ async fn admit_composed_inputs(
         .unwrap();
     let claimed = database.claim(&lease, 1).await.unwrap();
     assert_eq!(claimed.len(), 1);
-    let mut tx = database.begin(&actor, claimed[0].epoch).await.unwrap();
+    let mut tx = database
+        .begin(&actor, claimed[0].epoch, u64::MAX)
+        .await
+        .unwrap();
     tx.write(DomainWrite::SessionMail(SessionMailWrite::Admit {
         session: session.clone(),
         run: run.clone(),

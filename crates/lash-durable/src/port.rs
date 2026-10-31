@@ -496,11 +496,27 @@ pub trait DurableStore: DurableReads {
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError>;
 
     /// Open the owner's transaction over `actor` at `epoch`: a fenced read
-    /// that returns the pending mail, the store's clock and, for a session
-    /// actor, its unfinished turn's accepted cancel request, in one read.
+    /// that returns a byte-bounded pending-mail prefix, the store's clock and,
+    /// for a session actor, its close and unfinished turn's accepted cancel
+    /// request, in one snapshot. The candidate row bound is
+    /// [`OpenedActor::MAIL_PAGE_ROWS`](crate::OpenedActor::MAIL_PAGE_ROWS).
     /// Refused with [`DurableError::OwnershipLost`] when `epoch` is not
     /// current.
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError>;
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError>;
+
+    /// Revalidate ownership and an exact revision without reading mail or owner
+    /// payload. This grants no acknowledgement frontier and writes nothing.
+    async fn revalidate(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+    ) -> Result<(), DurableError>;
 
     /// Refresh only external control and a byte-bounded mailbox page for a
     /// retained owner. An unchanged basis never reloads a head or phase.
@@ -523,6 +539,7 @@ pub trait DurableStore: DurableReads {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, ProcessView), DurableError>;
 
     /// Refresh external process control without loading its record, driver or root.

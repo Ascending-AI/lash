@@ -519,7 +519,7 @@ async fn atomic_carry(tier: super::served::Tier) {
         CommitId::mint(),
     )
     .unwrap();
-    let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
+    let mut tx = store.begin(&actor, claim.epoch, u64::MAX).await.unwrap();
     tx.stage_all(staging).write(write);
     store
         .commit(tx, CommitLabel::new("law.park"))
@@ -585,7 +585,7 @@ async fn atomic_carry(tier: super::served::Tier) {
         CommitId::mint(),
     )
     .unwrap();
-    let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
+    let mut tx = store.begin(&actor, claim.epoch, u64::MAX).await.unwrap();
     tx.stage_all(staging).write(write);
     let tokens: Vec<String> =
         lash_vocabulary::claims::ObligationToken::for_requirements(&requirements_b)

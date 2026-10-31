@@ -1971,7 +1971,7 @@ async fn a_suspended_round_consumes_observed_wakes_without_losing_a_later_comple
         let held = nodes.database().actor(&actor()).await.unwrap().unwrap();
         let observed = nodes
             .database()
-            .begin(&actor(), held.epoch)
+            .begin(&actor(), held.epoch, u64::MAX)
             .await
             .unwrap()
             .seen();

@@ -109,7 +109,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
         })
     };
     let commit = |writes: Vec<DomainWrite>, epoch: Epoch| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         for write in writes {
             tx.write(write);
         }
@@ -263,7 +263,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         let Some(owned) = claimed.iter().find(|claimed| claimed.actor == actor) else {
             return Err(LawBroken(format!("{} was not claimed", call.session)));
         };
-        let mut tx = store.begin(&owned.actor, owned.epoch).await?;
+        let mut tx = store.begin(&owned.actor, owned.epoch, u64::MAX).await?;
         let texts = names.iter().map(|name| text(name)).collect::<Vec<_>>();
         // The owned call is open: its root holds its request alone.
         let (snapshot, snapshot_texts, request_texts) = match call.call {
@@ -367,7 +367,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
         })
     };
     let commit = |writes: Vec<DomainWrite>| async move {
-        let mut tx = store.begin(actor, epoch).await?;
+        let mut tx = store.begin(actor, epoch, u64::MAX).await?;
         for write in writes {
             tx.write(write);
         }

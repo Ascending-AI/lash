@@ -257,7 +257,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
     let claimed = lash_durable::DurableStore::claim(&durable, &node, 1)
         .await
         .expect("claim the session");
-    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch)
+    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("begin the admission");
     for (call, prompt) in (1..).zip(&composed) {
@@ -373,7 +373,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
         .expect("read the root")
         .expect("the root is retained")
         .request_texts;
-    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch)
+    let mut tx = lash_durable::DurableStore::begin(&durable, &actor, claimed[0].epoch, u64::MAX)
         .await
         .expect("begin the settlement");
     tx.write(lash_durable::DomainWrite::Prompt(

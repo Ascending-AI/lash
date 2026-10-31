@@ -233,7 +233,16 @@ impl ActorContext {
             );
             let (tx, view) = self
                 .durable()?
-                .open_process(self.actor(), self.epoch())
+                .open_process(
+                    self.actor(),
+                    self.epoch(),
+                    self.backend()
+                        .config()
+                        .settings()
+                        .graph_reads
+                        .owner()
+                        .total_bytes,
+                )
                 .await?;
             let next = super::super::process::continuation::Continuation::loaded(view.clone());
             *held = Some(super::super::owner_state::OwnerState::loaded(

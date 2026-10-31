@@ -181,35 +181,23 @@ lash_store_sql::statements! {
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
                AND r.terminal_kind IS NULL";
 
-        /// Actor `?1`'s epoch, state, revision and mail marks with each mail
-        /// past its acknowledgement, in order (one row with NULL mail columns
-        /// when none); and, when `?2` names its session, on every row that
-        /// session's unfinished turn with its phase row, in the turn read's
-        /// column order, and the cancel request the turn accepted, in the
-        /// cancel read's (FIG-6399). One statement, so one snapshot answers
-        /// the open; the turn is looked up once.
-        /// External-frontier-only refresh, with body bytes bounded before transfer.
-        open_retained = "WITH page AS MATERIALIZED (
-                SELECT m.seq, length(CAST(m.body AS BLOB)) AS bytes,
-                    sum(length(CAST(m.body AS BLOB))) OVER (ORDER BY m.seq) AS total
-                FROM actor_mail m JOIN actors a ON a.actor_key = m.actor_key
-                WHERE a.actor_key = ?1 AND m.seq > a.acked_seq)
-             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
+        /// Actor `?1`'s authority, one bounded mail page and session `?2`'s
+        /// fresh cancellation and close controls, in one snapshot. The retained
+        /// owner payload is not reloaded.
+        open_retained = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode,
-                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason))
-                     FROM (SELECT run, call_id, request_id, origin, reason
-                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q)
+                    (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason)) FROM (SELECT run, call_id, request_id, origin, reason FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q),
+                    (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page),
+                    (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
+                        WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
+                          AND close_mail.seq > a.acked_seq))
              FROM actors a
-             LEFT JOIN page p ON p.total - p.bytes <= ?3
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
-                 AND p.total <= ?3 AND ?3 > 0
              LEFT JOIN session_runs r ON r.session_id = ?2
                  AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
              LEFT JOIN turn_cancel_requests c ON c.session_id = r.session_id AND c.turn_id = r.run
-             WHERE a.actor_key = ?1 ORDER BY p.seq";
+             WHERE a.actor_key = ?1");
 
-        open = "WITH t AS MATERIALIZED (
+        open = lash_store_sql::mailbox_query!("?3", "?4", ", t AS MATERIALIZED (
                  SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                         p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                         p.turn_deadline_ms, p.written_epoch, p.model_calls,
@@ -222,15 +210,18 @@ lash_store_sql::statements! {
                  WHERE r.session_id = ?2 AND r.admission_json IS NOT NULL
                    AND r.terminal_kind IS NULL)
              SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms, t.*,
+                    t.*,
                     (SELECT json_group_array(json_array(q.run, q.call_id, q.request_id, q.origin, q.reason))
                      FROM (SELECT run, call_id, request_id, origin, reason
-                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q)
+                           FROM tool_call_cancel_requests WHERE session_id = ?2 ORDER BY run, call_id) q),
+                    (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page),
+                    (?2 IS NOT NULL AND EXISTS (SELECT 1 FROM actor_mail close_mail
+                        WHERE close_mail.actor_key = a.actor_key AND close_mail.kind = ?5
+                          AND close_mail.seq > a.acked_seq))
              FROM actors a
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN t ON TRUE
              WHERE a.actor_key = ?1
-             ORDER BY m.seq";
+            ");
 
         /// Release without rewriting the due date: a claimed actor's is
         /// NULL, and a release without a timer leaves it so. The SQL still

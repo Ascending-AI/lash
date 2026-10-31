@@ -644,7 +644,7 @@ async fn lo_fence_replans_one_conflicted_command_on_sqlite_memory() {
                     .build()
                     .unwrap()
                     .block_on(async {
-                        let winner = db.begin(&actor, epoch).await.unwrap();
+                        let winner = db.begin(&actor, epoch, u64::MAX).await.unwrap();
                         db.commit(winner, CommitLabel::new("law.intervene"))
                             .await
                             .unwrap();
@@ -1396,7 +1396,7 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let winner = db.begin(&actor, epoch).await.unwrap();
+                    let winner = db.begin(&actor, epoch, u64::MAX).await.unwrap();
                     db.commit(winner, CommitLabel::new("law.kernel-intervene"))
                         .await
                         .unwrap();

@@ -175,7 +175,7 @@ async fn stale_epochs_are_refused(
 ) -> LawOutcome {
     let before = store.actor(actor).await?;
     for held in 0..current.0 {
-        match store.begin(actor, Epoch(held)).await {
+        match store.begin(actor, Epoch(held), u64::MAX).await {
             Err(DurableError::OwnershipLost(fenced)) => ensure!(
                 fenced.held == Epoch(held) && fenced.current == Some(current),
                 "a stale begin at {held} named the wrong epochs: {fenced}"
@@ -242,7 +242,7 @@ pub async fn one_writer_under_a_claim_race(store: &dyn DurableStore) -> LawOutco
             "{actor} is not owned by its claimer at its claimed epoch: {snapshot:?}"
         );
         stale_epochs_are_refused(store, actor, *epoch).await?;
-        let tx = store.begin(actor, *epoch).await?;
+        let tx = store.begin(actor, *epoch, u64::MAX).await?;
         store.commit(tx, LABEL).await?;
     }
     Ok(())
@@ -261,7 +261,7 @@ pub async fn a_zombie_owner_past_reap_cannot_commit(
     ensure!(claimed.len() == 1, "the zombie claimed {claimed:?}");
     let held = claimed[0].epoch;
     append(store, &actor, "before the reap").await?;
-    let mut open = store.begin(&actor, held).await?;
+    let mut open = store.begin(&actor, held, u64::MAX).await?;
     open.ack_seen().give_up(Release::Idle);
     let before = store.actor(&actor).await?;
 
@@ -319,7 +319,7 @@ pub async fn a_zombie_owner_past_reap_cannot_commit(
         reclaimed.len() == 1 && reclaimed[0].epoch > current,
         "the survivor's claim answered {reclaimed:?}"
     );
-    let tx = store.begin(&actor, reclaimed[0].epoch).await?;
+    let tx = store.begin(&actor, reclaimed[0].epoch, u64::MAX).await?;
     ensure!(
         tx.mail().len() == 1,
         "the survivor reads the mail the zombie never acknowledged"
@@ -356,7 +356,9 @@ pub async fn a_lapsed_heartbeat_is_reaped_with_an_epoch_bump(
     );
 
     advance(TTL);
-    let tx = store.begin(&claimed[0].actor, claimed[0].epoch).await?;
+    let tx = store
+        .begin(&claimed[0].actor, claimed[0].epoch, u64::MAX)
+        .await?;
     store.commit(tx, LABEL).await?;
     store.heartbeat(&watcher).await?;
     let mut reaped = store.reap(&watcher).await?;
@@ -434,7 +436,9 @@ pub async fn mail_from_non_owners_wakes_the_actor(
             .map(|claimed| claimed.epoch)
             .ok_or_else(|| LawBroken(format!("{key} was not claimed")))
     };
-    let mut tx = store.begin(&actor, epoch_of_claim(&actor)?).await?;
+    let mut tx = store
+        .begin(&actor, epoch_of_claim(&actor)?, u64::MAX)
+        .await?;
     tx.give_up(Release::Idle);
     let released = store.commit(tx, LABEL).await?;
     ensure!(
@@ -476,7 +480,7 @@ pub async fn mail_from_non_owners_wakes_the_actor(
             && receipt.woken[0].owner.as_ref() == Some(&owner.owner),
         "mail to an owned actor answered {receipt:?}"
     );
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     let bodies: Vec<&str> = tx.mail().iter().map(|mail| mail.body.as_str()).collect();
     ensure!(
         bodies == ["first", "second"] && tx.woken(),
@@ -496,7 +500,7 @@ pub async fn mail_from_non_owners_wakes_the_actor(
     );
     let claimed = store.claim(&owner, 1).await?;
     ensure!(claimed.len() == 1, "the re-woken actor was not claimed");
-    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    let mut tx = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     ensure!(
         tx.woken() && tx.mail().is_empty(),
         "a wake without mail read {:?}",
@@ -524,7 +528,7 @@ pub async fn mail_from_non_owners_wakes_the_actor(
         "a due actor was claimed as {claimed:?}"
     );
 
-    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    let mut tx = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     tx.give_up(Release::Terminal);
     store.commit(tx, LABEL).await?;
     let mut mail = MailTx::new();
@@ -582,15 +586,15 @@ pub async fn no_write_through_a_stale_epoch(
     let mut opened = Vec::new();
 
     let claimed = store.claim(&first, 1).await?;
-    opened.push(store.begin(&actor, claimed[0].epoch).await?);
-    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    opened.push(store.begin(&actor, claimed[0].epoch, u64::MAX).await?);
+    let mut tx = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     tx.give_up(Release::Idle);
     store.commit(tx, LABEL).await?;
     append(store, &actor, "wake").await?;
 
     let claimed = store.claim(&second, 1).await?;
-    opened.push(store.begin(&actor, claimed[0].epoch).await?);
-    let mut beyond = store.begin(&actor, claimed[0].epoch).await?;
+    opened.push(store.begin(&actor, claimed[0].epoch, u64::MAX).await?);
+    let mut beyond = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     beyond.ack_through(crate::MailSeq(beyond.seen().0 + 1));
     ensure!(
         matches!(
@@ -605,7 +609,7 @@ pub async fn no_write_through_a_stale_epoch(
 
     let claimed = store.claim(&first, 1).await?;
     ensure!(claimed.len() == 1, "the reaped actor was not claimable");
-    opened.push(store.begin(&actor, claimed[0].epoch).await?);
+    opened.push(store.begin(&actor, claimed[0].epoch, u64::MAX).await?);
     node(store, "epoch-first").await?;
     let current = epoch_of(store, &actor).await?;
     ensure!(
@@ -635,7 +639,7 @@ pub async fn no_write_through_a_stale_epoch(
     stale_epochs_are_refused(store, &actor, current).await?;
     ensure!(
         matches!(
-            store.begin(&session("absent")?, Epoch(0)).await,
+            store.begin(&session("absent")?, Epoch(0), u64::MAX).await,
             Err(DurableError::OwnershipLost(fenced)) if fenced.current.is_none()
         ),
         "an unknown actor was opened"
@@ -671,7 +675,7 @@ pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
     let claimed = store.claim(&owner, 1).await?;
     ensure!(claimed.len() == 1, "the session was not claimed");
     let epoch = claimed[0].epoch;
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: id.clone(),
         run: run.clone(),
@@ -693,7 +697,7 @@ pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
         admitted.turn_cancel
     );
 
-    let tx = store.begin(&actor, epoch).await?;
+    let tx = store.begin(&actor, epoch, u64::MAX).await?;
     ensure!(
         tx.turn_cancel().is_none(),
         "the open read a request none made"
@@ -754,7 +758,7 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     let owner = node(store, "cancel-owner").await?;
     let claimed = store.claim(&owner, 1).await?;
     ensure!(claimed.len() == 1, "the session was not claimed");
-    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    let mut tx = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     tx.write(DomainWrite::Turn(TurnWrite::Admit {
         session: id.clone(),
         run: run.clone(),
@@ -881,7 +885,7 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
 
     let claimed = store.claim(&owner, 1).await?;
     ensure!(claimed.len() == 1, "the woken session was not claimed");
-    let mut tx = store.begin(&actor, claimed[0].epoch).await?;
+    let mut tx = store.begin(&actor, claimed[0].epoch, u64::MAX).await?;
     ensure!(
         tx.turn_cancel() == Some(&escalated),
         "the owner's open read the turn's cancel as {:?}",
@@ -954,7 +958,7 @@ pub async fn lo_fence_with_path(
     let exec = ExecKey::Cell(sid, run, CellId::new("stale"));
     let effect = EffectKey(vec![7].into());
     let (root, encoded) = tagged_node("lo-fence-stale");
-    let mut stale = store.begin(&actor, epoch).await?;
+    let mut stale = store.begin(&actor, epoch, u64::MAX).await?;
     let expected = stale.revision();
     stale.stage([encoded]);
     stale.write(crate::DomainWrite::RunFact(RunFactWrite::Append {
@@ -984,12 +988,12 @@ pub async fn lo_fence_with_path(
             TTL_MILLIS,
         );
     }
-    let mut parked = store.begin(&actor, epoch).await?;
+    let mut parked = store.begin(&actor, epoch, u64::MAX).await?;
     parked.write(crate::DomainWrite::ActorPark {
         reason_json: Some("stale-park".into()),
     });
     parked.ack_seen().give_up(Release::Parked);
-    let winner = store.begin(&actor, epoch).await?;
+    let winner = store.begin(&actor, epoch, u64::MAX).await?;
     let acknowledged = store.commit(winner, LABEL).await?;
     let before = store
         .actor(&actor)
@@ -1045,7 +1049,7 @@ pub async fn lo_fence_with_path(
     }
     // Arrival changes mail_seq, never the actor's planning revision. The
     // old read can acknowledge only its seen prefix, leaving new mail owed.
-    let mut tx = store.begin(&actor, epoch).await?;
+    let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
     append(store, &actor, "unseen arrival").await?;
     tx.ack_seen();
     store.commit(tx, LABEL).await?;
@@ -1057,7 +1061,7 @@ pub async fn lo_fence_with_path(
         after.has_mail && after.pending_mail == 1,
         "unseen mail was acknowledged"
     );
-    let takeover = store.begin(&actor, epoch).await?;
+    let takeover = store.begin(&actor, epoch, u64::MAX).await?;
     advance(TTL + Duration::from_millis(1));
     let successor = node(store, "lo-fence-successor").await?;
     store.reap(&successor).await?;
@@ -1091,7 +1095,7 @@ pub async fn lo_fence_preserves_a_composed_drafts_basis(store: &dyn DurableStore
     );
     let effect = EffectKey(vec![7].into());
     let (root, encoded) = tagged_node("held-admission");
-    let mut held = store.begin(&actor, epoch).await?;
+    let mut held = store.begin(&actor, epoch, u64::MAX).await?;
     let expected = held.revision();
     held.stage([encoded]);
     held.write(crate::DomainWrite::EffectAdmission(
@@ -1102,13 +1106,13 @@ pub async fn lo_fence_preserves_a_composed_drafts_basis(store: &dyn DurableStore
             admission: root,
         },
     ));
-    let winner = store.begin(&actor, epoch).await?;
+    let winner = store.begin(&actor, epoch, u64::MAX).await?;
     let committed = store.commit(winner, LABEL).await?;
     let before = store.actor(&actor).await?;
     // OutputBoundary and the first cell save open anew for fresh mail/cancel
     // facts before appending the response/outcome they held across preparation.
     append(store, &actor, "fresh control frontier").await?;
-    let mut boundary = store.begin(&actor, epoch).await?;
+    let mut boundary = store.begin(&actor, epoch, u64::MAX).await?;
     let result = match boundary.append(held) {
         Ok(_) => store.commit(boundary, LABEL).await,
         Err(error) => {
@@ -1249,7 +1253,7 @@ pub async fn lo_postimage_receipt_matches_reopen(
         )
         .map_err(stored)?;
         let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
-        let mut tx = store.begin(&actor, epoch).await?;
+        let mut tx = store.begin(&actor, epoch, u64::MAX).await?;
         tx.stage(encoded.component_nodes.clone().into_values());
         tx.stage(encoded.descriptor.clone());
         if explicit {
@@ -1295,14 +1299,14 @@ pub async fn lo_postimage_receipt_matches_reopen(
             first = Some((write, head.clone()));
         }
     }
-    let mut empty = store.begin(&actor, epoch).await?;
+    let mut empty = store.begin(&actor, epoch, u64::MAX).await?;
     empty.ack_seen();
     ensure!(
         store.commit(empty, LABEL).await?.session_heads.is_empty(),
         "metadata-only commit fabricated a head result"
     );
     let (write, first) = first.ok_or_else(|| LawBroken("first receipt absent".into()))?;
-    let mut replay = store.begin(&actor, epoch).await?;
+    let mut replay = store.begin(&actor, epoch, u64::MAX).await?;
     replay.write(write);
     let replay = store.commit(replay, LABEL).await?;
     let [replayed] = replay.session_heads.as_slice() else {
@@ -1328,7 +1332,7 @@ pub async fn lo_postimage_receipt_matches_reopen(
     )
     .map_err(stored)?;
     let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
-    let mut refused = store.begin(&actor, epoch).await?;
+    let mut refused = store.begin(&actor, epoch, u64::MAX).await?;
     refused.stage(encoded.component_nodes.into_values());
     refused.stage(encoded.descriptor);
     refused.write(DomainWrite::SessionCommit(SessionCommitWrite {

@@ -441,7 +441,7 @@ pub async fn a_prepared_configuration_reference_racing_retirement_is_atomic(
             .map_err(|error| refused("retain racing config", error))?;
         let mut reference = tier
             .store()
-            .begin(&follower.actor, follower.epoch)
+            .begin(&follower.actor, follower.epoch, u64::MAX)
             .await
             .map_err(|error| refused("begin racing reference", error))?;
         reference.require_exact(std::sync::Arc::new(expected));

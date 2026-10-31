@@ -225,8 +225,13 @@ impl DurableStore for RecordedStore {
         owned
     }
 
-    async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
-        let opened = self.inner.begin(actor, epoch).await;
+    async fn begin(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let opened = self.inner.begin(actor, epoch, max_mail_bytes).await;
         if let Err(error) = &opened {
             let outcome = match error {
                 DurableError::OwnershipLost(_) => "ownership_lost",
@@ -243,6 +248,15 @@ impl DurableStore for RecordedStore {
             );
         }
         opened
+    }
+
+    async fn revalidate(
+        &self,
+        actor: &lash::durable::ActorKey,
+        epoch: lash::durable::Epoch,
+        expected: lash::durable::StateRevision,
+    ) -> Result<(), lash::durable::DurableError> {
+        self.inner.revalidate(actor, epoch, expected).await
     }
 
     async fn begin_retained(
@@ -273,8 +287,9 @@ impl DurableStore for RecordedStore {
         &self,
         actor: &ActorKey,
         epoch: Epoch,
+        max_mail_bytes: u64,
     ) -> Result<(ActorTx, lash::durable::domain::ProcessView), DurableError> {
-        let opened = self.inner.open_process(actor, epoch).await;
+        let opened = self.inner.open_process(actor, epoch, max_mail_bytes).await;
         if let Err(error) = &opened {
             let outcome = match error {
                 DurableError::OwnershipLost(_) => "ownership_lost",

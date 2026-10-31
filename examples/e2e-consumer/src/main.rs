@@ -592,7 +592,10 @@ mod commit_cut_laws {
         };
         let a = store.register_node(&spec).await.unwrap();
         let claimed = store.claim(&a, 1).await.unwrap();
-        let tx = store.begin(&actor, claimed[0].epoch).await.unwrap();
+        let tx = store
+            .begin(&actor, claimed[0].epoch, u64::MAX)
+            .await
+            .unwrap();
         let caller_store = Arc::clone(&store);
         let caller =
             tokio::spawn(async move { caller_store.commit(tx, CommitLabel::TURN_COMMIT).await });

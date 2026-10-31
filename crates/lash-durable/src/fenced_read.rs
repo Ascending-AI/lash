@@ -6,6 +6,40 @@ use crate::domain::{ExecKey, RootOwner};
 use crate::{ActorKey, ActorKind, DurableError, Epoch, StateRevision};
 use lash_core_store::checkpoint_graph::GraphRefusal;
 
+/// Check one keyed actor observation before interpreting its owner payload.
+pub fn validate_authority(
+    actor: &ActorKey,
+    epoch: Epoch,
+    expected: Option<StateRevision>,
+    observed: Option<(Epoch, &str, StateRevision)>,
+) -> Result<StateRevision, DurableError> {
+    let Some((current, state, revision)) = observed else {
+        return Err(DurableError::OwnershipLost(crate::Fenced {
+            actor: actor.clone(),
+            held: epoch,
+            current: None,
+        }));
+    };
+    if current != epoch || state != crate::ActorState::Owned.as_str() {
+        return Err(DurableError::OwnershipLost(crate::Fenced {
+            actor: actor.clone(),
+            held: epoch,
+            current: Some(current),
+        }));
+    }
+    if let Some(expected) = expected
+        && revision != expected
+    {
+        return Err(DurableError::RevisionConflict {
+            actor: actor.clone(),
+            epoch,
+            expected,
+            actual: revision,
+        });
+    }
+    Ok(revision)
+}
+
 /// Whether a retained observation was displaced by this claim's adopted revision.
 /// The caller reads `acknowledged` under the same lock that adopts owner commits.
 /// This authorizes a new observation, never a revision change to a prepared draft.
