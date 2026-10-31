@@ -340,11 +340,68 @@ mod laws {
     use crate::laws::embedder::Embedder;
     use lash_kernel_doc::TaskId;
 
+    /// FIG-7575: a returned closure's lexical parent is no longer live when
+    /// its checkpoint is compiled again. Its borrowed cell must survive both
+    /// that selection and another write after the first cold return.
+    fn cold_lifted_capture_retains_shared_writes() {
+        use crate::Request;
+        use crate::laws::embedder::{int, result};
+        use lash_kernel_state::kernel_internals::census_impl::Census;
+        use lash_kernel_state::paged::AllocationCensus;
+
+        let definition = "function make(held: Any) -> Any\nkernel 1\nmetering statements\nbody { return fn(next) { let before = held set held = next do perform 0(before) as Any return held } }";
+        let mut run = Embedder::new(&format!(
+            "definition {}\nmain {{ let f = call make(7) let first = apply f(8) let second = apply f(9) return (first, second) }}",
+            serde_json::to_string(definition).unwrap(),
+        ));
+        for expected in [7, 8] {
+            assert!(matches!(run.run(), Step::Parked(_)));
+            let (root, certificate) = run.checkpoint();
+            let access = run.machine.heap.pages().clone();
+            let rows = run.machine.task(TaskId::MAIN).unwrap().frames.rows.clone();
+            let captured = (0..rows.len())
+                .map(|at| row::<FrameRecord>(&rows, at, &access).unwrap())
+                .find(|record| !record.capture_names.is_empty())
+                .expect("the parked closure has a captured variable");
+            let Unit::Library(function) = captured.statement.resolve(&access).unwrap().unit.clone()
+            else {
+                panic!("the closure has a lifted body")
+            };
+            let (mut program, _) = run.program(true);
+            program.selection =
+                lash_kernel_doc::Selection::Restored(lash_kernel_doc::RestoreSelection {
+                    live: [lash_kernel_value::CallableId {
+                        link: captured.link,
+                        function,
+                    }]
+                    .into(),
+                    pins: Default::default(),
+                });
+            run.machine = crate::KernelMachine::open_with_census(
+                program,
+                run.bounds,
+                &root,
+                Box::new(run.source.clone()),
+                Box::new(Census::restore(certificate).unwrap()),
+                crate::compile::Layout::default(),
+            )
+            .unwrap();
+            let Request::Effect(request) = run.pending.first().unwrap();
+            assert_eq!(request.args, vec![int(expected)]);
+            run.deliver_next();
+        }
+        assert_eq!(
+            result(run.run_to_end(&[])),
+            lash_kernel_doc::Datum::Tuple(vec![int(8), int(9)])
+        );
+    }
+
     /// K-BND-003 / K-EVAL-008: a stored borrowed capture must still be the
     /// source's cell owner. Ordinary values and missing captures cannot stand
     /// in for it and change either its price or its identity on restore.
     #[test]
     fn restored_capture_ownership_is_checked_against_the_source() {
+        cold_lifted_capture_retains_shared_writes();
         let definition = "function outer(held: Any) -> Any\nkernel 1\nmetering statements\nbody { let f = fn() { let w = perform 0(null) as Any return held } return apply f() }";
         let mut run = Embedder::new(&format!(
             "definition {}\nmain {{ let answer = call outer(7) return answer }}",
