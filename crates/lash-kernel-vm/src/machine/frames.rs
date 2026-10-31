@@ -209,8 +209,24 @@ impl Slots {
         &mut self,
         at: u32,
     ) -> Result<Option<PreparedBinding<'_>>, HeapFault> {
+        self.prepare_slot(at, false)
+    }
+    pub(super) fn prepare_assignment(
+        &mut self,
+        at: u32,
+    ) -> Result<Option<PreparedBinding<'_>>, HeapFault> {
+        self.prepare_slot(at, true)
+    }
+    fn prepare_slot(
+        &mut self,
+        at: u32,
+        assignment: bool,
+    ) -> Result<Option<PreparedBinding<'_>>, HeapFault> {
         let at = at as usize;
-        if !matches!(self.values.get(at), Some(SlotState::Empty)) {
+        if !matches!(
+            (assignment, self.values.get(at)),
+            (false, Some(SlotState::Empty)) | (true, Some(SlotState::Value(_)))
+        ) {
             return Ok(None);
         }
         if !self.changed[at] {

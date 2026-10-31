@@ -16,7 +16,7 @@ impl KernelMachine {
         value: doc::Value,
     ) -> Result<bool, Halt> {
         let op = running.stream.ops[pc as usize];
-        if !matches!(op, Op::Const { .. } | Op::Local { .. })
+        if !matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
             || matches!(op, Op::Const { .. }) && value.handle().is_some()
         {
             return Ok(false);
@@ -191,6 +191,9 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_source_published();
+            if matches!(op, Op::Session { .. }) {
+                crate::machine::islands::witness::precise_session_read_published();
+            }
         }
         Ok(published)
     }

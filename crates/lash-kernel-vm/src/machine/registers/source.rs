@@ -221,7 +221,9 @@ impl Operands {
         let Some(roots) = &self.roots else {
             return Ok(None);
         };
-        let Some(op @ (Op::Const { .. } | Op::Local { .. })) = stream.ops.get(pc as usize) else {
+        let Some(op @ (Op::Const { .. } | Op::Local { .. } | Op::Session { .. })) =
+            stream.ops.get(pc as usize)
+        else {
             return Ok(None);
         };
         let reg = op

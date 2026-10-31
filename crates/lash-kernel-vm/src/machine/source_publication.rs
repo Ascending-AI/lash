@@ -4,6 +4,7 @@ mod cell;
 pub(in crate::machine) use cell::{CellConstruction, PreparedObjectConstruction};
 pub(in crate::machine) mod construction;
 mod leaf;
+mod session;
 use super::session::Session;
 use crate::admission::{Allowance, SourceResources};
 use crate::compile::room::{

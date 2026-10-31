@@ -73,6 +73,8 @@ thread_local! {
     static PRECISE_CONSTRUCTIONS: std::cell::Cell<[u64;5]> = const { std::cell::Cell::new([0;5]) };
     static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
     static SCOPED_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static PRECISE_WRITES: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
+    static PRECISE_SESSION_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_SOURCE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TUPLE_CONSTRUCTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -93,6 +95,8 @@ pub(crate) fn begin() {
     EMPTY_TUPLE_CONSTRUCTIONS.with(|counts| counts.set([0; 2]));
     PRECISE_CONSTRUCTIONS.with(|counts| counts.set([0; 5]));
     PRECISE_BINDINGS.with(|counts| counts.set([0; 2]));
+    PRECISE_WRITES.with(|counts| counts.set([0; 2]));
+    PRECISE_SESSION_READS.with(|count| count.set(0));
     SCOPED_BINDINGS.with(|counts| counts.set([0; 2]));
     SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 4]));
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
@@ -173,7 +177,7 @@ pub(in crate::machine::islands) fn return_published() {
 pub(crate) fn cell_publications() -> u64 {
     CELL_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn cell_published() {
+pub(in crate::machine) fn cell_published() {
     CELL_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 
@@ -197,7 +201,7 @@ pub(in crate::machine::islands) fn closure_constructed() {
 pub(crate) fn session_publications() -> u64 {
     SESSION_PUBLICATIONS.with(|count| count.replace(0))
 }
-pub(in crate::machine::islands) fn session_published() {
+pub(in crate::machine) fn session_published() {
     SESSION_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 
@@ -351,7 +355,7 @@ pub(crate) fn source_replay_publications() -> [u64; 4] {
 pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
     use lash_kernel_exec::Op;
     let index = match op {
-        Op::Const { .. } | Op::Local { .. } => 0,
+        Op::Const { .. } | Op::Local { .. } | Op::Session { .. } => 0,
         Op::LetBind { .. } => 1,
         Op::LetBindShared { .. } => 2,
         Op::MakeTuple { .. }
@@ -366,4 +370,24 @@ pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
         counts[index] += 1;
         total.set(counts);
     });
+}
+
+#[cfg(test)]
+pub(crate) fn precise_writes() -> [u64; 2] {
+    PRECISE_WRITES.with(|counts| counts.replace([0; 2]))
+}
+#[cfg(test)]
+pub(crate) fn precise_session_reads() -> u64 {
+    PRECISE_SESSION_READS.with(|count| count.replace(0))
+}
+
+pub(in crate::machine) fn precise_write_published(value: lash_kernel_doc::Value) {
+    PRECISE_WRITES.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(value.handle().is_some())] += 1;
+        counts.set(next);
+    });
+}
+pub(in crate::machine) fn precise_session_read_published() {
+    PRECISE_SESSION_READS.with(|count| count.set(count.get() + 1));
 }

@@ -243,6 +243,8 @@ fn observe_source_or_register(
     let empty_tuples = crate::machine::islands::witness::empty_tuple_constructions();
     let precise_constructions = crate::machine::islands::witness::precise_constructions();
     let precise_bindings = crate::machine::islands::witness::precise_bindings();
+    let precise_writes = crate::machine::islands::witness::precise_writes();
+    let session_reads = crate::machine::islands::witness::precise_session_reads();
     let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
     let replay = crate::machine::islands::witness::source_replay_publications();
     if mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS) {
@@ -262,6 +264,37 @@ fn observe_source_or_register(
     let cells = crate::machine::islands::witness::cell_publications();
     let cell_constructions = crate::machine::islands::witness::cell_constructions();
     let closure_constructions = crate::machine::islands::witness::closure_constructions();
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+    {
+        if source.contains(READ_ADD_WRITE) {
+            assert!(
+                precise_writes[0] > 0,
+                "precise scalar assignment must consume its actual RHS under source acceptance"
+            );
+        }
+        if source.contains(SOURCE_CONSTRUCTION) {
+            assert!(
+                precise_writes[1] > 0,
+                "precise reference assignment must consume its actual RHS under source acceptance"
+            );
+        }
+        if source.contains(SOURCE_CELL) {
+            assert!(
+                cells >= 2,
+                "precise owning and captured cell writes must publish real member journals: {cells}"
+            );
+        }
+        if source.contains(SOURCE_SESSION) {
+            assert!(
+                sessions >= 2 && session_reads > 0,
+                "precise session writes and reads must publish their actual owners: {sessions}/{session_reads}"
+            );
+        }
+    }
     if mode == Mode::Source
         && layout == Layout(0)
         && !taped

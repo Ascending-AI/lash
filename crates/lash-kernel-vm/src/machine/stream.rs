@@ -255,11 +255,14 @@ impl KernelMachine {
                     let (lib, count) = (LibId(lib.0), args.len as usize);
                     self.call_answered(task, running.exe, lib, at(args.start), count)?;
                 }
-                Op::WriteSession { name, src } => {
+                Op::BindSession { name, src } | Op::WriteSession { name, src } => {
                     self.close_region(running.stream);
+                    if self.publish_precise_session_write(running, source_pc)? {
+                        return Ok(Ran::Done);
+                    }
                     let value = self.take(at(src));
                     let name = &running.stream.names[name.ix()];
-                    if !self.session_write(name, value, true)? {
+                    if !self.session_write(name, value, matches!(op, Op::WriteSession { .. }))? {
                         return unbound(name);
                     }
                     return self.source_done(running, source_pc, Ran::Done);
@@ -287,6 +290,9 @@ impl KernelMachine {
                 }
                 Op::WriteLocal { local, src } => {
                     self.close_region(running.stream);
+                    if self.publish_source_binding(running, source_pc)? {
+                        return Ok(Ran::Done);
+                    }
                     let value = self.take(at(src));
                     self.write_local(task, running.exe, local, value)?;
                     return self.source_done(running, source_pc, Ran::Done);
@@ -553,6 +559,9 @@ impl KernelMachine {
                     Some(value) => value,
                     None => return unbound(name),
                 };
+                if self.publish_source_leaf(running, pc, value)? {
+                    return Ok(true);
+                }
                 self.put(at(dst), value);
             }
             Op::MakeTuple { .. }
@@ -629,11 +638,6 @@ impl KernelMachine {
                     return Ok(Some(Ran::Step));
                 }
                 return Ok(None);
-            }
-            Op::BindSession { name, src } => {
-                let value = self.take(at(src));
-                self.session_write(&stream.names[name.ix()], value, false)?;
-                Ran::Done
             }
             Op::WriteUnbound { name, src } => {
                 self.take(at(src));
@@ -720,6 +724,7 @@ impl KernelMachine {
             | Op::Closure { .. }
             | Op::Pin { .. }
             | Op::WriteSession { .. }
+            | Op::BindSession { .. }
             | Op::Call { .. }
             | Op::Operator { .. }
             | Op::Bind { .. }

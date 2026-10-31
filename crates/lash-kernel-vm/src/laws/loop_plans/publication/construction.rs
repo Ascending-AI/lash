@@ -7,6 +7,18 @@ pub(super) fn successors() {
     use lash_kernel_value::sites::{Site, Unit};
     for (text, completed, next, phase) in [
         (
+            "main { let x = 1 set x = 2 return x }",
+            vec![1],
+            vec![2, 0],
+            Phase::Commit,
+        ),
+        (
+            "main { let x = 1 if true { set x = 2 } return x }",
+            vec![1, 1, 0],
+            vec![1, 1],
+            Phase::Leave,
+        ),
+        (
             "main { let xs = [1, 2] return xs }",
             vec![0],
             vec![1, 0],
