@@ -1,7 +1,6 @@
 //! A release window over actual retained process history, seeded before counting.
 
 use anyhow::{Result, bail, ensure};
-use lash_execution_contracts::backend::StoreSet as _;
 use lash_execution_contracts::process::{
     LifetimeDecision, ProcessEventAppendRequest, ProcessProvenance, ProcessRegistrar as _,
     ProcessRegistration, ProcessRegistryTestSupport as _, ProcessRetention as _, WaitKind,
@@ -47,7 +46,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
                 since_ms: 1,
                 kind: WaitKind::Call {
                     resume_at_ms: None,
-                    call_id: ToolCallId::fixture(format!(
+                    call_id: ToolCallId::fixture(&format!(
                         "release-{index}-{}",
                         "x".repeat(PAYLOAD_BYTES)
                     )),
