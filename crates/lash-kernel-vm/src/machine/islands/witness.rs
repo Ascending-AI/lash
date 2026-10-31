@@ -59,6 +59,7 @@ pub enum Exit {
 pub type Counts = BTreeMap<(Family, Exit), u64>;
 
 thread_local! {
+    static PRECISE_READS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_TEST_ITERATIONS: std::cell::Cell<[Option<u64>; 2]> = const { std::cell::Cell::new([None; 2]) };
     static PRECISE_TESTS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static SOURCE_LOOP_PUBLICATIONS: std::cell::RefCell<std::collections::BTreeMap<lash_kernel_value::sites::Site, std::collections::BTreeSet<u64>>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
@@ -75,7 +76,7 @@ thread_local! {
     static NATIVE_TABLE_PUBLICATIONS: std::cell::Cell<[u64;3]> = const { std::cell::Cell::new([0;3]) };
     static EMPTY_TUPLE_CONSTRUCTIONS: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
     static PRECISE_CONSTRUCTIONS: std::cell::Cell<[u64;5]> = const { std::cell::Cell::new([0;5]) };
-    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
+    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 5]> = const { std::cell::Cell::new([0; 5]) };
     static SCOPED_BINDINGS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_WRITES: std::cell::Cell<[u64;2]> = const { std::cell::Cell::new([0;2]) };
     static PRECISE_SESSION_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -90,6 +91,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PRECISE_READS.with(|counts| counts.set([0; 2]));
     PRECISE_TEST_ITERATIONS.with(|counts| counts.set([None; 2]));
     PRECISE_TESTS.with(|counts| counts.set([0; 2]));
     SESSION_PUBLICATIONS.with(|count| count.set(0));
@@ -104,7 +106,7 @@ pub(crate) fn begin() {
     PRECISE_WRITES.with(|counts| counts.set([0; 2]));
     PRECISE_SESSION_READS.with(|count| count.set(0));
     SCOPED_BINDINGS.with(|counts| counts.set([0; 2]));
-    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 4]));
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 5]));
     PRECISE_SOURCE_PUBLICATIONS.with(|count| count.set(0));
     TUPLE_CONSTRUCTIONS.with(|count| count.set(0));
     TABLE_CONSTRUCTIONS.with(|counts| counts.set([0; 3]));
@@ -354,8 +356,8 @@ pub(in crate::machine) fn scoped_binding_published(shared: bool) {
 }
 
 #[cfg(test)]
-pub(crate) fn source_replay_publications() -> [u64; 4] {
-    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.replace([0; 4]))
+pub(crate) fn source_replay_publications() -> [u64; 5] {
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.replace([0; 5]))
 }
 
 pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
@@ -369,6 +371,7 @@ pub(in crate::machine) fn source_replay_published(op: lash_kernel_exec::Op) {
         | Op::MakeSet { .. }
         | Op::MakeMap { .. }
         | Op::MakeRecord { .. } => 3,
+        Op::Field { .. } | Op::Index { .. } => 4,
         Op::Closure { .. } => return,
         _ => unreachable!("a replay publication has a prepared source operation"),
     };
@@ -456,6 +459,19 @@ pub(in crate::machine) fn precise_test_published(taken: bool, iteration: u64) {
     PRECISE_TESTS.with(|counts| {
         let mut next = counts.get();
         next[usize::from(taken)] += 1;
+        counts.set(next);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn precise_reads() -> [u64; 2] {
+    PRECISE_READS.with(|counts| counts.replace([0; 2]))
+}
+
+pub(in crate::machine) fn precise_read_published(index: bool) {
+    PRECISE_READS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(index)] += 1;
         counts.set(next);
     });
 }

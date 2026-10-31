@@ -127,33 +127,33 @@ impl PreparedJoin<'_> {
         self.registers.source.publish_join(self.join);
     }
 }
-pub(super) struct PreparedConstruction<'a> {
+pub(super) struct PreparedOutput<'a> {
     registers: &'a mut Registers,
-    construction: source::Construction,
+    output: source::Output,
 }
-impl PreparedConstruction<'_> {
+impl PreparedOutput<'_> {
     pub(super) fn owner(&self) -> lash_kernel_state::kernel_internals::logical::Owner {
-        self.construction.owner()
+        self.output.owner()
     }
     pub(super) fn owners(&self) -> Vec<lash_kernel_state::kernel_internals::logical::Owner> {
-        self.construction.owners()
+        self.output.owners()
     }
     pub(super) fn values(&self) -> Vec<Value> {
-        self.construction.values()
+        self.output.values()
     }
     pub(super) fn publish(
         self,
         value: Value,
         holding: lash_kernel_state::kernel_internals::logical::Holding,
     ) {
-        for reg in self.construction.registers() {
+        for reg in self.output.registers() {
             self.registers.take(reg.ix(), Value::Null);
         }
-        let output = self.construction.reg_index();
+        let output = self.output.reg_index();
         self.registers.put(output, value);
         self.registers
             .source
-            .publish_construction(self.construction, value, holding);
+            .publish_output(self.output, value, holding);
     }
 }
 
@@ -345,25 +345,37 @@ impl Registers {
         Ok(())
     }
 
-    pub(super) fn prepare_source_construction(
+    pub(super) fn prepare_source_output(
         &mut self,
         stream: &crate::compile::Stream,
         pc: u32,
-    ) -> Result<Option<PreparedConstruction<'_>>, HeapFault> {
+    ) -> Result<Option<PreparedOutput<'_>>, HeapFault> {
         let Some(reg) = stream.ops.get(pc as usize).and_then(|op| op.writes()) else {
             return Ok(None);
         };
         if reg.ix() >= self.extent {
             return Err(HeapFault::Malformed(
-                "source construction output is outside its admitted register window".into(),
+                "source output is outside its admitted register window".into(),
             ));
         }
-        let Some(construction) = self.source.prepare_construction(stream, pc)? else {
+        let Some(output) = self.source.prepare_output(stream, pc)? else {
             return Ok(None);
         };
-        Ok(Some(PreparedConstruction {
+        if matches!(
+            stream.ops[pc as usize],
+            lash_kernel_exec::Op::Field { .. } | lash_kernel_exec::Op::Index { .. }
+        ) {
+            for (reg, _, value) in output.inputs() {
+                if !self.get(reg.ix()).is_some_and(|actual| actual.same(value)) {
+                    return Err(HeapFault::Malformed(
+                        "source read snapshot differs from its register".into(),
+                    ));
+                }
+            }
+        }
+        Ok(Some(PreparedOutput {
             registers: self,
-            construction,
+            output,
         }))
     }
 

@@ -2,21 +2,19 @@
 pub(in crate::machine) mod storage;
 use super::*;
 use crate::compile::room::{ExitKind, Phase, Point, publication::Occurrence};
-use crate::machine::{
-    Halt, KernelMachine, fault, registers::PreparedConstruction, stream::Running,
-};
+use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::{Holding, JournalEvent, PublicationValue as PV};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 struct SourceConstruction<'heap, 'bank> {
     recipe: storage::Construction<'heap>,
-    bank: PreparedConstruction<'bank>,
+    bank: PreparedOutput<'bank>,
     physical_room: u64,
 }
 struct PreparedSourceConstruction<'bank> {
     data: storage::Prepared,
-    bank: PreparedConstruction<'bank>,
+    bank: PreparedOutput<'bank>,
     holding: Holding,
 }
 impl<'bank> StoragePreparation for SourceConstruction<'_, 'bank> {
@@ -123,7 +121,7 @@ impl KernelMachine {
             return Ok(false);
         };
         self.logical_flush()?;
-        let Some(bank) = self.regs.prepare_source_construction(running.stream, pc)? else {
+        let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
             return Ok(false);
         };
         let output = bank.owner();

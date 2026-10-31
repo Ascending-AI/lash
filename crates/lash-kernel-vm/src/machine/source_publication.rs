@@ -8,6 +8,7 @@ pub(in crate::machine) mod construction;
 mod join;
 mod leaf;
 mod occurrence;
+mod read;
 use occurrence::source_loops;
 mod session;
 mod test;

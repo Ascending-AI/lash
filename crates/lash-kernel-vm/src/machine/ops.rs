@@ -310,15 +310,13 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Reads field `field` of the record or the error in `target` into
-    /// `out` (`K-FORM-009`).
-    pub(super) fn read_field(
+    /// Reads a field of the evaluated record or error (`K-FORM-009`).
+    pub(super) fn field_value(
         &mut self,
-        target: Reg,
+        target: Value,
         field: &crate::compile::Field,
-        out: Reg,
-    ) -> Eval<()> {
-        let value = match self.regs[target] {
+    ) -> Eval<Value> {
+        let value = match target {
             Value::Record(record) => {
                 self.resolve_field(record, field)?;
                 let slot = field.site.and_then(|site| self.sites.slot(site));
@@ -346,19 +344,16 @@ impl KernelMachine {
             }
             _ => return raise("type_error", "only a record or an error has fields"),
         };
-        self.put(out, value);
-        Ok(())
+        Ok(value)
     }
 
-    pub(super) fn read_index(
+    pub(super) fn index_value(
         &mut self,
-        target: Reg,
-        index: Reg,
-        out: Reg,
+        target: Value,
+        index: Value,
         site: Option<crate::compile::ReadSite>,
-    ) -> Eval<()> {
-        let index = self.regs[index];
-        let value = match self.regs[target] {
+    ) -> Eval<Value> {
+        let value = match target {
             Value::Tuple(object) | Value::List(object) => {
                 let at = position(&index)?;
                 let (element, len) = self.in_arena(|arena| {
@@ -385,8 +380,7 @@ impl KernelMachine {
                 self.resolve(record, &index)?;
                 let Some(site) = site else {
                     let found = self.in_arena(|arena| arena.table_get(record, &index))?;
-                    self.put(out, found.unwrap_or(Value::Absent));
-                    return Ok(());
+                    return Ok(found.unwrap_or(Value::Absent));
                 };
                 let slot = self.sites.slot(site);
                 let (found, at) = self.in_arena(|arena| {
@@ -418,8 +412,7 @@ impl KernelMachine {
                 );
             }
         };
-        self.put(out, value);
-        Ok(())
+        Ok(value)
     }
 
     /// Refuses a value that is no legal key (`K-KEY-002`).

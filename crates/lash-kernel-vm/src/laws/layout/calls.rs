@@ -19,7 +19,7 @@ const SOURCE_CONSTRUCTION: &str = "let f = fn(value) { let empty_a = () let empt
 const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { print e.kind } try { set xs[2] = 2 } catch e { print e.kind } return xs";
 // K-CHG-001: an unpaid source region cannot publish a captured closure.
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
-const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
+const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
 const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
@@ -32,7 +32,7 @@ const FORMATTED_APPEND: &str = "let build = fn(n) { let text = \"\" let i = 0 wh
 const FORMATTED_MISS: &str = "let build = fn() { let text = \"old\" set text = text.concat(text, text.join([\"field=\", 1, \"; suffix\"], \"\")) return text } return apply build()";
 
 thread_local! {
-    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 4]> = const { std::cell::Cell::new([0; 4]) };
+    static SOURCE_REPLAY_PUBLICATIONS: std::cell::Cell<[u64; 5]> = const { std::cell::Cell::new([0; 5]) };
     static CHECKPOINT_EXITS: std::cell::RefCell<crate::machine::islands::witness::Counts> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     // PreparedLibrary is an immutable, shareable fixture. Cold reopen still
     // constructs its own library in Embedder::reopen.
@@ -248,18 +248,20 @@ fn observe_source_or_register(
     let scoped_bindings = crate::machine::islands::witness::scoped_bindings();
     let precise_joins = crate::machine::islands::witness::precise_joins();
     let precise_tests = crate::machine::islands::witness::precise_tests();
+    let precise_reads = crate::machine::islands::witness::precise_reads();
     let precise_test_iterations = crate::machine::islands::witness::precise_test_iterations();
     let loop_publications = crate::machine::islands::witness::source_loop_publications();
     let replay = crate::machine::islands::witness::source_replay_publications();
-    if mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS) {
-        SOURCE_REPLAY_PUBLICATIONS.with(|total| {
-            let mut counts = total.get();
-            for (sum, count) in counts.iter_mut().zip(replay) {
+    let scoped_replay = mode == Mode::Source && source.contains(SOURCE_SCOPED_BINDINGS);
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| {
+        let mut counts = total.get();
+        for (index, (sum, count)) in counts.iter_mut().zip(replay).enumerate() {
+            if scoped_replay || index == 4 {
                 *sum += count;
             }
-            total.set(counts);
-        });
-    }
+        }
+        total.set(counts);
+    });
     let precise_source = crate::machine::islands::witness::precise_source_publications();
     let tuple_constructions = crate::machine::islands::witness::tuple_constructions();
     let table_constructions = crate::machine::islands::witness::table_constructions();
@@ -367,6 +369,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_SCOPED_BINDINGS)
     {
+        assert!(
+            precise_reads.iter().all(|count| *count > 0),
+            "field and index reads must publish real inputs and their aliased result under source acceptance: {precise_reads:?}"
+        );
         assert!(
             precise_tests.iter().all(|count| *count > 0),
             "both actual while outcomes must consume their condition through source acceptance: {precise_tests:?}"
@@ -586,7 +592,7 @@ fn observe_source_or_register(
 /// layout, including arity, type, depth, memory and missing-binding exits.
 #[test]
 fn direct_call_entry_agrees() {
-    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 4]));
+    SOURCE_REPLAY_PUBLICATIONS.with(|total| total.set([0; 5]));
     CHECKPOINT_EXITS.with_borrow_mut(|counts| counts.clear());
     let definition = |signature: &str, body: &str| {
         let function = format!(
@@ -947,7 +953,7 @@ fn direct_call_entry_agrees() {
             let replay = SOURCE_REPLAY_PUBLICATIONS.with(|total| total.get());
             assert!(
                 replay.iter().all(|count| *count > 0),
-                "finite charge prefixes must publish their leaves, ordinary/shared bindings and constructors before their unchanged typed stop: {replay:?}"
+                "finite charge prefixes must publish their leaves, ordinary/shared bindings, constructors and member reads before their unchanged typed stop: {replay:?}"
             );
         }
         for memory in [8192, 16384] {

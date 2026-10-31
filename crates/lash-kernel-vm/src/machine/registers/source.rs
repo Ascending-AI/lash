@@ -80,13 +80,13 @@ impl Leaf {
         (self.operand.reg, self.operand.held.value)
     }
 }
-pub(super) struct Construction {
+pub(super) struct Output {
     inputs: Vec<(Reg, Owner, Value)>,
     reg: Reg,
     site: Arc<Site>,
     owner: Owner,
 }
-impl Construction {
+impl Output {
     pub(super) fn reg_index(&self) -> usize {
         self.reg.ix()
     }
@@ -98,6 +98,9 @@ impl Construction {
     }
     pub(super) fn values(&self) -> Vec<Value> {
         self.inputs.iter().map(|(_, _, value)| *value).collect()
+    }
+    pub(super) fn inputs(&self) -> &[(Reg, Owner, Value)] {
+        &self.inputs
     }
     pub(super) fn registers(&self) -> impl Iterator<Item = Reg> + '_ {
         self.inputs.iter().map(|(reg, _, _)| *reg)
@@ -183,11 +186,11 @@ impl Operands {
         };
         assert!(operand.held.owner == Some(transfer.owner));
     }
-    pub(super) fn prepare_construction(
+    pub(super) fn prepare_output(
         &mut self,
         stream: &Stream,
         pc: u32,
-    ) -> Result<Option<Construction>, HeapFault> {
+    ) -> Result<Option<Output>, HeapFault> {
         if !self.active {
             return Ok(None);
         }
@@ -200,22 +203,22 @@ impl Operands {
             | Op::MakeMap { .. }
             | Op::MakeSet { .. }
             | Op::MakeRecord { .. }
-            | Op::Closure { .. }),
+            | Op::Closure { .. }
+            | Op::Field { .. }
+            | Op::Index { .. }),
         ) = stream.ops.get(pc as usize)
         else {
             return Ok(None);
         };
         let reg = op
             .writes()
-            .ok_or_else(|| invalid("source construction has no output register"))?;
+            .ok_or_else(|| invalid("source output has no output register"))?;
         let Some(Some(site)) = stream.source_sites.get(pc as usize) else {
             return Ok(None);
         };
         let reads = op.reads();
         if self.positions.get(reg.ix()).copied() != Some(usize::MAX) && !reads.contains(&reg) {
-            return Err(invalid(
-                "source construction overwrites an unconsumed operand",
-            ));
+            return Err(invalid("source output overwrites an unconsumed operand"));
         }
         let mut inputs = Vec::new();
         inputs
@@ -228,14 +231,14 @@ impl Operands {
                 .positions
                 .get(input.ix())
                 .copied()
-                .ok_or_else(|| invalid("source construction input register is missing"))?;
+                .ok_or_else(|| invalid("source output input register is missing"))?;
             let operand = self
                 .values
                 .get(position)
-                .ok_or_else(|| invalid("source construction input has no owner"))?;
+                .ok_or_else(|| invalid("source output input has no owner"))?;
             let owner = roots.operand(&operand.site)?;
             if operand.reg != input || operand.held.owner != Some(owner) {
-                return Err(invalid("source construction input has another owner"));
+                return Err(invalid("source output input has another owner"));
             }
             inputs.push((input, owner, operand.held.value));
         }
@@ -244,34 +247,34 @@ impl Operands {
             .map_err(|_| HeapFault::Exhausted {
                 resource: lash_kernel_doc::heap::HostResource::StagingBytes,
             })?;
-        Ok(Some(Construction {
+        Ok(Some(Output {
             inputs,
             reg,
             site: Arc::clone(site),
             owner: roots.operand(site)?,
         }))
     }
-    pub(super) fn publish_construction(
+    pub(super) fn publish_output(
         &mut self,
-        construction: Construction,
+        output: Output,
         value: Value,
         holding: lash_kernel_state::kernel_internals::logical::Holding,
     ) {
-        for (reg, owner, _) in construction.inputs {
+        for (reg, owner, _) in output.inputs {
             let Some(operand) = self.remove_value(reg) else {
                 unreachable!("an exclusively prepared source input exists");
             };
             assert!(operand.held.owner == Some(owner));
         }
         self.publish_leaf(Leaf {
-            owner: construction.owner,
+            owner: output.owner,
             operand: Operand {
-                reg: construction.reg,
-                site: construction.site,
+                reg: output.reg,
+                site: output.site,
                 held: Held {
                     value,
                     holding,
-                    owner: Some(construction.owner),
+                    owner: Some(output.owner),
                 },
             },
         });

@@ -5,7 +5,7 @@ use crate::compile::{
     room::{ExitKind, Measure, Phase, Point, publication::Occurrence},
 };
 use crate::machine::{
-    Halt, KernelMachine, SlotState, fault, registers::PreparedConstruction, stream::Running,
+    Halt, KernelMachine, SlotState, fault, registers::PreparedOutput, stream::Running,
 };
 use doc::heap::EntityId;
 use lash_kernel_exec::Op;
@@ -73,15 +73,11 @@ impl StoragePreparation for ClosureConstruction {
 
 struct SourceClosure<'bank> {
     recipe: ClosureConstruction,
-    bank: PreparedConstruction<'bank>,
+    bank: PreparedOutput<'bank>,
     holding: Holding,
 }
 impl<'bank> StoragePreparation for SourceClosure<'bank> {
-    type Prepared = (
-        PreparedObjectConstruction,
-        PreparedConstruction<'bank>,
-        Holding,
-    );
+    type Prepared = (PreparedObjectConstruction, PreparedOutput<'bank>, Holding);
     const MATERIALIZES: bool = true;
     fn prepare<'a>(
         self,
@@ -172,7 +168,7 @@ impl KernelMachine {
             };
             entities.push(entity);
         }
-        let Some(bank) = self.regs.prepare_source_construction(running.stream, pc)? else {
+        let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
             return Ok(false);
         };
         let output = bank.owner();

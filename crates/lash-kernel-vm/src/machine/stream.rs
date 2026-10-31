@@ -176,6 +176,8 @@ impl KernelMachine {
                     pc = self.enter_region(running, region, total, pc)?;
                 }
                 Op::Const { .. }
+                | Op::Field { .. }
+                | Op::Index { .. }
                 | Op::Local { .. }
                 | Op::Session { .. }
                 | Op::LetBind { .. }
@@ -192,7 +194,7 @@ impl KernelMachine {
                         continue;
                     }
                 }
-                Op::Unbound { .. } | Op::Field { .. } | Op::Index { .. } | Op::Pin { .. } => {
+                Op::Unbound { .. } | Op::Pin { .. } => {
                     inside!(self, running, pc, self.in_region_rare(running, op));
                 }
                 Op::Nested { act, args } => {
@@ -525,6 +527,23 @@ impl KernelMachine {
         let op = running.stream.ops[pc as usize];
         let task = running.task;
         match op {
+            Op::Field { at: reg, field } => {
+                let reg = at(reg);
+                let value = self.field_value(self.regs[reg], &running.stream.fields[field.ix()])?;
+                if self.publish_source_read(running, pc, value)? {
+                    return Ok(true);
+                }
+                self.put(reg, value);
+            }
+            Op::Index { at: reg, site } => {
+                let reg = at(reg);
+                let site = crate::compile::ReadSite::new(site.0, running.stream.layout);
+                let value = self.index_value(self.regs[reg], self.regs[reg + 1], site)?;
+                if self.publish_source_read(running, pc, value)? {
+                    return Ok(true);
+                }
+                self.put(reg, value);
+            }
             Op::Const { dst, c } => {
                 let value = self.literal(&running.stream.consts[c.ix()])?;
                 if self.publish_source_leaf(running, pc, value)? {
@@ -589,15 +608,6 @@ impl KernelMachine {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         match op {
             Op::Unbound { name, .. } => unbound(&stream.names[name.ix()]),
-            Op::Field { at: r, field } => {
-                let r = at(r);
-                self.read_field(r, &stream.fields[field.ix()], r)
-            }
-            Op::Index { at: r, site } => {
-                let r = at(r);
-                let site = crate::compile::ReadSite::new(site.0, stream.layout);
-                self.read_index(r, r + 1, r, site)
-            }
             Op::MakeTuple { items } => self.make_tuple(items),
             Op::MakeList { items } => self.make_list(items),
             Op::MakeSet { items } => self.make_set(items),
