@@ -46,6 +46,7 @@ use super::{Answer, SqliteDurableStore, apply_owner, commit, refuse};
 use crate::conn::{TxOutcome, cached_execute};
 
 lash_store_sql::statements! {
+    lazy
     /// Page statements only SQLite issues: the `json_each` binding of a
     /// node list and its integer holds.
     pub(crate) struct PageSqliteStatements @ "durable_pages_sqlite" {
@@ -60,12 +61,12 @@ lash_store_sql::statements! {
         /// Mixed closure and node-only holds from one owner commit. A retained
         /// call keeps its roots until logical expiry, which queues them after
         /// deleting the row. SQLite's single writer makes that check atomic.
-        hold_set = "WITH RECURSIVE input AS MATERIALIZED (SELECT ?1 AS closures, ?2 AS nodes),
+        hold_set = "WITH RECURSIVE input AS MATERIALIZED (SELECT ?1 AS closure_bytes, ?2 AS node_bytes),
              offsets AS (SELECT 1 AS pos UNION ALL SELECT pos + 32 FROM offsets, input
-                 WHERE pos + 32 <= max(length(closures), length(nodes))),
+                 WHERE pos + 32 <= max(length(closure_bytes), length(node_bytes))),
              retired AS (
-                 SELECT substr(closures, pos, 32) AS hash, 1 AS closure FROM input, offsets WHERE pos <= length(closures)
-                 UNION ALL SELECT substr(nodes, pos, 32), 0 FROM input, offsets WHERE pos <= length(nodes))
+                 SELECT substr(closure_bytes, pos, 32) AS hash, 1 AS closure FROM input, offsets WHERE pos <= length(closure_bytes)
+                 UNION ALL SELECT substr(node_bytes, pos, 32), 0 FROM input, offsets WHERE pos <= length(node_bytes))
              INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
              SELECT blobs.hash, retired.closure, ?3 FROM retired
              JOIN blobs ON blobs.hash = retired.hash

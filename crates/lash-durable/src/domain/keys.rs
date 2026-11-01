@@ -100,13 +100,17 @@ pub(super) fn stored(prefix: &str, parts: &[&str]) -> String {
     key.push_str(prefix);
     for part in parts {
         key.push('/');
-        for character in part.chars() {
-            match character {
-                '%' => key.push_str("%25"),
-                '/' => key.push_str("%2F"),
-                other => key.push(other),
-            }
+        let mut rest = *part;
+        while let Some(index) = rest.bytes().position(|byte| matches!(byte, b'%' | b'/')) {
+            key.push_str(&rest[..index]);
+            key.push_str(if rest.as_bytes()[index] == b'%' {
+                "%25"
+            } else {
+                "%2F"
+            });
+            rest = &rest[index + 1..];
         }
+        key.push_str(rest);
     }
     key
 }
