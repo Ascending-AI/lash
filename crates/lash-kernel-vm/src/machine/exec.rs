@@ -1050,6 +1050,8 @@ impl KernelMachine {
             ArgumentOwners::Operands => self.regs.take_source_arguments(base, given),
             ArgumentOwners::Control => Vec::new(),
         };
+        #[cfg(any(test, feature = "testing"))]
+        crate::machine::islands::witness::logical_entry_fallback();
         self.logical_enter_frame(task, exe, code_id, &inputs)?;
         Ok(())
     }

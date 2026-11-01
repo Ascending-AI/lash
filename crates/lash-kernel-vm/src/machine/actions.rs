@@ -213,12 +213,17 @@ impl KernelMachine {
         lib: LibId,
         args: lash_kernel_exec::RegRange,
     ) -> Status {
+        let arguments = args;
         let count = args.len as usize;
         let args = args.start.0 as usize;
         let entry = &running.stream.nested[act.ix()];
         self.observe_action(running.exe, &entry.site);
         if entry.guest {
-            self.enter(running.task, host, &entry.site, entry.occurrence)?;
+            if let Some(occurrence) = self.publish_source_call_enter(running, entry, arguments)? {
+                self.observe_entry(running.task, host, &entry.site, occurrence)?;
+            } else {
+                self.enter(running.task, host, &entry.site, entry.occurrence)?;
+            }
         }
         let function = running.exe.lib(lib);
         if matches!(entry.kind, NestedKind::Call(NestedCallee::CheckedHelper(_))) {

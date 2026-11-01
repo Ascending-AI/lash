@@ -899,6 +899,7 @@ main {
 /// refusals under every layout, warm or cold.
 #[test]
 fn allocating_operations_agree() {
+    crate::machine::islands::witness::begin();
     let mut witness = Embedder::with(
         ALLOCATING,
         Setup {
@@ -934,6 +935,11 @@ fn allocating_operations_agree() {
             );
         }
     }
+    assert_eq!(
+        crate::machine::islands::witness::logical_entry_fallbacks(),
+        0,
+        "every allocating body enters through its accepted source entry"
+    );
 }
 
 /// The same bodies and public signatures are authoritative for their
