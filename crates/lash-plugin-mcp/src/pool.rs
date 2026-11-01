@@ -127,18 +127,16 @@ pub struct McpConnectionPool {
     lifecycle_observer: RwLock<Option<crate::service_lifecycle::LifecycleObserver>>,
 }
 
-/// The diagnostic of an actor-owned health state, retaining schema admission causes.
+/// The diagnostic of an actor-owned health state.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "cause", rename_all = "snake_case")]
 pub enum McpServerFault {
-    UnusableSchema(Box<lash_vocabulary::ToolCatalogBuildError>),
     Connection(String),
 }
 
 impl McpServerFault {
     pub fn message(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            Self::UnusableSchema(source) => source.to_string().into(),
             Self::Connection(message) => message.into(),
         }
     }
@@ -207,6 +205,9 @@ impl McpServerHealth {
 pub struct McpServerStatus {
     pub server_name: String,
     pub tool_count: usize,
+    /// Refused native tool names and their schema admission causes from the
+    /// last accepted discovery. Published with the catalog, retained on outage.
+    pub tool_refusals: BTreeMap<String, lash_kernel_value::json_schema::SchemaAdmissionError>,
     pub health: McpServerHealth,
 }
 
@@ -302,6 +303,13 @@ struct InstalledServer {
     /// (`<server>.<tool>`), with symmetric `_h` eight-character identity
     /// suffixes on cleanup/truncation collision groups.
     tools: BTreeMap<String, ImportedTool>,
+    tool_refusals: BTreeMap<String, lash_kernel_value::json_schema::SchemaAdmissionError>,
+}
+
+#[derive(Default)]
+struct ImportedCatalog {
+    tools: BTreeMap<String, ImportedTool>,
+    tool_refusals: BTreeMap<String, lash_kernel_value::json_schema::SchemaAdmissionError>,
 }
 
 impl InstalledCatalog {
@@ -340,6 +348,7 @@ impl InstalledCatalog {
                 generation: 0,
                 notifying: false,
                 tools: BTreeMap::new(),
+                tool_refusals: BTreeMap::new(),
             },
         );
         self.changed();
@@ -363,7 +372,7 @@ impl InstalledCatalog {
     fn replace(
         &mut self,
         entry: &McpEntry,
-        imported: BTreeMap<String, ImportedTool>,
+        imported: ImportedCatalog,
         generation: u64,
         notifying: bool,
     ) -> Result<(), McpError> {
@@ -378,7 +387,7 @@ impl InstalledCatalog {
                 entry.server_name
             )));
         }
-        for (name, tool) in &imported {
+        for (name, tool) in &imported.tools {
             let existing = self
                 .servers
                 .iter()
@@ -392,7 +401,8 @@ impl InstalledCatalog {
             }
         }
         if let Some(installed) = self.servers.get_mut(&entry.server_name) {
-            installed.tools = imported;
+            installed.tools = imported.tools;
+            installed.tool_refusals = imported.tool_refusals;
             installed.generation = generation;
             installed.notifying = notifying;
         }
@@ -625,6 +635,11 @@ impl McpConnectionPool {
                     .servers
                     .get(&entry.server_name)
                     .map_or(0, |installed| installed.tools.len()),
+                tool_refusals: catalog
+                    .servers
+                    .get(&entry.server_name)
+                    .map(|installed| installed.tool_refusals.clone())
+                    .unwrap_or_default(),
             })
             .collect()
     }
@@ -917,15 +932,12 @@ impl McpEntry {
     }
 
     #[cfg(test)]
-    fn replace_imported_tools(
-        &self,
-        imported: BTreeMap<String, ImportedTool>,
-    ) -> Result<(), McpError> {
+    fn replace_imported_tools(&self, imported: ImportedCatalog) -> Result<(), McpError> {
         self.replace_imported_tools_at(imported, 0, false)
     }
     fn replace_imported_tools_at(
         &self,
-        imported: BTreeMap<String, ImportedTool>,
+        imported: ImportedCatalog,
         generation: u64,
         notifying: bool,
     ) -> Result<(), McpError> {
@@ -1135,7 +1147,7 @@ fn import_tools(
     server_name: &str,
     tools: Vec<rmcp::model::Tool>,
     execution: Duration,
-) -> Result<BTreeMap<String, ImportedTool>, McpError> {
+) -> Result<ImportedCatalog, McpError> {
     let raw_names = tools
         .iter()
         .map(|tool| tool.name.as_ref())
@@ -1149,9 +1161,10 @@ fn import_tools_with_name_builder(
     mut tools: Vec<rmcp::model::Tool>,
     execution: Duration,
     mut build_name: impl FnMut(&str, &str) -> String,
-) -> Result<BTreeMap<String, ImportedTool>, McpError> {
+) -> Result<ImportedCatalog, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
-    let mut imported = BTreeMap::new();
+    let mut imported = ImportedCatalog::default();
+    let mut operations = BTreeMap::new();
     let server = naming::server_segment(server_name);
     for tool in tools {
         // MCP tasks are an unsolicited extension result in 2026-07-28,
@@ -1169,15 +1182,29 @@ fn import_tools_with_name_builder(
         // tool's canonical name, both NAME-CANON by construction.
         let prefixed = format!("{server}.{}", build_name(server_name, &original_name));
         let tool_id = naming::durable_tool_id(server_name, &original_name);
+        // Catalog identity errors remain server failures, even when one of
+        // the colliding tools would be refused for its schema.
+        if let Some(existing) = operations.insert(prefixed.clone(), tool_id.clone()) {
+            return Err(McpError::Config(format!(
+                "MCP operation collision for `{prefixed}` between tool ids `{existing}` and `{tool_id}`"
+            )));
+        }
         let tag = admission::contract_tag(&tool_id, &tool)?;
 
-        let definition = ToolDefinition::raw(
+        let definition = match ToolDefinition::raw(
             tool_id,
             prefixed.as_str(),
             description,
             input_schema,
             output_schema,
-        )?
+        ) {
+            Ok(definition) => definition,
+            Err(lash_vocabulary::ToolCatalogBuildError::UnusableSchema { source, .. }) => {
+                imported.tool_refusals.insert(original_name, source);
+                continue;
+            }
+            Err(error) => return Err(McpError::Config(error.to_string())),
+        }
         .host_tag(tag)
         .with_execution(execution);
         let imported_tool = ImportedTool {
@@ -1185,18 +1212,7 @@ fn import_tools_with_name_builder(
             definition,
             completion,
         };
-        match imported.entry(prefixed.clone()) {
-            std::collections::btree_map::Entry::Vacant(slot) => {
-                slot.insert(imported_tool);
-            }
-            std::collections::btree_map::Entry::Occupied(existing) => {
-                return Err(McpError::Config(format!(
-                    "MCP operation collision for `{prefixed}` between tool ids `{}` and `{}`",
-                    existing.get().definition.manifest.id,
-                    imported_tool.definition.manifest.id
-                )));
-            }
-        }
+        imported.tools.insert(prefixed, imported_tool);
     }
     Ok(imported)
 }

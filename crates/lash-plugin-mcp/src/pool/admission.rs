@@ -43,11 +43,11 @@ pub(super) fn contract_tag(
 
 /// `tools` with the guidance `peer`'s discover instructions pin.
 pub(super) fn pinned_guidance(
-    mut tools: BTreeMap<String, ImportedTool>,
+    mut tools: ImportedCatalog,
     entry: &McpEntry,
     peer: &Peer<RoleClient>,
-) -> Result<BTreeMap<String, ImportedTool>, McpError> {
-    super::guidance::pin_guidance(&mut tools, entry, peer)?;
+) -> Result<ImportedCatalog, McpError> {
+    super::guidance::pin_guidance(&mut tools.tools, entry, peer)?;
     Ok(tools)
 }
 

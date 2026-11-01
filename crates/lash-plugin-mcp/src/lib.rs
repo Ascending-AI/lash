@@ -26,6 +26,12 @@
 //! redact it. Exit evidence distinguishes observations made before failure
 //! from exits during cleanup, including forced termination.
 //!
+//! Schema admission is per tool on startup and refresh. Admitted tools publish
+//! together with typed refusals in [`McpServerStatus::tool_refusals`], keyed by
+//! native tool name, through the pool and plugin's `server_statuses()` methods.
+//! A newly refused tool leaves the catalog; a repaired tool returns on refresh.
+//! Refusals stay with the last accepted catalog across connection outages.
+//!
 //! Host seams for server-to-client requests (sampling, roots, elicitation) take
 //! and return Lash-owned values: [`McpSamplingParams`], [`McpSamplingResult`],
 //! [`McpRoot`], [`McpElicitationResult`] and the shared [`McpHostRefusal`].

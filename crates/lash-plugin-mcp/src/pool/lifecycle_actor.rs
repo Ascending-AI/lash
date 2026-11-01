@@ -972,21 +972,7 @@ impl LifecycleActor {
     }
 
     fn record_mcp_error(&self, error: &McpError) {
-        let fault = match error {
-            McpError::UnusableSchema(source) => {
-                McpServerFault::UnusableSchema(Box::new(source.clone()))
-            }
-            McpError::PoolShutDown
-            | McpError::Config(_)
-            | McpError::Io(_)
-            | McpError::Json(_)
-            | McpError::UnsupportedProtocolRevision { .. }
-            | McpError::Protocol(_)
-            | McpError::StartupTimeout { .. }
-            | McpError::StartupFailure { .. }
-            | McpError::Reconfigure(_) => McpServerFault::Connection(error.to_string()),
-        };
-        self.record_fault(fault);
+        self.record_error(error.to_string());
     }
 
     fn record_error(&self, error: String) {

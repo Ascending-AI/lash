@@ -612,7 +612,7 @@ async fn stale_list_changed_refresh_cannot_overwrite_replacement_catalog() {
     );
     assert!(
         current_entry
-            .replace_imported_tools_at(BTreeMap::new(), 1, true)
+            .replace_imported_tools_at(ImportedCatalog::default(), 1, true)
             .is_err(),
         "old generation cannot install"
     );

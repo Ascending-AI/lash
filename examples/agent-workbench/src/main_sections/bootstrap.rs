@@ -693,6 +693,12 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             status.tool_count,
             status.health.error().unwrap_or_else(|| "none".into())
         );
+        for (tool, reason) in status.tool_refusals {
+            eprintln!(
+                "agent-workbench MCP server {} refused tool {tool}: {reason}",
+                status.server_name
+            );
+        }
     }
     let tool_provider =
         if dev_provider_scenario == Some(failure_provider::DevProviderScenario::CrashResume) {

@@ -84,58 +84,18 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
         let mut defective = serde_json::to_value(&with_schema).expect("encode tool");
         defective[field] = json!({"type":"unknown"});
         let defective = serde_json::from_value(defective).expect("wire tool");
-        let error = import_tools("test", vec![defective], std::time::Duration::from_secs(30))
-            .err()
-            .expect("unusable schema refused at discovery");
+        let catalog = import_tools(
+            "test",
+            vec![defective, advertised_tool("valid")],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("schema refusals do not fail the catalog");
+        assert_eq!(catalog.tools.len(), 1);
+        assert_eq!(catalog.tool_refusals.len(), 1);
         assert!(matches!(
-            error,
-            McpError::UnusableSchema(
-                lash_core::facade_support::ToolCatalogBuildError::UnusableSchema {
-                    source: lash_kernel_value::json_schema::SchemaAdmissionError::Compilation { .. },
-                    ..
-                }
-            )
+            catalog.tool_refusals.get("lookup"),
+            Some(lash_kernel_value::json_schema::SchemaAdmissionError::Compilation { .. })
         ));
-    }
-    let source = ToolDefinition::raw(
-        "bad",
-        "host.bad",
-        "bad",
-        Value::Null,
-        serde_json::json!({"type":"null"}),
-    )
-    .expect_err("invalid schema");
-    let fault = McpServerFault::UnusableSchema(Box::new(source.clone()));
-    for health in [
-        McpServerHealth::Connected {
-            catalog_error: Some(fault.clone()),
-        },
-        McpServerHealth::Reconnecting {
-            last_error: Some(fault.clone()),
-        },
-        McpServerHealth::Disconnected {
-            last_error: Some(fault.clone()),
-        },
-        McpServerHealth::Exhausted {
-            attempts: 3,
-            last_error: Some(fault.clone()),
-        },
-        McpServerHealth::ShuttingDown {
-            reason: Some(fault.clone()),
-        },
-    ] {
-        let restored: McpServerHealth =
-            serde_json::from_value(serde_json::to_value(&health).expect("encode health"))
-                .expect("restore health");
-        assert_eq!(restored.fault(), Some(&fault));
-        let failure =
-            lash_core::ToolFailure::from(crate::call_failure::McpCallFailure::ServerUnavailable {
-                server: "test".into(),
-                health: restored,
-                after_ms: 0,
-            });
-        assert!(matches!(failure.cause.as_deref(),
-            Some(lash_core::ToolFailureCause::ToolSchemaAdmission { source: retained }) if retained.as_ref() == &source));
     }
     let without_schema = advertised_tool("plain");
     let tools = import_tools(
@@ -144,7 +104,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
         std::time::Duration::from_secs(30),
     )
     .expect("imports");
-    for tool in tools.values() {
+    for tool in tools.tools.values() {
         let schema = tool.definition.contract.output_schema.canonical.as_value();
         assert_eq!(schema["required"], json!(["content"]));
         assert_eq!(schema["properties"]["content"]["type"], "array");
@@ -280,20 +240,35 @@ fn import_refuses_a_forced_final_name_collision_without_overwriting() {
         naming::build_catalog_names_with_digest("directory", &["get-user", "get_user"], |_| {
             "aaaaaaaa".to_string()
         });
-    let result = import_tools_with_name_builder(
-        "directory",
-        vec![advertised_tool("get-user"), advertised_tool("get_user")],
-        std::time::Duration::from_secs(30),
-        |_, tool| names[tool].clone(),
+    let mut refused = advertised_tool("get-user");
+    refused.input_schema = Arc::new(
+        serde_json::from_value(json!({"$ref":"https://example.com/value"})).expect("schema"),
     );
-    let error = match result {
-        Ok(_) => panic!("colliding final names must be refused"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("MCP operation collision"), "{message}");
-    assert!(message.contains("get-user"), "{message}");
-    assert!(message.contains("get_user"), "{message}");
+    for (tools, distinct_names) in [
+        (
+            vec![advertised_tool("get-user"), advertised_tool("get_user")],
+            true,
+        ),
+        (vec![refused.clone(), advertised_tool("get_user")], true),
+        (vec![refused.clone(), refused], false),
+    ] {
+        let result = import_tools_with_name_builder(
+            "directory",
+            tools,
+            std::time::Duration::from_secs(30),
+            |_, tool| names[tool].clone(),
+        );
+        let error = match result {
+            Ok(_) => panic!("colliding final names must be refused even for refused schemas"),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        assert!(message.contains("MCP operation collision"), "{message}");
+        assert!(message.contains("get-user"), "{message}");
+        if distinct_names {
+            assert!(message.contains("get_user"), "{message}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -404,7 +379,7 @@ async fn advertised_tools_snapshot_never_combines_colliding_catalog_generations(
     let writer = std::thread::spawn(move || {
         writer_started_tx.send(()).expect("signal writer start");
         first
-            .replace_imported_tools(BTreeMap::new())
+            .replace_imported_tools(ImportedCatalog::default())
             .expect("first catalog retires its name");
         second
             .replace_imported_tools(forced_catalog(&second.server_name))

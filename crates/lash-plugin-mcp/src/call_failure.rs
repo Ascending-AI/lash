@@ -318,17 +318,6 @@ impl From<McpCallFailure> for ToolFailure {
             ),
             F::ToolError { .. } => (C::Execution, "mcp_tool_error", S::Tool, None),
         };
-        let schema_cause = if let F::ServerUnavailable { health, .. } = &cause {
-            if let Some(super::pool::McpServerFault::UnusableSchema(source)) = health.fault() {
-                Some(Box::new(lash_core::ToolFailureCause::ToolSchemaAdmission {
-                    source: source.clone(),
-                }))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
         let message = cause.to_string();
         let raw = match cause {
             F::ToolError { message, content } => ToolValue::Object(BTreeMap::from([
@@ -339,7 +328,7 @@ impl From<McpCallFailure> for ToolFailure {
             cause => ToolValue::untrusted_json(json!(cause)),
         };
         Self {
-            cause: schema_cause,
+            cause: None,
             class,
             code: code.into(),
             message,

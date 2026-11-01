@@ -11,6 +11,7 @@ enum Scenario {
     Items,
     Bytes,
     Valid,
+    MixedAdmission,
 }
 
 struct PeerState {
@@ -184,6 +185,18 @@ async fn answer(stream: tokio::net::TcpStream, state: Arc<PeerState>) {
                 }
                 Scenario::Bytes => {
                     result["tools"][0]["description"] = json!("x".repeat(8 * 1024 * 1024 + 1));
+                }
+                Scenario::MixedAdmission => {
+                    let schema = if index % 2 == 1 {
+                        json!({"type":"object", "properties":{"value":{"$ref":"https://example.com/value"}}})
+                    } else {
+                        json!({"type":"object"})
+                    };
+                    result = json!({"tools":[
+                        {"name":"bad", "inputSchema":schema},
+                        {"name":"first", "inputSchema":{"type":"object"}},
+                        {"name":"second", "inputSchema":{"type":"object"}}
+                    ]});
                 }
                 Scenario::Storm | Scenario::Valid => {}
             }
@@ -470,5 +483,67 @@ async fn a_nondefault_catalog_limit_is_honored_at_discovery() {
     let pool = result.expect("pool");
     let health = pool.server_statuses();
     assert!(format!("{health:?}").contains("item limit 0"), "{health:?}");
+    pool.shutdown_all().await;
+}
+
+/// FIG-7578: one refused schema must not hide the server's admissible tools.
+#[tokio::test]
+async fn tool_admission_refusals_publish_the_rest_and_follow_refreshes() {
+    let fixture = HttpPeer::start(Scenario::MixedAdmission).await;
+    let pool = McpConnectionPool::connect(BTreeMap::from([("http".to_string(), fixture.config())]))
+        .await
+        .expect("retained HTTP entry");
+    let entry = pool.entries.read_recover()["http"].clone();
+    for (phase, expected) in [2, 3, 2, 3].into_iter().enumerate() {
+        if phase > 0 {
+            let revision = pool.catalog.read_recover().revision.clone();
+            pool.refresh_catalogs();
+            while pool.catalog.read_recover().revision == revision {
+                tokio::task::yield_now().await;
+            }
+            entry.establish().await.expect("refresh control barrier");
+        }
+        assert_eq!(pool.advertised_tools().len(), expected, "phase {phase}");
+        let names = pool
+            .advertised_tools()
+            .into_iter()
+            .map(|tool| tool.manifest.tool().to_string())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"http.first".to_string()));
+        assert!(names.contains(&"http.second".to_string()));
+        assert_eq!(names.contains(&"http.bad".to_string()), expected == 3);
+        let status = pool.server_statuses().remove(0);
+        assert!(status.health.is_connected());
+        assert!(pool.startup_failure("http").is_none());
+        if expected == 2 {
+            assert_eq!(status.tool_refusals.len(), 1);
+            assert!(matches!(
+                status.tool_refusals.get("bad"),
+                Some(lash_kernel_value::json_schema::SchemaAdmissionError::NonLocalReference {
+                    reference, ..
+                }) if reference == "https://example.com/value"
+            ));
+            let restored: McpServerStatus =
+                serde_json::from_value(serde_json::to_value(&status).expect("encode status"))
+                    .expect("decode typed refusal");
+            assert_eq!(restored, status);
+            let generation = entry
+                .service_snapshot()
+                .expect("connected service")
+                .generation;
+            entry.record_call_success(generation);
+            entry
+                .establish()
+                .await
+                .expect("successful call control barrier");
+            assert_eq!(
+                pool.server_statuses()[0].tool_refusals,
+                status.tool_refusals
+            );
+        } else {
+            assert!(status.tool_refusals.is_empty());
+        }
+        assert!(status.health.fault().is_none());
+    }
     pool.shutdown_all().await;
 }
