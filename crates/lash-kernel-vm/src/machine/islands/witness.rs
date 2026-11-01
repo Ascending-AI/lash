@@ -115,6 +115,10 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    #[cfg(test)]
+    PACKET_SCOPED_RETURNS.set(0);
+    #[cfg(test)]
+    PRECISE_SCOPED_RETURNS.set(0);
     PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
     PACKET_FRAME_ENTRIES.with(|count| count.set([0; 2]));
     PACKET_CALL_ENTERS.with(|count| count.set(0));
@@ -806,4 +810,31 @@ pub(crate) fn decline_body_return() {
 #[cfg(test)]
 pub(crate) fn take_body_return_decline() -> bool {
     DECLINE_BODY_RETURN.replace(false)
+}
+
+#[cfg(test)]
+thread_local! {
+    static PACKET_SCOPED_RETURNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn packet_scoped_returns() -> u64 {
+    PACKET_SCOPED_RETURNS.replace(0)
+}
+
+#[cfg(test)]
+pub(in crate::machine) fn packet_scoped_returned() {
+    PACKET_SCOPED_RETURNS.set(PACKET_SCOPED_RETURNS.get() + 1);
+}
+
+#[cfg(test)]
+thread_local! {
+    static PRECISE_SCOPED_RETURNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn precise_scoped_returns() -> u64 {
+    PRECISE_SCOPED_RETURNS.replace(0)
+}
+#[cfg(test)]
+pub(in crate::machine) fn precise_scoped_returned() {
+    PRECISE_SCOPED_RETURNS.set(PRECISE_SCOPED_RETURNS.get() + 1);
 }

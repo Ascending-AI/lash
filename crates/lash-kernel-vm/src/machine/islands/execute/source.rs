@@ -37,7 +37,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if frame.state.resident
             || (frame.state.callee.plan.charged && frame.state.boundary.is_some())
             || frame.state.callee.compiled.cleanups
-            || frame.state.control.len() != 1
+            || !frame
+                .state
+                .control
+                .iter()
+                .all(|control| matches!(control, Position::Block(..)))
         {
             return false;
         }

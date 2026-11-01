@@ -174,9 +174,9 @@ pub(crate) struct CompiledInterval {
     whole: bool,
 }
 impl Source {
-    /// The exact runtime is at a defining block's direct Return. Its only
-    /// successor is that block's Leave; earlier children have already completed.
-    /// The canonical walker proves the suffix without replaying their history.
+    /// An issued Return leaves its entered ordinary blocks, then its Source.
+    /// Its authored path proves enclosing if choices; earlier children have
+    /// completed. Cleanup and loop departures require their separate recipes.
     pub(crate) fn compile_return_suffix(
         &self,
         at: &Point,
@@ -184,31 +184,46 @@ impl Source {
         self.verify()?;
         if at.phase != Phase::Commit
             || at.site.unit != self.site.unit
-            || at.site.path.len() != self.site.path.len() + 1
             || !at.site.path.starts_with(&self.site.path)
-            || !matches!(
-                self.body
-                    .get(*at.site.path.last().ok_or(Refused::Path)? as usize),
-                Some(doc::Stmt::Return { .. })
-            )
+            || at.site.path.len() <= self.site.path.len()
         {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        let mut path = self.site.clone();
+        let mut blocks = Vec::new();
+        let mut choices = BTreeMap::new();
+        for index in &at.site.path[self.site.path.len()..] {
+            match node {
+                doc::Node::Block(_) => blocks.push(path.clone()),
+                doc::Node::Stmt(doc::Stmt::If { .. }) if matches!(*index, 1 | 2) => {
+                    choices.insert(path.clone(), *index == 1);
+                }
+                // Loops and try regions need their own actual departure recipe.
+                _ => return Err(Refused::Path),
+            }
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+            path = path.child(*index);
+        }
+        if !matches!(node, doc::Node::Stmt(doc::Stmt::Return { .. })) {
             return Err(Refused::Path);
         }
         let leave = Point {
             site: self.site.clone(),
             phase: Phase::Leave,
         };
-        let route: Box<[_]> = [
-            Selection::Event {
-                at: at.clone(),
-                exit: ExitKind::Return,
+        let route: Box<[_]> = std::iter::once(Selection::Event {
+            at: at.clone(),
+            exit: ExitKind::Return,
+        })
+        .chain(blocks.iter().rev().map(|site| Selection::Event {
+            at: Point {
+                site: site.clone(),
+                phase: Phase::Leave,
             },
-            Selection::Event {
-                at: leave.clone(),
-                exit: ExitKind::Normal,
-            },
-        ]
-        .into();
+            exit: ExitKind::Normal,
+        }))
+        .collect();
         let key = Key {
             event: true,
             join: None,
@@ -221,17 +236,21 @@ impl Source {
             return Ok(Arc::clone(interval));
         }
         struct Suffix<'a> {
-            source: &'a Site,
             returning: &'a Site,
+            blocks: &'a [Site],
+            choices: &'a BTreeMap<Site, bool>,
             route: &'a [Selection],
             cursor: usize,
         }
         impl evaluate::Events for Suffix<'_> {
             fn completed(&mut self, site: &Site) -> Option<ExitKind> {
-                (site != self.source && site != self.returning).then_some(ExitKind::Normal)
+                (!self.returning.path.starts_with(&site.path)).then_some(ExitKind::Normal)
             }
             fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
-                if site == self.source && phase == Phase::Enter {
+                if self.cursor == 0
+                    && ((phase == Phase::Enter && self.blocks.contains(site))
+                        || (phase == Phase::Test && self.choices.contains_key(site)))
+                {
                     return Ok(ExitKind::Normal);
                 }
                 let Some(Selection::Event { at, exit }) = self.route.get(self.cursor) else {
@@ -243,20 +262,26 @@ impl Source {
                 self.cursor += 1;
                 Ok(*exit)
             }
-            fn choose(&mut self, _: &Site) -> Result<bool, Refused> {
-                Err(Refused::Facts)
+            fn choose(&mut self, site: &Site) -> Result<bool, Refused> {
+                self.choices.get(site).copied().ok_or(Refused::Facts)
             }
             fn selected_end(&self) -> bool {
                 self.cursor == self.route.len()
             }
         }
         let mut suffix = Suffix {
-            source: &self.site,
             returning: &at.site,
+            blocks: &blocks,
+            choices: &choices,
             route: &route,
             cursor: 0,
         };
-        let exit = evaluate::walk_to(self, &self.site, &mut suffix, 3)?;
+        let exit = evaluate::walk_to(
+            self,
+            &self.site,
+            &mut suffix,
+            route.len() + blocks.len() + choices.len(),
+        )?;
         if exit != ExitKind::Return || suffix.cursor != route.len() {
             return Err(Refused::Path);
         }

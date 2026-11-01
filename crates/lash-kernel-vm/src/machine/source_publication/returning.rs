@@ -24,7 +24,10 @@ impl KernelMachine {
                 || frame.cleaning.is_some()
                 || frame.awaiting.is_some()
                 || frame.pending.peek().is_some()
-                || frame.control.len() != 1
+                || !frame
+                    .control
+                    .iter()
+                    .all(|control| matches!(control, Control::Block { .. }))
                 || frame
                     .source_frontier
                     .as_ref()
@@ -32,7 +35,7 @@ impl KernelMachine {
             {
                 return Ok(None);
             }
-            let Some(Control::Block { block, .. }) = frame.control.last() else {
+            let Some(Control::Block { block, .. }) = frame.control.iter().next() else {
                 return Ok(None);
             };
             if running.exe.block(*block).site != code.source_room.site {
@@ -47,6 +50,30 @@ impl KernelMachine {
                 roots.invocation().clone(),
             )
         };
+        let Ok(interval) = source.compile_return_suffix(&room::Point {
+            site: running.stmt.site.clone(),
+            phase: room::Phase::Commit,
+        }) else {
+            return Ok(None);
+        };
+        {
+            let frame = self.frame(running.task)?;
+            if !interval
+                .events()
+                .skip(1)
+                .map(|event| &event.point.site)
+                .eq(frame.control.iter().rev().map(|control| {
+                    let Control::Block { block, .. } = control else {
+                        unreachable!("return controls were checked")
+                    };
+                    &running.exe.block(*block).site
+                }))
+            {
+                return Err(
+                    malformed("precise return differs from its entered source blocks").into(),
+                );
+            }
+        }
         let Some(roles) = running.stmt.source_roles_at(running.stream, pc) else {
             return Ok(None);
         };
@@ -96,6 +123,8 @@ impl KernelMachine {
         if frame.invocation != invocation.id() {
             return Err(malformed("return preparation names another invocation").into());
         }
+        #[cfg(test)]
+        let scoped = frame.control.len() > 1;
         let logical = &mut frame.logical;
         let mut completion = None;
         let safe_point = self.charged;
@@ -140,6 +169,10 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_return_published(run_root);
+            #[cfg(test)]
+            if scoped {
+                crate::machine::islands::witness::precise_scoped_returned();
+            }
         }
         debug_assert_eq!(published, completion.is_some());
         Ok(completion)

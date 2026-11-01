@@ -81,68 +81,87 @@ impl ReturnInput<'_> {
             outputs: vec![(departure, PV::Existing(input))],
             ..Default::default()
         };
-        let preview = Program::new(vec![returning.clone()]);
-        let Some(preview) = preview.evaluate(ledger, arena) else {
-            return Ok(None);
-        };
-        let preview = preview
-            .prepare(
-                ledger,
-                arena.registration().map_err(native_fault)?,
-                heap,
-                Program::new(vec![returning.clone()]),
-            )
-            .map_err(member_fault)?;
-        let groups = vec![
-            room::Owner::Scope(source.site.clone()),
-            room::Owner::Operands(source.site.clone()),
-        ];
-        let mut closing = std::collections::BTreeSet::new();
-        for group in &groups {
-            for owner in slots
-                .group(group, self.task, self.invocation.id())
-                .ok_or_else(|| malformed("return scope has no canonical owner group"))?
-            {
-                if owner != input && ledger.holding(owner, heap.pages())?.is_some() {
-                    closing.insert(owner);
-                }
-            }
-        }
-        let closing = closing.into_iter().collect::<Vec<_>>();
-        let release_scope = preview.release_cost(&closing, heap.pages())?;
-        drop(preview);
-        let leave = Point {
-            site: source.site.clone(),
-            phase: SourcePhase::Leave,
-        };
-        let facts = LeafExecution(
-            [
-                (
-                    at.clone(),
-                    LeafFacts {
-                        dependencies: value.handle().into_iter().collect(),
-                        values: [
-                            (Measure::Local(departure_selector), i128::from(bytes)),
-                            (
-                                Measure::Release(vec![input_selector].into()),
-                                i128::from(released),
-                            ),
-                        ]
-                        .into(),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    leave.clone(),
-                    LeafFacts {
-                        values: [(Measure::Release(groups.into()), i128::from(release_scope))]
-                            .into(),
-                        ..Default::default()
-                    },
-                ),
-            ]
+        let mut events = vec![returning];
+        let mut retired = std::collections::BTreeSet::from([input]);
+        let mut facts = LeafExecution(
+            [(
+                at.clone(),
+                LeafFacts {
+                    dependencies: value.handle().into_iter().collect(),
+                    values: [
+                        (Measure::Local(departure_selector), i128::from(bytes)),
+                        (
+                            Measure::Release(vec![input_selector].into()),
+                            i128::from(released),
+                        ),
+                    ]
+                    .into(),
+                    ..Default::default()
+                },
+            )]
             .into(),
         );
+        let mut leave = None;
+        for event in interval.events().skip(1) {
+            if event.point.phase != SourcePhase::Leave || leave.is_some() {
+                return Err(malformed("return suffix has another source departure"));
+            }
+            let groups = vec![
+                room::Owner::Scope(event.point.site.clone()),
+                room::Owner::Operands(event.point.site.clone()),
+            ];
+            let mut closing = std::collections::BTreeSet::new();
+            for group in &groups {
+                for owner in slots
+                    .group(group, self.task, self.invocation.id())
+                    .ok_or_else(|| malformed("return scope has no canonical owner group"))?
+                {
+                    if !retired.contains(&owner) && ledger.holding(owner, heap.pages())?.is_some() {
+                        closing.insert(owner);
+                    }
+                }
+            }
+            let closing = closing.into_iter().collect::<Vec<_>>();
+            let preview = Program::new(events.clone());
+            let Some(preview) = preview.evaluate(ledger, arena) else {
+                return Ok(None);
+            };
+            let preview = preview
+                .prepare(
+                    ledger,
+                    arena.registration().map_err(native_fault)?,
+                    heap,
+                    Program::new(events.clone()),
+                )
+                .map_err(member_fault)?;
+            let released = preview.release_cost(&closing, heap.pages())?;
+            drop(preview);
+            facts.0.insert(
+                event.point.clone(),
+                LeafFacts {
+                    values: [(Measure::Release(groups.into()), i128::from(released))].into(),
+                    ..Default::default()
+                },
+            );
+            if event.point.site == source.site {
+                leave = Some(event.point.clone());
+                events.push(JournalEvent {
+                    frame: Some(FrameEvent::Leave {
+                        task: self.task,
+                        invocation: self.invocation.id(),
+                    }),
+                    outputs: vec![(incoming, PV::Existing(departure))],
+                    ..Default::default()
+                });
+            } else {
+                retired.extend(closing.iter().copied());
+                events.push(JournalEvent {
+                    inputs: closing,
+                    ..Default::default()
+                });
+            }
+        }
+        let leave = leave.ok_or_else(|| malformed("return suffix has no defining Leave"))?;
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.return-leave");
@@ -166,18 +185,6 @@ impl ReturnInput<'_> {
             unpaid: None,
             ..start.clone()
         };
-        let task = self.task;
-        let invocation = self.invocation.id();
-        let make = || {
-            Program::new(vec![
-                returning.clone(),
-                JournalEvent {
-                    frame: Some(FrameEvent::Leave { task, invocation }),
-                    outputs: vec![(incoming, PV::Existing(departure))],
-                    ..Default::default()
-                },
-            ])
-        };
         let allowance = Allowance {
             occurrences: vec![],
             before: 0,
@@ -195,7 +202,7 @@ impl ReturnInput<'_> {
                 next,
                 allowance,
             },
-            program: make(),
+            program: Program::new(events),
         }))
     }
 }

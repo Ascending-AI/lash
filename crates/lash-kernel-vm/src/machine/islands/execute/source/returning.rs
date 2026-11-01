@@ -33,9 +33,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             site: statement.site.clone(),
             phase: SourcePhase::Commit,
         };
-        let Ok(_) = source.compile_return_suffix(&at) else {
+        let Ok(interval) = source.compile_return_suffix(&at) else {
             return Ok(ValuePublication::Unavailable);
         };
+        if !interval
+            .events()
+            .skip(1)
+            .map(|event| &event.point.site)
+            .eq(frame.state.control.iter().rev().map(|control| {
+                let Position::Block(block, _) = control else {
+                    unreachable!("return frame checked its controls")
+                };
+                &self
+                    .exe
+                    .block(frame.state.callee.compiled.blocks[*block].id)
+                    .site
+            }))
+        {
+            return Err(malformed(
+                "return suffix differs from its entered source blocks",
+            ));
+        }
         let Some(roles) = statement.source_roles_at(stream, returned.pc) else {
             return Ok(ValuePublication::Unavailable);
         };
@@ -101,6 +119,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::return_published();
+            #[cfg(test)]
+            if frame.state.control.len() > 1 {
+                crate::machine::islands::witness::packet_scoped_returned();
+            }
         }
         Ok(if published {
             ValuePublication::Published(value)

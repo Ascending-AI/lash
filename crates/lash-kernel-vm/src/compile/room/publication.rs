@@ -249,9 +249,11 @@ impl Frontier {
         let mut cursor = 0;
         let room = interval.evaluate_checked(execution, |event, site, facts| {
             dependencies.extend_from_slice(facts.dependencies().ok_or(Refused::Facts)?);
+            let earlier = &program.events()[..cursor];
             let actual = &program.events()[cursor];
             cursor += 1;
             EventContext {
+                earlier,
                 source: &self.source,
                 slots: &slots,
                 occurrence: &self.position.occurrence,
@@ -461,6 +463,7 @@ fn fault(text: &str) -> HeapFault {
     HeapFault::Malformed(text.into())
 }
 struct EventContext<'a> {
+    earlier: &'a [JournalEvent],
     source: &'a Source,
     slots: &'a OwnerSlots,
     occurrence: &'a Occurrence,
@@ -469,6 +472,38 @@ struct EventContext<'a> {
     arena: &'a Arena,
 }
 impl EventContext<'_> {
+    /// Explicit source releases are checked against the journal's preceding
+    /// edits. The canonical prepared program validates every edit and price.
+    fn present(&self, owner: logical::Owner) -> Result<bool, Refused> {
+        for event in self.earlier.iter().rev() {
+            if event.outputs.iter().any(|(output, _)| *output == owner) {
+                return Ok(true);
+            }
+            if event.inputs.contains(&owner) {
+                return Ok(false);
+            }
+            match event.frame {
+                Some(logical::FrameEvent::Enter { task, invocation })
+                    if owner == (logical::Owner::Frame { task, invocation }) =>
+                {
+                    return Ok(true);
+                }
+                Some(logical::FrameEvent::Leave { task, invocation })
+                    if matches!(owner, logical::Owner::Frame { task: t, invocation: i }
+                        | logical::Owner::Value { task: t, invocation: i, .. }
+                        if t == task && i == invocation) =>
+                {
+                    return Ok(false);
+                }
+                _ => {}
+            }
+        }
+        self.ledger
+            .holding(owner, self.heap.pages())
+            .map(|holding| holding.is_some())
+            .map_err(|_| Refused::Facts)
+    }
+
     fn check_reference(
         &self,
         owner: logical::Owner,
@@ -589,9 +624,10 @@ impl EventContext<'_> {
             source,
             slots,
             occurrence,
-            ledger,
+            ledger: _,
             heap,
             arena,
+            earlier: _,
         } = *self;
         let root = |owner: &Owner| slots.root(owner, occurrence.task, occurrence.invocation);
         let mut reads = BTreeSet::new();
@@ -780,10 +816,7 @@ impl EventContext<'_> {
         // Missing explicit releases and wrong same-price owner substitutions are
         // rejected independently of the source envelope's retained numeric delta.
         for owner in reads {
-            if ledger
-                .holding(owner, heap.pages())
-                .map_err(|_| Refused::Facts)?
-                .is_some()
+            if self.present(owner)?
                 && !actual.inputs.contains(&owner)
                 && !matches!(actual.frame, Some(logical::FrameEvent::Leave { .. }))
             {

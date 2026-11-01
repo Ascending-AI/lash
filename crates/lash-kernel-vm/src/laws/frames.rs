@@ -73,6 +73,15 @@ fn probes(
         }
     }
     probes.push((
+        "deep.branch",
+        register(
+            "deep.branch",
+            "n: Any",
+            String::new(),
+            "if true { let saved = n return saved } return 0",
+        ),
+    ));
+    probes.push((
         "deep.forward",
         register(
             "deep.forward",
@@ -183,6 +192,41 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(result(run(under_a_call, 102)), int(100));
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
+
+    let scoped_observation = |source_only: bool| {
+        crate::machine::islands::witness::begin();
+        let bounds = Bounds {
+            call_depth: 2,
+            ..ROOMY
+        };
+        let mut embedder =
+            Embedder::with("main { return deep.branch([7]) }", setup(bounds, u64::MAX));
+        if source_only {
+            embedder.machine.force_source_execution();
+        }
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        let value = result(embedder.run_to_end(&[]));
+        assert_eq!(value, Datum::List(vec![int(7)]));
+        if source_only {
+            assert!(
+                crate::machine::islands::witness::precise_scoped_returns() > 0,
+                "the precise source must publish the same entered block suffix"
+            );
+        } else {
+            assert!(
+                crate::machine::islands::witness::packet_scoped_returns() > 0,
+                "the entered if block must leave through its accepted return suffix"
+            );
+        }
+
+        (value, embedder.machine.meters(), tape.steps())
+    };
+    assert_eq!(
+        scoped_observation(false),
+        scoped_observation(true),
+        "the accepted block suffix must preserve the source result, charge tape and terminal holdings"
+    );
     // A declined packet return resumes before the same library completion fee.
     let completed = || {
         let bounds = Bounds {
