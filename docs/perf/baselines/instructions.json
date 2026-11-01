@@ -538,11 +538,11 @@
     "kernel/python/object_build": 13150.784433333334,
     "kernel/typescript/object_sort": 137511.09072222223,
     "kernel/python/object_sort": 106105.32126666667,
-    "replay/chat-short/host": 38744400.5,
-    "replay/chat-long-compacting/host": 43286076.0,
-    "replay/ts-codemode/host": 127458697.0,
+    "replay/chat-short/host": 42188972.0,
+    "replay/chat-long-compacting/host": 47982374.0,
+    "replay/ts-codemode/host": 132261742.0,
     "replay/ts-codemode/worker": 40895931.0,
-    "replay/py-codemode/host": 99545675.0,
+    "replay/py-codemode/host": 95032687.0,
     "replay/py-codemode/worker": 12608808.0
   },
   "provenance": {
@@ -766,11 +766,11 @@
     "kernel/python/object_build": 13150.784433333334,
     "kernel/typescript/object_sort": 137511.09072222223,
     "kernel/python/object_sort": 106105.32126666667,
-    "replay/chat-short/host": 38744400.5,
-    "replay/chat-long-compacting/host": 43286076.0,
-    "replay/ts-codemode/host": 127458697.0,
+    "replay/chat-short/host": 42188972.0,
+    "replay/chat-long-compacting/host": 47982374.0,
+    "replay/ts-codemode/host": 132261742.0,
     "replay/ts-codemode/worker": 40895931.0,
-    "replay/py-codemode/host": 99545675.0,
+    "replay/py-codemode/host": 95032687.0,
     "replay/py-codemode/worker": 12608808.0
   },
   "row_provenance": {
