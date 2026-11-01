@@ -21,7 +21,7 @@ const SOURCE_BAD_MEMBER: &str = "let xs = [1] try { set xs[3] = 2 } catch e { pr
 const SOURCE_CLOSURE_PREFIX: &str = "let run = fn(value) { let captured = value do let(wrapper = fn() { return captured }, call literal(wrapper)) return captured } return apply run(7)";
 const SOURCE_SCOPED_BINDINGS: &str = "let run = fn(value) { if true { do value } else { do value } if false { do value } else { do value } do \"a deferred source payload beyond the inline representation\" do 1000000000000000000000000 do b\"0011ff\" let callback = &literal do apply callback(value) let ordinary = let(alias = if(true, value, value), alias) let captured = let(shared = [if(false, value, ordinary)], let(get = fn() { return shared }, apply get())) do {value: [value]}.value do [[value]][0] for ignored in [0, 1] { let scoped = let(alias = [value], alias) let capture = fn() { return scoped } set scoped = [value] } else { do value } let active = true while active { let scoped = let(alias = value, alias) set active = false } return [ordinary, captured] } return apply run(7)";
 const SOURCE_CELL: &str = "let run = fn(value) { let saved = value let getter = fn() { return saved } let setter = fn(next) { set saved = next return saved } set saved = [value, value] let alias = apply getter() let changed = apply setter([alias, alias]) return (alias, changed, apply getter()) } return apply run([7])";
-const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { let table = map{\"keep\": value} set table[\"keep\"] = 9 set table[\"a dynamic key beyond the inline representation\"] = value remove table[\"keep\"] remove table[\"absent\"] let record = {keep: value} set record[\"added\"] = value remove record[\"keep\"] let members = set{7} set members[8] = true set members[7] = false remove members[8] if members[7] { return members } if members[8] { return members } if same(record[\"added\"], value) { } else { return record } let numeric = map{1: value} set numeric[1.0] = 9 if same(numeric[1], 9) { } else { return numeric } let transient = [value, 0, 1] remove transient[1] remove transient[1] remove transient[0] set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
+const SOURCE_MEMBER: &str = "let nested = [7] let f = fn(xs, value) { let table = map{\"keep\": value} set table[\"keep\"] = 9 set table[\"a dynamic key beyond the inline representation\"] = value remove table[\"keep\"] remove table[\"absent\"] let record = {keep: value} set record[\"added\"] = value remove record[\"keep\"] set record.short = value if same(record.short, value) { } else { return record } set record.a_static_field_name_beyond_the_inline_representation = value if same(record.a_static_field_name_beyond_the_inline_representation, value) { } else { return record } set record.a_static_field_name_beyond_the_inline_representation = 9 if same(record.a_static_field_name_beyond_the_inline_representation, 9) { } else { return record } remove record.short remove record.a_static_field_name_beyond_the_inline_representation remove record.an_absent_static_field_name_beyond_the_inline_representation if same(record.len(record), 1) { } else { return record } let members = set{7} set members[8] = true set members[7] = false remove members[8] if members[7] { return members } if members[8] { return members } if same(record[\"added\"], value) { } else { return record } let numeric = map{1: value} set numeric[1.0] = 9 if same(numeric[1], 9) { } else { return numeric } let transient = [value, 0, 1] remove transient[1] remove transient[1] remove transient[0] set xs[0] = value set xs[1] = value set xs[2] = value set xs[3] = 9 set value[0] = 8 return xs } return apply f([], nested)";
 const SOURCE_UNIT: &str = "let nested = [7] let f = fn(value) { if same(value, ()) { return 0 } return value } return apply f(nested)";
 const SOURCE_PENDING_UNIT: &str = "let nested = [7] let f = fn(value) { try { return [9] } finally { if same(value, ()) { return 0 } } } return apply f(nested)";
 const READ_ADD_MISS: &str = "let run = fn(obj) { let total = 1 set total = flat.add(total, invoke helper.element_map_any(obj, \"missing\")) return total } return apply run(map{\"a\": 255})";
@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let field_members = crate::machine::islands::witness::field_member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
     let native_reads = crate::machine::islands::witness::native_read_publications();
     let native_graphs = crate::machine::islands::witness::native_graph_publications();
@@ -534,6 +535,10 @@ fn observe_source_or_register(
         assert!(
             table_members >= 10,
             "precise map, set and record edits must publish their exact normalized members: {table_members}"
+        );
+        assert!(
+            field_members >= 6,
+            "static field writes and removals must publish their actual code keys and prepared storage: {field_members}"
         );
     }
     if mode != Mode::Source

@@ -263,16 +263,11 @@ impl JournalEvent {
                 .iter()
                 .zip(&other.entities)
                 .all(|(a, b)| a.entity == b.entity && a.body.same(&b.body))
-            && match (self.member, other.member) {
+            && match (&self.member, &other.member) {
                 (None, None) => true,
                 (Some(a), Some(b)) => {
                     a.handle == b.handle
-                        && match (a.member, b.member) {
-                            (Member::List(a), Member::List(b)) => a == b,
-                            (Member::Variable, Member::Variable) => true,
-                            (Member::Table(a), Member::Table(b)) => a.same(&b),
-                            _ => false,
-                        }
+                        && a.member.same(&b.member)
                         && match (a.next, b.next) {
                             (None, None) => true,
                             (Some(a), Some(b)) => a.same(&b),
@@ -324,10 +319,10 @@ impl JournalEvent {
         for (_, value) in &self.outputs {
             value.handles(handles);
         }
-        if let Some(edit) = self.member {
+        if let Some(edit) = &self.member {
             handles.push(edit.handle);
             handles.extend(edit.next.and_then(|v| v.handle()));
-            if let Member::Table(key) = edit.member {
+            if let Member::Table(key) = &edit.member {
                 handles.extend(key.handle());
             }
         }
@@ -589,7 +584,7 @@ impl EvaluatedProgram {
                     registration.arena(),
                     access,
                     edit.handle,
-                    edit.member,
+                    edit.member.clone(),
                     edit.next,
                 )?;
                 changes.push(change);

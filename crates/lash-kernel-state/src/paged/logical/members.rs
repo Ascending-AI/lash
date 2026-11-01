@@ -7,11 +7,24 @@ use lash_kernel_doc::{
     arena::{ArenaHandle, Body},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Member {
     List(u64),
     Table(Value),
+    /// A field name from the admitted source instruction, without an operand.
+    Field(std::sync::Arc<str>),
     Variable,
+}
+impl Member {
+    pub fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::List(a), Self::List(b)) => a == b,
+            (Self::Table(a), Self::Table(b)) => a.same(b),
+            (Self::Field(a), Self::Field(b)) => a == b,
+            (Self::Variable, Self::Variable) => true,
+            _ => false,
+        }
+    }
 }
 #[derive(Debug, thiserror::Error)]
 pub enum MemberFault {
@@ -88,7 +101,7 @@ impl Ledger {
         if let Some(handle) = next.and_then(|value| value.handle()) {
             handles.push(handle);
         }
-        if let Member::Table(key) = member
+        if let Member::Table(key) = &member
             && let Some(handle) = key.handle()
         {
             handles.push(handle);
@@ -117,6 +130,35 @@ impl Ledger {
                 let next = next.ok_or_else(|| invalid("a variable cannot remove its member"))?;
                 remove = Holding::from_native(arena, access, &old)?;
                 add = Holding::from_native(arena, access, &next)?;
+            }
+            Member::Field(name) => {
+                if !matches!(arena.body(handle)?, Body::Record(_)) {
+                    return Err(NativeError::Decline.into());
+                }
+                let old = arena.logical_entry_key(handle, &crate::arena::Key::of_text(&name))?;
+                match (old, next) {
+                    (Some((key, value)), None) => remove = entry(arena, access, key, value, true)?,
+                    (None, Some(value)) => {
+                        let key = lash_kernel_doc::heap::PageValue::Text(
+                            lash_kernel_doc::heap::TextRef {
+                                normal: Default::default(),
+                                summary: lash_kernel_doc::heap_values::text_summary(&name),
+                                body: lash_kernel_doc::heap::TextPayload::Resident(name),
+                            },
+                        );
+                        add = entry_holdings(
+                            Holding::from_page(access, &key)?,
+                            Holding::from_native(arena, access, &value)?,
+                            true,
+                            access,
+                        )?;
+                    }
+                    (Some((_, old)), Some(value)) => {
+                        remove = Holding::from_native(arena, access, &old)?;
+                        add = Holding::from_native(arena, access, &value)?;
+                    }
+                    (None, None) => {}
+                }
             }
             Member::Table(key) => {
                 let record = match arena.body(handle)? {
@@ -168,14 +210,25 @@ fn entry(
     if record && !matches!(key, Value::Text(_) | Value::LongText(_)) {
         return Err(NativeError::Decline.into());
     }
-    let mut holding = Holding::from_native(arena, access, &key)?;
+    entry_holdings(
+        Holding::from_native(arena, access, &key)?,
+        Holding::from_native(arena, access, &value)?,
+        record,
+        access,
+    )
+}
+fn entry_holdings(
+    mut holding: Holding,
+    value: Holding,
+    record: bool,
+    access: &Access<'_>,
+) -> Result<Holding, MemberFault> {
     if record {
         holding.bytes = holding
             .bytes
             .checked_sub(Cost::REFERENCE)
             .ok_or_else(|| invalid("field price underflow"))?;
     }
-    let value = Holding::from_native(arena, access, &value)?;
     holding.bytes = holding
         .bytes
         .checked_add(value.bytes)

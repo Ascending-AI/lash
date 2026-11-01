@@ -469,7 +469,7 @@ struct EventContext<'a> {
     arena: &'a Arena,
 }
 impl EventContext<'_> {
-    fn check_cell(
+    fn check_reference(
         &self,
         owner: logical::Owner,
         handle: lash_kernel_doc::arena::ArenaHandle,
@@ -507,8 +507,18 @@ impl EventContext<'_> {
         if !unique
             || edge != Some((doc::heap::Identity::Object(entity), 1))
             || holding.bytes() != bytes
-            || !matches!(self.arena.body(handle), Ok(doc::arena::Body::Cell(_)))
         {
+            return Err(Refused::Retained);
+        }
+        Ok(())
+    }
+    fn check_cell(
+        &self,
+        owner: logical::Owner,
+        handle: lash_kernel_doc::arena::ArenaHandle,
+    ) -> Result<(), Refused> {
+        self.check_reference(owner, handle)?;
+        if !matches!(self.arena.body(handle), Ok(doc::arena::Body::Cell(_))) {
             return Err(Refused::Retained);
         }
         Ok(())
@@ -567,6 +577,7 @@ impl EventContext<'_> {
             if source.assigns_cell(&event.point.site) {
                 let edit = actual
                     .member
+                    .as_ref()
                     .filter(|edit| {
                         matches!(edit.member, logical::Member::Variable) && edit.next.is_some()
                     })
@@ -618,6 +629,20 @@ impl EventContext<'_> {
             || (native.is_none() && actual.entities.len() > event.entities.len())
         {
             return Err(Refused::Retained);
+        }
+        if let Some(edit) = &actual.member {
+            match (&edit.member, &site.field) {
+                (logical::Member::Field(actual), Some(expected)) if actual == expected => {
+                    let target = root(&Owner::Operand(event.point.site.child(0)))
+                        .ok_or(Refused::Retained)?;
+                    self.check_reference(target, edit.handle)?;
+                    if !matches!(arena.body(edit.handle), Ok(doc::arena::Body::Record(_))) {
+                        return Err(Refused::Retained);
+                    }
+                }
+                (logical::Member::Field(_), _) | (_, Some(_)) => return Err(Refused::Retained),
+                _ => {}
+            }
         }
         let mut scratch = 0_u64;
         for lease in source

@@ -352,9 +352,12 @@ impl KernelMachine {
                     }
                     return self.source_done(running, source_pc, Ran::Done);
                 }
-                Op::SetIndex { .. } | Op::RemoveIndex { .. } => {
+                Op::SetIndex { .. }
+                | Op::RemoveIndex { .. }
+                | Op::SetField { .. }
+                | Op::RemoveField { .. } => {
                     self.close_region(running.stream);
-                    if self.publish_source_indexed_member(running, source_pc)? {
+                    if self.publish_source_member(running, source_pc)? {
                         self.source_complete_joins(running, source_pc)?;
                         return Ok(Ran::Done);
                     }

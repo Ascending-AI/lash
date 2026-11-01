@@ -208,8 +208,8 @@ impl KernelMachine {
         };
         let input = bank.owner();
         let value = bank.value();
-        if let Some((owner, edit)) = member
-            && (owner != input || !edit.next.is_some_and(|next| next.same(&value)))
+        if let Some((owner, edit)) = &member
+            && (*owner != input || !edit.next.is_some_and(|next| next.same(&value)))
         {
             return Err(malformed("cell RHS changed during preparation").into());
         }
@@ -352,7 +352,7 @@ impl KernelMachine {
             || {
                 Program::new(vec![JournalEvent {
                     inputs: inputs.clone(),
-                    member: member.map(|(_, edit)| edit),
+                    member: member.as_ref().map(|(_, edit)| edit.clone()),
                     outputs: if member.is_some() {
                         vec![]
                     } else {
@@ -379,14 +379,14 @@ impl KernelMachine {
                 bank,
                 slot,
                 cell: entity.map(|entity| CellConstruction { entity, value }),
-                member: member.map(|(_, edit)| edit),
+                member: member.as_ref().map(|(_, edit)| edit.clone()),
             },
             |arena, _, edits, (bank, slot, cell, write)| {
                 if let Some(write) = write {
                     let [edit] = edits.as_slice() else {
                         unreachable!("cell publication changed member arity");
                     };
-                    write.publish(arena, *edit);
+                    write.publish(arena, edit.clone());
                 } else {
                     debug_assert!(edits.is_empty());
                 }

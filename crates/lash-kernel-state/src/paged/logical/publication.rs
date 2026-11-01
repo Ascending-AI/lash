@@ -6,7 +6,7 @@ use lash_kernel_doc::{Value, arena::ArenaHandle};
 
 /// The canonical storage owner receives exactly the edit whose old content
 /// and replacement were checked. It reserves fallible storage before publish.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct MemberEdit {
     pub handle: ArenaHandle,
     pub member: Member,
@@ -98,7 +98,7 @@ impl Ledger {
             &mut registration,
             access,
             handle,
-            member,
+            member.clone(),
             next,
             inputs,
             outputs,
@@ -207,7 +207,7 @@ impl<'a> PreparedPublication<'a> {
             &mut self.registration,
             access,
             handle,
-            member,
+            member.clone(),
             next,
             inputs,
             outputs,

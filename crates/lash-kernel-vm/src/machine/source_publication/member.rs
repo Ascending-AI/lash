@@ -1,4 +1,4 @@
-//! Indexed member edits install their reserved storage and bank edits together.
+//! Source member edits install their reserved storage and bank edits together.
 use super::*;
 use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurrence};
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
@@ -10,6 +10,10 @@ enum PreparedMember {
     Write(lash_kernel_state::arena::PreparedListWrite),
     Remove(lash_kernel_state::arena::PreparedListRemove),
     Table(lash_kernel_state::arena::PreparedTableMember),
+    Field(
+        lash_kernel_state::arena::PreparedBatch,
+        lash_kernel_state::arena::PreparedTableMember,
+    ),
 }
 impl PreparedMember {
     fn publish(self, arena: &mut Arena, edit: MemberEdit) {
@@ -17,51 +21,125 @@ impl PreparedMember {
             Self::Write(write) => write.publish(arena, edit),
             Self::Remove(remove) => remove.publish(arena, edit),
             Self::Table(table) => table.publish(arena, edit),
+            Self::Field(batch, table) => {
+                batch.publish(arena);
+                table.publish(arena, edit);
+            }
         }
     }
 }
+struct MemberStorage(MemberEdit);
+impl StoragePreparation for MemberStorage {
+    type Prepared = PreparedMember;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        actual: Program,
+    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
+        let edit = self.0;
+        if let Member::Field(name) = edit.member {
+            let Some((installation, table)) =
+                arena.prepare_field_member(edit.handle, name, edit.next)?
+            else {
+                return Ok(None);
+            };
+            let (registration, batch) = installation.into_parts();
+            return Ok(Some(PreparedStorage {
+                registration,
+                storage: PreparedMember::Field(batch, table),
+                actual,
+            }));
+        }
+        let storage = match edit.member {
+            Member::List(index) => match edit.next {
+                Some(value) => arena
+                    .prepare_list_write(edit.handle, index, value)?
+                    .map(PreparedMember::Write),
+                None => arena
+                    .prepare_list_remove(edit.handle, index)?
+                    .map(PreparedMember::Remove),
+            },
+            Member::Table(key) => arena
+                .prepare_table_member(edit.handle, key, edit.next)?
+                .map(PreparedMember::Table),
+            Member::Variable | Member::Field(_) => {
+                return Err(malformed("a source member store has another target"));
+            }
+        };
+        let Some(storage) = storage else {
+            return Ok(None);
+        };
+        Ok(Some(PreparedStorage {
+            registration: arena.registration().map_err(native_fault)?,
+            storage,
+            actual,
+        }))
+    }
+}
 impl KernelMachine {
-    pub(in crate::machine) fn publish_source_indexed_member(
+    pub(in crate::machine) fn publish_source_member(
         &mut self,
         running: &Running<'_>,
         pc: u32,
     ) -> Result<bool, Halt> {
-        let (target, removing) = match running.stream.ops[pc as usize] {
-            Op::SetIndex { target, .. } => (target, false),
-            Op::RemoveIndex { target } => (target, true),
+        let (target, removing, field) = match running.stream.ops[pc as usize] {
+            Op::SetIndex { target, .. } => (target, false, None),
+            Op::RemoveIndex { target } => (target, true, None),
+            Op::SetField { target, field, .. } => (
+                target,
+                false,
+                Some(Arc::<str>::from(
+                    running.stream.fields[field.ix()].name.as_str(),
+                )),
+            ),
+            Op::RemoveField { target, field } => (
+                target,
+                true,
+                Some(Arc::<str>::from(
+                    running.stream.fields[field.ix()].name.as_str(),
+                )),
+            ),
             _ => return Ok(false),
         };
         let target_value = self.regs[target.ix()];
-        let key = self.regs[target.ix() + 1];
-        let (handle, member) = match target_value {
-            doc::Value::List(handle) => {
-                let Some(index) = crate::compile::position(&key) else {
-                    return Ok(false);
-                };
-                let Ok(len) = self.arena.borrow().len(handle) else {
-                    return Ok(false);
-                };
-                if index > len || (removing && index == len) {
-                    return Ok(false);
-                }
-                (handle, Member::List(index))
+        let key = field.is_none().then(|| self.regs[target.ix() + 1]);
+        let (handle, member) = if let Some(name) = &field {
+            let doc::Value::Record(handle) = target_value else {
+                return Ok(false);
+            };
+            if self.arena.borrow().entries(handle).is_err() {
+                return Ok(false);
             }
-            doc::Value::Map(handle) | doc::Value::Set(handle) | doc::Value::Record(handle) => {
-                if matches!(target_value, doc::Value::Record(_))
-                    && !matches!(key, doc::Value::Text(_) | doc::Value::LongText(_))
-                {
-                    return Ok(false);
+            (handle, Member::Field(Arc::clone(name)))
+        } else {
+            let key = key.expect("indexed operation has its evaluated key");
+            match target_value {
+                doc::Value::List(handle) => {
+                    let Some(index) = crate::compile::position(&key) else {
+                        return Ok(false);
+                    };
+                    let Ok(len) = self.arena.borrow().len(handle) else {
+                        return Ok(false);
+                    };
+                    if index > len || (removing && index == len) {
+                        return Ok(false);
+                    }
+                    (handle, Member::List(index))
                 }
-                let arena = self.arena.borrow();
-                // The ordinary source reader resolves cold keys/bodies before
-                // a resident storage recipe can be prepared. No edit is quoted
-                // against a proxy or an incomplete table.
-                if arena.key(&key).is_err() || arena.entries(handle).is_err() {
-                    return Ok(false);
+                doc::Value::Map(handle) | doc::Value::Set(handle) | doc::Value::Record(handle) => {
+                    if matches!(target_value, doc::Value::Record(_))
+                        && !matches!(key, doc::Value::Text(_) | doc::Value::LongText(_))
+                    {
+                        return Ok(false);
+                    }
+                    let arena = self.arena.borrow();
+                    if arena.key(&key).is_err() || arena.entries(handle).is_err() {
+                        return Ok(false);
+                    }
+                    (handle, Member::Table(key))
                 }
-                (handle, Member::Table(key))
+                _ => return Ok(false),
             }
-            _ => return Ok(false),
         };
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
@@ -93,14 +171,20 @@ impl KernelMachine {
         };
         let inputs = bank.owners();
         let values = bank.values();
-        let next = match values.as_slice() {
-            [actual, actual_key]
-                if removing && actual.same(&target_value) && actual_key.same(&key) =>
+        let next = match (field.is_some(), values.as_slice()) {
+            (true, [actual]) if removing && actual.same(&target_value) => None,
+            (true, [actual, value]) if !removing && actual.same(&target_value) => Some(*value),
+            (false, [actual, actual_key])
+                if removing
+                    && actual.same(&target_value)
+                    && key.is_some_and(|key| actual_key.same(&key)) =>
             {
                 None
             }
-            [actual, actual_key, value]
-                if !removing && actual.same(&target_value) && actual_key.same(&key) =>
+            (false, [actual, actual_key, value])
+                if !removing
+                    && actual.same(&target_value)
+                    && key.is_some_and(|key| actual_key.same(&key)) =>
             {
                 if matches!(target_value, doc::Value::Set(_)) {
                     let doc::Value::Bool(present) = value else {
@@ -111,7 +195,7 @@ impl KernelMachine {
                     Some(*value)
                 }
             }
-            _ => return Err(malformed("indexed member has another source input shape").into()),
+            _ => return Err(malformed("member store has another source input shape").into()),
         };
         let edit = MemberEdit {
             handle,
@@ -137,7 +221,7 @@ impl KernelMachine {
                 arena.registration().map_err(native_fault)?,
                 self.heap.pages(),
                 handle,
-                edit.member,
+                edit.member.clone(),
                 edit.next,
                 &[],
                 &[],
@@ -273,29 +357,16 @@ impl KernelMachine {
             || {
                 Program::new(vec![JournalEvent {
                     inputs: inputs.clone(),
-                    member: Some(edit),
+                    member: Some(edit.clone()),
                     ..Default::default()
                 }])
             },
-            Reserve(|arena: &mut Arena| match edit.member {
-                Member::List(index) => match edit.next {
-                    Some(value) => arena
-                        .prepare_list_write(handle, index, value)
-                        .map(|write| write.map(PreparedMember::Write)),
-                    None => arena
-                        .prepare_list_remove(handle, index)
-                        .map(|remove| remove.map(PreparedMember::Remove)),
-                },
-                Member::Table(key) => arena
-                    .prepare_table_member(handle, key, edit.next)
-                    .map(|table| table.map(PreparedMember::Table)),
-                Member::Variable => Err(malformed("an indexed store cannot edit a variable cell")),
-            }),
+            MemberStorage(edit.clone()),
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list store changed member arity")
                 };
-                write.publish(arena, *edit);
+                write.publish(arena, edit.clone());
                 bank.publish();
             },
         )?;
@@ -305,7 +376,9 @@ impl KernelMachine {
                 self.grown();
             }
             #[cfg(any(test, feature = "testing"))]
-            if matches!(edit.member, Member::Table(_)) {
+            if matches!(edit.member, Member::Field(_)) {
+                crate::machine::islands::witness::field_member_published();
+            } else if matches!(edit.member, Member::Table(_)) {
                 crate::machine::islands::witness::table_member_published();
             } else if removing {
                 crate::machine::islands::witness::list_removal_published();

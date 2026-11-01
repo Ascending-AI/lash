@@ -176,7 +176,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     .map_err(|error| malformed(&error.to_string()))?,
                 self.heap.pages(),
                 handle,
-                edit.member,
+                edit.member.clone(),
                 edit.next,
                 &[],
                 &[],
@@ -254,7 +254,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let make = || {
             Program::new(vec![JournalEvent {
                 inputs: inputs.clone(),
-                member: Some(edit),
+                member: Some(edit.clone()),
                 ..Default::default()
             }])
         };
@@ -290,14 +290,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     Member::Variable => arena
                         .prepare_cell_write(handle, value)
                         .map(|write| write.map(PreparedWrite::Cell)),
-                    Member::Table(_) => Ok(None),
+                    Member::Table(_) | Member::Field(_) => Ok(None),
                 }
             }),
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list publication changed member arity");
                 };
-                write.publish(arena, *edit);
+                write.publish(arena, edit.clone());
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

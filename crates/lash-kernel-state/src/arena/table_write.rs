@@ -1,12 +1,14 @@
-//! A complete resident table edit is prepared without changing its guest body.
+//! Table storage and insertion sequences are complete before source acceptance.
 use super::*;
+use crate::paged::logical::{Member, MemberEdit};
 use lash_kernel_doc::heap::{HeapFault, HostResource};
 
-/// A complete indexed edit with all installation storage already reserved.
+/// The exact member address and all infallible installation storage.
 pub struct PreparedTableMember {
     version: ContentVersion,
     handle: ArenaHandle,
-    key: Value,
+    address: Member,
+    key: Option<Value>,
     next: Option<Value>,
     edit: Option<TableEdit>,
 }
@@ -25,6 +27,16 @@ struct TableEdit {
     sequence: u64,
     resident_before: u64,
 }
+pub(super) struct TableSnapshot {
+    version: ContentVersion,
+    handle: ArenaHandle,
+    kind: TableKind,
+    values: Vec<Value>,
+    sequences: Vec<u64>,
+    next_sequence: u64,
+    place: Option<usize>,
+    old: Option<(Value, Value)>,
+}
 fn reserve<T>(values: &mut Vec<T>, additional: usize) -> Result<(), HeapFault> {
     values
         .try_reserve(additional)
@@ -39,14 +51,12 @@ fn fault(error: NativeError) -> HeapFault {
     }
 }
 impl Arena {
-    /// Reserve normalized table storage, its index and mutation bookkeeping.
-    /// Key and cold-read errors are resolved by the ordinary source caller.
-    pub fn prepare_table_member(
-        &mut self,
+    /// Capture the resident target, its original key spelling and sequence ids.
+    pub(super) fn table_snapshot(
+        &self,
         handle: ArenaHandle,
-        key: Value,
-        next: Option<Value>,
-    ) -> Result<Option<PreparedTableMember>, HeapFault> {
+        key: &Key,
+    ) -> Result<Option<TableSnapshot>, HeapFault> {
         let Some(version) = self.content_version(handle) else {
             return Ok(None);
         };
@@ -59,37 +69,19 @@ impl Arena {
             Ok(Body::Record(_)) => TableKind::Record,
             _ => return Ok(None),
         };
-        if matches!(kind, TableKind::Set)
-            && next.is_some_and(|value| !matches!(value, Value::Absent))
-        {
-            return Ok(None);
-        }
-        if matches!(kind, TableKind::Record) && !matches!(key, Value::Text(_) | Value::LongText(_))
-        {
-            return Ok(None);
-        }
-        let Ok(resident_key) = self.key(&key) else {
-            return Ok(None);
-        };
         let Ok((table, index)) = self.table_view(handle) else {
             return Ok(None);
         };
         let Ok(held) = tables::pairs(handle, table) else {
             return Ok(None);
         };
-        let place = tables::find(handle, table, index, &resident_key).map_err(fault)?;
+        let place = tables::find(handle, table, index, key).map_err(fault)?;
         let old = place
             .map(|place| tables::pair(table, place).map(|pair| (pair[0], pair[1])))
             .transpose()
             .map_err(fault)?;
-        if old.is_none() && next.is_none() {
-            return Ok(Some(PreparedTableMember {
-                version,
-                handle,
-                key,
-                next,
-                edit: None,
-            }));
+        if place.is_some_and(|place| place.chunk != 0) {
+            return Ok(None);
         }
         let mut values = Vec::new();
         reserve(&mut values, held.len() + 2)?;
@@ -97,80 +89,155 @@ impl Arena {
         let mut sequences = Vec::new();
         reserve(&mut sequences, held.len() / 2 + 1)?;
         sequences.extend(index.sequences(0).iter());
-        let before = held.len() as u64;
-        let mut next_sequence = index.next();
-        let sequence = if let Some(place) = place {
-            if place.chunk != 0 {
-                return Ok(None);
-            }
-            let sequence = *sequences.get(place.at).ok_or_else(|| {
+        Ok(Some(TableSnapshot {
+            version,
+            handle,
+            kind,
+            values,
+            sequences,
+            next_sequence: index.next(),
+            place: place.map(|place| place.at),
+            old,
+        }))
+    }
+    /// Prepare an evaluated index key with the same canonical table builder.
+    pub fn prepare_table_member(
+        &mut self,
+        handle: ArenaHandle,
+        key: Value,
+        next: Option<Value>,
+    ) -> Result<Option<PreparedTableMember>, HeapFault> {
+        let Ok(resident) = self.key(&key) else {
+            return Ok(None);
+        };
+        let Some(snapshot) = self.table_snapshot(handle, &resident)? else {
+            return Ok(None);
+        };
+        if matches!(snapshot.kind, TableKind::Set)
+            && next.is_some_and(|value| !matches!(value, Value::Absent))
+        {
+            return Ok(None);
+        }
+        if matches!(snapshot.kind, TableKind::Record)
+            && !matches!(key, Value::Text(_) | Value::LongText(_))
+        {
+            return Ok(None);
+        }
+        let prepared = snapshot.build(
+            &self.objects,
+            &self.facts,
+            &self.layouts,
+            Member::Table(key),
+            Some(key),
+            next,
+        )?;
+        prepared.reserve(self, 0)?;
+        Ok(Some(prepared))
+    }
+}
+impl TableSnapshot {
+    pub(super) fn is_record(&self) -> bool {
+        matches!(self.kind, TableKind::Record)
+    }
+    pub(super) fn old_key(&self) -> Option<Value> {
+        self.old.map(|(key, _)| key)
+    }
+    pub(super) fn build(
+        mut self,
+        objects: &impl Bodies,
+        facts: &impl FactTable,
+        layouts: &layouts::Layouts,
+        address: Member,
+        key: Option<Value>,
+        next: Option<Value>,
+    ) -> Result<PreparedTableMember, HeapFault> {
+        if self.old.is_none() && next.is_none() {
+            return Ok(PreparedTableMember {
+                version: self.version,
+                handle: self.handle,
+                address,
+                key,
+                next,
+                edit: None,
+            });
+        }
+        let before = self.values.len() as u64;
+        let sequence = if let Some(at) = self.place {
+            let sequence = *self.sequences.get(at).ok_or_else(|| {
                 HeapFault::Malformed("a table position has no insertion sequence".into())
             })?;
             match next {
-                Some(value) => values[place.at * 2 + 1] = value,
+                Some(value) => self.values[at * 2 + 1] = value,
                 None => {
-                    drop(values.drain(place.at * 2..place.at * 2 + 2));
-                    sequences.remove(place.at);
+                    drop(self.values.drain(at * 2..at * 2 + 2));
+                    self.sequences.remove(at);
                 }
             }
             sequence
         } else {
-            let Some(value) = next else {
-                unreachable!("an absent removal was prepared above");
-            };
-            let sequence = next_sequence;
-            next_sequence = next_sequence
+            let key = key.ok_or_else(|| {
+                HeapFault::Malformed("a table insertion has no prepared key".into())
+            })?;
+            let value =
+                next.ok_or_else(|| HeapFault::Malformed("a table insertion has no value".into()))?;
+            let sequence = self.next_sequence;
+            self.next_sequence = sequence
                 .checked_add(1)
                 .ok_or_else(|| HeapFault::Malformed("table insertion sequence overflow".into()))?;
-            values.extend([key, value]);
-            sequences.push(sequence);
+            self.values.extend([key, value]);
+            self.sequences.push(sequence);
             sequence
         };
         let (table, mut index) = tables::build(
-            &self.objects,
-            &self.facts,
-            &self.layouts,
-            values
+            objects,
+            facts,
+            layouts,
+            self.values
                 .as_chunks::<2>()
                 .0
                 .iter()
                 .map(|[key, value]| (*key, *value)),
         )
         .map_err(fault)?;
-        index.resequence(sequences, next_sequence).map_err(fault)?;
-        let body = match kind {
+        index
+            .resequence(self.sequences, self.next_sequence)
+            .map_err(fault)?;
+        let body = match self.kind {
             TableKind::Map => Body::Map(table),
             TableKind::Set => Body::Set(table),
             TableKind::Record => Body::Record(table),
         };
-        let flat = self.summarize_flat(&body);
-        reserve(&mut self.zero, 2)?;
-        reserve(&mut self.dirty, 1)?;
-        reserve(&mut self.facts[handle.index() as usize].cards, 1)?;
-        Ok(Some(PreparedTableMember {
-            version,
-            handle,
+        let flat = sizes::summarize_flat(objects, &body);
+        Ok(PreparedTableMember {
+            version: self.version,
+            handle: self.handle,
+            address,
             key,
             next,
             edit: Some(TableEdit {
                 body,
                 index,
                 flat,
-                old,
-                structural: old.is_none() || next.is_none(),
+                old: self.old,
+                structural: self.old.is_none() || next.is_none(),
                 sequence,
                 resident_before: before,
             }),
-        }))
+        })
     }
 }
 impl PreparedTableMember {
-    /// Install the one authenticated member edit without another allocation.
-    pub fn publish(self, arena: &mut Arena, edit: crate::paged::logical::MemberEdit) {
+    pub(super) fn reserve(&self, arena: &mut Arena, batch: usize) -> Result<(), HeapFault> {
+        reserve(&mut arena.zero, batch + 2)?;
+        reserve(&mut arena.dirty, batch + 1)?;
+        reserve(&mut arena.facts[self.handle.index() as usize].cards, 1)
+    }
+    /// Install the exact authenticated edit without a lookup or allocation.
+    pub fn publish(self, arena: &mut Arena, edit: MemberEdit) {
         assert!(arena.registration_active() && arena.content_is(&self.version));
         assert!(
             edit.handle == self.handle
-                && matches!(edit.member, crate::paged::logical::Member::Table(key) if key.same(&self.key))
+                && edit.member.same(&self.address)
                 && match (edit.next, self.next) {
                     (Some(a), Some(b)) => a.same(&b),
                     (None, None) => true,
@@ -198,7 +265,10 @@ impl PreparedTableMember {
         arena.facts[self.handle.index() as usize].flat = prepared.flat;
         match (prepared.old, self.next) {
             (None, Some(value)) => {
-                arena.hold(&self.key);
+                let Some(key) = self.key else {
+                    unreachable!("a prepared insertion has its key");
+                };
+                arena.hold(&key);
                 arena.hold(&value);
             }
             (Some((_, old)), Some(value)) => {

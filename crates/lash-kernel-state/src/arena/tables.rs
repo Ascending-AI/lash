@@ -680,8 +680,15 @@ impl super::Arena {
         key: &Value,
     ) -> Result<Option<(Value, Value)>, NativeError> {
         let key = self.key(key)?;
+        self.logical_entry_key(handle, &key)
+    }
+    pub(crate) fn logical_entry_key(
+        &self,
+        handle: ArenaHandle,
+        key: &Key,
+    ) -> Result<Option<(Value, Value)>, NativeError> {
         let (table, index) = self.table_view(handle)?;
-        find(handle, table, index, &key)?
+        find(handle, table, index, key)?
             .map(|place| pair(table, place).map(|pair| (pair[0], pair[1])))
             .transpose()
     }

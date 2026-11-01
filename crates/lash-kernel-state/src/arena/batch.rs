@@ -67,6 +67,52 @@ impl Bodies for PreparedInstallation<'_> {
             .or_else(|| self.registration.read_arena().objects.get(handle))
     }
 }
+impl FactTable for PreparedInstallation<'_> {
+    fn get(&self, index: usize) -> Option<&Facts> {
+        self.batch
+            .entries
+            .iter()
+            .find(|entry| entry.handle.index() as usize == index)
+            .map(|entry| &entry.facts)
+            .or_else(|| self.registration.read_arena().facts.get(index))
+    }
+}
+impl Arena {
+    /// Stage the actual code field key and the complete table edit together.
+    pub fn prepare_field_member(
+        &mut self,
+        handle: ArenaHandle,
+        name: std::sync::Arc<str>,
+        next: Option<Value>,
+    ) -> Result<Option<(PreparedInstallation<'_>, PreparedTableMember)>, HeapFault> {
+        let Some(snapshot) = self.table_snapshot(handle, &Key::of_text(&name))? else {
+            return Ok(None);
+        };
+        if !snapshot.is_record() {
+            return Ok(None);
+        }
+        let old = snapshot.old_key();
+        let mut nursery = lash_kernel_doc::Nursery::unaccounted(self.objects());
+        let key = old.or_else(|| next.map(|_| nursery.text(&name)));
+        let mut installation =
+            self.prepare_install(nursery.into_new())
+                .map_err(|error| match error {
+                    NativeError::Host(error) => error,
+                    error => HeapFault::Malformed(error.to_string()),
+                })?;
+        let table = snapshot.build(
+            &installation,
+            &installation,
+            &installation.registration.read_arena().layouts,
+            crate::paged::logical::Member::Field(name),
+            key,
+            next,
+        )?;
+        let count = installation.batch.entries.len();
+        table.reserve(installation.registration.arena(), count)?;
+        Ok(Some((installation, table)))
+    }
+}
 impl<'a> PreparedInstallation<'a> {
     /// Reads a detached body or an existing dependency without installing it.
     /// The exclusive registration keeps every returned generation stable.

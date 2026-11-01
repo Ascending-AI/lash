@@ -43,6 +43,7 @@ impl Linear {
 pub(super) struct PublicationSite {
     pub(super) assignment: Option<lash_kernel_value::Name>,
     pub(super) member: bool,
+    pub(super) field: Option<Arc<str>>,
 }
 struct Step {
     publication: PublicationSite,
@@ -84,6 +85,18 @@ impl Step {
                     place: doc::Place::Variable(name),
                     ..
                 }) => Some(name.clone()),
+                _ => None,
+            },
+            field: match node {
+                doc::Node::Stmt(
+                    doc::Stmt::Assign {
+                        place: doc::Place::Member(doc::Member::Field { field, .. }),
+                        ..
+                    }
+                    | doc::Stmt::Remove {
+                        member: doc::Member::Field { field, .. },
+                    },
+                ) => Some(Arc::from(field.as_str())),
                 _ => None,
             },
             member: source.assigns_cell(&event.point.site)
