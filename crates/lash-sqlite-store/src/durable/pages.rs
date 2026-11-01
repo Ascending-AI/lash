@@ -21,6 +21,7 @@
 //! transaction. Expired leases are reaped first: their roots join the
 //! frontier, so what only they kept is peeled by a later step.
 
+use crate::Prepare as _;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
@@ -301,7 +302,7 @@ fn install_nodes(
             InstallEntry::Named { .. } => None,
             InstallEntry::Supplied(node) => Some(&node.id),
         }));
-        let mut statement = tx.prepare_cached(SQL.sqlite.candidate_nodes.sql())?;
+        let mut statement = tx.statement(SQL.sqlite.candidate_nodes.sql())?;
         let _bindings = crate::observed_sql::text_bindings(
             SQL.sqlite.candidate_nodes.sql(),
             &[&named, &supplied],
@@ -339,7 +340,7 @@ fn install_nodes(
         }
     }
     for chunk in fresh.chunks(graph::BLOB_BATCH_ROWS) {
-        let mut insert = tx.prepare_cached(graph::blob_batch_sql(chunk.len()))?;
+        let mut insert = tx.statement(graph::blob_batch_sql(chunk.len()))?;
         for (index, node) in chunk.iter().enumerate() {
             insert.raw_bind_parameter(index * 2 + 1, node.id.0.as_slice())?;
             insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
@@ -383,7 +384,7 @@ fn install_edges(
             let digests = graph::digest_array(children.iter());
             let _bindings =
                 crate::observed_sql::text_bindings(SQL.sqlite.encodings.sql(), &[&digests]);
-            tx.prepare_cached(SQL.sqlite.encodings.sql())?
+            tx.statement(SQL.sqlite.encodings.sql())?
                 .query_map([digests], |row| crate::codec::hash_column(row, 0))?
                 .collect::<rusqlite::Result<_>>()?
         };
@@ -421,7 +422,7 @@ fn lease_fenced(
     held: lash_durable::Epoch,
 ) -> rusqlite::Result<DurableError> {
     let current = tx
-        .prepare_cached(SQL.actor.epoch_of.sql())?
+        .statement(SQL.actor.epoch_of.sql())?
         .query_row([actor.as_str()], |row| row.get::<_, i64>(0))
         .optional()?;
     Ok(DurableError::OwnershipLost(Fenced {
@@ -465,7 +466,7 @@ fn fence_holds(
     epoch: lash_durable::Epoch,
 ) -> rusqlite::Result<bool> {
     let row = tx
-        .prepare_cached(SQL.actor.epoch_of.sql())?
+        .statement(SQL.actor.epoch_of.sql())?
         .query_row([actor.as_str()], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })
@@ -488,7 +489,7 @@ pub(crate) fn retire_step_in(
     let mut progress = RetirementProgress::default();
     let limit = budget.nodes.max(1);
     let expired: Vec<i64> = tx
-        .prepare_cached(SQL.sqlite.leases_expired.sql())?
+        .statement(SQL.sqlite.leases_expired.sql())?
         .query_map(
             rusqlite::params![now.0, i64::try_from(limit).unwrap_or(i64::MAX)],
             |row| row.get(0),
@@ -497,7 +498,7 @@ pub(crate) fn retire_step_in(
     let mut reaped = BTreeSet::new();
     for lease in expired {
         if let Some(root) = tx
-            .prepare_cached(SQL.pages.lease_reap.sql())?
+            .statement(SQL.pages.lease_reap.sql())?
             .query_row(rusqlite::params![lease, now.0], |row| {
                 crate::codec::hash_column(row, 0)
             })
@@ -582,7 +583,7 @@ fn frontier_put(
 /// and whether its closure is peeled.
 fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(String, bool)>> {
     let continued = tx
-        .prepare_cached(SQL.pages.frontier_take.sql())?
+        .statement(SQL.pages.frontier_take.sql())?
         .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
             Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?))
         })?
@@ -591,14 +592,14 @@ fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(String, 
         return Ok(continued);
     }
     let Some(root) = tx
-        .prepare_cached(SQL.sqlite.hold_next.sql())?
+        .statement(SQL.sqlite.hold_next.sql())?
         .query_row([], |row| crate::codec::hash_column(row, 0))
         .optional()?
     else {
         return Ok(Vec::new());
     };
     let closure: bool = tx
-        .prepare_cached(SQL.pages.hold_take.sql())?
+        .statement(SQL.pages.hold_take.sql())?
         .query_row([crate::codec::SqlHash(&root)], |row| row.get(0))?;
     Ok(vec![(root, closure)])
 }
@@ -627,7 +628,7 @@ pub(super) fn acquire_in(
         Ok(None) => return Ok(Err(DurableError::Graph(GraphRefusal::RootRetired))),
         Err(refusal) => return Ok(Err(DurableError::Graph(refusal))),
     }
-    let id: i64 = tx.prepare_cached(SQL.pages.lease_insert.sql())?.query_row(
+    let id: i64 = tx.statement(SQL.pages.lease_insert.sql())?.query_row(
         rusqlite::params![
             owner_bytes(&request.owner),
             request.expected.0.as_slice(),
@@ -655,7 +656,7 @@ pub(super) fn release_many_in(
         return Ok(Vec::new());
     }
     let ids: Vec<_> = leases.iter().map(|lease| lease.0.cast_signed()).collect();
-    tx.prepare_cached(SQL.sqlite.release_leases.sql())?
+    tx.statement(SQL.sqlite.release_leases.sql())?
         .query_map([graph::json_array(&ids)], |row| {
             crate::codec::hash_column(row, 0)
         })?
@@ -663,7 +664,7 @@ pub(super) fn release_many_in(
 }
 
 pub(super) fn release_in(tx: &Connection, lease: RootLeaseId) -> rusqlite::Result<Option<String>> {
-    tx.prepare_cached(SQL.pages.lease_release.sql())?
+    tx.statement(SQL.pages.lease_release.sql())?
         .query_row([lease.0.cast_signed()], |row| {
             crate::codec::hash_column(row, 0)
         })
@@ -698,7 +699,7 @@ impl PageStore for SqliteDurableStore {
                 return refuse(refusal);
             }
             let renewed = tx
-                .prepare_cached(SQL.pages.lease_renew.sql())?
+                .statement(SQL.pages.lease_renew.sql())?
                 .query_row(
                     rusqlite::params![
                         lease.id.0.cast_signed(),
@@ -742,7 +743,7 @@ impl PageStore for SqliteDurableStore {
             let mut live = None;
             let mut returned = Vec::new();
             {
-                let mut statement = conn.prepare_cached(SQL.sqlite.leased_pages.sql())?;
+                let mut statement = conn.statement(SQL.sqlite.leased_pages.sql())?;
                 let mut rows = statement.query(rusqlite::params![
                     id.0.cast_signed(),
                     root.0.as_slice(),
@@ -852,7 +853,7 @@ impl PageStore for SqliteDurableStore {
     async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError> {
         self.read(move |tx| -> Answer<RetirementBacklog> {
             let (holds, oldest) = tx
-                .prepare_cached(SQL.pages.backlog.sql())?
+                .statement(SQL.pages.backlog.sql())?
                 .query_row([], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?))
                 })?;

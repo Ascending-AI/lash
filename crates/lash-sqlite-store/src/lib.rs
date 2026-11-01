@@ -128,6 +128,8 @@ mod attachments;
 mod blobs;
 mod codec;
 mod conn;
+mod statement;
+pub(crate) use statement::Prepare;
 mod operational;
 pub use operational::SqliteOperationalSettings;
 mod connection_sql;
@@ -354,7 +356,7 @@ fn sqlite_graph_node_insert_error(
     node_id: &lash_vocabulary::identity::NodeId,
 ) -> StoreError {
     if sqlite_unique_violation(&err) {
-        let conflicts = tx.query_row(
+        let conflicts = tx.query_row_once(
             crate::session_sql::session_sql()
                 .graph_sqlite
                 .select_insert_conflicts

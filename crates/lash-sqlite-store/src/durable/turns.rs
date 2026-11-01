@@ -5,6 +5,7 @@
 //! fenced owner commit (or the mailbox commit), after the fence; a refusal
 //! rolls the whole commit back.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_core_store::store::HeadWriter;
@@ -163,7 +164,7 @@ pub(super) fn apply(
                 Err(error) => return Ok(Err(encoding(&error))),
             };
             let admitted = tx
-                .prepare_cached(SQL.admit_run.sql())?
+                .statement(SQL.admit_run.sql())?
                 .query_row(
                     rusqlite::params![session.as_str(), run.as_str(), admission],
                     |_| Ok(()),
@@ -214,7 +215,7 @@ pub(super) fn apply(
             let (replaced, consumed) = match commit.open_roots.take(session, run) {
                 Some(roots) => roots,
                 None => tx
-                    .prepare_cached(SQL.phase_roots.sql())?
+                    .statement(SQL.phase_roots.sql())?
                     .query_row([session.as_str(), run.as_str()], |row| {
                         Ok((
                             crate::codec::optional_hash_column(row, 0)?,
@@ -225,7 +226,7 @@ pub(super) fn apply(
                     .unwrap_or_default(),
             };
             let advanced = tx
-                .prepare_cached(if consumed.is_some() {
+                .statement(if consumed.is_some() {
                     SQL.advance_phase.sql()
                 } else {
                     SQLITE_SQL.advance_without_answer.sql()
@@ -270,7 +271,7 @@ pub(super) fn apply(
             answer,
         } => {
             let recorded = tx
-                .prepare_cached(SQL.answer_set.sql())?
+                .statement(SQL.answer_set.sql())?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
@@ -295,7 +296,7 @@ pub(super) fn apply(
             namespaces,
         } => {
             let open = tx
-                .prepare_cached(SQL.open_named_run.sql())?
+                .statement(SQL.open_named_run.sql())?
                 .query_row([session.as_str(), run.as_str()], |_| Ok(()))
                 .optional()?;
             if open.is_none() {
@@ -318,7 +319,7 @@ pub(super) fn apply(
                 // A held write keeps the stored root; any other replaces it.
                 if !matches!(namespace.values, StoredValues::Held) {
                     let replaced = tx
-                        .prepare_cached(SQL.namespace_root.sql())?
+                        .statement(SQL.namespace_root.sql())?
                         .query_row(
                             [session.as_str(), run.as_str(), namespace.plugin.as_str()],
                             |row| crate::codec::optional_hash_column(row, 0),
@@ -351,7 +352,7 @@ pub(super) fn apply(
             working,
         } => {
             let set = tx
-                .prepare_cached(SQL.working_set.sql())?
+                .statement(SQL.working_set.sql())?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
@@ -410,7 +411,7 @@ pub(super) fn apply(
                 Err(error) => return Ok(Err(encoding(&error))),
             };
             let ended = tx
-                .prepare_cached(if transcript.is_some() {
+                .statement(if transcript.is_some() {
                     SQL.end_run.sql()
                 } else {
                     SQLITE_SQL.end_without_transcript.sql()
@@ -446,7 +447,7 @@ pub(super) fn apply(
             // values whole, its PhaseRoot alone (the TurnContent ordering
             // constraint, [`super::Retired`]).
             let phase = tx
-                .prepare_cached(SQL.delete_phase.sql())?
+                .statement(SQL.delete_phase.sql())?
                 .query_row([session.as_str(), run.as_str()], |row| {
                     Ok((
                         crate::codec::optional_hash_column(row, 0)?,
@@ -464,7 +465,7 @@ pub(super) fn apply(
                 }
             }
             let namespaces = tx
-                .prepare_cached(SQL.delete_namespaces.sql())?
+                .statement(SQL.delete_namespaces.sql())?
                 .query_map([session.as_str(), run.as_str()], |row| {
                     crate::codec::optional_hash_column(row, 0)
                 })?
@@ -609,7 +610,7 @@ pub(super) fn request_cancel(
             .map(|(woken, _)| (TurnCancelAnswer::Withdrawn { input }, Some(woken))));
     }
     let open = tx
-        .prepare_cached(SQL.open_named_run.sql())?
+        .statement(SQL.open_named_run.sql())?
         .query_row([session, run], |_| Ok(()))
         .optional()?;
     if open.is_none() {
@@ -669,7 +670,7 @@ fn cancel_of(
     run: &TurnId,
 ) -> Answer<Option<TurnCancelRequest>> {
     let stored = tx
-        .prepare_cached(SQL.cancel_of.sql())?
+        .statement(SQL.cancel_of.sql())?
         .query_row([session.as_str(), run.as_str()], |row| {
             StoredCancel::read(row, 0)
         })
@@ -726,7 +727,7 @@ pub(super) fn turn_end(
     run: &TurnId,
 ) -> Answer<Option<TurnEnd>> {
     let stored = tx
-        .prepare_cached(SQL.ended.sql())?
+        .statement(SQL.ended.sql())?
         .query_row([session.as_str(), run.as_str()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
         })
@@ -751,7 +752,7 @@ pub(super) fn turn_namespaces(
     run: &TurnId,
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
 ) -> Answer<Vec<TurnNamespace>> {
-    let mut statement = tx.prepare_cached(SQL.namespaces.sql())?;
+    let mut statement = tx.statement(SQL.namespaces.sql())?;
     let rows = statement
         .query_map([session.as_str(), run.as_str()], |row| {
             Ok((
@@ -804,7 +805,7 @@ pub(super) fn turn_with_roots(
     session: &SessionId,
 ) -> Answer<Option<(TurnRow, PhaseRoots)>> {
     let stored = tx
-        .prepare_cached(super::SQL.sqlite.turn.sql())?
+        .statement(super::SQL.sqlite.turn.sql())?
         .query_row([session.as_str()], |row| {
             Ok((
                 StoredTurn::read(row, 0)?,
@@ -836,7 +837,7 @@ pub(super) fn turn_frontier(
     session: &SessionId,
 ) -> Answer<Option<(Option<TurnCancelRequest>, PhaseRoots)>> {
     let stored = tx
-        .prepare_cached(super::SQL.sqlite.turn_frontier.sql())?
+        .statement(super::SQL.sqlite.turn_frontier.sql())?
         .query_row([session.as_str()], |row| {
             StoredFrontier::read(row, 0, session.as_str())
         })
@@ -1034,13 +1035,14 @@ mod ddl_tests {
     //! The storage laws of a turn's stored forms (FIG-5221): the DDL itself
     //! refuses a phase row without what its phase restores from, and a run
     //! terminal whose kind its cause does not derive.
+    use crate::Prepare as _;
 
     use rusqlite::{Connection, params};
 
     fn tables() -> Connection {
         let conn = Connection::open_in_memory().expect("an in-memory database");
         conn.execute_batch(crate::schema::SCHEMA).expect("blobs");
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs (hash, content, encoding) VALUES ('{}', x'00', 1)",
             [],
         )
@@ -1059,7 +1061,7 @@ mod ddl_tests {
         checkpoint: Option<&str>,
         pin: Option<(&str, i64)>,
     ) -> rusqlite::Result<usize> {
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO turn_phases (session_id, run, phase, phase_arg, iteration,
                  checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
@@ -1126,7 +1128,7 @@ mod ddl_tests {
     fn the_ddl_refuses_a_terminal_kind_its_cause_does_not_derive() {
         let conn = tables();
         let end = |run: &str, kind: &str, cause: &str| {
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO session_runs (session_id, run, admission_json, terminal_kind,
                      terminal_cause_json, terminal_head_revision, terminal_at_ms)
                  VALUES ('s', ?1, NULL, ?2, ?3, NULL, 1)",

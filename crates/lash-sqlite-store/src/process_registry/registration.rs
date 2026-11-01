@@ -181,7 +181,7 @@ impl SqliteProcessRegistry {
         // (ADR 0116 §3.4).
         if let Some(hold) = consumer_hold.as_ref()
             && tx
-                .query_row(
+                .query_row_once(
                     process_sql().abandoned_hold.exists.sql(),
                     params![hold.key.as_str()],
                     |row| row.get::<_, bool>(0),

@@ -128,7 +128,7 @@ pub(crate) fn load_queued_batch_by_id_conn(
     batch_id: &str,
 ) -> Result<Option<QueuedWorkBatch>, StoreError> {
     let row = conn
-        .query_row(
+        .query_row_once(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .select_by_id
@@ -170,7 +170,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     let submission_digest = support::queued_work_submission_digest(batch)?;
     if let Some(source_key) = batch.source_key.as_deref() {
         let by_source_key = conn
-            .query_row(
+            .query_row_once(
                 sql.queued_batches.select_id_by_source_key.sql(),
                 params![batch.session_id.as_str(), source_key],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -193,7 +193,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
         now,
         Some(nonce),
     );
-    conn.execute(
+    conn.execute_once(
         sql.queued_batches_sqlite.insert_new.sql(),
         params![
             batch_id.as_str(),
@@ -241,7 +241,7 @@ pub(crate) fn complete_admitted_batch_conn(
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let row = lash_core_store::store::IngressRowId::Batch(batch_id.clone());
     let observed: Option<Option<String>> = conn
-        .query_row(
+        .query_row_once(
             turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
             params![session_id.as_str(), batch_id.as_str()],
             |row| row.get(0),
@@ -255,7 +255,7 @@ pub(crate) fn complete_admitted_batch_conn(
         observed.as_ref().map(Option::as_deref),
     )?;
     let settled = conn
-        .execute(
+        .execute_once(
             turn_ingress.queued_batches.settle_admitted.sql(),
             params![
                 session_id.as_str(),
@@ -302,7 +302,7 @@ pub(crate) fn settle_open_command_conn(
     };
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let observed: Option<Option<String>> = conn
-        .query_row(
+        .query_row_once(
             turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
             params![session_id.as_str(), batch_id.as_str()],
             |row| row.get(0),
@@ -315,7 +315,7 @@ pub(crate) fn settle_open_command_conn(
         observed.as_ref().map(Option::as_deref),
     )?;
     let settled = conn
-        .execute(
+        .execute_once(
             turn_ingress.queued_batches.settle_command.sql(),
             params![
                 session_id.as_str(),

@@ -369,7 +369,7 @@ impl SqliteStore {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare_cached(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
+                .statement(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| crate::codec::hash_column(row, 0))
@@ -397,7 +397,7 @@ impl SqliteStore {
                 StoreError::Backend(format!("failed to encode checkpoint ref batch: {error}"))
             })?;
             let mut statement = conn
-                .prepare_cached(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
+                .statement(artifact_sql().blobs_sqlite.select_bodies_by_hash.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| {
@@ -424,7 +424,7 @@ impl SqliteStore {
             return Ok(None);
         }
         let bytes: Option<Vec<u8>> = conn
-            .prepare_cached(artifact_sql().blobs.select_content.sql())
+            .statement(artifact_sql().blobs.select_content.sql())
             .and_then(|mut statement| {
                 statement.query_row(params![crate::codec::SqlHash(blob_ref.as_str())], |row| {
                     row.get(0)

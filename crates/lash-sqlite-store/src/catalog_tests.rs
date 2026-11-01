@@ -1,3 +1,4 @@
+use crate::Prepare as _;
 use rusqlite::{Connection, params};
 
 /// ADR 0024: forks and admissions retain shared ancestors even after the
@@ -25,7 +26,7 @@ fn frame_retention_follows_forks_and_admissions_after_producer_deletion() {
     )
     .expect("shared history and retained revisions");
     let retained = |owner: &str, node: &str| -> bool {
-        conn.query_row(
+        conn.query_row_once(
             crate::session_sql::session_sql()
                 .graph_sqlite
                 .artifact_frame_is_retained
@@ -44,7 +45,7 @@ fn frame_retention_follows_forks_and_admissions_after_producer_deletion() {
     );
     assert!(!retained("barrier", "barrier"));
 
-    conn.execute(
+    conn.execute_once(
         "DELETE FROM session_revisions WHERE session_id = 'fork-one'",
         [],
     )
@@ -62,7 +63,7 @@ fn frame_retention_follows_forks_and_admissions_after_producer_deletion() {
     .expect("an admission protects the other fork's nodes");
     assert!(retained("producer", "frame"));
     assert!(retained("fork-two", "leaf-two"));
-    conn.execute(
+    conn.execute_once(
         "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = 'leaf-two'",
         [],
     )
@@ -77,7 +78,7 @@ fn frame_retention_follows_forks_and_admissions_after_producer_deletion() {
     )
     .expect("a retained revision directly pins the producer's frame");
     assert!(retained("producer", "frame"));
-    conn.execute(
+    conn.execute_once(
         "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = 'frame'",
         [],
     )

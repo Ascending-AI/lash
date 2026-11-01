@@ -52,7 +52,7 @@ pub(crate) fn commit_competing(
 }
 
 pub(crate) fn blob_rows(tx: &rusqlite::Connection, hash: &str) -> i64 {
-    tx.query_row(
+    tx.query_row_once(
         "SELECT COUNT(*) FROM blobs WHERE hash = unhex(?1)",
         params![hash],
         |row| row.get(0),
@@ -161,7 +161,7 @@ async fn an_artifact_read_keeps_its_snapshot_while_its_referrer_ends() {
         )
         .expect("end the module's only referrer");
         let pointers: i64 = tx
-            .query_row(
+            .query_row_once(
                 "SELECT COUNT(*) FROM artifact_refs WHERE artifact_ref = 'snapshot-module'",
                 [],
                 |row| row.get(0),
@@ -241,7 +241,7 @@ async fn a_material_read_keeps_its_snapshot_while_its_holder_releases() {
         crate::artifact_store::tool_material::release_material_tx(tx, &holder.referrer(), 1)
             .expect("release the holder");
         let pointers: i64 = tx
-            .query_row(
+            .query_row_once(
                 "SELECT COUNT(*) FROM artifact_refs WHERE namespace = 'tool_material'",
                 [],
                 |row| row.get(0),

@@ -6,6 +6,7 @@
 //! per call, and the whole reason each filter shape has its own name is that a
 //! spliced optional predicate cannot seek.
 
+use crate::Prepare as _;
 use rusqlite::Connection;
 
 use super::{tool_intent_sql, turn_ingress_sql};
@@ -33,8 +34,9 @@ fn catalog() -> Connection {
 /// statement that scans and a statement that seeks return the same rows, and
 /// only the plan tells them apart.
 fn plan(conn: &Connection, sql: &str) -> String {
+    let explained = format!("EXPLAIN QUERY PLAN {sql}");
     let mut statement = conn
-        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .statement_once(&explained)
         .unwrap_or_else(|error| panic!("statement prepares: {error}\n{sql}"));
     // A plan is produced from the statement's shape, not its values, but SQLite
     // still wants every parameter bound before it will produce one.
@@ -42,7 +44,7 @@ fn plan(conn: &Connection, sql: &str) -> String {
         .map(|_| rusqlite::types::Value::Null)
         .collect::<Vec<_>>();
     let rows = statement
-        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+        .query_map(crate::statement::params_from_iter(bindings.iter()), |row| {
             row.get::<_, String>(3)
         })
         .expect("plan rows")
@@ -125,7 +127,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.cancel_requests.delete_by_session.sql(),
         sql.cancel_requests.select_request.sql(),
     ] {
-        conn.prepare(statement)
+        conn.statement_once(statement)
             .unwrap_or_else(|error| panic!("statement prepares: {error}\n{statement}"));
     }
 }
@@ -146,7 +148,7 @@ fn every_tool_intent_statement_prepares_against_the_process_schema() {
         sql.shared.release_settled_payloads.sql(),
         sql.sqlite.insert_new.sql(),
     ] {
-        conn.prepare(statement)
+        conn.statement_once(statement)
             .unwrap_or_else(|error| panic!("statement prepares: {error}\n{statement}"));
     }
 }
@@ -228,7 +230,7 @@ fn reopening_replaces_obsolete_ingress_indexes() {
     conn.execute_batch(crate::schema::SCHEMA)
         .expect("reopen applies the current index set");
     let mut names = conn
-        .prepare(
+        .statement_once(
             "SELECT name FROM sqlite_master
              WHERE type = 'index'
                AND tbl_name IN ('queued_work_batches', 'pending_turn_inputs')",
@@ -302,7 +304,7 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
     )
     .expect("seed settled history retaining its run bindings");
     let bound = crate::durable::session_mail::bound_run_query();
-    let mut probe = conn.prepare(&bound).unwrap();
+    let mut probe = conn.statement_once(&bound).unwrap();
     for &state in TurnInputStateKind::ALL {
         for bound in [false, true] {
             let ingress = if state == TurnInputStateKind::DeferredNextTurn || state.is_terminal() {
@@ -310,7 +312,7 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
             } else {
                 r#"{"scope":"active_turn","turn_id":"candidate"}"#
             };
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO pending_turn_inputs
                      (origin_json, enqueue_seq, input_id, session_id, ingress_json, state, input_json,
                       submission_digest, enqueued_at_ms, admitted_run, admitted_by, terminal_at_ms)
@@ -340,7 +342,7 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
                 steps <= 100,
                 "bound_run visited settled history: {steps} VM steps"
             );
-            conn.execute(
+            conn.execute_once(
                 "DELETE FROM pending_turn_inputs WHERE input_id = 'candidate'",
                 [],
             )
@@ -372,7 +374,7 @@ fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
 
     let work = [1, 10, 1000].map(|turns| {
         let conn = catalog();
-        conn.execute(
+        conn.execute_once(
             "WITH RECURSIVE history(n) AS (
                  VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?1
              )
@@ -396,7 +398,7 @@ fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
         )
         .expect("open inputs of both delivery kinds");
         let inputs_query = crate::durable::session_mail::open_inputs_query();
-        let mut probe = conn.prepare(&inputs_query).expect("mailbox query");
+        let mut probe = conn.statement_once(&inputs_query).expect("mailbox query");
         let inputs = probe
             .query_map(["history"], |row| row.get::<_, String>(0))
             .unwrap()

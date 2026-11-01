@@ -12,7 +12,7 @@ fn session_fault_conn(
     conn: &Connection,
     session_id: &SessionId,
 ) -> Result<Option<SessionFault>, StoreError> {
-    conn.query_row(
+    conn.query_row_once(
         session_sql().meta.select_fault.sql(),
         params![session_id.as_str()],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -45,7 +45,7 @@ impl SessionFaultStore for SqliteStore {
             .write_flow(move |tx| {
                 commit((|| {
                     let changed = tx
-                        .execute(
+                        .execute_once(
                             session_sql().meta.record_fault.sql(),
                             params![session_id.as_str(), fault_json, at_ms],
                         )
@@ -86,7 +86,7 @@ impl SessionFaultStore for SqliteStore {
         let rows: Vec<(String, String, i64)> = self
             .conn
             .call(move |conn| {
-                let mut select = conn.prepare_cached(session_sql().meta.list_faults.sql())?;
+                let mut select = conn.statement(session_sql().meta.list_faults.sql())?;
                 select
                     .query_map(params![after, limit], |row| {
                         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -107,7 +107,7 @@ impl SessionFaultStore for SqliteStore {
         self.conn
             .write_flow(move |tx| {
                 commit(
-                    tx.execute(
+                    tx.execute_once(
                         session_sql().meta.clear_fault.sql(),
                         params![session_id.as_str()],
                     )

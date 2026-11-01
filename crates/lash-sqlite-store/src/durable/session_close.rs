@@ -5,6 +5,7 @@
 //! fenced owner commit (or the mailbox commit), after the fence; a refusal
 //! rolls the whole commit back.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
@@ -45,7 +46,7 @@ static SQL: LazyLock<SessionCloseStatements> =
 type Stored = (Option<String>, i64, i64);
 
 fn stored(tx: &Connection, session: &SessionId) -> rusqlite::Result<Option<Stored>> {
-    tx.prepare_cached(SQL.row.sql())?
+    tx.statement(SQL.row.sql())?
         .query_row([session.as_str()], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
@@ -164,7 +165,7 @@ pub(super) fn record_ending(
 
 pub(super) fn ending_scopes(tx: &Connection, session: &SessionId) -> Answer<Vec<ScopeKey>> {
     let stored = tx
-        .prepare_cached(SQL.ending_scopes.sql())?
+        .statement(SQL.ending_scopes.sql())?
         .query_map([session.as_str()], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(stored

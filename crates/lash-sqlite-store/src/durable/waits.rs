@@ -7,6 +7,7 @@
 //! wait row before its conditional update needs no row lock: the wait row is
 //! read and written before the owner's actor row is woken.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
@@ -172,10 +173,10 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &WaitWrite)
 fn owners_of(
     tx: &Connection,
     sql: &str,
-    params: impl rusqlite::Params,
+    params: impl crate::statement::Values,
 ) -> rusqlite::Result<Vec<String>> {
     let mut owners = tx
-        .prepare_cached(sql)?
+        .statement(sql)?
         .query_map(params, |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     owners.sort();
@@ -216,7 +217,7 @@ pub(super) fn resolve(
     now: DurableInstant,
 ) -> Answer<(ResolveAnswer, Option<Woken>)> {
     let Some(row) = tx
-        .prepare_cached(SQL.one.sql())?
+        .statement(SQL.one.sql())?
         .query_row([resolution.id.to_hex()], stored_row)
         .optional()?
     else {
@@ -234,7 +235,7 @@ pub(super) fn resolve(
         return Ok(Err(corrupt("pending wait", &resolution.id.to_hex())));
     };
     let owner: Option<String> = tx
-        .prepare_cached(SQL.resolve.sql())?
+        .statement(SQL.resolve.sql())?
         .query_row(
             rusqlite::params![
                 resolution.id.to_hex(),
@@ -269,7 +270,7 @@ pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()
 
 pub(super) fn pending(tx: &Connection, owner: &ActorKey) -> Answer<Vec<WaitRow>> {
     let rows = tx
-        .prepare_cached(SQL.pending.sql())?
+        .statement(SQL.pending.sql())?
         .query_map([owner.as_str()], stored_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows.into_iter().map(decode).collect())
@@ -277,7 +278,7 @@ pub(super) fn pending(tx: &Connection, owner: &ActorKey) -> Answer<Vec<WaitRow>>
 
 pub(super) fn wait(tx: &Connection, id: &WaitId) -> Answer<Option<WaitRow>> {
     Ok(tx
-        .prepare_cached(SQL.one.sql())?
+        .statement(SQL.one.sql())?
         .query_row([id.to_hex()], stored_row)
         .optional()?
         .map(decode)

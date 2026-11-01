@@ -151,7 +151,7 @@ impl SqliteStore {
                 let unheld: BTreeSet<String> = if acquired.is_empty() {
                     BTreeSet::new()
                 } else {
-                    tx.prepare_cached(HELD_SQL.held.select_unheld.sql())?
+                    tx.statement(HELD_SQL.held.select_unheld.sql())?
                         .query_map(
                             params![
                                 MODULE_ARTIFACT_NAMESPACE,
@@ -177,7 +177,7 @@ impl SqliteStore {
                         .collect::<Vec<_>>(),
                 )?;
                 let mut stored: BTreeMap<String, String> = tx
-                    .prepare_cached(HELD_SQL.held.select_blob_refs.sql())?
+                    .statement(HELD_SQL.held.select_blob_refs.sql())?
                     .query_map(params![MODULE_ARTIFACT_NAMESPACE, refs], |row| {
                         Ok((row.get(0)?, crate::codec::hash_column(row, 1)?))
                     })?
@@ -235,7 +235,7 @@ impl SqliteStore {
                     }
                 }
                 for chunk in blobs.chunks(BLOB_BATCH_ROWS) {
-                    let mut insert = tx.prepare_cached(&HELD_SQL.blob_batches[chunk.len() - 1])?;
+                    let mut insert = tx.statement(&HELD_SQL.blob_batches[chunk.len() - 1])?;
                     for (index, (blob_ref, envelope)) in chunk.iter().enumerate() {
                         insert.raw_bind_parameter(index * 2 + 1, crate::codec::SqlHash(blob_ref.as_str()))?;
                         insert.raw_bind_parameter(index * 2 + 2, &envelope[..])?;
@@ -301,7 +301,7 @@ impl SqliteStore {
             .map(|artifact_ref| (artifact_ref.clone(), Vec::new()))
             .collect();
         {
-            let mut statement = tx.prepare_cached(HELD_SQL.held.select_edges.sql())?;
+            let mut statement = tx.statement(HELD_SQL.held.select_edges.sql())?;
             let mut rows = statement.query(params![namespace, refs])?;
             while let Some(row) = rows.next()? {
                 let artifact_ref: String = row.get(0)?;
@@ -346,7 +346,7 @@ impl SqliteStore {
         // Each pointer was its blob's root: peel the blobs and what only
         // they reached.
         let blobs: BTreeSet<String> = tx
-            .prepare_cached(HELD_SQL.held.delete_unreferenced.sql())?
+            .statement(HELD_SQL.held.delete_unreferenced.sql())?
             .query_map(params![namespace, json_set(&unreferenced)?], |row| {
                 crate::codec::hash_column(row, 0)
             })?

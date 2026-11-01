@@ -8,12 +8,12 @@ pub(super) fn bounds_conn(
     conn: &Connection,
 ) -> Result<ProcessChangeBounds, lash_execution_contracts::plugin_error::PluginError> {
     let current = conn
-        .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+        .query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
             row.get::<_, i64>(0)
         })
         .map_err(process_sqlite_error)?;
     let horizon = conn
-        .query_row(
+        .query_row_once(
             process_sql().clock_sqlite.select_compaction_horizon.sql(),
             [],
             |row| row.get::<_, i64>(0),
@@ -75,7 +75,7 @@ pub(super) async fn page(
                 let through = match &cursor {
                     Some(cursor) => Some(cursor.through().clone()),
                     None => tx
-                        .query_row(
+                        .query_row_once(
                             process_sql().process.select_max_process_id.sql(),
                             [],
                             |row| row.get::<_, Option<String>>(0),
@@ -110,9 +110,9 @@ pub(super) async fn page(
                         through.as_str(),
                         limit + 1,
                     );
-                    let mut stmt = tx.prepare_cached(sql).map_err(process_sqlite_error)?;
+                    let mut stmt = tx.statement(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
-                        .query_map(rusqlite::params_from_iter(values), |row| {
+                        .query_map(crate::statement::params_from_iter(values), |row| {
                             row.get::<_, String>(0)
                         })
                         .map_err(process_sqlite_error)?;
@@ -178,9 +178,9 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
 
     registry.conn.call(move |conn| {
         let tx = conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM processes", [])?;
+        tx.execute_once("DELETE FROM processes", [])?;
         for record in rows {
-            tx.execute("INSERT INTO processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, change_seq, lifetime, lifecycle_json, start_json, execution_json) VALUES (?1, 'host', ?2, ?3, ?4, ?5, 1, 'detached', ?6, ?7, ?8)", params![record.id.as_str(), record.identity.kind.as_str(), record.identity.label, record.created_at_ms as i64, record.updated_at_ms as i64, serde_json::to_string(&record.lifecycle_storage()).expect("encode lifecycle"), serde_json::to_string(&record.start_storage()).expect("encode start"), serde_json::to_string(&record.execution_storage()).expect("encode execution")])?;
+            tx.execute_once("INSERT INTO processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, change_seq, lifetime, lifecycle_json, start_json, execution_json) VALUES (?1, 'host', ?2, ?3, ?4, ?5, 1, 'detached', ?6, ?7, ?8)", params![record.id.as_str(), record.identity.kind.as_str(), record.identity.label, record.created_at_ms as i64, record.updated_at_ms as i64, serde_json::to_string(&record.lifecycle_storage()).expect("encode lifecycle"), serde_json::to_string(&record.start_storage()).expect("encode start"), serde_json::to_string(&record.execution_storage()).expect("encode execution")])?;
         }
         tx.commit()?;
         Ok(())

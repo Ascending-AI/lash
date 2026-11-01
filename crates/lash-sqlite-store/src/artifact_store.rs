@@ -202,7 +202,7 @@ fn session_artifact_owner_live_tx(
         return Ok(true);
     };
     let (metadata, deleted): (bool, bool) = tx
-        .prepare_cached(
+        .statement(
             crate::attachments::attachment_sql()
                 .sqlite
                 .session_state
@@ -270,7 +270,7 @@ fn retain_process_env_tx(
         reference: &str,
     ) -> rusqlite::Result<Vec<u8>> {
         let stored: Option<(String, Option<i64>)> = tx
-            .prepare_cached(artifact_sql().refs.select_body_ref.sql())?
+            .statement(artifact_sql().refs.select_body_ref.sql())?
             .query_row(params![namespace, reference], |row| {
                 Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
             })
@@ -333,7 +333,7 @@ pub(crate) fn acquire_process_env_tx(
         return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
     }
     let stored: Option<String> = tx
-        .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+        .statement(artifact_sql().refs.select_blob_ref.sql())
         .and_then(|mut statement| {
             statement.query_row(params![PROCESS_ENV_NAMESPACE, env.as_str()], |row| {
                 crate::codec::hash_column(row, 0)
@@ -366,7 +366,7 @@ pub(crate) fn artifact_fenced_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,
 ) -> rusqlite::Result<bool> {
-    tx.prepare_cached(artifact_sql().fences.select_is_fenced.sql())
+    tx.statement(artifact_sql().fences.select_is_fenced.sql())
         .and_then(|mut statement| {
             statement.query_row(
                 params![referrer.kind().as_str(), referrer.canonical_id()],
@@ -443,7 +443,7 @@ impl SqliteStore {
                     ],
                 )?;
                 let stored_blob_ref: String = tx
-                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+                    .statement(artifact_sql().refs.select_blob_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![namespace, artifact_ref], |row| {
                             crate::codec::hash_column(row, 0)
@@ -491,7 +491,7 @@ impl SqliteStore {
             if artifact_fenced_tx(tx, referrer)? {
                 return Err(artifact_failure(ArtifactStoreError::ReferrerEnded { referrer: referrer.clone() }));
             }
-            let exists: bool = tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
+            let exists: bool = tx.statement("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
                 params![namespace, artifact_ref], |row| row.get(0)))?;
             if !exists {
                 return Err(artifact_failure(ArtifactStoreError::ArtifactMissing { artifact_ref }));
@@ -556,7 +556,7 @@ impl SqliteStore {
         now_ms: u64,
     ) -> rusqlite::Result<()> {
         let refs: Vec<String> = {
-            let mut stmt = tx.prepare_cached(
+            let mut stmt = tx.statement(
                 artifact_sql()
                     .edges
                     .select_referrer_edges_in_namespace
@@ -590,7 +590,7 @@ impl SqliteStore {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
-            let exists: bool = tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
+            let exists: bool = tx.statement("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
                     params![namespace, artifact_ref], |row| row.get(0)))?;
             if !exists {
                 return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
@@ -636,7 +636,7 @@ impl SqliteStore {
     ) -> rusqlite::Result<()> {
         fence_artifact_referrer_tx(tx, referrer, now_ms)?;
         let mut released = std::collections::BTreeMap::<String, Vec<String>>::new();
-        let mut statement = tx.prepare_cached(artifact_sql().refs.delete_local_edges.sql())?;
+        let mut statement = tx.statement(artifact_sql().refs.delete_local_edges.sql())?;
         let mut rows =
             statement.query(params![referrer.kind().as_str(), referrer.canonical_id(),])?;
         while let Some(row) = rows.next()? {
@@ -683,14 +683,14 @@ impl SqliteStore {
                     }));
                 }
                 let stored = |namespace: &str, artifact_ref: &str| -> rusqlite::Result<bool> {
-                    tx.prepare_cached("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
+                    tx.statement("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
                         params![namespace, artifact_ref],
                         |row| row.get(0),
                     ))
                 };
                 let manifest_json = serde_json::to_string(&manifest)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                let missing: Option<String> = tx.prepare_cached(artifact_sql().refs.select_missing_manifest.sql()).and_then(|mut statement| statement.query_row(
+                let missing: Option<String> = tx.statement(artifact_sql().refs.select_missing_manifest.sql()).and_then(|mut statement| statement.query_row(
                     params![manifest_json], |row| row.get(0),
                 )).optional()?;
                 if let Some(artifact_ref) = missing {
@@ -712,7 +712,7 @@ impl SqliteStore {
                             artifact_sql().refs.insert_pointer.sql(),
                             params![PROCESS_DEFINITION_NAMESPACE, id, crate::codec::SqlHash(blob_ref.as_str())],
                         )?;
-                        let stored_blob_ref: String = tx.prepare_cached(artifact_sql().refs.select_blob_ref.sql()).and_then(|mut statement| statement.query_row(
+                        let stored_blob_ref: String = tx.statement(artifact_sql().refs.select_blob_ref.sql()).and_then(|mut statement| statement.query_row(
                             params![PROCESS_DEFINITION_NAMESPACE, id],
                             |row| crate::codec::hash_column(row, 0),
                         ))?;
@@ -768,7 +768,7 @@ impl SqliteStore {
             .read_connection()
             .read(move |conn| {
                 let stored: Option<(String, Option<i64>)> = conn
-                    .prepare_cached(artifact_sql().refs.select_body_ref.sql())
+                    .statement(artifact_sql().refs.select_body_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![namespace, artifact_ref], |row| {
                             Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
@@ -782,8 +782,7 @@ impl SqliteStore {
                 if let Some(pauses) = pauses.as_ref() {
                     pauses.reach_compound_read(crate::testing::SqliteCompoundRead::Artifact);
                 }
-                let mut edges =
-                    conn.prepare_cached(artifact_sql().edges.select_artifact_edges.sql())?;
+                let mut edges = conn.statement(artifact_sql().edges.select_artifact_edges.sql())?;
                 let mut rows = edges.query(params![namespace, artifact_ref])?;
                 while let Some(row) = rows.next()? {
                     let kind: String = row.get(0)?;
@@ -1196,7 +1195,7 @@ mod tests {
     async fn edge_count(store: &SqliteStore, artifact_ref: &str) -> i64 {
         let artifact_ref = artifact_ref.to_owned();
         store.conn.call(move |conn| {
-            conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'kernel_document' AND artifact_ref = ?1",
+            conn.query_row_once("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'kernel_document' AND artifact_ref = ?1",
                 params![artifact_ref], |row| row.get(0))
         }).await.expect("edge count")
     }
@@ -1272,8 +1271,8 @@ mod tests {
             .expect("publish with guard");
         let (edges, obligations): (i64, i64) = store.conn.call(|conn| {
             Ok((
-                conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE artifact_ref = 'guarded-module'", [], |row| row.get(0))?,
-                conn.query_row("SELECT COUNT(*) FROM artifact_cleanup_obligations WHERE referrer_kind = 'execution'", [], |row| row.get(0))?,
+                conn.query_row_once("SELECT COUNT(*) FROM artifact_referrer_edges WHERE artifact_ref = 'guarded-module'", [], |row| row.get(0))?,
+                conn.query_row_once("SELECT COUNT(*) FROM artifact_cleanup_obligations WHERE referrer_kind = 'execution'", [], |row| row.get(0))?,
             ))
         }).await.expect("read edge and guard");
         assert_eq!((edges, obligations), (1, 1));
@@ -1476,20 +1475,20 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
         conn.execute_batch(crate::schema::SCHEMA)
             .expect("create durable core");
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'00', 0)",
             [],
         )
         .expect("insert artifact blob");
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', zeroblob(32))",
             [],
         ).expect("insert artifact pointer");
-        assert!(conn.execute(
+        assert!(conn.execute_once(
             "INSERT INTO artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id) VALUES ('kernel_document', 'm', 'host_pin', '')",
             [],
         ).is_err());
-        assert!(conn.execute(
+        assert!(conn.execute_once(
             "INSERT INTO referrer_fences (referrer_kind, referrer_id, ended_at_ms) VALUES ('host_pin', '', 1)",
             [],
         ).is_err());
@@ -1498,7 +1497,7 @@ mod tests {
         old.execute_batch("CREATE TABLE artifact_owners (owner_kind TEXT, owner_id TEXT)")
             .expect("create old table");
         assert!(
-            old.query_row(
+            old.query_row_once(
                 artifact_sql().edges.select_artifact_edges.sql(),
                 params![MODULE_ARTIFACT_NAMESPACE, "m"],
                 |row| row.get::<_, String>(0)
@@ -1521,7 +1520,7 @@ mod tests {
         store
             .conn
             .write(|tx| {
-                tx.execute(
+                tx.execute_once(
                     artifact_sql().edges.insert_edge.sql(),
                     params![
                         MODULE_ARTIFACT_NAMESPACE,
@@ -1567,7 +1566,7 @@ mod tests {
             .conn
             .call(|conn| {
                 conn.execute_batch("PRAGMA ignore_check_constraints = ON")?;
-                conn.execute(
+                conn.execute_once(
                     artifact_sql().edges.insert_edge.sql(),
                     params![
                         MODULE_ARTIFACT_NAMESPACE,

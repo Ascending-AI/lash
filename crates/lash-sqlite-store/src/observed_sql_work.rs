@@ -79,7 +79,7 @@ fn identity_class(sql: &str, expanded: &[u8]) -> (String, bool) {
         let Some(rest) = expanded.get(at..) else {
             return ("unknown".into(), false);
         };
-        let (spelled, _) = super::literal(rest);
+        let spelled = super::literal(rest);
         let Some(value) = rest.get(..spelled) else {
             return ("unknown".into(), false);
         };

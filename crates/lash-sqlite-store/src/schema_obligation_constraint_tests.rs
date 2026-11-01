@@ -1,6 +1,7 @@
 //! Execute each physical obligation CHECK against every tagged field shape.
 
 use super::{PROCESS_SCHEMA, SCHEMA};
+use crate::Prepare as _;
 use crate::schema_fragments::SESSION_RUNS_TABLES;
 use rusqlite::Connection;
 
@@ -99,7 +100,7 @@ fn sqlite_obligation_checks_reject_incomplete_variants() {
                 let expected = *valid
                     && (!cleanup
                         || (!values.contains("'delivered'") && !values.starts_with("NULL")));
-                let result = connection.execute(
+                let result = connection.execute_once(
                     &format!("INSERT INTO obligation_projection VALUES ({values})"),
                     [],
                 );

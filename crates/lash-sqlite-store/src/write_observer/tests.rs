@@ -1,4 +1,5 @@
 use super::*;
+use crate::Prepare as _;
 
 /// TRAFFIC-CONSERVATION: two updates to one physical page count twice,
 /// checkpoint bytes remain separate, and no incomplete cut can certify.
@@ -31,10 +32,10 @@ fn traffic_conservation_rewrites_checkpoint_and_incomplete_boundaries() {
     let connection = open(dir.path().join("writes.db"), rusqlite::OpenFlags::default()).unwrap();
     connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE sample (value TEXT); INSERT INTO sample VALUES ('first'); PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
     let page_size: u64 = connection
-        .query_row("PRAGMA page_size", [], |r| r.get(0))
+        .query_row_once("PRAGMA page_size", [], |r| r.get(0))
         .unwrap();
     let root: u32 = connection
-        .query_row(
+        .query_row_once(
             "SELECT rootpage FROM sqlite_schema WHERE name='sample'",
             [],
             |r| r.get(0),
@@ -50,7 +51,7 @@ fn traffic_conservation_rewrites_checkpoint_and_incomplete_boundaries() {
         scope(origin, || {
             let writes = crate::observed_sql::WriteWitness::start(&connection);
             connection
-                .execute("UPDATE sample SET value=?1", [value])
+                .execute_once("UPDATE sample SET value=?1", [value])
                 .unwrap();
             assert!(
                 !observer.snapshot().complete,
@@ -95,7 +96,7 @@ fn traffic_conservation_rewrites_checkpoint_and_incomplete_boundaries() {
     );
     assert_eq!(
         connection
-            .query_row("SELECT value FROM sample", [], |r| r.get::<_, String>(0))
+            .query_row_once("SELECT value FROM sample", [], |r| r.get::<_, String>(0))
             .unwrap(),
         "third"
     );
@@ -108,7 +109,7 @@ fn traffic_conservation_rewrites_checkpoint_and_incomplete_boundaries() {
     }
     scope("sample.overflow", || {
         connection
-            .execute("UPDATE sample SET value='fourth'", [])
+            .execute_once("UPDATE sample SET value='fourth'", [])
             .unwrap();
     });
     let overflow = observer.snapshot();
@@ -183,13 +184,13 @@ fn savepoint_rollback_keeps_transient_pages_in_memory() {
         )
         .unwrap();
     connection
-        .execute("UPDATE sample SET value = ?1", [vec![1_u8; 4096]])
+        .execute_once("UPDATE sample SET value = ?1", [vec![1_u8; 4096]])
         .unwrap();
     connection
         .execute_batch("ROLLBACK TO member; RELEASE member;")
         .unwrap();
     connection
-        .execute(
+        .execute_once(
             "UPDATE sample SET value = ?1 WHERE id = 1",
             [vec![2_u8; 4096]],
         )
@@ -199,14 +200,14 @@ fn savepoint_rollback_keeps_transient_pages_in_memory() {
     assert!(written.bytes(WriteKind::WalBody) > 0);
     assert_eq!(
         connection
-            .query_row("SELECT value FROM sample WHERE id = 1", [], |row| row
+            .query_row_once("SELECT value FROM sample WHERE id = 1", [], |row| row
                 .get::<_, Vec<u8>>(0))
             .unwrap(),
         vec![2_u8; 4096],
     );
     assert_eq!(
         connection
-            .query_row(
+            .query_row_once(
                 "SELECT count(*) FROM sample WHERE id > 1 AND value = zeroblob(4096)",
                 [],
                 |row| row.get::<_, u64>(0)
@@ -216,7 +217,7 @@ fn savepoint_rollback_keeps_transient_pages_in_memory() {
     );
     assert_eq!(
         connection
-            .query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
+            .query_row_once("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
             .unwrap(),
         2
     );

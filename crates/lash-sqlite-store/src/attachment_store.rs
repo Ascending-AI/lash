@@ -15,6 +15,7 @@
 //! [`AttachmentStorePersistence::Durable`], an in-memory one is
 //! [`AttachmentStorePersistence::Ephemeral`].
 
+use crate::Prepare as _;
 use crate::codec::{SqlHash, hash_column};
 use std::sync::{Arc, LazyLock};
 
@@ -220,7 +221,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(move |connection| {
                 connection
-                    .query_row(
+                    .query_row_once(
                         attachment_blob_sql().select_content.sql(),
                         params![SqlHash(&attachment_id), sql_limit],
                         |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
@@ -258,7 +259,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(move |connection| {
                 connection
-                    .query_row(
+                    .query_row_once(
                         attachment_blob_sql().select_delivery.sql(),
                         params![SqlHash(&id), expected, bound],
                         |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
@@ -307,7 +308,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(|connection| {
                 let mut statement =
-                    connection.prepare_cached(attachment_blob_sql().select_all_refs.sql())?;
+                    connection.statement(attachment_blob_sql().select_all_refs.sql())?;
                 statement
                     .query_map([], |row| Ok((hash_column(row, 0)?, row.get::<_, i64>(1)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()
@@ -330,7 +331,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(move |connection| {
                 let mut statement =
-                    connection.prepare_cached(attachment_blob_sql().select_page_refs.sql())?;
+                    connection.statement(attachment_blob_sql().select_page_refs.sql())?;
                 statement
                     .query_map(
                         params![
@@ -357,7 +358,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(move |connection| {
                 connection
-                    .query_row(
+                    .query_row_once(
                         attachment_blob_sql().select_ref.sql(),
                         params![SqlHash(&attachment_id)],
                         |row| Ok((hash_column(row, 0)?, row.get::<_, i64>(1)?)),

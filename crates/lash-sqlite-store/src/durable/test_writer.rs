@@ -19,7 +19,7 @@ impl SqliteDurableStore {
                 return refuse(DurableError::NodeLeaseLost { node: owner.node });
             }
             let acquired = tx
-                .prepare_cached(TEST_SQL.acquire_idle.sql())?
+                .statement(TEST_SQL.acquire_idle.sql())?
                 .query_row(
                     rusqlite::params![
                         actor.as_str(),
@@ -34,7 +34,7 @@ impl SqliteDurableStore {
                 return commit(Epoch(acquired));
             }
             let current = tx
-                .prepare_cached(SQL.actor.epoch_of.sql())?
+                .statement(SQL.actor.epoch_of.sql())?
                 .query_row([actor.as_str()], |row| {
                     Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
                 })

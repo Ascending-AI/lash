@@ -1,3 +1,4 @@
+use crate::Prepare as _;
 use std::time::Duration;
 
 use crate::conn::tests::installed;
@@ -34,7 +35,10 @@ async fn the_wal_is_checkpointed_by_volume_off_the_committing_thread() {
         .expect("create the table");
     for _ in 0..8 {
         writer
-            .write(|tx| tx.execute("INSERT INTO rows VALUES (x'07')", []).map(drop))
+            .write(|tx| {
+                tx.execute_once("INSERT INTO rows VALUES (x'07')", [])
+                    .map(drop)
+            })
             .await
             .expect("commit a small row");
     }
@@ -45,14 +49,14 @@ async fn the_wal_is_checkpointed_by_volume_off_the_committing_thread() {
         "commits under the threshold never checkpoint"
     );
     let autocheckpoint: i64 = writer
-        .call(|c| c.query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0)))
+        .call(|c| c.query_row_once("PRAGMA wal_autocheckpoint", [], |row| row.get(0)))
         .await
         .expect("read the writer's autocheckpoint");
     assert_eq!(autocheckpoint, 0, "no commit checkpoints on the writer");
 
     writer
         .write(|tx| {
-            tx.execute("INSERT INTO rows VALUES (?1)", [vec![7_u8; 1024 * 1024]])
+            tx.execute_once("INSERT INTO rows VALUES (?1)", [vec![7_u8; 1024 * 1024]])
                 .map(drop)
         })
         .await
@@ -96,7 +100,7 @@ async fn the_wal_is_checkpointed_by_volume_off_the_committing_thread() {
     assert!(worker.runs.load(std::sync::atomic::Ordering::Relaxed) >= 1);
     writer
         .write(|tx| {
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO rows VALUES (?1)",
                 [vec![8_u8; 4 * 1024 * 1024]],
             )

@@ -18,6 +18,7 @@
 //! schema-open path runs before any runtime exists, and the field is deployment
 //! metadata rather than a durable domain fact that replay depends on.
 
+use crate::Prepare as _;
 use lash_core_store::store::StoreComponentVersion;
 use lash_core_store::store::StoreReleaseStamp;
 use lash_core_store::store::StoreReleaseState;
@@ -56,7 +57,7 @@ fn now_epoch_ms() -> i64 {
 /// A pre-stamp database does not, and that is an absence rather than a read
 /// failure: it records no release because no build that stamps has written it.
 pub(crate) fn table_exists(conn: &Connection) -> rusqlite::Result<bool> {
-    let count: i64 = conn.query_row(
+    let count: i64 = conn.query_row_once(
         crate::connection_sql::SELECT_RELEASE_STAMP_TABLE_EXISTS,
         [],
         |row| row.get(0),
@@ -69,7 +70,7 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
         return Ok(StoreReleaseState::Unstamped);
     }
     let row: Option<(String, String, i64)> = conn
-        .query_row(session_sql().release_stamp.select_stamp.sql(), [], |row| {
+        .query_row_once(session_sql().release_stamp.select_stamp.sql(), [], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .optional()?;
@@ -93,7 +94,7 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<StoreReleaseState> {
 
 /// The writing release alone, when the row can still be read during a refusal.
 pub(crate) fn read_release(conn: &Connection) -> Option<String> {
-    conn.query_row(
+    conn.query_row_once(
         session_sql().release_stamp.select_release.sql(),
         [],
         |row| row.get(0),
@@ -107,7 +108,7 @@ pub(crate) fn read_release(conn: &Connection) -> Option<String> {
 /// admitted the durable-core schema.
 pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     let existing: Option<String> = tx
-        .query_row(
+        .query_row_once(
             session_sql().release_stamp.select_release.sql(),
             [],
             |row| row.get(0),

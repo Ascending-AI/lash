@@ -4,6 +4,7 @@
 //! The dispatch in `durable/mod.rs` calls [`apply`] inside the fenced owner
 //! commit, after the fence; a refusal rolls the whole commit back.
 
+use crate::Prepare as _;
 use lash_durable::domain::session_mail::{batch_kind, decode_batch, decode_input};
 use lash_durable::domain::{
     DomainRefusal, MailBatchKind, OperationCancelAnswer, OperationCancelRequest, SessionMailWrite,
@@ -66,7 +67,7 @@ pub(super) fn operation_is_open(
 ) -> Answer<bool> {
     let run = operation.run_id();
     Ok(Ok(tx
-        .prepare_cached(SQL.session_mail.operation_is_open.sql())?
+        .statement(SQL.session_mail.operation_is_open.sql())?
         .query_row(
             rusqlite::params![
                 operation.session_id.as_str(),
@@ -91,22 +92,22 @@ fn count(value: i64) -> bool {
 
 /// Session `session`'s standing: `(live, closing)`.
 fn standing(tx: &Connection, session: &SessionId) -> rusqlite::Result<(bool, bool)> {
-    let (meta, deleted, closing) = tx
-        .prepare_cached(SQL.session_mail.standing.sql())?
-        .query_row([session.as_str()], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })?;
+    let (meta, deleted, closing) =
+        tx.statement(SQL.session_mail.standing.sql())?
+            .query_row([session.as_str()], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
     Ok((count(meta) && !count(deleted), count(closing)))
 }
 
 /// The session's open mail, read in one snapshot.
 pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbox> {
     let (meta, deleted, closing, bound, inputs, batches) = tx
-        .prepare_cached(SQLITE.mailbox.sql())?
+        .statement(SQLITE.mailbox.sql())?
         .query_row([session.as_str()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -188,7 +189,7 @@ pub(super) fn request_operation_cancel(
         Err(_) => return Ok(Err(undecodable("session id", session))),
     };
     let open = tx
-        .prepare_cached(SQL.session_mail.open_operation.sql())?
+        .statement(SQL.session_mail.open_operation.sql())?
         .query_row([session, batch], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })
@@ -208,14 +209,14 @@ pub(super) fn request_operation_cancel(
         )));
     }
     let withdrawn = tx
-        .prepare_cached(SQL.session_mail.withdraw_unentered.sql())?
+        .statement(SQL.session_mail.withdraw_unentered.sql())?
         .query_row(rusqlite::params![session, batch, now.0], |_| Ok(()))
         .optional()?;
     if withdrawn.is_some() {
         return Ok(super::wake_within(tx, &actor, false, now)?
             .map(|(woken, _)| (OperationCancelAnswer::Withdrawn, Some(woken))));
     }
-    tx.prepare_cached(SQL.session_mail.request_operation_cancel.sql())?
+    tx.statement(SQL.session_mail.request_operation_cancel.sql())?
         .query_row(
             rusqlite::params![session, batch, request.request_json],
             |_| Ok(()),
@@ -234,14 +235,14 @@ pub(super) fn settle_held(
     run: &TurnId,
     now_ms: i64,
 ) -> rusqlite::Result<()> {
-    tx.prepare_cached(SQL.session_mail.settle_held_inputs.sql())?
+    tx.statement(SQL.session_mail.settle_held_inputs.sql())?
         .execute(rusqlite::params![
             session.as_str(),
             run.as_str(),
             lash_core_store::turn_input_vocabulary::TurnInputStateKind::Cancelled.as_str(),
             now_ms,
         ])?;
-    tx.prepare_cached(SQL.session_mail.settle_held_batches.sql())?
+    tx.statement(SQL.session_mail.settle_held_batches.sql())?
         .execute(rusqlite::params![session.as_str(), run.as_str(), now_ms])?;
     Ok(())
 }
@@ -256,7 +257,7 @@ pub(super) fn cancel_inputs(
     disposition: lash_protocol_types::session_model::TurnCancelUndeliveredInputPolicy,
 ) -> Answer<lash_core_store::turn_control_vocabulary::TurnCancelInputOutcome> {
     let rows = tx
-        .prepare_cached(SQL.session_mail.cancel_inputs.sql())?
+        .statement(SQL.session_mail.cancel_inputs.sql())?
         .query_map([session.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -305,7 +306,7 @@ pub(super) fn withdraw_queued(
     now_ms: i64,
 ) -> Answer<Option<InputId>> {
     let candidates = tx
-        .prepare_cached(SQL.session_mail.open_inputs_named.sql())?
+        .statement(SQL.session_mail.open_inputs_named.sql())?
         .query_map([session.as_str(), run.as_str()], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })?
@@ -319,7 +320,7 @@ pub(super) fn withdraw_queued(
             continue;
         }
         let withdrawn = tx
-            .prepare_cached(SQL.session_mail.withdraw_input.sql())?
+            .statement(SQL.session_mail.withdraw_input.sql())?
             .query_row(
                 rusqlite::params![
                     session.as_str(),
@@ -367,7 +368,7 @@ fn enter_operation(
     batch: &BatchId,
 ) -> Answer<()> {
     let entered = tx
-        .prepare_cached(SQL.session_mail.enter_operation.sql())?
+        .statement(SQL.session_mail.enter_operation.sql())?
         .query_row(
             rusqlite::params![session.as_str(), batch.as_str(), commit.now.0],
             |_| Ok(()),
@@ -461,7 +462,7 @@ fn admit(
             continue;
         }
         let bound = tx
-            .prepare_cached(statement.sql())?
+            .statement(statement.sql())?
             .query_map(
                 rusqlite::params![
                     session.as_str(),
@@ -513,6 +514,7 @@ pub(crate) fn open_inputs_query() -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::Prepare as _;
     use lash_core_store::store::{
         ControlIntentStore as _, QueuedWorkStore as _, SessionCatalogStore as _,
     };
@@ -568,7 +570,7 @@ mod tests {
             VALUES ('cleanup-liveness', 0, 0, 'root')";
         store
             .conn
-            .call(|connection| connection.execute(DELETED, []))
+            .call(|connection| connection.execute_once(DELETED, []))
             .await
             .unwrap();
         assert!(
@@ -578,7 +580,7 @@ mod tests {
         store
             .conn
             .call(|connection| {
-                connection.execute(
+                connection.execute_once(
                     "DELETE FROM deleted_sessions WHERE session_id = 'cleanup-liveness'",
                     [],
                 )
@@ -587,7 +589,7 @@ mod tests {
             .unwrap();
         let run = operation.run_id();
         let bound = run.clone();
-        store.conn.call(move |connection| connection.execute(
+        store.conn.call(move |connection| connection.execute_once(
             "UPDATE queued_work_batches SET admitted_run = ?1, admitted_by = ?1 WHERE session_id = 'cleanup-liveness'",
             [bound.as_str()],
         )).await.unwrap();
@@ -629,14 +631,14 @@ mod tests {
         );
         store
             .conn
-            .call(|connection| connection.execute(DELETED, []))
+            .call(|connection| connection.execute_once(DELETED, []))
             .await
             .unwrap();
         assert!(
             store.operation_is_open(&operation).await.unwrap(),
             "the unfinished run survives deletion independently"
         );
-        store.conn.call(|connection| connection.execute(
+        store.conn.call(|connection| connection.execute_once(
             "UPDATE queued_work_batches SET admitted_run = NULL, admitted_by = NULL,
                 terminal_cause = 'applied', terminal_at_ms = 1 WHERE session_id = 'cleanup-liveness'", [],
         )).await.unwrap();

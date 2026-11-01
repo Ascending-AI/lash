@@ -511,6 +511,7 @@ impl std::fmt::Debug for SqliteStoreSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Prepare as _;
     use lash_core_store::store::SessionCatalogStore as _;
 
     /// A SQLite deployment is one database file (FIG-5195): a directory in
@@ -561,7 +562,7 @@ mod tests {
     fn catalog_table_count(uri: &str) -> i64 {
         rusqlite::Connection::open(uri)
             .expect("open a raw connection to the catalog")
-            .query_row(
+            .query_row_once(
                 "SELECT count(*) FROM sqlite_master WHERE name = 'session_head'",
                 [],
                 |row| row.get(0),

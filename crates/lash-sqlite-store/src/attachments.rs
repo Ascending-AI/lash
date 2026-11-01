@@ -157,7 +157,7 @@ pub(crate) fn release_session_attachments_conn(
     let sessions = match session {
         Some(session) => vec![session.as_str().to_owned()],
         None => tx
-            .prepare_cached(attachment_sql().holds.select_queued_sessions.sql())
+            .statement(attachment_sql().holds.select_queued_sessions.sql())
             .map_err(sqlite_error)?
             .query_map(params![budget], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?
@@ -194,7 +194,7 @@ fn session_holds_conn(
     id: &AttachmentId,
 ) -> Result<bool, StoreError> {
     let (ingress, history): (bool, bool) = tx
-        .query_row(
+        .query_row_once(
             attachment_sql().holds.select_holders.sql(),
             params![session.as_str(), SqlHash(id.as_str())],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -203,7 +203,7 @@ fn session_holds_conn(
     if ingress || !history {
         return Ok(ingress);
     }
-    tx.query_row(
+    tx.query_row_once(
         attachment_sql().sqlite.session_state.sql(),
         params![session.as_str()],
         |row| row.get(2),
@@ -222,7 +222,7 @@ pub(crate) fn acquire_attachment_refs_conn(
     let ids = ids.iter().collect::<std::collections::BTreeSet<_>>();
     for id in &ids {
         let deleting = tx
-            .query_row(
+            .query_row_once(
                 attachment_sql().sqlite.select_deleting.sql(),
                 params![SqlHash(id.as_str())],
                 |_| Ok(()),
@@ -231,7 +231,7 @@ pub(crate) fn acquire_attachment_refs_conn(
             .map_err(sqlite_error)?
             .is_some();
         let evidenced = tx
-            .query_row(
+            .query_row_once(
                 attachment_sql().uploads.select_evidence.sql(),
                 params![SqlHash(id.as_str())],
                 |_| Ok(()),
@@ -267,7 +267,7 @@ fn has_permit(
     write: &AttachmentWrite,
     token: &str,
 ) -> Result<bool, StoreError> {
-    tx.query_row(
+    tx.query_row_once(
         attachment_sql().pending.select_permit.sql(),
         params![
             token,
@@ -356,7 +356,7 @@ impl SqliteStore {
                         (sql.pending.select_root_page.sql(), None)
                     }
                 };
-                let mut statement = conn.prepare_cached(query)?;
+                let mut statement = conn.statement(query)?;
                 let rows = if let Some(kind) = kind {
                     statement
                         .query_map(
@@ -390,7 +390,7 @@ impl SqliteStore {
         self.conn
             .call(move |conn| {
                 Ok(conn
-                    .query_row(
+                    .query_row_once(
                         attachment_sql().edges.select_live_root.sql(),
                         params![SqlHash(&id)],
                         |_| Ok(()),
@@ -408,7 +408,7 @@ impl SqliteStore {
             .conn
             .call(|conn| {
                 let mut statement =
-                    conn.prepare_cached(attachment_sql().condemnation.select_all.sql())?;
+                    conn.statement(attachment_sql().condemnation.select_all.sql())?;
                 statement
                     .query_map([], |row| {
                         Ok((
@@ -473,7 +473,7 @@ impl SqliteStore {
         let generation = self
             .conn
             .write(|tx| {
-                tx.query_row(
+                tx.query_row_once(
                     attachment_sql().sweep_clock.mint_generation.sql(),
                     params![true],
                     |row| row.get::<_, i64>(0),
@@ -524,7 +524,7 @@ impl SqliteStore {
                 let outcome: Result<_, StoreError> = (|| {
                     let rows = {
                         let mut statement = tx
-                            .prepare_cached(attachment_sql().condemnation.select_adoptable.sql())
+                            .statement(attachment_sql().condemnation.select_adoptable.sql())
                             .map_err(sqlite_error)?;
                         statement
                             .query_map(params![mine], |row| {
@@ -717,7 +717,7 @@ impl SqliteStore {
             .write_flow(move |tx| {
                 outcome((|| {
                     if tx
-                        .query_row(
+                        .query_row_once(
                             attachment_sql().edges.select_live_root.sql(),
                             params![SqlHash(&id)],
                             |_| Ok(()),
@@ -729,7 +729,7 @@ impl SqliteStore {
                         return Ok(lash_core_store::store::AttachmentCondemnation::RootPresent);
                     }
                     if tx
-                        .query_row(
+                        .query_row_once(
                             attachment_sql().sqlite.select_condemned.sql(),
                             params![SqlHash(&id)],
                             |_| Ok(()),
@@ -769,7 +769,7 @@ impl SqliteStore {
             .write_flow(move |tx| {
                 outcome((|| {
                     let claim = tx
-                        .query_row(
+                        .query_row_once(
                             attachment_sql().condemnation.select_claim.sql(),
                             params![SqlHash(id.as_str())],
                             |row| {
@@ -966,7 +966,7 @@ impl AttachmentReferrers for SqliteStore {
                     let referrer = &write.claim.referrer();
                     check_fence(tx, referrer)?;
                     let condemnation = tx
-                        .query_row(
+                        .query_row_once(
                             attachment_sql().condemnation.select_phase_and_claim.sql(),
                             params![SqlHash(write.attachment_id.as_str())],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
@@ -1189,7 +1189,7 @@ impl AttachmentReferrers for SqliteStore {
         let session = session.clone();
         self.conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     attachment_sql().sqlite.session_state.sql(),
                     params![session.as_str()],
                     |row| {
@@ -1224,7 +1224,7 @@ impl AttachmentReferrers for SqliteStore {
             .conn
             .call(move |conn| {
                 let mut statement =
-                    conn.prepare_cached(attachment_sql().edges.select_referrers.sql())?;
+                    conn.statement(attachment_sql().edges.select_referrers.sql())?;
                 statement
                     .query_map(params![SqlHash(id.as_str())], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

@@ -102,7 +102,7 @@ impl SqliteDurableStore {
         let actor = actor.clone();
         let at = self.instant()?;
         self.query(move |connection| {
-            let mut statement = connection.prepare_cached(SQL.open.sql())?;
+            let mut statement = connection.statement(SQL.open.sql())?;
             let mut rows = statement.query(rusqlite::params![
                 actor.as_str(),
                 process.as_str(),
@@ -162,7 +162,7 @@ impl SqliteDurableStore {
         let actor = actor.clone();
         let at = self.instant()?;
         self.query(move |connection| {
-            let mut statement = connection.prepare_cached(SQL.frontier.sql())?;
+            let mut statement = connection.statement(SQL.frontier.sql())?;
             let mut rows = statement.query(rusqlite::params![
                 actor.as_str(),
                 actor.id(),
@@ -234,7 +234,7 @@ pub(super) fn refresh_view(
         return Ok(Ok(None));
     };
     let frontier = tx
-        .prepare_cached(SQL.control.sql())?
+        .statement(SQL.control.sql())?
         .query_row([actor.id()], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,

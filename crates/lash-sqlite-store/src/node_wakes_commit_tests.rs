@@ -24,7 +24,7 @@ async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
     let claimed = store.claim(&node, 1).await.unwrap().pop().unwrap();
     let clear = || {
         store.conn.write(|tx| {
-            tx.execute("DELETE FROM node_wakes", [])?;
+            tx.execute_once("DELETE FROM node_wakes", [])?;
             Ok(())
         })
     };
@@ -33,7 +33,7 @@ async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
     store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
     let hints = || {
         store.conn.read(|c| {
-            c.query_row(
+            c.query_row_once(
                 "SELECT COUNT(*) FROM node_wakes WHERE node_id IS NULL",
                 [],
                 |row| row.get::<_, u64>(0),
@@ -88,7 +88,7 @@ async fn wake_capture_carries_final_facts_without_temporary_rows() {
     store
         .conn
         .write(move |tx| {
-            tx.execute("DELETE FROM node_wakes", [])?;
+            tx.execute_once("DELETE FROM node_wakes", [])?;
             Ok(())
         })
         .await
@@ -98,8 +98,8 @@ async fn wake_capture_carries_final_facts_without_temporary_rows() {
         "sqlite",
         store.conn.write(move |tx| {
             let before = tx.total_changes();
-            tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [key.as_str()])?;
-            tx.execute(crate::durable::NODE_WAKE_FINAL_OWNER, [key.as_str()])?;
+            tx.execute_once(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [key.as_str()])?;
+            tx.execute_once(crate::durable::NODE_WAKE_FINAL_OWNER, [key.as_str()])?;
             Ok(tx.total_changes() - before)
         }),
     )
@@ -116,7 +116,7 @@ async fn wake_capture_carries_final_facts_without_temporary_rows() {
     let rows = store
         .conn
         .read(|c| {
-            c.prepare("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
+            c.statement_once("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
                 .query_map([], |row| {
                     Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
                 })?
@@ -155,8 +155,8 @@ async fn rolled_back_capture_cannot_reach_a_committed_sibling() {
     store
         .conn
         .write(|tx| {
-            tx.execute(crate::durable::NODE_WAKE_OWNED_SETUP, [])?;
-            tx.execute("DELETE FROM node_wakes", [])?;
+            tx.execute_once(crate::durable::NODE_WAKE_OWNED_SETUP, [])?;
+            tx.execute_once("DELETE FROM node_wakes", [])?;
             Ok(())
         })
         .await
@@ -168,11 +168,11 @@ async fn rolled_back_capture_cannot_reach_a_committed_sibling() {
     });
     hold.wait_until_reached().await;
     let mut refused = Box::pin(store.conn.write_flow(move |tx| {
-        tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
+        tx.execute_once(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
         Ok(crate::conn::TxOutcome::Rollback(()))
     }));
     let mut sibling = Box::pin(store.conn.write(|tx| {
-        tx.execute(crate::durable::NODE_WAKE_SESSION_REVISION, [])?;
+        tx.execute_once(crate::durable::NODE_WAKE_SESSION_REVISION, [])?;
         Ok(())
     }));
     std::future::poll_fn(|cx| {
@@ -188,7 +188,7 @@ async fn rolled_back_capture_cannot_reach_a_committed_sibling() {
     let rows = store
         .conn
         .read(|c| {
-            c.prepare("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
+            c.statement_once("SELECT node_id, actors FROM node_wakes ORDER BY seq")?
                 .query_map([], |row| {
                     Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
                 })?
@@ -423,7 +423,7 @@ pub(super) async fn lost_hint_reaches_the_claim_poll() {
     let hints = store
         .conn
         .read(|c| {
-            c.prepare("SELECT node_id FROM node_wakes WHERE actors = ?1")?
+            c.statement_once("SELECT node_id FROM node_wakes WHERE actors = ?1")?
                 .query_map([node_wake_payload::READY], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()
         })
@@ -526,15 +526,15 @@ async fn producers_leave_wake_expiry_to_bounded_maintenance() {
         "a producer must not sweep disposable hints: {receipt:?}"
     );
     store.conn.write(|tx| {
-        tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
+        tx.execute_once("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
         for _ in 0..4200 {
-            tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0)", [])?;
+            tx.execute_once("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0)", [])?;
         }
         Ok(())
     }).await.unwrap();
     let count = || {
         store.conn.read(|c| {
-            c.query_row(
+            c.query_row_once(
                 "SELECT count(*) FROM node_wakes WHERE actors = 'old'",
                 [],
                 |row| row.get::<_, usize>(0),
@@ -550,7 +550,7 @@ async fn producers_leave_wake_expiry_to_bounded_maintenance() {
     let young = store
         .conn
         .read(|c| {
-            c.query_row(
+            c.query_row_once(
                 "SELECT count(*) FROM node_wakes WHERE published_at_ms = ?1",
                 [i64::try_from(STORE_TIME).unwrap()],
                 |row| row.get::<_, usize>(0),
@@ -604,7 +604,7 @@ async fn maintenance_commits_only_when_nodes_or_hints_expired() {
 
     let expired_node = store.register_node(&spec("expired", 1)).await.unwrap();
     store.conn.write(|tx| {
-        tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0), (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
+        tx.execute_once("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0), (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
         Ok(())
     }).await.unwrap();
     clock.advance(2);
@@ -631,7 +631,7 @@ async fn maintenance_commits_only_when_nodes_or_hints_expired() {
         .conn
         .read(|tx| {
             let hints = tx
-                .prepare("SELECT actors FROM node_wakes ORDER BY seq")?
+                .statement_once("SELECT actors FROM node_wakes ORDER BY seq")?
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(hints, ["young"]);

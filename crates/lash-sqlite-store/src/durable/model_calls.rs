@@ -1,5 +1,6 @@
 //! SQLite adapter for sealed model-call records.
 use super::{Answer, Committing};
+use crate::Prepare as _;
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder};
 use lash_core_store::model_calls::{ModelCallFact, ModelCallRecord};
 use lash_durable::domain::{ModelCallWrite, RunFacts};
@@ -51,7 +52,7 @@ pub(super) fn ids(
     owner: &str,
 ) -> Answer<Vec<lash_protocol_types::llm::types::LlmCallId>> {
     Ok(Ok(tx
-        .prepare_cached(SQL.ids.sql())?
+        .statement(SQL.ids.sql())?
         .query_map([session.as_str(), owner], |row| {
             row.get::<_, String>(0)
                 .map(lash_protocol_types::llm::types::LlmCallId)
@@ -64,17 +65,15 @@ pub(super) fn apply(
     commit: &Committing<'_>,
     write: &ModelCallWrite,
 ) -> Answer<()> {
-    let inserted = tx
-        .prepare_cached(SQL.append.sql())?
-        .execute(rusqlite::params![
-            write.key.session.as_str(),
-            write.key.call.owner_column(),
-            write.key.call.call_column(),
-            write.call_id.0,
-            write.record.0.as_slice(),
-            commit.now.0,
-            commit.epoch.0,
-        ])?;
+    let inserted = tx.statement(SQL.append.sql())?.execute(rusqlite::params![
+        write.key.session.as_str(),
+        write.key.call.owner_column(),
+        write.key.call.call_column(),
+        write.call_id.0,
+        write.record.0.as_slice(),
+        commit.now.0,
+        commit.epoch.0,
+    ])?;
     if inserted != 1 {
         return Ok(Err(super::corrupt(
             "model call",
@@ -89,7 +88,7 @@ pub(super) fn delete_session(
     session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     let roots = tx
-        .prepare_cached(SQL.delete_session.sql())?
+        .statement(SQL.delete_session.sql())?
         .query_map([session.as_str()], |row| {
             crate::codec::optional_hash_column(row, 0)
         })?
@@ -117,8 +116,8 @@ pub(super) fn read(
         params.push(keys);
     }
     let rows = tx
-        .prepare_cached(sql)?
-        .query_map(rusqlite::params_from_iter(params), |row| {
+        .statement(sql)?
+        .query_map(crate::statement::params_from_iter(params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 crate::codec::hash_column(row, 1)?,
@@ -180,20 +179,18 @@ pub(super) fn apply_pin(
             attempt,
             enclosing,
         } => {
-            let changed = tx
-                .prepare_cached(SQL.reserve.sql())?
-                .execute(rusqlite::params![
-                    key.session.as_str(),
-                    key.call.owner_column(),
-                    key.call.call_column(),
-                    call_id.0,
-                    i64::from(*attempt),
-                    enclosing.as_ref().map(|owner| owner.owner.stored()),
-                    enclosing
-                        .as_ref()
-                        .map(|owner| i64::try_from(owner.run.0).unwrap_or(i64::MAX)),
-                    enclosing.as_ref().map(|owner| owner.call.as_str()),
-                ])?;
+            let changed = tx.statement(SQL.reserve.sql())?.execute(rusqlite::params![
+                key.session.as_str(),
+                key.call.owner_column(),
+                key.call.call_column(),
+                call_id.0,
+                i64::from(*attempt),
+                enclosing.as_ref().map(|owner| owner.owner.stored()),
+                enclosing
+                    .as_ref()
+                    .map(|owner| i64::try_from(owner.run.0).unwrap_or(i64::MAX)),
+                enclosing.as_ref().map(|owner| owner.call.as_str()),
+            ])?;
             if changed != 1 {
                 return Ok(Err(super::corrupt(
                     "model call reservation",
@@ -202,7 +199,7 @@ pub(super) fn apply_pin(
             }
         }
         ModelCallPinWrite::Answered { key } => {
-            tx.prepare_cached(SQL.answered.sql())?.execute([
+            tx.statement(SQL.answered.sql())?.execute([
                 key.session.as_str(),
                 &key.call.owner_column(),
                 &key.call.call_column(),
@@ -233,8 +230,8 @@ pub(super) fn pins(
         params.push(selected);
     }
     let rows = tx
-        .prepare_cached(sql)?
-        .query_map(rusqlite::params_from_iter(params), |row| {
+        .statement(sql)?
+        .query_map(crate::statement::params_from_iter(params), |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,

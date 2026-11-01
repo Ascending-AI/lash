@@ -26,7 +26,7 @@ pub(super) fn occupied_node_ids_conn(
             StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
         })?;
         let mut statement = tx
-            .prepare_cached(session_sql().graph_sqlite.select_occupied.sql())
+            .statement(session_sql().graph_sqlite.select_occupied.sql())
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![encoded], |row| row.get::<_, String>(0))

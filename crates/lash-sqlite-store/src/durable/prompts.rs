@@ -10,6 +10,7 @@
 //! record finds stored is never reclaimed under it, and a record binds the
 //! bodies of only the texts it does not find (FIG-5946).
 
+use crate::Prepare as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
@@ -121,7 +122,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
         } => {
             let (session, owner, ordinal) = call_params(call);
             let recorded = tx
-                .prepare_cached(SQL.insert_snapshot.sql())?
+                .statement(SQL.insert_snapshot.sql())?
                 .query_row(
                     rusqlite::params![session, owner, ordinal, snapshot, request, commit.epoch.0],
                     |_| Ok(()),
@@ -226,7 +227,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             let owner = ModelCallId::turn_owner(run);
             let open = open.map(|call| call.to_string());
             let params = rusqlite::params![session.as_str(), owner, open];
-            let mut statement = tx.prepare_cached(SQLITE_SQL.settle_requests.sql())?;
+            let mut statement = tx.statement(SQLITE_SQL.settle_requests.sql())?;
             let calls = statement
                 .query_map(params, |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
@@ -306,7 +307,7 @@ pub(crate) fn release_unretained(
     session: Option<&SessionId>,
 ) -> rusqlite::Result<usize> {
     let calls = {
-        let mut statement = tx.prepare_cached(SQL.expired_calls.sql())?;
+        let mut statement = tx.statement(SQL.expired_calls.sql())?;
         let rows = statement.query_map(
             rusqlite::params![
                 session.map(SessionId::as_str),
@@ -359,9 +360,9 @@ fn encode(value: &impl serde::Serialize) -> rusqlite::Result<String> {
 fn hash_set(
     tx: &Connection,
     sql: &str,
-    params: impl rusqlite::Params,
+    params: impl crate::statement::Values,
 ) -> rusqlite::Result<BTreeSet<String>> {
-    let mut statement = tx.prepare_cached(sql)?;
+    let mut statement = tx.statement(sql)?;
     let rows = statement.query_map(params, |row| crate::codec::hash_column(row, 0))?;
     rows.collect()
 }
@@ -369,7 +370,7 @@ fn hash_set(
 pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<PromptSnapshotRow>> {
     let (session, owner, ordinal) = call_params(call);
     let Some((snapshot, request, written_epoch, expired)) = tx
-        .prepare_cached(SQL.read_snapshot.sql())?
+        .statement(SQL.read_snapshot.sql())?
         .query_row(rusqlite::params![session, owner, ordinal], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
@@ -390,7 +391,7 @@ pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<P
     // Recover the complete closure in one statement, irrespective of the
     // chronological prefix's depth. Both dialects use the same edge owner.
     let roots = tx
-        .prepare_cached(SQLITE_SQL.read_edges.sql())?
+        .statement(SQLITE_SQL.read_edges.sql())?
         .query_map(rusqlite::params![session, owner, ordinal], |row| {
             Ok((row.get::<_, String>(0)?, crate::codec::hash_column(row, 1)?))
         })?
@@ -415,7 +416,7 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
     }
     use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
     let list = encode(&hashes)?;
-    let mut statement = tx.prepare_cached(SQLITE_SQL.read_texts.sql())?;
+    let mut statement = tx.statement(SQLITE_SQL.read_texts.sql())?;
     let mut roots = BTreeSet::new();
     let mut nodes = BTreeMap::new();
     for row in statement.query_map([&list], |row| {
@@ -890,7 +891,7 @@ mod tests {
                         nodes.extend(text.graph_nodes().unwrap());
                     }
                     super::super::graph::install_staged(connection, &nodes)?.unwrap();
-                    connection.execute(
+                    connection.execute_once(
                         "INSERT INTO prompt_prefixes(session_id, hash) VALUES ('live', ?1)",
                         [crate::codec::SqlHash(&hashes[depth])],
                     )?;
@@ -900,7 +901,7 @@ mod tests {
                         4096,
                     )?;
                     let steps = connection
-                        .prepare_cached(super::super::graph::retirement_sql_for_testing())?
+                        .statement(super::super::graph::retirement_sql_for_testing())?
                         .get_status(rusqlite::StatementStatus::VmStep);
                     assert_eq!(
                         retired,
@@ -908,8 +909,9 @@ mod tests {
                         "a live parent protects the complete prefix without walking it"
                     );
                     assert_eq!(
-                        connection.query_row("SELECT count(*) FROM blobs", [], |row| row
-                            .get::<_, usize>(0))?,
+                        connection
+                            .query_row_once("SELECT count(*) FROM blobs", [], |row| row
+                                .get::<_, usize>(0))?,
                         depth + 1
                     );
                     // PREFIX-RETIRE-BOUNDARY: ownership already held by a
@@ -924,10 +926,10 @@ mod tests {
                         0,
                         "a protected prefix must not enter and leave the retirement queue"
                     );
-                    connection.execute("DELETE FROM prompt_prefixes", [])?;
+                    connection.execute_once("DELETE FROM prompt_prefixes", [])?;
                     super::reclaim(connection, &BTreeSet::from([hashes[depth].clone()]))?;
                     assert_eq!(
-                        connection.query_row("SELECT count(*) FROM blobs", [], |r| r
+                        connection.query_row_once("SELECT count(*) FROM blobs", [], |r| r
                             .get::<_, usize>(0))?,
                         0,
                         "last root release still reclaims the complete chain"
@@ -966,7 +968,7 @@ mod tests {
                         .collect();
                     super::super::graph::install_staged(connection, &nodes)?.unwrap();
                     for session in 0..size {
-                        connection.execute(
+                        connection.execute_once(
                             "INSERT INTO prompt_prefixes(session_id, hash) VALUES (?1, ?2)",
                             rusqlite::params![
                                 format!("unrelated-{session}"),
@@ -983,15 +985,15 @@ mod tests {
                         (1, 1, BTreeSet::new())
                     );
                     assert_eq!(
-                        connection.query_row(
+                        connection.query_row_once(
                             "SELECT count(*) FROM prompt_prefixes",
                             [],
                             |row| row.get::<_, usize>(0)
                         )?,
                         size
                     );
-                    let statement = connection
-                        .prepare_cached(super::super::graph::retirement_sql_for_testing())?;
+                    let statement =
+                        connection.statement(super::super::graph::retirement_sql_for_testing())?;
                     Ok(statement.get_status(rusqlite::StatementStatus::VmStep))
                 })
                 .await
@@ -1049,18 +1051,18 @@ mod tests {
         // The last call deliberately remains unconsumed even past revision
         // release: recovery owns its request and snapshot until settlement.
         store.conn.write(|tx| {
-            tx.execute("INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'00', 0)", [])?;
-            tx.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind)
+            tx.execute_once("INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'00', 0)", [])?;
+            tx.execute_once("INSERT INTO session_meta (session_id, relation_kind, retention_kind)
                 VALUES ('sql-work-owner', 'root', 'head_only')", [])?;
             for revision in [1, 2] {
-                tx.execute("INSERT INTO session_revisions (session_id, head_revision, config_ref)
+                tx.execute_once("INSERT INTO session_revisions (session_id, head_revision, config_ref)
                     VALUES ('sql-work-owner', ?1, zeroblob(32))", [revision])?;
             }
-            tx.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
-            tx.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,
+            tx.execute_once("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
+            tx.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,
                 terminal_at_ms, terminal_head_revision, terminal_window_revision)
                 VALUES ('sql-work-owner', 'settled', 'answered', '{\"cause\":\"commands_applied\"}', 0, 1, 1)", [])?;
-            tx.execute("INSERT INTO pins (session_id, target_kind, target_id)
+            tx.execute_once("INSERT INTO pins (session_id, target_kind, target_id)
                 VALUES ('sql-work-owner', 'revision', '1')", [])?;
             crate::revisions::record_terminal_conn(tx, &SessionId::from("sql-work-owner"), 2, lash_durable::DurableInstant(0))
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))
@@ -1085,7 +1087,7 @@ mod tests {
                 Err(DurableError::Domain(DomainRefusal::PromptAuditExpired { call: expired }))
                     if expired == call(ordinal)));
         }
-        let remaining = store.conn.read(|tx| tx.query_row(
+        let remaining = store.conn.read(|tx| tx.query_row_once(
             "SELECT COUNT(*) FROM prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL", [],
             |row| row.get::<_, i64>(0))).await.unwrap();
         assert_eq!(
@@ -1093,7 +1095,7 @@ mod tests {
             "one invocation releases exactly one internal batch"
         );
         catalog.gc_unreachable().await.unwrap();
-        let remaining = store.conn.read(|tx| tx.query_row(
+        let remaining = store.conn.read(|tx| tx.query_row_once(
             "SELECT COUNT(*) FROM prompt_snapshots WHERE snapshot IS NOT NULL AND request IS NULL", [],
             |row| row.get::<_, i64>(0))).await.unwrap();
         assert_eq!(

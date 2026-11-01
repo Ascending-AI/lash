@@ -1,5 +1,6 @@
 /// LO-ROOT-PREPARE: rebinding a cached retirement batch must not reparse
 /// the catalog and recursive walk on every execution.
+use crate::Prepare as _;
 #[tokio::test]
 async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
     let set = crate::SqliteStoreSet::memory().await.unwrap();
@@ -10,7 +11,7 @@ async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
             let mut reparses = Vec::new();
             for _ in 0..3 {
                 let mut statement =
-                    connection.prepare_cached(super::SQL.sqlite.retirement_candidates.sql())?;
+                    connection.statement(super::SQL.sqlite.retirement_candidates.sql())?;
                 let rows = statement
                     .query_map(rusqlite::params!["[]", 256], |_| Ok(()))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -56,19 +57,19 @@ async fn lo_root_retirement_work_ignores_unrelated_edges() {
                         .unwrap();
                 }
                 for (id, node) in staging.nodes() {
-                    connection.execute(
+                    connection.execute_once(
                         "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 1)",
                         rusqlite::params![id.0.as_slice(), node.bytes.as_ref()],
                     )?;
                 }
                 for (id, _) in staging.nodes().iter().filter(|(id, _)| **id != child) {
-                    connection.execute(
+                    connection.execute_once(
                         "INSERT INTO blob_edges(parent_hash, child_hash) VALUES (?1, ?2)",
                         rusqlite::params![id.0.as_slice(), child.0.as_slice()],
                     )?;
                 }
                 let root = lash_core_store::store::BlobRef::for_content(b"retired leaf");
-                connection.execute(
+                connection.execute_once(
                     "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
                     rusqlite::params![crate::codec::SqlHash(root.as_str()), b"retired leaf"],
                 )?;
@@ -79,7 +80,7 @@ async fn lo_root_retirement_work_ignores_unrelated_edges() {
                 )?;
                 assert_eq!(result, (1, 1, Default::default()));
                 let statement =
-                    connection.prepare_cached(super::SQL.sqlite.retirement_candidates.sql())?;
+                    connection.statement(super::SQL.sqlite.retirement_candidates.sql())?;
                 Ok(statement.get_status(rusqlite::StatementStatus::VmStep))
             })
             .await
@@ -138,17 +139,16 @@ async fn an_install_reuses_a_stored_root_instead_of_revisiting_its_chain() {
                 super::install_staged(connection, &chain)?.unwrap();
                 encode(&mut staging, "a new root over the stored chain", Some(head));
                 let again = staging.into_nodes();
-                let statement =
-                    connection.prepare_cached(super::SQL.sqlite.install_frontier.sql())?;
+                let statement = connection.statement(super::SQL.sqlite.install_frontier.sql())?;
                 statement.reset_status(rusqlite::StatementStatus::VmStep);
                 drop(statement);
                 super::install_staged(connection, &again)?.unwrap();
                 let reads = connection
-                    .prepare_cached(super::SQL.sqlite.install_frontier.sql())?
+                    .statement(super::SQL.sqlite.install_frontier.sql())?
                     .get_status(rusqlite::StatementStatus::VmStep);
                 // A stored head whose bytes changed under its digest is
                 // compared at the frontier and refused.
-                connection.execute(
+                connection.execute_once(
                     "UPDATE blobs SET content = CAST(content || x'00' AS BLOB) WHERE hash = ?1",
                     [head.0.as_slice()],
                 )?;
@@ -197,11 +197,11 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
     store
         .conn
         .write(move |tx| {
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
                 rusqlite::params![SqlHash(retained.as_str()), b"retained control".as_slice()],
             )?;
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
                 [SqlHash(retained.as_str())],
             )?;
@@ -214,14 +214,14 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
         .write(move |tx| {
             let candidate = BlobRef::for_content(b"unpublished candidate");
             let absent = BlobRef::for_content(b"absent root");
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
                 rusqlite::params![
                     SqlHash(candidate.as_str()),
                     b"unpublished candidate".as_slice()
                 ],
             )?;
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
                 [SqlHash(absent.as_str())],
             )?;
@@ -236,7 +236,7 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
         .conn
         .call(move |connection| {
             let keys = connection
-                .prepare("SELECT hash, typeof(hash), length(hash) FROM blobs ORDER BY hash")?
+                .statement_once("SELECT hash, typeof(hash), length(hash) FROM blobs ORDER BY hash")?
                 .query_map([], |row| {
                     Ok((
                         hash_column(row, 0)?,
@@ -246,7 +246,7 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(keys, [(control.0, "blob".to_owned(), 32)]);
-            let rooted: i64 = connection.query_row(
+            let rooted: i64 = connection.query_row_once(
                 "SELECT count(*) FROM retirement_holds JOIN blobs ON root_ref = hash",
                 [],
                 |row| row.get(0),

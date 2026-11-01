@@ -44,6 +44,7 @@
 //! A memory store set has no node wakes: it lives in one process, and its
 //! nodes find each other's work through the claim poll and the mail scan.
 
+use crate::Prepare as _;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
@@ -275,7 +276,7 @@ impl Opener {
         .map_err(store_failure)?;
         let version = data_version(&connection).map_err(store_failure)?;
         let cursor = connection
-            .query_row(TAIL, [], |row| row.get::<_, i64>(0))
+            .query_row_once(TAIL, [], |row| row.get::<_, i64>(0))
             .map_err(store_failure)?;
         Ok(Session {
             lock,
@@ -308,7 +309,7 @@ impl Opener {
 }
 
 fn data_version(connection: &rusqlite::Connection) -> rusqlite::Result<i64> {
-    connection.query_row("PRAGMA data_version", [], |row| row.get(0))
+    connection.query_row_once("PRAGMA data_version", [], |row| row.get(0))
 }
 
 impl Session {
@@ -326,17 +327,14 @@ impl Session {
         self.version = version;
         let row = |row: &rusqlite::Row<'_>| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?));
         let rows = match node {
-            Some(node) => self
-                .connection
-                .prepare_cached(PAST)
-                .and_then(|mut statement| {
-                    statement
-                        .query_map(rusqlite::params![self.cursor, node], row)?
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                }),
+            Some(node) => self.connection.statement(PAST).and_then(|mut statement| {
+                statement
+                    .query_map(rusqlite::params![self.cursor, node], row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            }),
             None => self
                 .connection
-                .prepare_cached(PAST_EVERY_NODE)
+                .statement(PAST_EVERY_NODE)
                 .and_then(|mut statement| {
                     statement
                         .query_map([self.cursor], row)?

@@ -139,7 +139,7 @@ fn complete_inputs_conn(
         serde_json::to_string(&ids).map_err(|error| StoreError::Backend(error.to_string()))?;
     let sql = &crate::turn_ingress::turn_ingress_sql().pending_inputs_sqlite;
     let mut statement = tx
-        .prepare_cached(sql.completed_rows.sql())
+        .statement(sql.completed_rows.sql())
         .map_err(sqlite_error)?;
     let mut rows = statement
         .query(params![session.as_str(), encoded])
@@ -165,7 +165,7 @@ fn complete_inputs_conn(
     drop(rows);
     drop(statement);
     let settled: std::collections::BTreeSet<String> = tx
-        .prepare_cached(sql.complete_set.sql())
+        .statement(sql.complete_set.sql())
         .map_err(sqlite_error)?
         .query_map(
             params![
@@ -198,7 +198,7 @@ fn admitted_input_conn(
     input_id: &lash_vocabulary::identity::InputId,
 ) -> Result<PendingTurnInputRow, StoreError> {
     let row = tx
-        .prepare_cached(
+        .statement(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_by_id
@@ -228,7 +228,7 @@ fn admitted_batch_conn(
     batch_id: &lash_vocabulary::identity::BatchId,
 ) -> Result<QueuedWorkBatch, StoreError> {
     let row = tx
-        .query_row(
+        .query_row_once(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
                 .select_by_id

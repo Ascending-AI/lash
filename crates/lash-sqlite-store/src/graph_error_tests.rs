@@ -26,12 +26,12 @@ fn sqlite_graph_collisions_use_transactional_identity() {
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .expect("claim the writer before inserting");
     let insert = crate::session_sql::session_sql().graph.insert.sql();
-    tx.execute(
+    tx.execute_once(
         insert,
         params!["session-a", "node-a", None::<&str>, 3, "frame", 2, "{}"],
     )
     .expect("seed graph uniqueness fixture");
-    tx.execute(
+    tx.execute_once(
         "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = 'node-a'",
         [],
     )
@@ -45,7 +45,7 @@ fn sqlite_graph_collisions_use_transactional_identity() {
             (session.clone(), "node-a", 3, true),
         ] {
             let raw = tx
-                .execute(
+                .execute_once(
                     insert,
                     params![
                         session_id.as_str(),
@@ -86,7 +86,7 @@ fn sqlite_graph_collisions_use_transactional_identity() {
         }
     }
     let raw = tx
-        .execute(
+        .execute_once(
             insert,
             params!["session-a", "node-a", None::<&str>, 3, "frame", -1, "{}"],
         )
@@ -128,7 +128,7 @@ fn sqlite_constraint_preserves_extended_code_in_host_fault() {
     )
     .expect("constraint fixture");
     let raw = conn
-        .execute("INSERT INTO codes VALUES ('same')", [])
+        .execute_once("INSERT INTO codes VALUES ('same')", [])
         .expect_err("duplicate value");
     let error = sqlite_error(raw);
     let fault = StoreFault::of_store_error(&error).expect("host store fault");

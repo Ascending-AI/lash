@@ -9,6 +9,7 @@
 //! and the cancel request are the registry's own writes on this commit's
 //! connection, so the registry and the actor never disagree.
 
+use crate::Prepare as _;
 use lash_durable::domain::{
     CANCEL_MAIL, CancelAnswer, CancelRequest, DomainRefusal, ProcessActorRow, ProcessStartRows,
     ProcessWrite, ScopeKey,
@@ -67,7 +68,7 @@ pub(crate) fn create_actor_within(
         Err(_) => return Ok(Err(super::corrupt("process actor key", process.as_str()))),
     };
     let created = tx
-        .prepare_cached(SQL.actor.create.sql())?
+        .statement(SQL.actor.create.sql())?
         .query_row(
             rusqlite::params![actor.as_str(), actor.kind().as_str(), formats, now.0],
             |_| Ok(()),
@@ -117,7 +118,7 @@ pub(super) fn claim_within(
     let formats = super::formats_json(&lease.decodes);
     let serves = lease.serves.as_json();
     let candidates = tx
-        .prepare_cached(SQL.sqlite.claimable.sql())?
+        .statement(SQL.sqlite.claimable.sql())?
         .query_map(
             rusqlite::params![
                 now.0,
@@ -172,7 +173,7 @@ pub(super) fn claim_within(
             .map(|(actor, ..)| actor.as_str())
             .collect::<Vec<_>>();
         let keys = serde_json::Value::from(keys).to_string();
-        let mut statement = tx.prepare_cached(SQL.sqlite.claim.sql())?;
+        let mut statement = tx.statement(SQL.sqlite.claim.sql())?;
         let rows = statement.query_map(
             rusqlite::params![keys, owner.node.as_str(), owner.boot.as_str()],
             |row| Ok((row.get::<_, String>(0)?, Epoch(row.get::<_, i64>(1)?))),
@@ -363,7 +364,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                 SQL.process.advance.sql()
             };
             let moved = tx
-                .prepare_cached(statement)?
+                .statement(statement)?
                 .query_row(
                     rusqlite::params![
                         process.as_str(),
@@ -556,7 +557,7 @@ fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> An
     }
     if let ScopeKey::Turn(session, run) = scope {
         let (holds, children) = tx
-            .prepare_cached(
+            .statement(
                 crate::process_registry::sql::process_sql()
                     .plan
                     .turn_close
@@ -619,7 +620,7 @@ pub(super) async fn process(
 
 fn process_row(tx: &Connection, process: &ProcessId) -> Answer<Option<ProcessActorRow>> {
     Ok(Ok(tx
-        .prepare_cached(SQL.process.row.sql())?
+        .statement(SQL.process.row.sql())?
         .query_row([process.as_str()], |row| actor_row(row, 0, process))
         .optional()?
         .flatten()))
@@ -662,7 +663,7 @@ pub(super) fn until_children(
     let after = after.map_or("", ProcessId::as_str);
     let limit = integer::<i64>(limit)?;
     let ids = tx
-        .prepare_cached(SQL.process.pending_children.sql())?
+        .statement(SQL.process.pending_children.sql())?
         .query_map(rusqlite::params![kind, id, after, limit], |row| {
             row.get::<_, String>(0)
         })?
@@ -686,7 +687,7 @@ pub(super) fn live_until_descendants(
         return Ok(Ok(Vec::new()));
     };
     let ids = tx
-        .prepare_cached(SQL.process.live_descendants.sql())?
+        .statement(SQL.process.live_descendants.sql())?
         .query_map(
             rusqlite::params![
                 roots.kind,
@@ -712,7 +713,7 @@ mod tests {
     #[tokio::test]
     async fn a_turn_close_with_no_holds_uses_only_its_child_probe() {
         let conn = crate::tests::input_run_sql_fixture();
-        conn.execute("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", []).expect("terminal");
+        conn.execute_once("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", []).expect("terminal");
         crate::observed_sql::enable(&conn);
         let actor = ActorKey::session("session").expect("actor");
         let commit = Committing {
@@ -749,7 +750,7 @@ mod tests {
             stores.process_env_store().as_ref(),
         )
         .await;
-        store.conn.call(|conn| conn.execute("INSERT INTO session_runs (session_id, run) VALUES ('held-session', 'held-run')", [])).await.expect("run");
+        store.conn.call(|conn| conn.execute_once("INSERT INTO session_runs (session_id, run) VALUES ('held-session', 'held-run')", [])).await.expect("run");
         let owner = lash_core_store::scope_identity::ScopeId::turn("held-session", "held-run");
         let mut registration = lash_execution_contracts::testing::held_engine_registration(
             serde_json::json!({}),
@@ -773,8 +774,8 @@ mod tests {
             .await
             .expect("mark");
         store.conn.call(move |conn| {
-            assert!(conn.query_row("SELECT scope_has_holds FROM session_runs", [], |row| row.get::<_, bool>(0))?);
-            conn.execute("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", [])?;
+            assert!(conn.query_row_once("SELECT scope_has_holds FROM session_runs", [], |row| row.get::<_, bool>(0))?);
+            conn.execute_once("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", [])?;
             let actor = ActorKey::session("held-session").expect("actor");
             let commit = Committing {
             process_views: Default::default(),
@@ -783,8 +784,8 @@ mod tests {
                 retired: Default::default(), open_roots: Default::default(),
             };
             close_scope(conn, &commit, &ScopeKey::Turn("held-session".into(), "held-run".into()))?.expect("close");
-            assert_eq!(conn.query_row("SELECT count(*) FROM processes WHERE consumer_hold_key IS NOT NULL", [], |row| row.get::<_, i64>(0))?, 0);
-            assert_eq!(conn.query_row("SELECT count(*) FROM abandoned_consumer_holds", [], |row| row.get::<_, i64>(0))?, 0);
+            assert_eq!(conn.query_row_once("SELECT count(*) FROM processes WHERE consumer_hold_key IS NOT NULL", [], |row| row.get::<_, i64>(0))?, 0);
+            assert_eq!(conn.query_row_once("SELECT count(*) FROM abandoned_consumer_holds", [], |row| row.get::<_, i64>(0))?, 0);
             Ok(())
         }).await.expect("cleanup");
     }

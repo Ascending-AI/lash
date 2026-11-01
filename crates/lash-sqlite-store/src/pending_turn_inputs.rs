@@ -125,7 +125,7 @@ pub(crate) fn load_pending_turn_input_by_id_conn(
     input_id: &str,
 ) -> Result<Option<lash_core_store::turn_input_vocabulary::PendingTurnInput>, StoreError> {
     let row = conn
-        .prepare_cached(
+        .statement(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .select_by_id
@@ -150,7 +150,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     match target {
         lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget::InputId(input_id) => {
-            conn.prepare_cached(sql.pending_inputs.select_by_id.sql())
+            conn.statement(sql.pending_inputs.select_by_id.sql())
                 .and_then(|mut statement| {
                     statement.query_row(
                         params![session_id.as_str(), input_id.as_str()],
@@ -163,7 +163,7 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
         lash_core_store::turn_input_vocabulary::PendingTurnInputCancelTarget::SourceKey(
             source_key,
         ) => conn
-            .prepare_cached(sql.pending_inputs.select_by_source_key.sql())
+            .statement(sql.pending_inputs.select_by_source_key.sql())
             .and_then(|mut statement| {
                 statement.query_row(
                     params![session_id.as_str(), source_key],

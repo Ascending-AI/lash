@@ -48,7 +48,7 @@ impl lash_execution_contracts::process::ProcessQuery for SqliteProcessRegistry {
                         return Ok(Some(record));
                     }
                     let tombstone: Option<(String, i64)> = conn
-                        .query_row(
+                        .query_row_once(
                             process_sql().tombstone.select_terminal.sql(),
                             params![process_id.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -193,7 +193,7 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
                     for process_id in &process_ids {
                         let mut record = Self::require_process_conn(tx, process_id)?;
                         let removed = tx
-                            .execute(
+                            .execute_once(
                                 process_sql().observer.delete.sql(),
                                 params![from_session_id.as_str(), process_id.as_str()],
                             )
@@ -261,7 +261,7 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
                 } else {
                     registry.list_observed.sql()
                 };
-                let mut stmt = conn.prepare_cached(sql)?;
+                let mut stmt = conn.statement(sql)?;
                 let rows = stmt.query_map(
                     params![session_id.as_str(), status, retired_since_ms],
                     |row| row.get::<_, String>(0),
@@ -297,12 +297,12 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
         let (retained, observer) = self
             .conn
             .call(move |conn| {
-                let retained = conn.query_row(
+                let retained = conn.query_row_once(
                     process_sql().process.exists_by_id.sql(),
                     params![queried_process_id.as_str()],
                     |row| row.get::<_, bool>(0),
                 )?;
-                let observer = conn.query_row(
+                let observer = conn.query_row_once(
                     process_sql().observer_sqlite.exists.sql(),
                     params![session_id.as_str(), queried_process_id.as_str()],
                     |row| row.get::<_, bool>(0),
@@ -328,7 +328,7 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
                 Ok((|| {
                     Self::require_process_conn(conn, &process_id)?;
                     let mut stmt = conn
-                        .prepare(process_sql().observer.list_sessions_for_process.sql())
+                        .statement_once(process_sql().observer.list_sessions_for_process.sql())
                         .map_err(process_sqlite_error)?;
                     stmt.query_map(params![process_id.as_str()], |row| {
                         crate::codec::sql_identity::<SessionId>(row.get::<_, String>(0)?)
@@ -358,7 +358,7 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
                 Ok(tx_outcome((|| {
                     let session_id = session_id_owned;
                     let removed_observer_count = tx
-                        .execute(
+                        .execute_once(
                             process_sql().observer.delete_by_session.sql(),
                             params![session_id],
                         )
@@ -418,7 +418,7 @@ impl lash_execution_contracts::process::ProcessEventLog for SqliteProcessRegistr
                     }
                     let released_through = Self::released_through_conn(conn, &process_id)?;
                     let row: Option<(i64, String)> = conn
-                        .query_row(
+                        .query_row_once(
                             process_sql().event.read_by_replay_key.sql(),
                             params![process_id.as_str(), replay_key, through_sequence],
                             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -510,7 +510,7 @@ impl lash_execution_contracts::process::ProcessEventLog for SqliteProcessRegistr
                     let page = match mode {
                         lash_execution_contracts::process::ProcessEventQueryMode::Full => {
                             let mut stmt = conn
-                                .prepare(process_sql().event.page_full.sql())
+                                .statement_once(process_sql().event.page_full.sql())
                                 .map_err(process_sqlite_error)?;
                             let rows = stmt
                                 .query_map(
@@ -529,7 +529,7 @@ impl lash_execution_contracts::process::ProcessEventLog for SqliteProcessRegistr
                         }
                         lash_execution_contracts::process::ProcessEventQueryMode::Lite => {
                             let mut stmt = conn
-                                .prepare(process_sql().event.page_lite.sql())
+                                .statement_once(process_sql().event.page_lite.sql())
                                 .map_err(process_sqlite_error)?;
                             let rows = stmt
                                 .query_map(
@@ -795,7 +795,7 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
         let bytes: Option<Option<Vec<u8>>> = self
             .conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     process_sql().process_sqlite.select_environment_bytes.sql(),
                     params![crate::artifact_store::PROCESS_ENV_NAMESPACE, env.as_str()],
                     |row| row.get(0),
@@ -822,7 +822,7 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
         self.conn
             .call(move |conn| {
                 let row: Option<(Option<String>, Option<Vec<u8>>, Option<String>, Option<i64>)> =
-                    conn.query_row(
+                    conn.query_row_once(
                         process_sql().process_sqlite.select_authority.sql(),
                         params![
                             process.as_str(),

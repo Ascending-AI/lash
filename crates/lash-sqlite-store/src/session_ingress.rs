@@ -5,6 +5,7 @@
 //! `lash-store-sql`'s `session_ingress` module owns the statements; this
 //! module renders them once, at startup.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_store_sql::session_ingress::SessionIngressStatements;
@@ -23,7 +24,7 @@ pub(crate) fn allocate_sequence(
     conn: &rusqlite::Connection,
     session_id: &lash_kernel_value::identity::SessionId,
 ) -> Result<i64, crate::StoreError> {
-    conn.prepare_cached(session_ingress_sql().allocate_sequence.sql())
+    conn.statement(session_ingress_sql().allocate_sequence.sql())
         .map_err(crate::sqlite_error)?
         .query_row(rusqlite::params![session_id.as_str()], |row| row.get(0))
         .map_err(crate::sqlite_error)

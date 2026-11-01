@@ -20,6 +20,7 @@
 //! sync, and a checkpoint syncs the WAL before it copies frames and the
 //! database before it resets the WAL.
 
+use crate::Prepare as _;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_int;
@@ -173,7 +174,7 @@ impl CheckpointState {
         };
         // PASSIVE takes no lock a writer or reader waits on.
         let frames: i64 = connection
-            .prepare_cached("PRAGMA wal_checkpoint(PASSIVE)")?
+            .statement("PRAGMA wal_checkpoint(PASSIVE)")?
             .query_row([], |row| row.get(1))?;
         if frames
             < self
@@ -211,7 +212,7 @@ impl CheckpointState {
             "PRAGMA wal_checkpoint(TRUNCATE)"
         };
         let busy: i64 = connection
-            .prepare_cached(reset)?
+            .statement(reset)?
             .query_row([], |row| row.get(0))?;
         Ok(busy != 0)
     }

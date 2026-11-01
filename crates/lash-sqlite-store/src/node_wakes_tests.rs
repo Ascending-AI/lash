@@ -1095,7 +1095,7 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
     let payloads = store
         .conn
         .read(move |c| {
-            c.prepare("SELECT actors FROM node_wakes WHERE node_id = ?1 ORDER BY seq")?
+            c.statement_once("SELECT actors FROM node_wakes WHERE node_id = ?1 ORDER BY seq")?
                 .query_map([node], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()
         })
@@ -1119,7 +1119,7 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
     store
         .conn
         .write_flow(move |tx| {
-            tx.execute(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
+            tx.execute_once(crate::durable::NODE_WAKE_ROLLBACK_MAIL, [hot.as_str()])?;
             Ok(crate::conn::TxOutcome::Rollback(()))
         })
         .await
@@ -1127,7 +1127,7 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
     let after = store
         .conn
         .read(|c| {
-            c.query_row("SELECT count(*) FROM node_wakes", [], |row| {
+            c.query_row_once("SELECT count(*) FROM node_wakes", [], |row| {
                 row.get::<_, usize>(0)
             })
         })
@@ -1308,7 +1308,7 @@ fn young_wakes_do_not_pay_for_expiry_candidate_materialization() {
         INSERT INTO node_wakes (actors, published_at_ms) SELECT 'young', 100 FROM n",
     )
     .unwrap();
-    let mut statement = conn.prepare(super::PRUNE).unwrap();
+    let mut statement = conn.statement_once(super::PRUNE).unwrap();
     assert_eq!(statement.execute([50]).unwrap(), 0);
     let steps = statement.get_status(rusqlite::StatementStatus::VmStep);
     assert!(

@@ -19,7 +19,7 @@ impl SqliteDurableStore {
             let observed_at = integer(clock.timestamp_ms())
                 .map(DurableInstant)
                 .map_err(store_failure);
-            tx.prepare_cached(SQL.read.sql())?.query_row(
+            tx.statement(SQL.read.sql())?.query_row(
                 rusqlite::params![
                     node.as_ref().map(|node| node.node.as_str()),
                     actor.as_str(),

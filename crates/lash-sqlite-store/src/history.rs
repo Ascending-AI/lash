@@ -38,7 +38,7 @@ fn nonnegative(kind: &'static str, field: &'static str, value: i64) -> Result<u6
 fn live(conn: &Connection, session_id: &SessionId) -> Result<(), StoreError> {
     lash_core_store::store::validate_session_id(session_id)?;
     if conn
-        .prepare_cached(session_sql::session_sql().deleted_sqlite.exists.sql())
+        .statement(session_sql::session_sql().deleted_sqlite.exists.sql())
         .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
@@ -78,7 +78,7 @@ fn visible_header(
     session: &SessionId,
     node: &str,
 ) -> Result<Option<Header>, StoreError> {
-    conn.prepare_cached(session_sql::session_sql().graph_sqlite.visible_header.sql())
+    conn.statement(session_sql::session_sql().graph_sqlite.visible_header.sql())
         .and_then(|mut statement| statement.query_row(params![node, session.as_str()], header))
         .optional()
         .map_err(sqlite_error)
@@ -109,7 +109,7 @@ pub(crate) fn head_leaf_path_node(
     conn: &Connection,
     session: &SessionId,
 ) -> Result<Option<PathNode>, StoreError> {
-    conn.prepare_cached(
+    conn.statement(
         session_sql::session_sql()
             .graph_sqlite
             .select_head_leaf_path_node
@@ -138,7 +138,7 @@ pub(crate) fn head_leaf_path_node(
 
 fn owner_exit(conn: &Connection, owner: &SessionId) -> Result<OwnerExit, StoreError> {
     let row = conn
-        .prepare_cached(
+        .statement(
             session_sql::session_sql()
                 .graph_sqlite
                 .select_owner_exit
@@ -230,7 +230,7 @@ fn header_path_node(row: &Header) -> Result<PathNode, StoreError> {
 
 fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, StoreError> {
     let mut statement = conn
-        .prepare_cached(session_sql::session_sql().lineage.select_for_stamp.sql())
+        .statement(session_sql::session_sql().lineage.select_for_stamp.sql())
         .map_err(sqlite_error)?;
     let rows = statement
         .query_map(params![session.as_str()], |row| {
@@ -265,7 +265,7 @@ pub(crate) fn admitted_head_row(
         Some(_) => &session_sql::session_sql().head.select_terminal_window,
         None => &session_sql::session_sql().head.select_window,
     };
-    let mut statement = conn.prepare_cached(sql.sql()).map_err(sqlite_error)?;
+    let mut statement = conn.statement(sql.sql()).map_err(sqlite_error)?;
     let mut rows = match run {
         Some(run) => statement.query(params![session.as_str(), run.as_str()]),
         None => statement.query(params![session.as_str()]),
@@ -319,7 +319,7 @@ fn window_nodes(
     decoded: &AtomicU64,
 ) -> Result<(Vec<lash_core_store::session_graph::SessionNodeRecord>, u64), StoreError> {
     let mut stmt = conn
-        .prepare_cached(session_sql::session_sql().graph_sqlite.window_rows.sql())
+        .statement(session_sql::session_sql().graph_sqlite.window_rows.sql())
         .map_err(sqlite_error)?;
     let rows = stmt
         .query_map(params![session.as_str(), from, to], |row| {
@@ -617,7 +617,7 @@ impl SessionHistoryStore for SqliteStore {
                 Ok((|| {
                     live(conn, &session)?;
                     let Some((leaf, candidate)) = conn
-                        .prepare_cached(
+                        .statement(
                             session_sql::session_sql()
                                 .graph_sqlite
                                 .select_active_ancestor_candidate
@@ -715,7 +715,7 @@ fn committed_turns(
 ) -> Result<CommittedTurnNodesPage, StoreError> {
     live(conn, session)?;
     let mut stmt = conn
-        .prepare_cached(
+        .statement(
             session_sql::session_sql()
                 .turn_commits
                 .select_committed_turns_after
@@ -743,7 +743,7 @@ fn committed_turns(
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     let mut body_stmt = conn
-        .prepare_cached(
+        .statement(
             session_sql::session_sql()
                 .graph_sqlite
                 .select_live_owned_body
@@ -881,7 +881,7 @@ fn ancestors(
         return Err(corrupt("SessionGraph", "history cursor generation changed"));
     }
     let mut stmt = conn
-        .prepare_cached(session_sql::session_sql().graph_sqlite.page_headers.sql())
+        .statement(session_sql::session_sql().graph_sqlite.page_headers.sql())
         .map_err(sqlite_error)?;
     let rows = stmt
         .query_map(
@@ -970,7 +970,7 @@ fn ancestors(
         ))
     };
     let mut body_stmt = conn
-        .prepare_cached(session_sql::session_sql().graph_sqlite.select_body.sql())
+        .statement(session_sql::session_sql().graph_sqlite.select_body.sql())
         .map_err(sqlite_error)?;
     let mut nodes = Vec::with_capacity(headers.len());
     for header in headers {
@@ -1039,9 +1039,9 @@ fn failure_page(
             ],
         ),
     };
-    let mut stmt = conn.prepare_cached(query).map_err(sqlite_error)?;
+    let mut stmt = conn.statement(query).map_err(sqlite_error)?;
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(bind), |row| {
+        .query_map(crate::statement::params_from_iter(bind), |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,

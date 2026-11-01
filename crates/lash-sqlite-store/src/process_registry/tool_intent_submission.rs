@@ -1,3 +1,4 @@
+use crate::Prepare as _;
 use lash_execution_contracts::plugin_error::PluginError;
 use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
 use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
@@ -27,7 +28,7 @@ pub(super) async fn admit(
                 let sql = crate::turn_ingress::tool_intent_sql();
                 let owner = submission.identity.owner.to_string();
                 let retired: bool = tx
-                    .query_row(
+                    .query_row_once(
                         sql.shared.select_owner_retired.sql(),
                         params![owner],
                         |row| row.get(0),
@@ -40,7 +41,7 @@ pub(super) async fn admit(
                         .map(|(session, run)| (session.as_str(), run.as_str()))
                         .unzip();
                     let inserted = tx
-                        .execute(
+                        .execute_once(
                             sql.sqlite.insert_new.sql(),
                             params![
                                 submission.identity.replay_key,
@@ -116,7 +117,7 @@ fn read(
     replay_key: &str,
 ) -> Result<Option<ToolIntentSubmissionRecord>, PluginError> {
     let columns = tx
-        .query_row(
+        .query_row_once(
             crate::turn_ingress::tool_intent_sql()
                 .shared
                 .select_by_replay_key

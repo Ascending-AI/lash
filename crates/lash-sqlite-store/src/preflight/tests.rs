@@ -9,6 +9,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use crate::Prepare as _;
 use std::time::Duration;
 
 use lash_core_store::store::FleetFormat;
@@ -240,7 +241,7 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
 
 fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
     let conn = rusqlite::Connection::open(path).expect("open for stamp");
-    conn.execute(
+    conn.execute_once(
         "UPDATE lash_compat SET version = ?1, min_reader = ?2 WHERE singleton = 1",
         rusqlite::params![version, min_reader],
     )
@@ -255,6 +256,7 @@ fn stamp_compat(path: &std::path::Path, version: i64, min_reader: i64) {
 /// two properties that make the answer usable: an item nobody can read is still
 /// an item, and a surface nobody read is never an empty one.
 mod walk {
+    use crate::Prepare as _;
     use lash_core_store::store::DurablePayload;
     use lash_core_store::store::DurableScan;
     use lash_core_store::store::DurableSurface;
@@ -430,12 +432,12 @@ mod walk {
         // writing this; foreign data does not ask it.
         raw.execute_batch("PRAGMA foreign_keys = OFF")
             .expect("write foreign data");
-        raw.execute(
+        raw.execute_once(
             "INSERT INTO session_revisions (session_id, config_ref, head_revision, leaf_node_id, checkpoint_ref)
              VALUES ('orphaned', zeroblob(32), 0, NULL, X'7777777777777777777777777777777777777777777777777777777777777777')",
             [],
         ).expect("record the fixture revision");
-        raw.execute(
+        raw.execute_once(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('orphaned', 0)",
             [],
         )
@@ -472,7 +474,7 @@ mod walk {
             .await
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
-        raw.execute(
+        raw.execute_once(
             "INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), ?1, 0)",
             rusqlite::params![b"bare blob body".to_vec()],
         )
@@ -486,7 +488,7 @@ mod walk {
             "{}",
         )
         .expect("record the fixture revision");
-        raw.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('bare-checkpoint-session', 0)", [])
+        raw.execute_once("INSERT INTO session_head (session_id, head_revision) VALUES ('bare-checkpoint-session', 0)", [])
             .expect("install a session pointing at the bare blob");
         drop(raw);
 
@@ -546,7 +548,7 @@ mod walk {
             "{}",
         )
         .expect("record the fixture revision");
-        raw.execute(
+        raw.execute_once(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('published', 0)",
             [],
         )
@@ -635,7 +637,7 @@ mod walk {
             "{}",
         )
         .expect("record the fixture revision");
-        raw.execute(
+        raw.execute_once(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('stateless', 0)",
             [],
         )
@@ -706,10 +708,10 @@ async fn assert_release_admission(
     );
     let connection = rusqlite::Connection::open(&path).expect("open stamp");
     connection
-        .execute("UPDATE release_stamp SET release_version = ?1", [writing])
+        .execute_once("UPDATE release_stamp SET release_version = ?1", [writing])
         .expect("stamp release");
     connection
-        .execute(
+        .execute_once(
             "UPDATE lash_compat SET version = ?1, min_reader = ?1, fleet_format = ?2",
             rusqlite::params![schema_version, fleet_format],
         )

@@ -1,6 +1,7 @@
 //! Execution resolution and live-node claim capabilities:
 //! the SQLite side of `lash_store_sql::durable::packages`.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_durable::packages::NodeCapability;
@@ -26,9 +27,9 @@ fn replace_uses(
     execution: &lash_durable::resolutions::ExecutionId,
     rows: &str,
 ) -> rusqlite::Result<()> {
-    tx.prepare_cached(SQL.clear_uses.sql())?
+    tx.statement(SQL.clear_uses.sql())?
         .execute([&execution.0])?;
-    tx.prepare_cached(SQLITE.insert_uses.sql())?
+    tx.statement(SQLITE.insert_uses.sql())?
         .execute(rusqlite::params![execution.0, rows])?;
     Ok(())
 }
@@ -39,7 +40,7 @@ pub(super) fn live_nodes(
     now: DurableInstant,
 ) -> rusqlite::Result<Result<Vec<NodeCapability>, DurableError>> {
     let rows = tx
-        .prepare_cached(SQL.live_nodes.sql())?
+        .statement(SQL.live_nodes.sql())?
         .query_map([now.0], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -61,7 +62,7 @@ pub(super) fn actor_requirements(
     limit: i64,
 ) -> rusqlite::Result<Result<RequirementRows, DurableError>> {
     let rows = tx
-        .prepare_cached(SQL.actor_requirements.sql())?
+        .statement(SQL.actor_requirements.sql())?
         .query_map(rusqlite::params![after.unwrap_or(""), limit], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
@@ -91,7 +92,7 @@ pub(super) fn register(
         Err(error) => return Ok(Err(error)),
     };
     let inserted = tx
-        .prepare_cached(SQL.register_execution.sql())?
+        .statement(SQL.register_execution.sql())?
         .execute(rusqlite::params![
             record.execution.0,
             actor.as_str(),
@@ -118,7 +119,7 @@ pub(super) fn register(
 
 fn load(tx: &Connection, key: &ResolutionKey) -> Answer<Option<ResolutionRecord>> {
     let json: Option<String> = tx
-        .prepare_cached(SQL.load_resolution.sql())?
+        .statement(SQL.load_resolution.sql())?
         .query_row(
             rusqlite::params![
                 key.execution.0,
@@ -168,7 +169,7 @@ impl ExecutionResolutions for SqliteDurableStore {
             lash_durable::CommitLabel::RESOLUTION_COMMIT,
             move |tx, _| {
                 let row = tx
-                    .prepare_cached(SQL.owner_revision.sql())?
+                    .statement(SQL.owner_revision.sql())?
                     .query_row([owner.actor.as_str()], |row| {
                         Ok((
                             row.get::<_, i64>(0)?,
@@ -210,7 +211,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                         current: lash_durable::StateRevision(revision),
                     });
                 }
-                let revision = tx.prepare_cached(SQL.resolution_fence.sql())?.query_row(
+                let revision = tx.statement(SQL.resolution_fence.sql())?.query_row(
                     rusqlite::params![owner.actor.as_str(), owner.epoch.0, revision],
                     |row| row.get::<_, i64>(0),
                 )?;
@@ -260,7 +261,7 @@ impl ExecutionResolutions for SqliteDurableStore {
                 }
                 let json = serde_json::to_string(&candidate)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                tx.prepare_cached(SQL.insert_resolution.sql())?
+                tx.statement(SQL.insert_resolution.sql())?
                     .execute(rusqlite::params![
                         candidate.key.execution.0,
                         candidate.key.use_.link.to_string(),
@@ -285,7 +286,7 @@ pub(super) fn end_execution(
     execution: &lash_durable::resolutions::ExecutionId,
 ) -> Answer<()> {
     let changed = tx
-        .prepare_cached(SQL.end_execution.sql())?
+        .statement(SQL.end_execution.sql())?
         .execute([&execution.0, actor.as_str()])?;
     Ok(if changed == 0 {
         Err(lash_durable::packages::PackageRefusal::ExecutionUse.into())
@@ -299,7 +300,7 @@ fn requirements(
     actor: &lash_durable::ActorKey,
 ) -> Answer<lash_durable::resolutions::ClaimRequirements> {
     let rows = tx
-        .prepare_cached(SQL.requirements_rows.sql())?
+        .statement(SQL.requirements_rows.sql())?
         .query_map([actor.as_str()], |row| {
             Ok((
                 row.get(0)?,
@@ -323,7 +324,7 @@ pub(super) fn owner_requires(
         Some(requires) => requires.to_vec(),
         None => {
             let stored: Option<String> = tx
-                .prepare_cached(SQL.owner_revision.sql())?
+                .statement(SQL.owner_revision.sql())?
                 .query_row([actor.as_str()], |row| row.get(3))?;
             match lash_durable::parse_requires(stored.as_deref()) {
                 Ok(requires) => requires,
@@ -349,7 +350,7 @@ fn registration_rows(
     execution: &lash_durable::resolutions::ExecutionId,
 ) -> Answer<Option<(String, ExecutionRegistration, bool)>> {
     let row = tx
-        .prepare_cached(SQL.registration.sql())?
+        .statement(SQL.registration.sql())?
         .query_row([&execution.0], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -363,7 +364,7 @@ fn registration_rows(
         return Ok(Ok(None));
     };
     let uses = tx
-        .prepare_cached(SQL.current_uses.sql())?
+        .statement(SQL.current_uses.sql())?
         .query_map([&execution.0], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?
@@ -392,7 +393,7 @@ fn registered_use(
     candidate: &ResolutionRecord,
 ) -> Answer<lash_core_store::artifact_referrer::ArtifactReferrer> {
     let row = tx
-        .prepare_cached(SQL.registration_use.sql())?
+        .statement(SQL.registration_use.sql())?
         .query_row(
             rusqlite::params![
                 candidate.key.execution.0,
@@ -430,7 +431,7 @@ pub(super) fn adopt(
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
-    tx.prepare_cached(SQL.adopt_execution.sql())?
+    tx.statement(SQL.adopt_execution.sql())?
         .execute(rusqlite::params![
             record.execution.0,
             actor.as_str(),
@@ -472,7 +473,7 @@ pub(super) fn seed(
     }
     let json = serde_json::to_string(record)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-    tx.prepare_cached(SQL.insert_resolution.sql())?
+    tx.statement(SQL.insert_resolution.sql())?
         .execute(rusqlite::params![
             record.key.execution.0,
             record.key.use_.link.to_string(),
@@ -534,13 +535,14 @@ pub(super) fn end_actor_executions(
     tx: &Connection,
     actor: &lash_durable::ActorKey,
 ) -> rusqlite::Result<()> {
-    tx.prepare_cached(SQL.end_actor_executions.sql())?
+    tx.statement(SQL.end_actor_executions.sql())?
         .execute([actor.as_str()])?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::Prepare as _;
     /// PACKAGE-OPEN-WORK (FIG-7241): debt probes and actor termination do
     /// exactly the same store work with the same open executions, regardless
     /// of retained ended executions, including after termination is replayed.
@@ -570,13 +572,13 @@ mod tests {
                 .call(move |connection| {
                     for ordinal in 0..depth {
                         let execution = format!("ended-{ordinal}");
-                        connection.execute(
+                        connection.execute_once(
                             "INSERT INTO package_executions
                              (execution, actor_key, referrer_json, requirements_json, ended) VALUES (?1, ?2, ?3, ?4, 1)",
                             rusqlite::params![execution, seed_actor.as_str(), "ended referrer", "ended requirements"],
                         )?;
                         // An ended resolution must be excluded by the join too.
-                        connection.execute(
+                        connection.execute_once(
                             "INSERT INTO execution_resolutions (execution, link, slot, record_json)
                              VALUES (?1, 'ended-link', 0, 'ended resolution')",
                             [&execution],

@@ -1,5 +1,6 @@
 //! Tool-call publications inside the fenced execution transaction.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_core_store::checkpoint_graph::DecodeLimits;
@@ -129,7 +130,7 @@ pub(super) fn apply_admissions(
     let rows = serde_json::to_string(&rows)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     let changed = tx
-        .prepare_cached(SQLITE.admit_many.sql())?
+        .statement(SQLITE.admit_many.sql())?
         .execute(rusqlite::params![
             logical.stored(),
             execution.stored(),
@@ -181,35 +182,32 @@ pub(super) fn apply(
                 }
                 _ => (None, None),
             };
-            tx.prepare_cached(SQL.admit.sql())?
-                .execute(rusqlite::params![
-                    owner.stored(),
-                    call.as_str(),
-                    execution.stored(),
-                    integer::<i64>(run.0)?,
-                    integer::<i64>(*member)?,
-                    cancellable,
-                    session,
-                    turn,
-                    counted
-                ])?
+            tx.statement(SQL.admit.sql())?.execute(rusqlite::params![
+                owner.stored(),
+                call.as_str(),
+                execution.stored(),
+                integer::<i64>(run.0)?,
+                integer::<i64>(*member)?,
+                cancellable,
+                session,
+                turn,
+                counted
+            ])?
         }
         ToolCallWrite::Decide {
             owner,
             call,
             decision,
             fact,
-        } => tx
-            .prepare_cached(SQL.decide.sql())?
-            .execute(rusqlite::params![
-                owner.stored(),
-                call.as_str(),
-                match decision {
-                    ToolCallDecision::Final => "final",
-                    ToolCallDecision::Cancel => "cancel",
-                },
-                fact.0.as_slice()
-            ])?,
+        } => tx.statement(SQL.decide.sql())?.execute(rusqlite::params![
+            owner.stored(),
+            call.as_str(),
+            match decision {
+                ToolCallDecision::Final => "final",
+                ToolCallDecision::Cancel => "cancel",
+            },
+            fact.0.as_slice()
+        ])?,
         ToolCallWrite::Complete {
             owner,
             call,
@@ -218,7 +216,7 @@ pub(super) fn apply(
         } => {
             let outcome = serde_json::to_string(&answer.outcome)
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            tx.prepare_cached(SQL.complete.sql())?
+            tx.statement(SQL.complete.sql())?
                 .execute(rusqlite::params![
                     owner.stored(),
                     call.as_str(),
@@ -235,14 +233,13 @@ pub(super) fn apply(
         } => {
             let outcome = serde_json::to_string(&answer.outcome)
                 .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            tx.prepare_cached(SQL.answer.sql())?
-                .execute(rusqlite::params![
-                    owner.stored(),
-                    call.as_str(),
-                    outcome,
-                    answer.body.map(|node| node.0.to_vec()),
-                    answer.cancelled()
-                ])?
+            tx.statement(SQL.answer.sql())?.execute(rusqlite::params![
+                owner.stored(),
+                call.as_str(),
+                outcome,
+                answer.body.map(|node| node.0.to_vec()),
+                answer.cancelled()
+            ])?
         }
     };
     Ok(if changed == 1 {
@@ -266,7 +263,7 @@ pub(super) fn root(
         ToolCallRoot::Answer => &SQL.answer_root,
     };
     Ok(tx
-        .prepare_cached(sql.sql())?
+        .statement(sql.sql())?
         .query_row([owner.stored(), call.as_str().to_owned()], |row| {
             crate::codec::optional_hash_column(row, 0)
         })
@@ -311,7 +308,7 @@ pub(super) fn read(
             let keys =
                 serde_json::Value::from(calls.iter().map(|call| call.as_str()).collect::<Vec<_>>())
                     .to_string();
-            tx.prepare_cached(SQLITE.selected.sql())?
+            tx.statement(SQLITE.selected.sql())?
                 .query_map(rusqlite::params![key, keys], map)?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         }
@@ -327,7 +324,7 @@ pub(super) fn read(
                 ToolCallSelection::SavedReads { .. } => &SQL.saved_reads,
                 _ => &SQL.page,
             };
-            tx.prepare_cached(sql.sql())?
+            tx.statement(sql.sql())?
                 .query_map(rusqlite::params![key, sequence, call, limit], map)?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         }
@@ -395,7 +392,7 @@ pub(super) fn delete_owner(
     tx: &Connection,
     owner: &lash_durable::domain::CallOwner,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_owner.sql())?
+    tx.statement(SQL.delete_owner.sql())?
         .query_map([owner.stored()], |row| {
             Ok([
                 crate::codec::optional_hash_column(row, 0)?,
@@ -410,7 +407,7 @@ pub(super) fn delete_session(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_session.sql())?
+    tx.statement(SQL.delete_session.sql())?
         .query_map([session.as_str()], |row| {
             Ok([
                 crate::codec::optional_hash_column(row, 0)?,
@@ -428,7 +425,7 @@ pub(super) fn finish_reads(
 ) -> rusqlite::Result<()> {
     let outcome = serde_json::to_string(&lash_durable::domain::tool_calls::interrupted_read())
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-    tx.prepare_cached(SQL.finish_reads.sql())?
+    tx.statement(SQL.finish_reads.sql())?
         .execute(rusqlite::params![
             OwnerKey::Turn(session.clone(), run.clone()).stored(),
             outcome

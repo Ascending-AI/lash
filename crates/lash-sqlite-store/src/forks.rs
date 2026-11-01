@@ -27,7 +27,7 @@ pub(super) async fn fork_at_in_catalog(
             // Keep the fork fences in the shared order: exists -> deleted ->
             // retained revision -> live leaf -> frame.
             let exists = tx
-                .query_row(
+                .query_row_once(
                     session_sql().meta_sqlite.exists_materialized.sql(),
                     params![request.session_id.as_str()],
                     |_| Ok(()),
@@ -41,7 +41,7 @@ pub(super) async fn fork_at_in_catalog(
                 });
             }
             let deleted = tx
-                .query_row(
+                .query_row_once(
                     session_sql().deleted_sqlite.exists.sql(),
                     params![request.session_id.as_str()],
                     |_| Ok(()),
@@ -63,7 +63,7 @@ pub(super) async fn fork_at_in_catalog(
             };
             let sql_revision = i64::try_from(request.head_revision).map_err(|_| pruned())?;
             let retained = tx
-                .query_row(
+                .query_row_once(
                     session_sql().revisions.select.sql(),
                     params![source_session_id.as_str(), sql_revision],
                     |row| {
@@ -78,7 +78,7 @@ pub(super) async fn fork_at_in_catalog(
             let Some((leaf_node_id, mut checkpoint_ref)) = retained else {
                 persistence::ensure_session_not_deleted_conn(tx, &source_session_id)?;
                 let source_exists = tx
-                    .query_row(
+                    .query_row_once(
                         session_sql().meta_sqlite.exists_materialized.sql(),
                         params![source_session_id.as_str()],
                         |_| Ok(()),
@@ -102,7 +102,7 @@ pub(super) async fn fork_at_in_catalog(
                 // Retirement never tombstones a retained revision's leaf, so
                 // a dead one is damage, not a collected point.
                 let node_facts = tx
-                    .query_row(
+                    .query_row_once(
                         session_sql().graph_sqlite.select_owner_generation.sql(),
                         params![leaf_node_id],
                         |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -151,7 +151,7 @@ pub(super) async fn fork_at_in_catalog(
                 let mut expected_generation = fork_generation;
                 loop {
                     let facts = tx
-                        .query_row(
+                        .query_row_once(
                             session_sql().graph_sqlite.select_edge.sql(),
                             params![current_node_id.as_str()],
                             |row| {
@@ -214,7 +214,7 @@ pub(super) async fn fork_at_in_catalog(
             }
             if let Some(retained_ref) = checkpoint_ref.clone() {
                 let exists = tx
-                    .query_row(
+                    .query_row_once(
                         crate::artifact_store::artifact_sql().blobs_sqlite.select_exists.sql(),
                         params![crate::codec::SqlHash(&retained_ref)],
                         |row| row.get::<_, bool>(0),
@@ -292,7 +292,7 @@ pub(super) async fn fork_at_in_catalog(
             .map_err(sqlite_error)?;
             if let Some(fork_plan) = &fork_plan {
                 let mut stmt = tx
-                    .prepare(
+                    .statement_once(
                         session_sql().lineage.insert.sql(),
                     )
                     .map_err(sqlite_error)?;

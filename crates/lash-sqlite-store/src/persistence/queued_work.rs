@@ -92,7 +92,7 @@ impl SqliteStore {
                 let outcome: Result<Option<QueuedWorkBatch>, StoreError> = (|| {
                     let sql = crate::turn_ingress::turn_ingress_sql();
                     let row = tx
-                        .query_row(
+                        .query_row_once(
                             sql.queued_batches_sqlite.select_cancelable.sql(),
                             params![session_id.as_str(), batch_id.as_str()],
                             queued_batch_row_from_sql,
@@ -141,7 +141,7 @@ impl SqliteStore {
             .call(move |conn| {
                 let outcome = (|| {
                     let receipt: Option<(String, String, i64, i64)> = conn
-                        .query_row(
+                        .query_row_once(
                             crate::turn_ingress::turn_ingress_sql()
                                 .queued_batches
                                 .select_command_completion
@@ -183,7 +183,7 @@ impl SqliteStore {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = tx
-                            .prepare(
+                            .statement_once(
                                 crate::turn_ingress::turn_ingress_sql()
                                     .queued_batches
                                     .list_by_session
@@ -225,7 +225,7 @@ impl SqliteStore {
                         Option<i64>,
                         Option<i64>,
                     ) = conn
-                        .query_row(
+                        .query_row_once(
                             crate::turn_ingress::turn_ingress_sql()
                                 .family
                                 .pending_session_work_ordering
@@ -271,7 +271,7 @@ impl SqliteStore {
                 let outcome: Result<Vec<QueuedWorkBatch>, StoreError> = (|| {
                     let rows = {
                         let mut stmt = tx
-                            .prepare(
+                            .statement_once(
                                 crate::turn_ingress::turn_ingress_sql()
                                     .queued_batches
                                     .list_open

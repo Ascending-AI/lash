@@ -3,7 +3,7 @@
 use super::*;
 
 pub(crate) fn next_turn_change_sequence(conn: &Connection) -> Result<i64, StoreError> {
-    conn.prepare_cached(
+    conn.statement(
         crate::session_sql::session_sql()
             .turn_commits
             .next_change_seq
@@ -26,7 +26,7 @@ pub(crate) fn record_session_terminal(
     at_ms: i64,
 ) -> Result<(), StoreError> {
     let sequence = next_turn_change_sequence(conn)?;
-    conn.execute(
+    conn.execute_once(
         crate::session_sql::session_sql()
             .turn_commits
             .insert_session_terminal
@@ -50,7 +50,7 @@ impl SqliteStore {
                 Ok((|| {
                     let sql = &crate::session_sql::session_sql().turn_commits;
                     let (current, horizon): (i64, i64) = conn
-                        .query_row(sql.change_clock.sql(), [], |row| {
+                        .query_row_once(sql.change_clock.sql(), [], |row| {
                             Ok((row.get(0)?, row.get(1)?))
                         })
                         .map_err(sqlite_error)?;
@@ -66,7 +66,7 @@ impl SqliteStore {
                         })?;
                     after.check(current, horizon)?;
                     let mut stmt = conn
-                        .prepare_cached(sql.changes_after.sql())
+                        .statement(sql.changes_after.sql())
                         .map_err(sqlite_error)?;
                     let rows = stmt
                         .query_map(

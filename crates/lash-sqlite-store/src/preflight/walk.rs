@@ -42,6 +42,7 @@
 //! reported as [`ScanCoverage::NotScanned`] rather than an error, so a caller
 //! reads "nobody looked" instead of mistaking silence for "nothing here".
 
+use crate::Prepare as _;
 use lash_kernel_value::identity::SessionId;
 
 use lash_core_store::store::DurableItem;
@@ -165,7 +166,7 @@ fn read_module_artifacts(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
+    let mut statement = conn.statement(
         crate::artifact_store::artifact_sql()
             .refs
             .select_preflight_page
@@ -240,7 +241,7 @@ fn read_session_checkpoints(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
+    let mut statement = conn.statement(
         crate::artifact_store::artifact_sql()
             .blobs_sqlite
             .select_session_checkpoint_page
@@ -307,7 +308,7 @@ fn read_session_execution_state(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare_cached(
+    let mut statement = conn.statement(
         crate::artifact_store::artifact_sql()
             .blobs_sqlite
             .select_session_checkpoint_page
@@ -380,7 +381,7 @@ fn execution_state_blob_ref(manifest: &[u8]) -> Option<String> {
 }
 
 fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u8>>> {
-    let mut statement = conn.prepare_cached(
+    let mut statement = conn.statement(
         crate::artifact_store::artifact_sql()
             .blobs
             .select_content

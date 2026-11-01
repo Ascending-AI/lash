@@ -328,7 +328,7 @@ impl SqliteStore {
                 let outcome = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
                     let present = tx
-                        .query_row(
+                        .query_row_once(
                             crate::session_sql::session_sql().meta.select_present.sql(),
                             params![session_id.as_str()],
                             |_| Ok(()),

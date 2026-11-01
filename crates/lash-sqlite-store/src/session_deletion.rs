@@ -15,7 +15,7 @@ pub(super) async fn delete_session_from_catalog(
         let mut report = lash_core_store::store::SessionBlobReclaimReport::default();
         let outcome = (|| {
             let existed = tx
-                .query_row(
+                .query_row_once(
                     session_sql().meta_sqlite.exists_materialized.sql(),
                     params![session_id.as_str()],
                     |_| Ok(()),
@@ -53,7 +53,7 @@ pub(crate) fn delete_session_conn(
     report: &mut lash_core_store::store::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     let existed = tx
-        .query_row(
+        .query_row_once(
             session_sql().meta_sqlite.exists_materialized.sql(),
             params![session_id.as_str()],
             |_| Ok(()),
@@ -85,7 +85,7 @@ pub(crate) fn delete_session_conn(
         .map_err(sqlite_error)?;
     }
     let (leaf_node_id, checkpoint_ref) = tx
-        .query_row(
+        .query_row_once(
             session_sql().head.select_reclaim.sql(),
             params![session_id.as_str()],
             |row| {
@@ -135,7 +135,7 @@ pub(crate) fn delete_session_conn(
     // held below.
     let text_column =
         |sql: &str, hashes: bool| -> Result<Vec<String>, lash_core_store::store::StoreError> {
-            let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+            let mut stmt = tx.statement_once(sql).map_err(sqlite_error)?;
             let rows = stmt
                 .query_map(params![session_id.as_str()], |row| {
                     if hashes {
@@ -162,7 +162,7 @@ pub(crate) fn delete_session_conn(
     .collect();
     roots.extend(checkpoint_ref);
     roots.extend(
-        tx.query_row(
+        tx.query_row_once(
             session_sql().meta.select_admission_base.sql(),
             params![session_id.as_str()],
             |row| crate::codec::optional_hash_column(row, 0),
@@ -195,7 +195,7 @@ pub(crate) fn delete_session_conn(
     }
     let unreachable_candidates = {
         let mut stmt = tx
-            .prepare(session_sql().graph_sqlite.select_unreachable_leaves.sql())
+            .statement_once(session_sql().graph_sqlite.select_unreachable_leaves.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))

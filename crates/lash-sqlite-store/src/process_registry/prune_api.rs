@@ -177,7 +177,7 @@ impl lash_execution_contracts::process::ProcessRetention for SqliteProcessRegist
                             params![key, owner_kind, owner_id, now],
                         )?;
                         let mut statement =
-                            tx.prepare_cached(process_sql().process.select_owed_cancels.sql())?;
+                            tx.statement(process_sql().process.select_owed_cancels.sql())?;
                         let rows =
                             statement.query_map(params![key], |row| row.get::<_, String>(0))?;
                         rows.collect::<Result<Vec<_>, _>>()

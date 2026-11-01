@@ -64,7 +64,7 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let wanted = serde_json::to_string(&references.keys().collect::<Vec<_>>())
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 let missing: std::collections::BTreeSet<String> = tx
-                    .prepare_cached(held::HELD_SQL.held.select_unheld.sql())?
+                    .statement(held::HELD_SQL.held.select_unheld.sql())?
                     .query_map(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
@@ -92,7 +92,7 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         self.conn
             .call(move |tx| {
                 let held = tx
-                    .prepare_cached(
+                    .statement(
                         artifact_sql()
                             .edges
                             .select_referrer_edges_in_namespace
@@ -138,7 +138,7 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                     crate::schema_layout::MAIN,
                 );
                 let held = tx
-                    .prepare_cached(sql.labels_held.sql())?
+                    .statement(sql.labels_held.sql())?
                     .query_row(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
@@ -155,13 +155,12 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                         artifact_ref: reference,
                     }));
                 }
-                tx.prepare_cached(sql.insert_labels.sql())?
-                    .execute(params![
-                        MODULE_ARTIFACT_NAMESPACE,
-                        reference,
-                        digest.as_slice(),
-                        json
-                    ])?;
+                tx.statement(sql.insert_labels.sql())?.execute(params![
+                    MODULE_ARTIFACT_NAMESPACE,
+                    reference,
+                    digest.as_slice(),
+                    json
+                ])?;
                 Ok(())
             })
             .await
@@ -178,7 +177,7 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let sql = lash_store_sql::durable::packages::PackageStatements::render(
                     crate::schema_layout::MAIN,
                 );
-                tx.prepare_cached(sql.labels.sql())?
+                tx.statement(sql.labels.sql())?
                     .query_map(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
                         row.get(0)
                     })?
@@ -205,7 +204,7 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         self.read_connection()
             .call(move |conn| {
                 let stored: Option<(Option<Vec<u8>>, Option<i64>, String)> = conn
-                    .prepare_cached(PACKAGE_READ_SQL.record.sql())?
+                    .statement(PACKAGE_READ_SQL.record.sql())?
                     .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
                         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
                     })

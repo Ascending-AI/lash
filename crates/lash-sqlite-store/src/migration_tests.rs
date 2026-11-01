@@ -11,6 +11,7 @@
     reason = "migration fixtures read their owned temporary stores and backups and contend for the store ownership lock"
 )]
 
+use crate::Prepare as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -66,7 +67,7 @@ fn quiesce(root: &Path) {
     {
         let connection = raw(root);
         connection
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            .query_row_once("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
                 row.get::<_, i64>(0)
             })
             .expect("checkpoint");
@@ -151,7 +152,7 @@ fn versions() -> (i64, i64) {
 /// migration, 1 after it.
 fn stamp(root: &Path) -> i64 {
     let version: i64 = raw(root)
-        .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
+        .query_row_once("SELECT version FROM lash_compat", [], |row| row.get(0))
         .expect("read the stamp");
     version - versions().0
 }
@@ -163,14 +164,14 @@ async fn assert_migrated(root: &Path) {
     let connection = raw(root);
     for (table, _) in FIXTURE_ROWS {
         let rows: i64 = connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            .query_row_once(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
             })
             .expect("count fixture rows");
         assert_eq!(rows, 1, "{table} kept its row");
     }
     let successor: i64 = connection
-        .query_row(
+        .query_row_once(
             "SELECT COUNT(*) FROM sqlite_schema WHERE name IN \
              ('lash_synthetic_next', 'idx_lash_synthetic_next_note')",
             [],
@@ -404,7 +405,7 @@ async fn sqlite_migration_owns_the_store_and_holds_it_exclusively() {
     // refuses, and neither the store nor the backup location changed.
     let holder = raw(root.path());
     holder
-        .query_row("SELECT COUNT(*) FROM lash_compat", [], |row| {
+        .query_row_once("SELECT COUNT(*) FROM lash_compat", [], |row| {
             row.get::<_, i64>(0)
         })
         .expect("the other connection reads");

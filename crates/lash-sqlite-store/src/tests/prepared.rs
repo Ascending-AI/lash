@@ -102,9 +102,8 @@ async fn head_and_history_reuse_statements_with_a_bounded_cache_across_sessions(
             .call(|conn| {
                 for index in 0..SESSIONS {
                     let sql = format!("SELECT ?1 AS cache_pressure_{index}");
-                    let value: usize = conn
-                        .prepare_cached(&sql)?
-                        .query_row([index], |row| row.get(0))?;
+                    let value: usize =
+                        conn.statement(&sql)?.query_row([index], |row| row.get(0))?;
                     assert_eq!(value, index);
                     assert!(
                         retained_statements(conn) <= CAPACITY,

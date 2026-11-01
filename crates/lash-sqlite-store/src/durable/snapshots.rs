@@ -5,6 +5,7 @@
 //! fenced owner commit, after the fence and the installation of the commit's
 //! staged graph nodes; a refusal rolls the whole commit back.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_core_store::checkpoint_graph::{CommitId, NodeId};
@@ -65,14 +66,14 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
             // a revision, never matches a row.
             let put = match (expected, expected_root) {
                 (None, None) => tx
-                    .prepare_cached(SQL.put_first.sql())?
+                    .statement(SQL.put_first.sql())?
                     .query_row(
                         rusqlite::params![key, root.0.as_slice(), &commit_id.0[..], commit.epoch.0],
                         |_| Ok(()),
                     )
                     .optional()?,
                 (Some(rev), Some(expected_root)) => tx
-                    .prepare_cached(SQL.put_next.sql())?
+                    .statement(SQL.put_next.sql())?
                     .query_row(
                         rusqlite::params![
                             key,
@@ -95,14 +96,14 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
             }
             // Refused: read the revision it found, for the refusal's account.
             let found = tx
-                .prepare_cached(SQL.root.sql())?
+                .statement(SQL.root.sql())?
                 .query_row([&key], |row| row.get::<_, i64>(0))
                 .optional()?;
             conflict(exec, *expected, found.map(revision).transpose()?)
         }
         ExecRootWrite::Retire { exec, expected } => {
             let retired = tx
-                .prepare_cached(SQL.retire.sql())?
+                .statement(SQL.retire.sql())?
                 .query_row(
                     rusqlite::params![exec.stored(), expected.0.as_slice()],
                     |_| Ok(()),
@@ -125,7 +126,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
         }
         ExecRootWrite::Clear { exec } => {
             let cleared = tx
-                .prepare_cached(SQL.clear.sql())?
+                .statement(SQL.clear.sql())?
                 .query_row([exec.stored()], |row| crate::codec::hash_column(row, 0))
                 .optional()?;
             if let Some(root) = cleared {
@@ -161,7 +162,7 @@ pub(super) fn row_of(
 
 pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow>> {
     let row = tx
-        .prepare_cached(SQL.read.sql())?
+        .statement(SQL.read.sql())?
         .query_row([exec.stored()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -185,7 +186,7 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
 /// caller's to peel.
 pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
     let mut roots: Vec<String> = tx
-        .prepare_cached(SQL.clear_under.sql())?
+        .statement(SQL.clear_under.sql())?
         .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect::<rusqlite::Result<_>>()?;
     roots.extend(super::graph::clear_admissions_under(tx, prefix)?);
@@ -211,7 +212,7 @@ pub(super) fn under_limited(
         )),
     };
     let rows = tx
-        .prepare_cached(&sql)?
+        .statement(&sql)?
         .query_map([prefix], |row| {
             Ok((
                 row.get::<_, String>(0)?,

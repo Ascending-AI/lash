@@ -32,6 +32,7 @@
 //! the store may have been written since the old one. A failed migration
 //! rolls its one transaction back, so the store is as it was.
 
+use crate::Prepare as _;
 use std::io::{self, Write as _};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -641,7 +642,7 @@ impl Migration<'_> {
         for step in steps {
             tx.execute_batch(step.ddl)?;
         }
-        let stamped = tx.execute(
+        let stamped = tx.execute_once(
             "UPDATE lash_compat SET version = ?1 WHERE singleton = 1 AND version = ?2",
             [i64::from(manifest.to), i64::from(manifest.from)],
         )?;

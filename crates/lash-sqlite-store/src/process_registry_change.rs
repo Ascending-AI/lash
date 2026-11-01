@@ -19,7 +19,7 @@ pub(crate) fn compact_process_tombstones_conn(
     max_change_seq: Option<i64>,
 ) -> Result<usize, lash_execution_contracts::plugin_error::PluginError> {
     let compacted_through: Option<i64> = conn
-        .query_row(
+        .query_row_once(
             process_sql()
                 .tombstone_sqlite
                 .select_max_compactable_change_seq
@@ -29,7 +29,7 @@ pub(crate) fn compact_process_tombstones_conn(
         )
         .map_err(process_sqlite_error)?;
     let deleted = conn
-        .execute(
+        .execute_once(
             process_sql().tombstone_sqlite.delete_compactable.sql(),
             params![cutoff_epoch_ms, max_change_seq,],
         )
@@ -70,7 +70,7 @@ fn processes_changed_since_tx(
     lash_execution_contracts::plugin_error::PluginError,
 > {
     let horizon = conn
-        .query_row(
+        .query_row_once(
             process_sql().clock_sqlite.select_compaction_horizon.sql(),
             [],
             |row| row.get::<_, i64>(0),
@@ -93,7 +93,7 @@ fn processes_changed_since_tx(
         return Ok((Vec::new(), cursor));
     }
     let mut stmt = conn
-        .prepare(process_sql().process_sqlite.list_changes_after.sql())
+        .statement_once(process_sql().process_sqlite.list_changes_after.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(
@@ -167,7 +167,7 @@ fn prune_process_rows_conn(
     .map_err(process_sqlite_error)?;
 
     let final_change_seq = conn
-        .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+        .query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
             row.get::<_, i64>(0)
         })
         .map_err(process_sqlite_error)?;
@@ -177,7 +177,7 @@ fn prune_process_rows_conn(
     // tombstone change sequences retain process-id ordering without one clock
     // update and insert per process.
     let inserted_tombstones = conn
-        .execute(
+        .execute_once(
             process_sql().tombstone_sqlite.insert_from_pruned.sql(),
             params![process_ids_json, pruned_at_ms, first_change_seq],
         )
@@ -208,7 +208,7 @@ fn prune_process_rows_conn(
 
     let sql = process_sql();
     let pruned_events = conn
-        .execute(
+        .execute_once(
             sql.event_sqlite.delete_by_process_ids.sql(),
             params![process_ids_json],
         )
@@ -220,7 +220,7 @@ fn prune_process_rows_conn(
     )
     .map_err(process_sqlite_error)?;
     let pruned_processes = conn
-        .execute(
+        .execute_once(
             sql.process_sqlite.delete_by_ids.sql(),
             params![process_ids_json],
         )
@@ -250,7 +250,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 ) -> Result<Vec<ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
-        .prepare(process_sql().process_sqlite.list_prunable_terminal.sql())
+        .statement_once(process_sql().process_sqlite.list_prunable_terminal.sql())
         .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(params![cutoff, max_change_seq], |row| {
@@ -326,7 +326,7 @@ mod tests {
         let clock_before = registry
             .conn
             .call(|conn| {
-                conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                conn.query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
                     row.get::<_, i64>(0)
                 })
             })
@@ -374,7 +374,7 @@ mod tests {
         let tombstone_count = registry
             .conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT count(*) FROM process_tombstones WHERE process_id = ?1",
                     params![tombstone_process_id.as_str()],
                     |row| row.get::<_, i64>(0),
@@ -389,7 +389,7 @@ mod tests {
         let clock_after = registry
             .conn
             .call(|conn| {
-                conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                conn.query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
                     row.get::<_, i64>(0)
                 })
             })

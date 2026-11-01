@@ -28,6 +28,7 @@
 //! The orphan audit ([`audit_page`]) peels whatever a write outside the
 //! holds left behind.
 
+use crate::Prepare as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
@@ -402,17 +403,17 @@ pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<
     fn one(
         tx: &Connection,
         sql: &str,
-        params: impl rusqlite::Params,
+        params: impl crate::statement::Values,
     ) -> rusqlite::Result<Option<String>> {
         Ok(tx
-            .prepare_cached(sql)?
+            .statement(sql)?
             .query_row(params, |row| crate::codec::optional_hash_column(row, 0))
             .optional()?
             .flatten())
     }
     let stored = match owner {
         RootOwner::Exec(exec) => tx
-            .prepare_cached(SQL.snapshots.root.sql())?
+            .statement(SQL.snapshots.root.sql())?
             .query_row([exec.stored()], |row| {
                 crate::codec::optional_hash_column(row, 1)
             })
@@ -555,7 +556,7 @@ pub(crate) fn graph_closure(
 
 /// Prove snapshot membership without hydrating an already validated closure.
 pub(crate) fn config_root_visible(tx: &Connection, root: NodeId) -> rusqlite::Result<bool> {
-    tx.prepare_cached(SQL.sqlite.config_root_visible.sql())?
+    tx.statement(SQL.sqlite.config_root_visible.sql())?
         .query_row([root.0.as_slice()], |row| row.get(0))
 }
 
@@ -572,7 +573,7 @@ pub(super) fn validate_exact_reads(
         return Ok(Ok(()));
     }
     let mut present = BTreeSet::new();
-    let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
+    let mut statement = tx.statement(SQL.sqlite.stored_nodes.sql())?;
     let mut rows = statement.query([digest_array(expected.keys())])?;
     while let Some(row) = rows.next()? {
         let hash = crate::codec::hash_column(row, 0)?;
@@ -714,7 +715,7 @@ impl FrontierReader {
                 .iter()
                 .map(|node| (node.to_hex(), !self.graph_only || self.roots.contains(node)))
                 .collect();
-            let mut statement = tx.prepare_cached(SQL.sqlite.hydration_nodes.sql())?;
+            let mut statement = tx.statement(SQL.sqlite.hydration_nodes.sql())?;
             let mut rows = statement.query([json_array(&wanted)])?;
             while let Some(row) = rows.next()? {
                 let hash = crate::codec::hash_column(row, 0)?;
@@ -928,7 +929,7 @@ pub(super) fn peel_batch(
     limit: usize,
 ) -> rusqlite::Result<(usize, usize, BTreeSet<String>)> {
     let candidates = tx
-        .prepare_cached(SQL.sqlite.retirement_candidates.sql())?
+        .statement(SQL.sqlite.retirement_candidates.sql())?
         .query_map(
             rusqlite::params![
                 json_array(frontier),
@@ -950,14 +951,14 @@ pub(super) fn peel_batch(
     super::environment::peeled(tx, &gone)?;
     let batch = json_array(&gone);
     next.extend(
-        tx.prepare_cached(SQL.sqlite.retire_edges.sql())?
+        tx.statement(SQL.sqlite.retire_edges.sql())?
             .query_map([&batch], |row| crate::codec::hash_column(row, 0))?
             .collect::<rusqlite::Result<BTreeSet<_>>>()?
             .difference(&examined)
             .cloned(),
     );
     let deleted = tx
-        .prepare_cached(SQL.sqlite.retire_nodes.sql())?
+        .statement(SQL.sqlite.retire_nodes.sql())?
         .query_map([&batch], |_| Ok(()))?
         .collect::<rusqlite::Result<Vec<_>>>()?
         .len();
@@ -975,7 +976,7 @@ pub(super) fn peel_level(
     // the child becomes deletable only after the parent's edge goes, on the
     // next level.
     let gone = tx
-        .prepare_cached(SQL.sqlite.peel_orphans.sql())?
+        .statement(SQL.sqlite.peel_orphans.sql())?
         .query_map([json_array(frontier)], |row| {
             Ok((
                 crate::codec::hash_column(row, 0)?,
@@ -998,7 +999,7 @@ pub(super) fn peel_level(
             // Bytes that no longer decode cannot name the children: their
             // edges are found by the parent instead.
             None => children.extend(
-                tx.prepare_cached(SQL.sqlite.delete_parent_edges.sql())?
+                tx.statement(SQL.sqlite.delete_parent_edges.sql())?
                     .query_map([crate::codec::SqlHash(parent)], |row| {
                         crate::codec::hash_column(row, 0)
                     })?
@@ -1066,7 +1067,7 @@ pub(crate) fn retire_roots(
 /// How many roots the catalog names and how many blobs are stored.
 pub(crate) fn graph_counts(tx: &Connection) -> rusqlite::Result<(usize, usize)> {
     let count = |sql: &str| -> rusqlite::Result<usize> {
-        let count: i64 = tx.prepare_cached(sql)?.query_row([], |row| row.get(0))?;
+        let count: i64 = tx.statement(sql)?.query_row([], |row| row.get(0))?;
         Ok(usize::try_from(count).unwrap_or(0))
     };
     Ok((
@@ -1085,7 +1086,7 @@ pub(crate) fn audit_page(
     limit: usize,
 ) -> rusqlite::Result<(Option<String>, usize)> {
     let orphans = tx
-        .prepare_cached(SQL.graph.orphans_after.sql())?
+        .statement(SQL.graph.orphans_after.sql())?
         .query_map(
             rusqlite::params![
                 if after.is_empty() {
@@ -1129,7 +1130,7 @@ pub(super) fn apply_admission(
             admission,
         } => {
             let inserted = tx
-                .prepare_cached(SQL.graph.admission_put.sql())?
+                .statement(SQL.graph.admission_put.sql())?
                 .query_row(
                     rusqlite::params![
                         exec.stored(),
@@ -1162,7 +1163,7 @@ pub(super) fn apply_admission(
             expected,
         } => {
             let removed = tx
-                .prepare_cached(SQL.graph.admission_remove.sql())?
+                .statement(SQL.graph.admission_remove.sql())?
                 .query_row(
                     rusqlite::params![exec.stored(), &effect.0[..], expected.0.as_slice()],
                     |_| Ok(()),
@@ -1180,7 +1181,7 @@ pub(super) fn apply_admission(
 /// Drop every admission of the execution stored as `exec_key`, answering
 /// the Admission nodes they held: the caller's to peel.
 pub(super) fn clear_admissions(tx: &Connection, exec_key: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.graph.admissions_clear.sql())?
+    tx.statement(SQL.graph.admissions_clear.sql())?
         .query_map([exec_key], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
@@ -1191,7 +1192,7 @@ pub(super) fn clear_admissions_under(
     tx: &Connection,
     prefix: &str,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.graph.admissions_clear_under.sql())?
+    tx.statement(SQL.graph.admissions_clear_under.sql())?
         .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
@@ -1223,7 +1224,7 @@ pub(super) fn install(
     let mut installed = InstalledGraphMeasurement::default();
     if graph.nodes.is_empty() {
         if !named.is_empty() {
-            let mut statement = tx.prepare_cached(SQL.sqlite.stored_encodings.sql())?;
+            let mut statement = tx.statement(SQL.sqlite.stored_encodings.sql())?;
             let rows = statement.query_map([digest_array(named)], |row| {
                 Ok((crate::codec::node_column(row, 0)?, row.get::<_, i64>(1)?))
             })?;
@@ -1266,7 +1267,7 @@ pub(super) fn install(
     let mut absent = 0;
     let mut staged_refusal = None;
     let children = staged_children(staged);
-    let mut statement = tx.prepare_cached(SQL.sqlite.install_frontier.sql())?;
+    let mut statement = tx.statement(SQL.sqlite.install_frontier.sql())?;
     let _bindings = crate::observed_sql::text_bindings(
         SQL.sqlite.install_frontier.sql(),
         &[&roots, &children, &children],

@@ -19,11 +19,12 @@ fn retired_roster_page_uses_live_and_recency_indexes() {
         "~",
         257,
     );
+    let explained = format!("EXPLAIN QUERY PLAN {sql}");
     let mut stmt = conn
-        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .statement_once(&explained)
         .expect("prepare recently retired page query plan");
     let plan = stmt
-        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+        .query_map(crate::statement::params_from_iter(values.iter()), |row| {
             row.get::<_, String>(3)
         })
         .expect("explain recently retired query")
@@ -53,14 +54,15 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
+    let explained = format!(
+        "EXPLAIN QUERY PLAN {}",
+        process_sql()
+            .registry_sqlite
+            .list_observed_recent_retired
+            .sql()
+    );
     let mut stmt = conn
-        .prepare(&format!(
-            "EXPLAIN QUERY PLAN {}",
-            process_sql()
-                .registry_sqlite
-                .list_observed_recent_retired
-                .sql()
-        ))
+        .statement_once(&explained)
         .expect("prepare observed query plan");
     let plan = stmt
         .query_map(params!["session", Option::<String>::None, 100_i64], |row| {
@@ -102,11 +104,12 @@ fn pending_cancel_roster_page_seeks_the_partial_cancel_index() {
         "~",
         257,
     );
+    let explained = format!("EXPLAIN QUERY PLAN {sql}");
     let mut stmt = conn
-        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .statement_once(&explained)
         .expect("prepare pending-cancel query plan");
     let plan = stmt
-        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+        .query_map(crate::statement::params_from_iter(values.iter()), |row| {
             row.get::<_, String>(3)
         })
         .expect("explain pending-cancel query")
@@ -139,11 +142,12 @@ fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
         "~",
         257,
     );
+    let explained = format!("EXPLAIN QUERY PLAN {sql}");
     let mut stmt = conn
-        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .statement_once(&explained)
         .expect("prepare until-scope query plan");
     let plan = stmt
-        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+        .query_map(crate::statement::params_from_iter(values.iter()), |row| {
             row.get::<_, String>(3)
         })
         .expect("explain until-scope query")
@@ -168,7 +172,7 @@ fn retention_keeps_terminal_process_until_cascade_drains() {
     conn.execute_batch("INSERT INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, change_seq, lifetime, start_json, execution_json, lifecycle_json, cascade_cursor) VALUES ('parent', 'origin', 'standard', 0, 0, 1, 'detached', '{}', '{}', '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"terminal\",\"occurred_at_ms\":0,\"outcome\":{\"type\":\"settled\",\"output\":{\"outcome\":{\"status\":\"success\"}}}}}', 'child')").expect("terminal with unfinished cascade");
     let sql = process_sql().process_sqlite.list_prunable_terminal.sql();
     let count = |conn: &rusqlite::Connection| {
-        conn.prepare(sql)
+        conn.statement_once(sql)
             .expect("prepare candidates")
             .query_map(params![1, Option::<i64>::None], |_| Ok(()))
             .expect("candidates")
@@ -240,7 +244,7 @@ fn process_lifecycle_write_size() {
             ProcessId::fixture("write-size"),
             10,
         );
-        conn.execute(
+        conn.execute_once(
             process_sql().process_sqlite.insert_registration.sql(),
             params![
                 record.id.as_str(),
@@ -403,7 +407,7 @@ fn process_lifecycle_write_size() {
                 "complete read"
             );
             let payload: String = conn
-                .query_row(
+                .query_row_once(
                     process_sql().process_sqlite.list_changes_after.sql(),
                     params![0_i64, 100_i64],
                     |row| row.get(2),
@@ -414,7 +418,7 @@ fn process_lifecycle_write_size() {
                 record
             );
             let sequence: i64 = conn
-                .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                .query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
                     row.get(0)
                 })
                 .expect("clock");
@@ -431,7 +435,7 @@ fn process_lifecycle_write_size() {
                 "replay writes no projection"
             );
             let after: i64 = conn
-                .query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+                .query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
                     row.get(0)
                 })
                 .expect("clock");

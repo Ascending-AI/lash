@@ -1,6 +1,7 @@
 //! The checkpoint graph's store laws (`lash_durable::laws::graph`) over
 //! SQLite, in memory and in a file.
 
+use crate::Prepare as _;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -85,7 +86,7 @@ impl Tier {
             .connection_for_testing()
             .call(move |conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF")?;
-                let result = conn.execute(&sql, rusqlite::params_from_iter(params));
+                let result = conn.execute_once(&sql, crate::statement::params_from_iter(params));
                 conn.execute_batch("PRAGMA foreign_keys = ON")?;
                 result.map(drop)
             })
@@ -100,7 +101,7 @@ impl Tier {
         self.store
             .connection_for_testing()
             .call(move |conn| {
-                conn.prepare(sql)?
+                conn.statement_once(sql)?
                     .query_map([], |row| crate::codec::hash_column(row, 0))?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -137,7 +138,7 @@ impl GraphTier for Tier {
             .connection_for_testing()
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT content, encoding FROM blobs WHERE hash = ?1",
                     [crate::codec::SqlHash(&hash)],
                     |row| Ok((row.get(0)?, row.get(1)?)),
@@ -153,7 +154,7 @@ impl GraphTier for Tier {
         self.store
             .connection_for_testing()
             .call(move |conn| {
-                conn.prepare(
+                conn.statement_once(
                     "SELECT child_hash FROM blob_edges WHERE parent_hash = ?1 ORDER BY child_hash",
                 )?
                 .query_map([crate::codec::SqlHash(&parent)], |row| {
@@ -357,7 +358,7 @@ impl PageTier for Tier {
         self.store
             .connection_for_testing()
             .call(|conn| {
-                conn.prepare("SELECT parent_hash, child_hash FROM blob_edges")?
+                conn.statement_once("SELECT parent_hash, child_hash FROM blob_edges")?
                     .query_map([], |row| {
                         Ok((
                             crate::codec::hash_column(row, 0)?,
@@ -1137,7 +1138,7 @@ async fn a_park_publication_writes_a_counted_number_of_statements() {
                 if matches!(sql.as_str(), "begin immediate" | "commit") {
                     continue;
                 }
-                if !conn.prepare(&sql)?.readonly() {
+                if !conn.statement_once(&sql)?.readonly() {
                     writes += shape.statements;
                 }
             }

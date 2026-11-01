@@ -146,7 +146,7 @@ async fn checkpoint_work_pending_sqlite(
                 }
             };
             let pending: i64 = conn
-                .query_row(
+                .query_row_once(
                     sql,
                     params![
                         session_id.as_str(),
@@ -178,7 +178,7 @@ fn read_step_admission_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     let input_rows = {
         let mut stmt = tx
-            .prepare_cached(sql.pending_inputs.select_admitted_by_step.sql())
+            .statement(sql.pending_inputs.select_admitted_by_step.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
@@ -223,7 +223,7 @@ fn compose_active_turn_inputs_conn(
             .sql(),
     };
     let rows = {
-        let mut stmt = tx.prepare_cached(statement).map_err(sqlite_error)?;
+        let mut stmt = tx.statement(statement).map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
                 params![
@@ -298,7 +298,7 @@ fn scan_queued_work_candidates_sqlite(
     max_rows: usize,
 ) -> Result<QueuedWorkCandidateScan, StoreError> {
     let rows = {
-        let mut stmt = tx.prepare_cached(statement).map_err(sqlite_error)?;
+        let mut stmt = tx.statement(statement).map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
                 params![session_id.as_str(), admission_scan_limit(max_rows)],

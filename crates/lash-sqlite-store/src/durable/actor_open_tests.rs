@@ -5,6 +5,7 @@
 //! after the epoch fence, and every open reads cancellation and close mail
 //! afresh.
 
+use crate::Prepare as _;
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
 use lash_durable::domain::{
     DomainWrite, MailDomainWrite, SESSION_CLOSE_MAIL, TurnCancelRequest, TurnWrite,
@@ -184,7 +185,7 @@ async fn cached_owner_mail_pages_do_not_recompile_on_rebind() {
                 super::SQL.sqlite.open_retained.sql(),
             ] {
                 for _ in 0..3 {
-                    let mut statement = connection.prepare_cached(sql)?;
+                    let mut statement = connection.statement(sql)?;
                     let authority = statement
                         .query_map(
                             rusqlite::params![

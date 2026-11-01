@@ -78,7 +78,7 @@ pub(crate) fn load_turn_cancel_request_conn(
     turn_id: &TurnId,
 ) -> Result<Option<lash_core_store::turn_control_vocabulary::TurnCancelRequest>, StoreError> {
     let row = conn
-        .query_row(
+        .query_row_once(
             crate::turn_ingress::turn_ingress_sql()
                 .cancel_requests
                 .select_request

@@ -12,7 +12,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
         self.conn
             .call(move |conn| {
                 let outcome = conn
-                    .query_row(
+                    .query_row_once(
                         crate::turn_ingress::turn_ingress_sql()
                             .pending_inputs
                             .select_id_by_source_key
@@ -105,7 +105,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
             .call(move |conn| {
                 let outcome = (|| {
                     let stored: Option<String> = conn
-                        .query_row(
+                        .query_row_once(
                             crate::turn_ingress::turn_ingress_sql()
                                 .run_specs
                                 .select_spec
@@ -155,7 +155,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
                         statements.list_undelivered.sql(),
                         statements.list_accepted.sql(),
                     ] {
-                        let mut stmt = tx.prepare_cached(sql).map_err(sqlite_error)?;
+                        let mut stmt = tx.statement(sql).map_err(sqlite_error)?;
                         let listed = stmt
                             .query_map(
                                 params![session_id.as_str()],
@@ -196,7 +196,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
                 // completed or cancelled, open or admitted to its run alike.
                 let outcome = (|| {
                     let row = conn
-                        .prepare_cached(
+                        .statement(
                             crate::turn_ingress::turn_ingress_sql()
                                 .pending_inputs
                                 .select_by_id
@@ -231,7 +231,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
             .call(move |conn| {
                 let outcome = (|| {
                     let mut stmt = conn
-                        .prepare_cached(
+                        .statement(
                             crate::session_sql::session_sql()
                                 .turn_commits
                                 .select_all_for_session
@@ -354,7 +354,7 @@ impl lash_core_store::store::TurnInputStore for SqliteStore {
                         };
                         let rows = {
                             let mut stmt = tx
-                                .prepare_cached(
+                                .statement(
                                     crate::turn_ingress::turn_ingress_sql()
                                         .pending_inputs_sqlite
                                         .select_suffix
@@ -455,7 +455,7 @@ impl lash_core_store::store::QueuedWorkStore for SqliteStore {
         let session_id = session_id.clone();
         self.read_connection()
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .has_admissible_work
@@ -504,7 +504,7 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
     let mut identities = std::collections::BTreeMap::new();
     let mut forsaken_keys = std::collections::BTreeSet::new();
     let rows = tx
-        .prepare_cached(sql.family_sqlite.input_admission_identities.sql())
+        .statement(sql.family_sqlite.input_admission_identities.sql())
         .map_err(sqlite_error)?
         .query_map(params![session_id.as_str(), wanted], |row| {
             Ok((
@@ -610,7 +610,7 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 let trace_cause =
                     lash_core_store::store_backend_support::encode_trace_cause(&draft.trace_cause)?;
                 let inserted = tx
-                    .prepare_cached(sql.pending_inputs.insert_new.sql())
+                    .statement(sql.pending_inputs.insert_new.sql())
                     .and_then(|mut statement| {
                         statement.query_row(
                             params![
@@ -694,7 +694,7 @@ fn forsake_turn_input_conn(
     ensure_session_not_deleted_conn(tx, session_id)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let held: Option<String> = tx
-        .query_row(
+        .query_row_once(
             sql.pending_inputs.select_id_by_source_key.sql(),
             params![session_id.as_str(), source_key],
             |row| row.get(0),
@@ -731,7 +731,7 @@ fn turn_address_evidence_conn(
     turn_id: &lash_vocabulary::identity::TurnId,
 ) -> Result<lash_core_store::store_backend_support::TurnAddressEvidence, StoreError> {
     let ended: bool = tx
-        .query_row(
+        .query_row_once(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .turn_address_ended
@@ -800,7 +800,7 @@ fn admit_run_spec_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     if let Some(turn_id) = support::steering_run_spec_target(draft) {
         let addressed: Option<(String, Option<String>)> = tx
-            .query_row(
+            .query_row_once(
                 sql.pending_inputs.select_run_spec_by_source_key.sql(),
                 params![draft.session_id.as_str(), turn_id.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -829,7 +829,7 @@ fn admit_run_spec_conn(
         )
         .map_err(sqlite_error)?;
         let stored: String = tx
-            .query_row(
+            .query_row_once(
                 sql.run_specs.select_spec.sql(),
                 params![draft.session_id.as_str(), hash],
                 |row| row.get(0),

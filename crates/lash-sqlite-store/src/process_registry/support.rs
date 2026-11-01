@@ -118,7 +118,7 @@ pub(super) async fn recent_events(
                     );
                 }
                 let mut stmt = conn
-                    .prepare(process_sql().event.list_recent.sql())
+                    .statement_once(process_sql().event.list_recent.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(params![process_id.as_str(), limit as i64], |row| {
@@ -147,7 +147,7 @@ impl SqliteProcessRegistry {
             return Ok(record);
         }
         let tombstone = conn
-            .query_row(
+            .query_row_once(
                 process_sql().tombstone.select_terminal.sql(),
                 params![process_id.as_str()],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -298,7 +298,7 @@ impl SqliteProcessRegistry {
         start_key: &lash_core_store::process_identity::StartKey,
     ) -> Result<Option<ProcessRecord>, lash_execution_contracts::plugin_error::PluginError> {
         let json: Option<String> = conn
-            .query_row(
+            .query_row_once(
                 process_sql().process.select_record_json_by_start_key.sql(),
                 params![start_key.as_str()],
                 |row| row.get(0),
@@ -314,7 +314,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
     ) -> Result<Option<ProcessRecord>, lash_execution_contracts::plugin_error::PluginError> {
         let json: Option<String> = conn
-            .query_row(
+            .query_row_once(
                 process_sql().process.select_record_json_by_id.sql(),
                 params![process_id.as_str()],
                 |row| row.get(0),
@@ -332,7 +332,7 @@ impl SqliteProcessRegistry {
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         let terminal_driver = if record.is_terminal() {
             let stored: Option<String> = conn
-                .query_row(
+                .query_row_once(
                     process_sql().process.select_driver_json_by_id.sql(),
                     params![record.id.as_str()],
                     |row| row.get::<_, Option<String>>(0),
@@ -382,7 +382,7 @@ impl SqliteProcessRegistry {
     ) -> Result<u64, lash_execution_contracts::plugin_error::PluginError> {
         crate::conn::cached_execute(conn, process_sql().clock_sqlite.bump.sql(), [])
             .map_err(process_sqlite_error)?;
-        conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
+        conn.query_row_once(process_sql().clock_sqlite.select_current.sql(), [], |row| {
             u64_from_sql("ProcessChangeClock", "current_seq", row.get::<_, i64>(0)?)
         })
         .map_err(process_sqlite_error)
@@ -397,7 +397,7 @@ impl SqliteProcessRegistry {
         fleet_format: lash_core_store::store::FleetFormat,
     ) -> Result<Option<ProcessEvent>, lash_execution_contracts::plugin_error::PluginError> {
         let row: Option<(String, Option<String>, String)> = conn
-            .query_row(
+            .query_row_once(
                 process_sql().event.select_by_replay_key.sql(),
                 params![process_id.as_str(), append.replay_key()],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -569,7 +569,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
     ) -> Result<(Option<u64>, u64), lash_execution_contracts::plugin_error::PluginError> {
         let last_sequence = conn
-            .query_row(
+            .query_row_once(
                 process_sql().event.select_max_sequence.sql(),
                 params![process_id.as_str()],
                 |row| row.get::<_, Option<i64>>(0),

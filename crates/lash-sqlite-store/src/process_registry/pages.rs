@@ -10,7 +10,7 @@ pub(super) async fn count_non_terminal_processes(
         .call(|conn| {
             Ok((|| {
                 let count: i64 = conn
-                    .query_row(
+                    .query_row_once(
                         process_sql()
                             .process_sqlite
                             .count_non_terminal_processes
@@ -38,7 +38,7 @@ pub(super) async fn live_reference_summary(
         .call(|conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare_cached(process_sql().process_sqlite.live_reference_summary.sql())
+                    .statement(process_sql().process_sqlite.live_reference_summary.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map([], |row| {
@@ -101,7 +101,7 @@ pub(super) async fn list_non_terminal_processes_page(
                 let through_process_id = match continuation.as_ref() {
                     Some(cursor) => cursor.through_process_id().clone(),
                     None => match conn
-                        .query_row(
+                        .query_row_once(
                             process_sql()
                                 .process_sqlite
                                 .select_max_non_terminal_process_id
@@ -133,7 +133,7 @@ pub(super) async fn list_non_terminal_processes_page(
                     ),
                     None => (process_queries.list_first_non_terminal_process_page.sql(), None),
                 };
-                let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
+                let mut stmt = conn.statement(sql).map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(
                         params![through_process_id.as_str(), after_process_id, row_limit],
@@ -203,7 +203,8 @@ mod tests {
                      ANALYZE;",
                 )?;
                 let explain = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
-                    let mut stmt = conn.prepare_cached(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                    let explained = format!("EXPLAIN QUERY PLAN {sql}");
+                    let mut stmt = conn.statement(&explained)?;
                     stmt.query_map(params, |row| row.get::<_, String>(3))?
                         .collect::<Result<Vec<_>, _>>()
                 };

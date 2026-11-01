@@ -77,7 +77,7 @@ pub(crate) fn write_session_meta(
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = session_sql().meta_sqlite.insert.sql();
     let changed = conn
-        .execute(
+        .execute_once(
             sql,
             params![
                 stored.session_id.as_str(),
@@ -147,7 +147,7 @@ pub(crate) fn load_recorded_lineage(
     session_id: &SessionId,
 ) -> Result<Option<lash_core_store::session_identity::SessionLineage>, StoreError> {
     let row = conn
-        .prepare_cached(session_sql().meta.select_lineage.sql())
+        .statement(session_sql().meta.select_lineage.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], |row| {
                 Ok((
@@ -196,7 +196,7 @@ fn load_session_meta_snapshot(
         Some(_) => &session_sql().meta_sqlite.select_snapshot,
         None => &session_sql().meta_sqlite.select_sole_snapshot,
     };
-    let mut statement = conn.prepare_cached(sql.sql()).map_err(sqlite_error)?;
+    let mut statement = conn.statement(sql.sql()).map_err(sqlite_error)?;
     // Classify cardinality and tombstones before decoding any relation or ID.
     let mut rows = match selected_session_id {
         Some(session) => statement.query(params![session.as_str(), guarded]),
@@ -258,7 +258,7 @@ pub(crate) fn retain_admission_base_conn(
     checkpoint_ref: Option<&lash_core_store::store::BlobRef>,
 ) -> Result<(), StoreError> {
     let replaced = conn
-        .prepare_cached(session_sql().meta.select_admission_base.sql())
+        .statement(session_sql().meta.select_admission_base.sql())
         .and_then(|mut statement| {
             statement.query_row(rusqlite::params![session_id.as_str()], |row| {
                 crate::codec::optional_hash_column(row, 0)
@@ -293,7 +293,7 @@ mod tests {
             .await
             .expect("store");
         store.conn.call(|conn| {
-            conn.execute("INSERT INTO session_meta (session_id, relation_kind, session_state_version, retention_kind) VALUES ('no-head', 'root', 0, 'until_gc')", [])?;
+            conn.execute_once("INSERT INTO session_meta (session_id, relation_kind, session_state_version, retention_kind) VALUES ('no-head', 'root', 0, 'until_gc')", [])?;
             Ok(())
         }).await.expect("legacy marker without head");
         for marker in [
@@ -303,7 +303,7 @@ mod tests {
             Some(-1),
         ] {
             store.conn.call(move |conn| {
-                conn.execute("UPDATE session_meta SET session_state_version = ?1 WHERE session_id = 'no-head'", [marker])?;
+                conn.execute_once("UPDATE session_meta SET session_state_version = ?1 WHERE session_id = 'no-head'", [marker])?;
                 Ok(())
             }).await.expect("change generation between invocations");
             for selector in [
@@ -344,7 +344,7 @@ mod tests {
         }
 
         store.conn.call(|conn| {
-            conn.execute("UPDATE session_meta SET session_state_version = ?1 WHERE session_id = 'no-head'", [lash_core_store::store::CURRENT_SESSION_STATE_VERSION])?;
+            conn.execute_once("UPDATE session_meta SET session_state_version = ?1 WHERE session_id = 'no-head'", [lash_core_store::store::CURRENT_SESSION_STATE_VERSION])?;
             Ok(())
         }).await.expect("supported marker");
         let session = SessionId::from("no-head");
@@ -388,8 +388,8 @@ mod tests {
             .await
             .expect("store");
         store.conn.call(|conn| {
-            conn.execute("INSERT INTO session_meta (session_id, relation_kind, parent_session_id, owning_process_id, retention_kind) VALUES ('child', 'child', 'parent', ?1, 'until_gc')", [ProcessId::fixture("owner").as_str()])?;
-            conn.execute("INSERT INTO session_meta_pending_observer_intents (session_id, process_index, process_id) VALUES ('child', 0, ?1), ('child', 1, ?2)", params![ProcessId::fixture("observer-a").as_str(), ProcessId::fixture("observer-b").as_str()])?;
+            conn.execute_once("INSERT INTO session_meta (session_id, relation_kind, parent_session_id, owning_process_id, retention_kind) VALUES ('child', 'child', 'parent', ?1, 'until_gc')", [ProcessId::fixture("owner").as_str()])?;
+            conn.execute_once("INSERT INTO session_meta_pending_observer_intents (session_id, process_index, process_id) VALUES ('child', 0, ?1), ('child', 1, ?2)", params![ProcessId::fixture("observer-a").as_str(), ProcessId::fixture("observer-b").as_str()])?;
             Ok(())
         }).await.expect("metadata");
         let session = SessionId::from("child");
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(guarded_sql.statements, 1, "guarded metadata read");
         for remaining in [1, 0] {
             store.conn.call(move |conn| {
-                conn.execute("DELETE FROM session_meta_pending_observer_intents WHERE process_index >= ?1", [remaining])?;
+                conn.execute_once("DELETE FROM session_meta_pending_observer_intents WHERE process_index >= ?1", [remaining])?;
                 Ok(())
             }).await.expect("settle intents");
             let (meta, receipt) = sql::collect(
@@ -456,7 +456,7 @@ mod tests {
             );
         }
         store.conn.call(|conn| {
-            conn.execute("INSERT INTO session_meta_pending_observer_intents (session_id, process_index, process_id) VALUES ('child', 2, ?1)", [ProcessId::fixture("gap").as_str()])?;
+            conn.execute_once("INSERT INTO session_meta_pending_observer_intents (session_id, process_index, process_id) VALUES ('child', 2, ?1)", [ProcessId::fixture("gap").as_str()])?;
             Ok(())
         }).await.expect("gap");
         assert!(matches!(
@@ -464,10 +464,10 @@ mod tests {
             Err(StoreError::StoredDataCorrupt { .. })
         ));
         store.conn.call(|conn| {
-            conn.execute("INSERT INTO deleted_sessions (session_id, created_at_ms, head_revision, relation_kind) VALUES ('child', 0, 0, 'root')", [])?;
+            conn.execute_once("INSERT INTO deleted_sessions (session_id, created_at_ms, head_revision, relation_kind) VALUES ('child', 0, 0, 'root')", [])?;
             // SQLite can retain a BLOB in a TEXT column after corruption.
             // JSON aggregation must not preempt permanent deletion evidence.
-            conn.execute("UPDATE session_meta_pending_observer_intents SET process_id = x'ff' WHERE session_id = 'child'", [])?;
+            conn.execute_once("UPDATE session_meta_pending_observer_intents SET process_id = x'ff' WHERE session_id = 'child'", [])?;
             Ok(())
         }).await.expect("tombstone beside corrupt metadata");
         assert!(matches!(
@@ -475,12 +475,12 @@ mod tests {
             Err(StoreError::SessionDeleted { .. })
         ));
         store.conn.call(|conn| {
-            conn.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind) VALUES ('other', 'root', 'until_gc')", [])?;
+            conn.execute_once("INSERT INTO session_meta (session_id, relation_kind, retention_kind) VALUES ('other', 'root', 'until_gc')", [])?;
             assert!(load_session_meta(conn, None).expect("multiple headers precede corrupt observer data").is_none());
-            conn.execute("DELETE FROM session_meta WHERE session_id = 'other'", [])?;
-            conn.execute("DELETE FROM session_meta_pending_observer_intents", [])?;
+            conn.execute_once("DELETE FROM session_meta WHERE session_id = 'other'", [])?;
+            conn.execute_once("DELETE FROM session_meta_pending_observer_intents", [])?;
             assert!(load_session_meta(conn, None).expect("sole").is_some());
-            conn.execute("DELETE FROM session_meta", [])?;
+            conn.execute_once("DELETE FROM session_meta", [])?;
             assert!(load_session_meta(conn, None).expect("empty").is_none());
             Ok(())
         }).await.expect("sole-session cardinality");

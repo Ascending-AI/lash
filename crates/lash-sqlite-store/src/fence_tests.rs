@@ -7,6 +7,7 @@
     reason = "test module: clippy's allow-expect-in-tests only exempts #[test] functions, and the fixture helpers here are test code too"
 )]
 
+use crate::Prepare as _;
 use std::time::Duration;
 
 use lash_core_store::compat::CompatRefusal;
@@ -40,7 +41,7 @@ fn raw(location: &SqliteLocation) -> Connection {
 
 fn count(location: &SqliteLocation, table: &str) -> i64 {
     raw(location)
-        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        .query_row_once(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
             row.get(0)
         })
         .expect("count rows")
@@ -98,7 +99,7 @@ async fn writer(location: &SqliteLocation) -> SqliteConnection {
 
 async fn insert(connection: &SqliteConnection, sql: &'static str) -> Result<(), StoreError> {
     connection
-        .write(move |tx| tx.execute(sql, []).map(drop))
+        .write(move |tx| tx.execute_once(sql, []).map(drop))
         .await
         .map_err(crate::sqlite_error)
 }
@@ -199,7 +200,7 @@ async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
         .expect("a writer under the installed stamp commits");
 
     raw(&location)
-        .execute("UPDATE lash_compat SET version = version + 1", [])
+        .execute_once("UPDATE lash_compat SET version = version + 1", [])
         .expect("another process expands the database");
     let before = count(&location, table);
     insert(&connection, sql)
@@ -208,7 +209,7 @@ async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
     assert_eq!(count(&location, table), before + 1);
 
     raw(&location)
-        .execute("UPDATE lash_compat SET min_reader = version", [])
+        .execute_once("UPDATE lash_compat SET min_reader = version", [])
         .expect("another process contracts the database");
     let error = insert(&connection, sql)
         .await
@@ -229,7 +230,7 @@ async fn sqlite_fence_readmits_a_stamp_migrated_by_another_process() {
     );
 
     raw(&location)
-        .execute("DELETE FROM lash_compat", [])
+        .execute_once("DELETE FROM lash_compat", [])
         .expect("another process deletes the stamp");
     let error = insert(&connection, sql)
         .await
@@ -275,7 +276,7 @@ async fn sqlite_migration_holds_the_database_exclusively() {
         Duration::from_secs(5),
         |tx| {
             assert!(!writable(), "the rewrite runs under the exclusive lock");
-            tx.execute("UPDATE lash_compat SET version = version + 1", [])
+            tx.execute_once("UPDATE lash_compat SET version = version + 1", [])
                 .map(drop)
         },
         |step| {
@@ -393,7 +394,7 @@ async fn sqlite_fence_observes_a_writable_move_of_f() {
     );
     Connection::open(&path)
         .expect("raw connection")
-        .execute(
+        .execute_once(
             "UPDATE lash_compat SET fleet_format = ?1",
             [i64::from(next)],
         )
@@ -498,7 +499,7 @@ async fn sqlite_fence_encodes_again_when_f_moves() {
         .expect("commit re-encodes under writable epoch");
     assert_ne!(receipt.schema_version, PINNED_RECEIPT_VERSION);
     let stored: String = raw(set.location())
-        .query_row(
+        .query_row_once(
             "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
             [session.as_str()],
             |row| row.get(0),

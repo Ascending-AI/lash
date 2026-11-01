@@ -1,5 +1,6 @@
 //! The compatibility row of the deployment's SQLite database.
 
+use crate::Prepare as _;
 use lash_core_store::compat;
 use lash_core_store::compat::CompatAdmission;
 use lash_core_store::compat::CompatRefusal;
@@ -39,7 +40,7 @@ fn malformed_on(conn: &Connection, detail: impl Into<String>) -> rusqlite::Error
 }
 
 fn table_exists(conn: &Connection) -> rusqlite::Result<bool> {
-    conn.query_row(
+    conn.query_row_once(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lash_compat')",
         [],
         |row| row.get(0),
@@ -53,7 +54,7 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<Option<(CompatStamp, u
         return Ok(None);
     }
     let row: Option<(String, i64, i64, i64)> = conn
-        .query_row(
+        .query_row_once(
             "SELECT component, version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -142,7 +143,7 @@ const FENCE: &str =
 /// rollback leaves the transaction having written nothing.
 pub(crate) fn fence(conn: &Connection, writable: VersionRange) -> rusqlite::Result<FleetFormat> {
     let row: Option<(String, i64, i64, i64)> = conn
-        .prepare_cached(FENCE)
+        .statement(FENCE)
         .and_then(|mut statement| {
             statement
                 .query_row([], |row| {
@@ -199,7 +200,7 @@ pub(crate) fn read_plugin_writers(
         })
     };
     let rows: Vec<(String, i64, i64)> = conn
-        .prepare_cached(PLUGIN_WRITERS)
+        .statement(PLUGIN_WRITERS)
         .and_then(|mut statement| {
             statement
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
@@ -216,7 +217,7 @@ pub(crate) fn record_plugin_writers(
     entries: &std::collections::BTreeMap<String, VersionRange>,
 ) -> rusqlite::Result<()> {
     for (plugin, range) in entries {
-        conn.prepare_cached(RECORD_PLUGIN_WRITER)?.execute(params![
+        conn.statement(RECORD_PLUGIN_WRITER)?.execute(params![
             plugin,
             i64::from(range.min()),
             i64::from(range.max())
@@ -292,7 +293,7 @@ pub(crate) fn flip_epoch_for_testing(
         |tx| {
             let recorded = fence(tx, writable)?.version();
             if recorded != target {
-                tx.execute(
+                tx.execute_once(
                     "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
                     [i64::from(target)],
                 )?;
@@ -312,7 +313,7 @@ pub(crate) fn flip_epoch_for_testing(
 /// (ADR 0115 §2.1).
 pub(crate) fn provision(tx: &Transaction<'_>, writable: VersionRange) -> rusqlite::Result<()> {
     let descriptor = descriptor(tx)?;
-    tx.execute(
+    tx.execute_once(
         "INSERT INTO lash_compat (singleton, component, version, min_reader, fleet_format)
          VALUES (1, ?1, ?2, ?3, ?4)",
         params![
@@ -413,8 +414,9 @@ struct Column {
 }
 
 fn columns(conn: &Connection, table: &str) -> rusqlite::Result<Vec<Column>> {
-    let mut statement =
-        conn.prepare("SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1)")?;
+    let mut statement = conn.statement_once(
+        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info(?1)",
+    )?;
     statement
         .query_map([table], |row| {
             Ok(Column {
@@ -429,7 +431,7 @@ fn columns(conn: &Connection, table: &str) -> rusqlite::Result<Vec<Column>> {
 }
 
 fn signature(conn: &Connection, table: &str, sql: &str) -> rusqlite::Result<Vec<String>> {
-    let mut statement = conn.prepare(sql)?;
+    let mut statement = conn.statement_once(sql)?;
     statement.query_map([table], |row| row.get(0))?.collect()
 }
 
@@ -440,7 +442,7 @@ pub(crate) fn verify_tolerant(conn: &Connection) -> rusqlite::Result<()> {
     for statements in crate::schema::provisioning_statements() {
         baseline.execute_batch(statements)?;
     }
-    let mut tables = baseline.prepare(
+    let mut tables = baseline.statement_once(
         "SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
     )?;
     let expected: Vec<(String, String)> = tables
@@ -449,7 +451,7 @@ pub(crate) fn verify_tolerant(conn: &Connection) -> rusqlite::Result<()> {
     let mut findings = Vec::new();
     for (table, expected_sql) in expected {
         let found_sql: Option<String> = conn
-            .query_row(
+            .query_row_once(
                 "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?1",
                 [&table],
                 |row| row.get(0),

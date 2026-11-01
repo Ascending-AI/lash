@@ -23,7 +23,7 @@ pub(crate) async fn reclaim(
                 match (|| {
                     let sql = &session_sql().turn_commits;
                     let current: i64 = tx
-                        .query_row(sql.change_clock.sql(), [], |row| row.get(0))
+                        .query_row_once(sql.change_clock.sql(), [], |row| row.get(0))
                         .map_err(sqlite_error)?;
                     let current =
                         u64::try_from(current).map_err(|_| StoreError::StoredDataCorrupt {
@@ -32,7 +32,7 @@ pub(crate) async fn reclaim(
                         })?;
                     let watermark = bound.turn_watermark.acknowledged_sequence(current)?;
                     let horizon: Option<i64> = tx
-                        .query_row(
+                        .query_row_once(
                             sql.removed_horizon.sql(),
                             params![cutoff, watermark],
                             |row| row.get(0),
@@ -100,7 +100,7 @@ async fn reclaim_tool_intent_submissions(
     let conn = &store.conn;
     let candidates = conn
         .call(move |conn| {
-            let mut stmt = conn.prepare_cached(
+            let mut stmt = conn.statement(
                 crate::turn_ingress::tool_intent_sql()
                     .sqlite
                     .select_reclaim_candidate_sessions

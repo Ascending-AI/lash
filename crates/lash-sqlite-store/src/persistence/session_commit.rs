@@ -31,7 +31,7 @@ fn commit_frame_transition_tx(
         let id = lash_protocol_types::ProcessDefinitionId::parse(&carry.artifact_ref)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
         let blob: String = tx
-            .query_row(
+            .query_row_once(
                 sql.refs.select_blob_ref.sql(),
                 params!["process_definition", carry.artifact_ref],
                 |row| crate::codec::hash_column(row, 0),
@@ -54,7 +54,7 @@ fn commit_frame_transition_tx(
             continue;
         };
         let exists: bool = tx
-            .query_row(
+            .query_row_once(
                 sql.edges.select_edge_exists.sql(),
                 params![
                     namespace,
@@ -137,7 +137,7 @@ impl SessionCommitStore for SqliteStore {
         )?;
         self.read_connection()
             .call(move |conn| {
-                let exists: bool = conn.query_row(
+                let exists: bool = conn.query_row_once(
                     session_sql().turn_commits.exists_for_turn.sql(),
                     params![session_id.as_str(), key],
                     |row| row.get(0),
@@ -407,7 +407,7 @@ pub(crate) fn apply_runtime_commit_conn(
     tx.admit_plugin_writers(planner.plugin_publication())
         .map_err(sqlite_error)?;
     let preimage = tx
-        .prepare_cached(session_sql().head_sqlite.commit_preimage.sql())
+        .statement(session_sql().head_sqlite.commit_preimage.sql())
         .map_err(sqlite_error)?
         .query_row(
             params![commit.session_id.as_str(), planner.operation_key()],
@@ -531,7 +531,7 @@ pub(crate) fn apply_runtime_commit_conn(
         (None, _) => true,
         (Some(_), None) => false,
         (Some(required), Some(parent)) => match tx
-            .prepare_cached(session_sql().graph_sqlite.select_readable_ancestor.sql())
+            .statement(session_sql().graph_sqlite.select_readable_ancestor.sql())
             .map_err(sqlite_error)?
             .query_row(
                 params![
@@ -670,7 +670,7 @@ pub(crate) fn apply_runtime_commit_conn(
     .map_err(sqlite_error)?;
     if changed != 1 {
         let published_revision = tx
-            .prepare_cached(session_sql().head.select_revision.sql())
+            .statement(session_sql().head.select_revision.sql())
             .map_err(sqlite_error)?
             .query_row(params![commit.session_id.as_str()], |row| {
                 row.get::<_, i64>(0)
@@ -687,7 +687,7 @@ pub(crate) fn apply_runtime_commit_conn(
         });
     }
     let retention = tx
-        .prepare_cached(session_sql().meta.touch_last_commit.sql())
+        .statement(session_sql().meta.touch_last_commit.sql())
         .map_err(sqlite_error)?
         .query_row(
             params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
@@ -743,7 +743,7 @@ pub(crate) fn apply_runtime_commit_conn(
         stored_checkpoint.checkpoint_ref,
         stored_checkpoint.manifest,
         now,
-        tx.prepare_cached(
+        tx.statement(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .has_admissible_work

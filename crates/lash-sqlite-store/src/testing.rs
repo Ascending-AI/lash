@@ -3,6 +3,7 @@
 //! This module only exists behind the crate's `testing` feature. Production
 //! factories arm no pause, and production builds do not compile the points.
 
+use crate::Prepare as _;
 use lash_protocol_types::{sync::LockResultExt, sync::MutexExt};
 
 use std::sync::{Arc, Condvar, Mutex};
@@ -90,7 +91,7 @@ pub fn read_rows_for_testing(
     use rusqlite::types::ValueRef;
     let connection = read_only(stores)?;
     let mut statement = connection
-        .prepare(sql)
+        .statement_once(sql)
         .map_err(|error| format!("prepare `{sql}`: {error}"))?;
     let names = statement
         .column_names()
@@ -211,7 +212,9 @@ pub fn read_stored_cells_for_testing(
     let mut cells = Vec::new();
     let tables = {
         let mut statement = connection
-            .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .statement_once(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name",
+            )
             .map_err(|error| format!("list the tables: {error}"))?;
         statement
             .query_map([], |row| {
@@ -229,8 +232,9 @@ pub fn read_stored_cells_for_testing(
             bytes: declaration.into_bytes(),
             documents: Vec::new(),
         });
+        let sql = format!("SELECT * FROM \"{table}\"");
         let mut statement = connection
-            .prepare(&format!("SELECT * FROM \"{table}\""))
+            .statement_once(&sql)
             .map_err(|error| format!("read `{table}`: {error}"))?;
         let columns = statement
             .column_names()
@@ -540,8 +544,8 @@ impl crate::SqliteStore {
             .next()
             .call(|connection| {
                 Ok((
-                    connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?,
-                    connection.query_row("PRAGMA cache_size", [], |row| row.get(0))?,
+                    connection.query_row_once("PRAGMA busy_timeout", [], |row| row.get(0))?,
+                    connection.query_row_once("PRAGMA cache_size", [], |row| row.get(0))?,
                 ))
             })
             .await

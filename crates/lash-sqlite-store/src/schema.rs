@@ -888,7 +888,7 @@ fn apply_versioned_schema_tx_with_writable(
 }
 
 pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<bool> {
-    let count: i64 = conn.query_row(
+    let count: i64 = conn.query_row_once(
         "SELECT COUNT(*) FROM sqlite_master
          WHERE name NOT LIKE 'sqlite_%'
            AND type IN ('table', 'index', 'trigger', 'view')",
@@ -919,7 +919,7 @@ mod compat_tests {
     fn content_hash_columns_are_binary_keys() {
         let mut connection = Connection::open_in_memory().unwrap();
         provision(&mut connection);
-        let columns = connection.prepare(
+        let columns = connection.statement_once(
             "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
              WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref', 'attachment_id')
                OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
@@ -968,7 +968,7 @@ mod compat_tests {
                     })
                     .expect("open SQLite database");
                 let fleet: u32 = connection
-                    .query_row(
+                    .query_row_once(
                         "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
                         [],
                         |row| row.get(0),
@@ -989,7 +989,7 @@ mod compat_tests {
         let mut connection = Connection::open_in_memory().expect("open database");
         provision(&mut connection);
         connection
-            .execute(
+            .execute_once(
                 "UPDATE lash_compat SET version = ?1, min_reader = ?1",
                 [above],
             )
@@ -1084,14 +1084,14 @@ mod observer_intent_migration_tests {
 
         assert_eq!(
             connection
-                .query_row("SELECT version FROM lash_compat", [], |row| row
+                .query_row_once("SELECT version FROM lash_compat", [], |row| row
                     .get::<_, i32>(0))
                 .expect("read refused version"),
             43,
             "a refused open must not relabel the old catalog"
         );
         let legacy_rows: i64 = connection
-            .query_row(
+            .query_row_once(
                 "SELECT COUNT(*) FROM session_meta_observer_intent_processes",
                 [],
                 |row| row.get(0),
@@ -1130,7 +1130,7 @@ mod schema_version_tests {
             .expect("commit the stamp write");
 
         let present: i64 = connection
-            .query_row(
+            .query_row_once(
                 "SELECT COUNT(*) FROM sqlite_master
                  WHERE type = 'table' AND name = 'pending_turn_inputs'",
                 [],

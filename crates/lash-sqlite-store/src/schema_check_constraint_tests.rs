@@ -258,7 +258,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         .execute_batch(PROCESS_SCHEMA)
         .expect("create process projection fixture");
     let insert = |id: &str, record: &str| {
-        process.execute(
+        process.execute_once(
             &format!(
                 "INSERT INTO processes ({PROCESS_FIXTURE_COLUMNS}) VALUES
                  (?1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', '{{}}', '{{}}', ?2)"
@@ -268,7 +268,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     };
     let columns = |id: &str| {
         process
-            .query_row(
+            .query_row_once(
                 "SELECT status, last_event_sequence, cancel_requested_at_ms
                    FROM processes WHERE process_id = ?1",
                 [id],
@@ -309,7 +309,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     )
     .expect("insert a running record");
     process
-        .execute(
+        .execute_once(
             "UPDATE processes SET lifecycle_json = ?1 WHERE process_id = 'moves'",
             [process_lifecycle_json(
                 ProcessStatus::Cancelled,
@@ -383,7 +383,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         );
         assert!(
             process
-                .execute(
+                .execute_once(
                     "UPDATE processes SET lifecycle_json = ?1 WHERE process_id = 'moves'",
                     [&record],
                 )

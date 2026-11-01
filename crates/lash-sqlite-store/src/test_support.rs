@@ -67,7 +67,7 @@ impl StoreTestSupport for SqliteStore {
                         )?
                     }
                     GraphRowCorruption::SetPayloadKindToPlugin => {
-                        let (parent, body): (Option<String>, String) = tx.query_row(
+                        let (parent, body): (Option<String>, String) = tx.query_row_once(
                             "SELECT parent_node_id, node_json FROM graph_nodes WHERE node_id = ?1",
                             params![node_id.as_str()],
                             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -114,7 +114,7 @@ impl StoreTestSupport for SqliteStore {
         let ancestor_node_id = ancestor_node_id.clone();
         self.conn
             .write(move |tx| {
-                let changed = tx.execute(
+                let changed = tx.execute_once(
                     "INSERT OR REPLACE INTO fork_lineage
                      (session_id, ancestor_session_id, fork_node_id, fork_generation)
                      SELECT ?1, session_id, node_id, generation

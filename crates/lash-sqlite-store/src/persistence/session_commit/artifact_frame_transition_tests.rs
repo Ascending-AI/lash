@@ -51,12 +51,12 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     let ended_referrer = ArtifactReferrer::FrameEnvironment(ended.clone());
     let blob = [0_u8];
     let blob_hash = BlobRef::digest_for_content(&blob);
-    conn.execute(
+    conn.execute_once(
         "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
         params![blob_hash.as_slice(), blob.as_slice()],
     )
     .expect("artifact blob");
-    conn.execute(
+    conn.execute_once(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', ?2)",
         params![
             crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
@@ -64,7 +64,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         ],
     )
     .expect("artifact pointer");
-    conn.execute(
+    conn.execute_once(
         crate::artifact_store::artifact_sql()
             .edges
             .insert_edge
@@ -112,7 +112,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
             .expect("first frame fence")
     );
     let count: i64 = conn
-        .query_row(
+        .query_row_once(
             "SELECT COUNT(*) FROM artifact_cleanup_obligations WHERE referrer_kind = 'frame_environment'",
             [],
             |row| row.get(0),
@@ -120,7 +120,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
         .expect("cleanup obligation");
     assert_eq!(count, 1);
     let edges = || {
-        conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges", [], |row| {
+        conn.query_row_once("SELECT COUNT(*) FROM artifact_referrer_edges", [], |row| {
             row.get::<_, i64>(0)
         })
         .expect("frame edges")
@@ -157,12 +157,12 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
     let source = ArtifactReferrer::FrameEnvironment(old.clone());
     let blob = [0_u8];
     let blob_hash = BlobRef::digest_for_content(&blob);
-    conn.execute(
+    conn.execute_once(
         "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
         params![blob_hash.as_slice(), blob.as_slice()],
     )
     .expect("artifact blob");
-    conn.execute(
+    conn.execute_once(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, ?3)",
         params![
             crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
@@ -171,7 +171,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
         ],
     )
     .expect("artifact pointer");
-    conn.execute(
+    conn.execute_once(
         crate::artifact_store::artifact_sql()
             .edges
             .insert_edge
@@ -207,7 +207,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
     let successor = ArtifactReferrer::FrameEnvironment(next);
     assert!(crate::artifact_store::artifact_fenced_tx(&conn, &source).expect("source fence"));
     assert!(
-        conn.query_row(
+        conn.query_row_once(
             crate::artifact_store::artifact_sql()
                 .edges
                 .select_edge_exists
@@ -223,7 +223,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
         .expect("successor edge")
     );
     let body: String = conn
-        .query_row(
+        .query_row_once(
             "SELECT cleanup_json FROM artifact_cleanup_obligations",
             [],
             |row| row.get(0),
@@ -333,7 +333,7 @@ async fn frame_end(
         .call(move |conn| {
             let fenced = crate::artifact_store::artifact_fenced_tx(conn, &referrer)?;
             let body: Option<String> = conn
-                .query_row(
+                .query_row_once(
                     "SELECT cleanup_json FROM artifact_cleanup_obligations \
                      WHERE referrer_kind = ?1 AND referrer_id = ?2",
                     params![referrer.kind().as_str(), referrer.canonical_id()],

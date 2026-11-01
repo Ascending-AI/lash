@@ -1,6 +1,7 @@
 //! Turn scopes derive their close from the retained run terminal. Other
 //! scopes retain their typed close ledger, including after a process is pruned.
 
+use crate::Prepare as _;
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::scope_identity::ScopeId;
 use lash_execution_contracts::plugin_error::PluginError;
@@ -102,7 +103,7 @@ pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bo
     }) = parent.opener()
     {
         return conn
-            .query_row(
+            .query_row_once(
                 process_sql().plan.turn_terminal.sql(),
                 params![session_id.as_str(), turn_id.as_str()],
                 |_| Ok(()),
@@ -112,7 +113,7 @@ pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bo
             .map_err(process_sqlite_error);
     }
     let (kind, id) = ledger_key(parent);
-    conn.query_row(process_sql().plan.exists.sql(), params![kind, id], |_| {
+    conn.query_row_once(process_sql().plan.exists.sql(), params![kind, id], |_| {
         Ok(())
     })
     .optional()
@@ -156,7 +157,7 @@ pub(super) async fn get(
         let ended = registry
             .conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     process_sql().plan.turn_terminal.sql(),
                     params![session_id.as_str(), turn_id.as_str()],
                     |row| row.get::<_, i64>(0),
@@ -175,7 +176,7 @@ pub(super) async fn get(
     let row = registry
         .conn
         .call(move |conn| {
-            conn.query_row(
+            conn.query_row_once(
                 process_sql().plan.select_stamps.sql(),
                 params![inside.0, inside.1],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
@@ -195,7 +196,7 @@ pub(crate) fn mark_holds_conn(conn: &Connection, owner: &ScopeId) -> Result<(), 
         turn_id,
     }) = owner.opener()
     {
-        conn.prepare_cached(process_sql().plan.mark_turn_holds.sql())
+        conn.statement(process_sql().plan.mark_turn_holds.sql())
             .map_err(process_sqlite_error)?
             .query_row(params![session_id.as_str(), turn_id.as_str()], |_| Ok(()))
             .optional()

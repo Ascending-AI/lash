@@ -72,12 +72,13 @@ async fn every_named_filter_shape_keeps_its_query_plan() {
 
 /// `EXPLAIN QUERY PLAN` for `statement`, as one newline-joined string.
 fn explain(conn: &Connection, statement: &str) -> rusqlite::Result<String> {
-    let mut prepared = conn.prepare(&format!("EXPLAIN QUERY PLAN {statement}"))?;
+    let explained = format!("EXPLAIN QUERY PLAN {statement}");
+    let mut prepared = conn.statement_once(&explained)?;
     // The plan is a property of the statement, not of the values, so every
     // parameter is bound NULL purely to satisfy the binding count.
     let bound = vec![rusqlite::types::Value::Null; prepared.parameter_count()];
     let rows = prepared
-        .query_map(rusqlite::params_from_iter(bound), |row| {
+        .query_map(crate::statement::params_from_iter(bound), |row| {
             row.get::<_, String>(3)
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -92,14 +93,14 @@ fn bound_run_discovery_work_ignores_settled_commands() {
     let bound = crate::durable::session_mail::bound_run_query();
     let read = || {
         let found: Option<String> = conn
-            .query_row(&bound, ["session"], |row| row.get(0))
+            .query_row_once(&bound, ["session"], |row| row.get(0))
             .optional()
             .expect("read the bound run");
         assert_eq!(found, None);
     };
     let early = lookup_steps(&conn, read);
     for n in 0..128 {
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO queued_work_batches
              (enqueue_seq, batch_id, session_id, delivery_policy, authority_json,
               enqueued_at_ms, submission_digest, terminal_cause, terminal_at_ms)
@@ -109,7 +110,7 @@ fn bound_run_discovery_work_ignores_settled_commands() {
         .expect("retain a settled command");
     }
     let retained: i64 = conn
-        .query_row("SELECT COUNT(*) FROM queued_work_batches", [], |row| {
+        .query_row_once("SELECT COUNT(*) FROM queued_work_batches", [], |row| {
             row.get(0)
         })
         .expect("witness retained command rows");
@@ -119,7 +120,7 @@ fn bound_run_discovery_work_ignores_settled_commands() {
         late * 100 <= early * 105,
         "bound-run discovery VM work grew: {early} -> {late}"
     );
-    conn.execute(
+    conn.execute_once(
         "INSERT INTO queued_work_batches
          (enqueue_seq, batch_id, session_id, delivery_policy, payload_json, authority_json,
           enqueued_at_ms, submission_digest, admitted_run, admitted_by)
@@ -129,7 +130,7 @@ fn bound_run_discovery_work_ignores_settled_commands() {
     )
     .expect("an open command is bound");
     let bound: String = conn
-        .query_row(&bound, ["session"], |row| row.get(0))
+        .query_row_once(&bound, ["session"], |row| row.get(0))
         .expect("discover the bound command after retained tombstones");
     assert_eq!(bound, "run");
 }
@@ -163,7 +164,7 @@ fn frame_cleanup_lookup_work_ignores_other_gates() {
         .expect("retain a frame cleanup");
     }
     let retained: i64 = conn
-        .query_row(
+        .query_row_once(
             "SELECT COUNT(*) FROM artifact_cleanup_obligations",
             [],
             |row| row.get(0),

@@ -6,6 +6,7 @@
     reason = "test module: clippy's allow-expect-in-tests only exempts #[test] functions, and the fixture helpers here are test code too"
 )]
 
+use crate::Prepare as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -75,7 +76,7 @@ fn store(set: &SqliteStoreSet) -> Arc<dyn RuntimeStore> {
 /// The recorded range of [`PLUGIN`], read as another process would.
 fn recorded_range(location: &SqliteLocation) -> Option<(i64, i64)> {
     raw(location)
-        .query_row(
+        .query_row_once(
             "SELECT min_format, max_format FROM lash_plugin_writers WHERE plugin_id = ?1",
             [PLUGIN],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -93,13 +94,13 @@ fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>
     let connection = raw(location);
     let count = |table: &str| -> i64 {
         connection
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            .query_row_once(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                 row.get(0)
             })
             .expect("count rows")
     };
     let mut heads = connection
-        .prepare("SELECT head.session_id, lower(hex(revision.config_ref)) FROM session_head AS head JOIN session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id")
+        .statement_once("SELECT head.session_id, lower(hex(revision.config_ref)) FROM session_head AS head JOIN session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id")
         .expect("prepare the head read");
     let heads = heads
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -374,7 +375,7 @@ async fn a_malformed_writer_range_refuses_every_plugin_publication() {
     let location = set.location().clone();
     let store = store(&set);
     raw(&location)
-        .execute(
+        .execute_once(
             "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format) VALUES (?1, 2, 1)",
             [PLUGIN],
         )
@@ -463,13 +464,13 @@ async fn a_deleted_writer_entry_refuses_writes_and_publishes_nothing() {
     // The plugin's entry recorded [1, 2], as a finalize that admitted its
     // native format would leave it.
     raw(&location)
-        .execute(
+        .execute_once(
             "INSERT INTO lash_plugin_writers (plugin_id, min_format, max_format) VALUES (?1, 1, 2)",
             [PLUGIN],
         )
         .expect("record the plugin's range");
     raw(&location)
-        .execute(
+        .execute_once(
             "DELETE FROM lash_plugin_writers WHERE plugin_id = ?1",
             [PLUGIN],
         )

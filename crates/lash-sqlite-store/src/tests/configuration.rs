@@ -31,7 +31,7 @@ async fn unchanged_configuration_is_not_rehydrated_by_transactional_or_history_r
     let terminal_session = session.clone();
     let revision = head.head_revision;
     store.conn.write(move |tx| {
-        tx.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision, terminal_window_revision) VALUES (?1, 'config-terminal', 'answered', '{\"cause\":\"commands_applied\"}', 42, ?2, ?2)", params![terminal_session.as_str(), revision])?;
+        tx.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision, terminal_window_revision) VALUES (?1, 'config-terminal', 'answered', '{\"cause\":\"commands_applied\"}', 42, ?2, ?2)", params![terminal_session.as_str(), revision])?;
         Ok(())
     }).await.expect("terminal at the retained revision");
     let window =
@@ -118,13 +118,13 @@ async fn configuration_reuse_keeps_history_and_admission_refusals_typed() {
         .expect("head");
     let raw = Connection::open(&path).expect("raw connection");
     let root: String = raw
-        .query_row(
+        .query_row_once(
             "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1",
             [owner.as_str()],
             |row| row.get(0),
         )
         .expect("root");
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_revisions SET config_ref = unhex(?1) WHERE session_id = ?2",
         params![root, foreign.as_str()],
     )
@@ -157,7 +157,7 @@ async fn configuration_reuse_keeps_history_and_admission_refusals_typed() {
             .expect("rolled back admission")
             .is_empty()
     );
-    raw.execute(
+    raw.execute_once(
         "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = unhex(?1)",
         [root],
     )
@@ -234,7 +234,7 @@ async fn a_cached_configuration_is_readmitted_under_the_snapshot_fleet() {
     let json = serde_json::to_string(&payload).expect("payload");
     let root = store.conn.write(move |tx| {
         crate::revisions::record_revision_conn(tx, &session, 999, None, None, &json).map_err(crate::sqlite_conversion_error)?;
-        tx.query_row("SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = 999", [session.as_str()], |row| row.get::<_, String>(0))
+        tx.query_row_once("SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = 999", [session.as_str()], |row| row.get::<_, String>(0))
     }).await.expect("fixture stamped by another fleet");
     let configs = Arc::clone(&store.configs);
     store
@@ -311,7 +311,7 @@ async fn configuration_reuse_keeps_snapshot_and_rollback_isolation() {
     assert_eq!(next.config.config_revision, 1);
     let latest = Connection::open(&path).expect("latest connection");
     let new_root: String = latest
-        .query_row(
+        .query_row_once(
             "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2",
             params![session.as_str(), receipt.head_revision],
             |row| row.get(0),
@@ -352,12 +352,12 @@ async fn configuration_reuse_keeps_snapshot_and_rollback_isolation() {
     let json = serde_json::to_string(&payload).expect("payload");
     crate::revisions::record_revision_conn(&tx, &session, 999, None, None, &json)
         .expect("private config");
-    tx.execute(
+    tx.execute_once(
         "UPDATE session_head SET head_revision = 999 WHERE session_id = ?1",
         [session.as_str()],
     )
     .expect("private head");
-    let root: String = tx.query_row("SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = 999", [session.as_str()], |row| row.get(0)).expect("private root");
+    let root: String = tx.query_row_once("SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = 999", [session.as_str()], |row| row.get(0)).expect("private root");
     let read = crate::codec::try_load_session_head_meta_from_conn(
         &tx,
         &session,
@@ -437,13 +437,13 @@ async fn a_cold_head_read_keeps_its_snapshot_while_the_old_config_is_peeled() {
     // The head stands at the selected revision again, with the next one
     // retained for the competing commit to move it to.
     let raw = Connection::open(&path).expect("fixture connection");
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_head SET head_revision = ?2 WHERE session_id = ?1",
         params![session.as_str(), selected.head_revision],
     )
     .expect("stand the head at the selected revision");
     let old_root: String = raw
-        .query_row(
+        .query_row_once(
             "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2",
             params![session.as_str(), selected.head_revision],
             |row| row.get(0),
@@ -462,12 +462,12 @@ async fn a_cold_head_read_keeps_its_snapshot_while_the_old_config_is_peeled() {
     });
     pause.wait_until_reached().await;
     crate::compound_read_tests::commit_competing(&path, |tx| {
-        tx.execute(
+        tx.execute_once(
             "UPDATE session_head SET head_revision = ?2 WHERE session_id = ?1",
             params![session.as_str(), next],
         )
         .expect("move the head");
-        tx.execute(
+        tx.execute_once(
             "DELETE FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2",
             params![session.as_str(), selected.head_revision],
         )

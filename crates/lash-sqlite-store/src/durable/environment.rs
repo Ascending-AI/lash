@@ -21,7 +21,7 @@ static CLEANUP: LazyLock<CleanupObligationStatements> =
 
 pub(crate) fn owner(tx: &Connection, id: &VersionOwnerId) -> Answer<Option<EnvironmentRecord>> {
     let row = tx
-        .prepare_cached(ENV.owner.sql())?
+        .statement(ENV.owner.sql())?
         .query_row([id.to_string()], |r| {
             Ok((
                 r.get(0)?,
@@ -44,7 +44,7 @@ pub(crate) fn authority(
     id: &VersionOwnerId,
 ) -> Answer<Option<env::EnvironmentAuthority>> {
     let row = tx
-        .prepare_cached(ENV.authority.sql())?
+        .statement(ENV.authority.sql())?
         .query_row([id.to_string()], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })
@@ -61,7 +61,7 @@ pub(super) fn head(
     session: &lash_kernel_value::identity::SessionId,
 ) -> Answer<Option<EnvironmentHead>> {
     let root: Option<String> = tx
-        .prepare_cached(ENV.head_root.sql())?
+        .statement(ENV.head_root.sql())?
         .query_row([session.as_str()], |r| crate::codec::hash_column(r, 0))
         .optional()?;
     let Some(root) = root else {
@@ -96,7 +96,7 @@ fn enqueue(tx: &Connection, owner: &VersionOwnerId, retired: bool) -> rusqlite::
     };
     let json = cleanup.to_json().map_err(conversion)?;
     if retired {
-        let changed = tx.execute(
+        let changed = tx.execute_once(
             ENV.queue_retired.sql(),
             rusqlite::params![owner.to_string(), json],
         )?;
@@ -110,7 +110,7 @@ fn enqueue(tx: &Connection, owner: &VersionOwnerId, retired: bool) -> rusqlite::
             referrer: cleanup.referrer(),
         }
         .id();
-        tx.execute(
+        tx.execute_once(
             CLEANUP.insert_if_absent.sql(),
             rusqlite::params![
                 "environment_version",
@@ -125,7 +125,7 @@ fn enqueue(tx: &Connection, owner: &VersionOwnerId, retired: bool) -> rusqlite::
     Ok(())
 }
 fn retire(tx: &Connection, owner: &VersionOwnerId) -> rusqlite::Result<()> {
-    if tx.execute(ENV.retire.sql(), [owner.to_string()])? != 0 {
+    if tx.execute_once(ENV.retire.sql(), [owner.to_string()])? != 0 {
         enqueue(tx, owner, true)?;
     }
     Ok(())
@@ -134,7 +134,7 @@ fn retire(tx: &Connection, owner: &VersionOwnerId) -> rusqlite::Result<()> {
 /// Same transaction as each deletion, including inline peel and orphan audit.
 pub(super) fn peeled(tx: &Connection, nodes: &BTreeSet<String>) -> rusqlite::Result<()> {
     let rows = tx
-        .prepare_cached(SQLITE.peeled.sql())?
+        .statement(SQLITE.peeled.sql())?
         .query_map([graph::json_array(nodes)], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for id in rows {
@@ -172,7 +172,7 @@ pub(super) fn validate_graph(
         .map(GraphNode::to_hex)
         .collect();
     let ids: Vec<_> = versions.keys().map(ToString::to_string).collect();
-    let mut statement = tx.prepare_cached(SQLITE.validation_authorities.sql())?;
+    let mut statement = tx.statement(SQLITE.validation_authorities.sql())?;
     let mut rows = statement.query(rusqlite::params![
         graph::json_array(&named),
         graph::json_array(&ids)
@@ -259,7 +259,7 @@ pub(super) fn apply(
                 Ok(r) => r,
                 Err(e) => return Ok(Err(e)),
             };
-            if tx.execute(
+            if tx.execute_once(
                 ENV.prepare.sql(),
                 rusqlite::params![
                     owner.id().to_string(),
@@ -294,7 +294,7 @@ pub(super) fn apply(
                             &accepted.publication.key(),
                         );
                         let held: bool = tx
-                            .prepare_cached(ENV.publication_held.sql())?
+                            .statement(ENV.publication_held.sql())?
                             .query_row(rusqlite::params![owner.to_string(), reference], |r| {
                                 r.get(0)
                             })?;
@@ -303,7 +303,7 @@ pub(super) fn apply(
                         }
                     }
                 }
-                tx.execute(
+                tx.execute_once(
                     ENV.publish.sql(),
                     rusqlite::params![owner.to_string(), commit.actor.as_str(), commit.epoch.0],
                 )?;
@@ -331,7 +331,7 @@ pub(super) fn apply(
                 }
             }
             let old: Option<String> = tx
-                .prepare_cached(ENV.head_root.sql())?
+                .statement(ENV.head_root.sql())?
                 .query_row([session.as_str()], |r| crate::codec::hash_column(r, 0))
                 .optional()?;
             if let Some(next) = next {
@@ -340,7 +340,7 @@ pub(super) fn apply(
                     Ok(r) => r,
                     Err(e) => return Ok(Err(e)),
                 };
-                tx.prepare_cached(ENV.head_put.sql())?
+                tx.statement(ENV.head_put.sql())?
                     .execute(rusqlite::params![
                         session.as_str(),
                         &root.0[..],
@@ -372,7 +372,7 @@ pub(super) fn finish(tx: &Connection, writes: &[DomainWrite]) -> Answer<()> {
                 Err(e) => return Ok(Err(e)),
             };
             let retained: bool = tx
-                .prepare_cached(ENV.has_reader.sql())?
+                .statement(ENV.has_reader.sql())?
                 .query_row([&root.0[..]], |r| r.get(0))?;
             if !retained {
                 return Ok(Err(Refusal::NoReader.into()));
@@ -413,7 +413,7 @@ impl EnvironmentStore for SqliteDurableStore {
                 VersionOwnerState::Retired => commit(true),
                 VersionOwnerState::Preparing => {
                     let epoch: Option<i64> = tx
-                        .prepare_cached(ENV.actor_epoch.sql())?
+                        .statement(ENV.actor_epoch.sql())?
                         .query_row([record.actor.as_str()], |r| r.get(0))
                         .optional()?;
                     if epoch == Some(record.preparing_epoch.0) {
@@ -449,7 +449,7 @@ pub(super) fn remove_head(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(ENV.head_remove.sql())?
+    tx.statement(ENV.head_remove.sql())?
         .query_map([session.as_str()], |r| crate::codec::hash_column(r, 0))?
         .collect()
 }
@@ -488,12 +488,12 @@ mod tests {
                 let mut staging = env::staging();
                 let root = env::stage_version(&mut staging, &round).unwrap();
                 let node = staging.nodes().get(&root).unwrap();
-                connection.execute(
+                connection.execute_once(
                     "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 1)",
                     rusqlite::params![root.0.as_slice(), node.bytes.as_ref()],
                 )?;
                 let actor = lash_durable::ActorKey::session("sql-work-owner").unwrap();
-                connection.execute(
+                connection.execute_once(
                     ENV.prepare.sql(),
                     rusqlite::params![
                         owner.id().to_string(),
@@ -504,7 +504,7 @@ mod tests {
                         root.0.as_slice(),
                     ],
                 )?;
-                connection.execute(
+                connection.execute_once(
                     ENV.publish.sql(),
                     rusqlite::params![owner.id().to_string(), actor.as_str(), identity.epoch],
                 )?;
@@ -515,12 +515,12 @@ mod tests {
                 )
                 .unwrap();
                 let before = connection
-                    .prepare_cached(SQLITE.validation_authorities.sql())?
+                    .statement(SQLITE.validation_authorities.sql())?
                     .get_status(rusqlite::StatementStatus::Run);
                 let supplied = env::supplied_versions(&graph);
                 let verdict = validate_graph(connection, &graph, &supplied, &BTreeSet::new())?;
                 let after = connection
-                    .prepare_cached(SQLITE.validation_authorities.sql())?
+                    .statement(SQLITE.validation_authorities.sql())?
                     .get_status(rusqlite::StatementStatus::Run);
                 Ok((verdict, after - before))
             })

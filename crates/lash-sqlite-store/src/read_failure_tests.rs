@@ -62,7 +62,7 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
     store
         .conn
         .call(move |conn| {
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO blobs (hash, content, encoding) VALUES (unhex(?1), ?2, 0)",
                 params![blob_hash, raw_content],
             )?;
@@ -105,7 +105,7 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
         store
             .conn
             .call(move |conn| {
-                conn.execute(
+                conn.execute_once(
                     "INSERT INTO blobs (hash, content, encoding) VALUES (unhex(?1), ?2, 0)",
                     params![hash, bytes],
                 )?;
@@ -134,7 +134,7 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
         let persisted: Vec<u8> = store
             .conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT content FROM blobs WHERE hash = unhex(?1)",
                     [hash],
                     |row| row.get(0),
@@ -283,7 +283,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     // A second connection consumes the batch after the reader fetched its row.
     crate::compound_read_tests::commit_competing(&path, |tx| {
         let deleted = tx
-            .execute(
+            .execute_once(
                 "DELETE FROM queued_work_batches WHERE batch_id = ?1",
                 params![batch.batch_id.as_str()],
             )
@@ -368,7 +368,7 @@ async fn sqlite_persisted_record_decode_classification() {
 
     let raw = rusqlite::Connection::open(&path).expect("open corruption connection");
     assert_eq!(
-        raw.execute(
+        raw.execute_once(
             "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = (SELECT config_ref FROM session_revisions JOIN session_head USING (session_id, head_revision) WHERE session_id = ?1)",
             [head_session_id.as_str()],
         )
@@ -381,7 +381,7 @@ async fn sqlite_persisted_record_decode_classification() {
     );
 
     let checkpoint_ref: String = raw
-        .query_row(
+        .query_row_once(
             "SELECT lower(hex(checkpoint_ref)) FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
             [checkpoint_session_id.as_str()],
             |row| row.get(0),
@@ -397,7 +397,7 @@ async fn sqlite_persisted_record_decode_classification() {
     )
     .expect("encode valid blob envelope");
     assert_eq!(
-        raw.execute(
+        raw.execute_once(
             "UPDATE blobs SET content = ?1 WHERE hash = unhex(?2)",
             params![malformed_manifest, checkpoint_ref],
         )
@@ -471,12 +471,12 @@ async fn seed_failure_evidence_session(
     store
         .conn
         .call(move |conn| {
-            let committed_at_ms = conn.query_row(
+            let committed_at_ms = conn.query_row_once(
                 "SELECT committed_at_ms FROM runtime_turn_commits WHERE session_id = ?1",
                 params![session_id],
                 |row| row.get::<_, i64>(0),
             )?;
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO runtime_turn_commits
                  (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
                   failure_evidence, change_seq, head_revision)
@@ -484,7 +484,7 @@ async fn seed_failure_evidence_session(
                          (SELECT MAX(head_revision) + 1 FROM runtime_turn_commits WHERE session_id = ?1))",
                 params![session_id, bad_result_json, committed_at_ms + 1],
             )?;
-            conn.execute("UPDATE turn_change_clock SET current_seq = current_seq + 1 WHERE singleton = 1", [])?;
+            conn.execute_once("UPDATE turn_change_clock SET current_seq = current_seq + 1 WHERE singleton = 1", [])?;
             Ok(())
         })
         .await
@@ -656,7 +656,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     // one a host ALTERed, can present the byte the driver must refuse to decode.
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("permit manufacturing a row the DDL now forbids");
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO session_meta
          (session_id, relation_kind, session_state_version, retention_kind)
          VALUES ('corrupt', 'corrupt', ?1, 'until_gc')",
@@ -671,13 +671,13 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         store.load_session_meta(&session_id).await,
         "SessionMeta relation",
     );
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_meta SET relation_kind = 'root' WHERE session_id = 'corrupt'",
         [],
     )
     .expect("repair relation");
 
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO blobs (hash, content, encoding) VALUES (X'2222222222222222222222222222222222222222222222222222222222222222', X'C1', 0)",
         [],
     )
@@ -694,7 +694,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         store.get_checkpoint(&corrupt_blob).await,
         "SessionCheckpoint",
     );
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO blobs (hash, content, encoding) VALUES (X'3333333333333333333333333333333333333333333333333333333333333333', ?1, 0)",
         params![
             encode_msgpack(
@@ -722,7 +722,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("allow unknown durable enum injection");
     let unknown_owner =
         lash_protocol_types::attachment::AttachmentId::parse("b2".repeat(32)).unwrap();
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, 'unknown', 'opaque')",
         params![crate::codec::SqlHash(unknown_owner.as_str())],
     )
@@ -737,7 +737,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     // pointer; foreign data does not ask it.
     raw.execute_batch("PRAGMA foreign_keys = OFF")
         .expect("write foreign data");
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
          VALUES (?1, 'dangling-artifact', X'7777777777777777777777777777777777777777777777777777777777777777')",
         params![MODULE_ARTIFACT_NAMESPACE],
@@ -757,14 +757,14 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "expected typed StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
     );
 
-    raw.execute("INSERT INTO blobs (hash, content, encoding) VALUES (X'4444444444444444444444444444444444444444444444444444444444444444', CAST('{' AS BLOB), 0)", []).expect("foreign config");
-    raw.execute(
+    raw.execute_once("INSERT INTO blobs (hash, content, encoding) VALUES (X'4444444444444444444444444444444444444444444444444444444444444444', CAST('{' AS BLOB), 0)", []).expect("foreign config");
+    raw.execute_once(
         "INSERT INTO session_revisions (session_id, head_revision, config_ref)
          VALUES ('corrupt', 0, X'4444444444444444444444444444444444444444444444444444444444444444')",
         [],
     )
     .expect("insert malformed head revision");
-    raw.execute(
+    raw.execute_once(
         "INSERT INTO session_head (session_id, head_revision) VALUES ('corrupt', 0)",
         [],
     )
@@ -793,7 +793,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("encode session head"),
     )
     .expect("install a valid configuration graph with a dangling checkpoint");
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_head SET head_revision = 1 WHERE session_id = 'corrupt'",
         [],
     )
@@ -811,8 +811,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         ),
         "a dangling checkpoint manifest must refuse the window read, got {dangling:?}"
     );
-    raw.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0)", []).expect("terminal on revision 0");
-    raw.execute(
+    raw.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0)", []).expect("terminal on revision 0");
+    raw.execute_once(
         "UPDATE session_revisions SET config_ref = X'5555555555555555555555555555555555555555555555555555555555555555' WHERE session_id = 'corrupt'",
         [],
     )
@@ -842,7 +842,7 @@ async fn corrupt_graph_node_surfaces_typed_corruption_from_history_reads() {
     admit_and_seed(&store, &session_id).await;
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
     assert!(
-        raw.execute(
+        raw.execute_once(
             "UPDATE graph_nodes SET node_json = '{' WHERE session_id = ?1",
             [session_id.as_str()],
         )

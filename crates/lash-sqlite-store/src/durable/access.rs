@@ -49,7 +49,7 @@ impl SqliteDurableStore {
         let now = self.instant()?;
         self.query(move |connection| {
             let (due, next_due) = connection
-                .prepare_cached(SQL.sqlite.readiness.sql())?
+                .statement(SQL.sqlite.readiness.sql())?
                 .query_row([now.0], |row| {
                     Ok((row.get::<_, bool>(0)?, row.get::<_, Option<i64>>(1)?))
                 })?;

@@ -32,7 +32,7 @@ impl StoreMaintenance for SqliteStore {
                     // else holds (FIG-6611).
                     let deleted = |statement: &str, holder_kind: &str| {
                         let ids = tx
-                            .prepare_cached(statement)
+                            .statement(statement)
                             .and_then(|mut statement| {
                                 statement
                                     .query_map(params![session_id.as_str()], |row| row.get(0))?

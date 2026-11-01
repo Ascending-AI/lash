@@ -134,7 +134,7 @@ pub(super) fn apply_owner(
     let session =
         (write.actor().kind() == lash_durable::ActorKind::Session).then(|| write.actor().id());
     let fence = tx
-        .prepare_cached(OWNER_SQL.fence.sql())?
+        .statement(OWNER_SQL.fence.sql())?
         .query_row(
             rusqlite::params![actor, write.epoch().0, write.revision().0, session],
             |row| {
@@ -360,7 +360,7 @@ pub(super) fn apply_owner(
             // and its claimer runs the stop (FIG-6099).
             let stopped = write.immediate_cancel_since_read(turn_cancel.as_ref())
                 || tx
-                    .prepare_cached(SQL.park.stop_mail_after.sql())?
+                    .statement(SQL.park.stop_mail_after.sql())?
                     .query_row(
                         rusqlite::params![
                             actor,
@@ -373,13 +373,13 @@ pub(super) fn apply_owner(
                     .optional()?
                     .is_some();
             let stored: String = if stopped {
-                tx.prepare_cached(SQL.sqlite.release_without_due.sql())?
+                tx.statement(SQL.sqlite.release_without_due.sql())?
                     .query_row(
                         rusqlite::params![actor, "ready", Option::<i64>::None, now.0],
                         |row| row.get(0),
                     )?
             } else {
-                tx.prepare_cached(SQL.park.park.sql())?
+                tx.statement(SQL.park.park.sql())?
                     .query_row([&actor], |row| row.get(0))?
             };
             match actor_state(&stored) {
@@ -390,7 +390,7 @@ pub(super) fn apply_owner(
         Some(Release::Terminal) => {
             cached_execute(tx, SQL.mail.delete_all.sql(), [&actor])?;
             let stored: String = tx
-                .prepare_cached(SQL.actor.end.sql())?
+                .statement(SQL.actor.end.sql())?
                 .query_row([&actor], |row| row.get(0))?;
             match actor_state(&stored) {
                 Ok(state) => state,
@@ -404,7 +404,7 @@ pub(super) fn apply_owner(
                 _ => ("idle", None),
             };
             let stored: String = tx
-                .prepare_cached(if due.is_some() {
+                .statement(if due.is_some() {
                     SQL.actor.release.sql()
                 } else {
                     SQL.sqlite.release_without_due.sql()

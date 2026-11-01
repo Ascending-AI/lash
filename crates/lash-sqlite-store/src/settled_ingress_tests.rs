@@ -71,12 +71,12 @@ async fn stored_bodies(store: &SqliteStore, input: &str, batch: &str) -> (bool, 
         .conn
         .call(move |conn| {
             Ok((
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT input_json IS NOT NULL FROM pending_turn_inputs WHERE input_id = ?1",
                     [input.as_str()],
                     |row| row.get::<_, bool>(0),
                 )?,
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT payload_json IS NOT NULL FROM queued_work_batches WHERE batch_id = ?1",
                     [batch.as_str()],
                     |row| row.get::<_, bool>(0),
@@ -99,12 +99,12 @@ async fn hold_attachments(store: &SqliteStore, session: &SessionId, inputs: &[(&
         .conn
         .write(move |tx| {
             for (input, attachment) in &inputs {
-                tx.execute(
+                tx.execute_once(
                     "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id)
                      VALUES (?1, 'session', ?2)",
                     params![crate::codec::SqlHash(attachment), session],
                 )?;
-                tx.execute(
+                tx.execute_once(
                     "INSERT INTO attachment_session_holds
                          (session_id, attachment_id, holder_kind, holder_id)
                      VALUES (?1, ?2, 'input', ?3)",
@@ -123,7 +123,7 @@ async fn session_edge(store: &SqliteStore, session: &SessionId, attachment: &str
     store
         .conn
         .call(move |conn| {
-            conn.query_row(
+            conn.query_row_once(
                 "SELECT EXISTS (SELECT 1 FROM attachment_referrer_edges
                      WHERE attachment_id = ?1 AND referrer_kind = 'session' AND referrer_id = ?2)",
                 params![crate::codec::SqlHash(&attachment), session.as_str()],
@@ -212,11 +212,11 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     store
         .conn
         .write(move |tx| {
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO session_runs (session_id, run) VALUES (?1, 'run-1')",
                 [session_text.as_str()],
             )?;
-            tx.execute(
+            tx.execute_once(
                 "UPDATE pending_turn_inputs SET admitted_run = 'run-1', admitted_by = 'admit'
                  WHERE input_id = ?1",
                 [input_id.as_str()],
@@ -251,7 +251,7 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     store
         .conn
         .write(move |tx| {
-            tx.execute(
+            tx.execute_once(
                 "UPDATE session_runs SET terminal_kind = 'answered',
                      terminal_cause_json = '{\"cause\":\"commands_applied\"}',
                      terminal_at_ms = 0, terminal_head_revision = ?2
@@ -299,15 +299,15 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     let (input_id, batch_id) = (input.input_id.to_string(), command.batch_id.to_string());
     store.conn.write(move |tx| {
         for index in 1..=128 {
-            tx.execute("INSERT INTO attachment_session_holds VALUES ('settled-ingress', X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'input', 'input-extra-' || ?1)", [index])?;
-            tx.execute("INSERT INTO pending_turn_inputs
+            tx.execute_once("INSERT INTO attachment_session_holds VALUES ('settled-ingress', X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'input', 'input-extra-' || ?1)", [index])?;
+            tx.execute_once("INSERT INTO pending_turn_inputs
                 (origin_json, enqueue_seq, input_id, session_id, source_key, ingress_json, state,
                  input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
                 SELECT '\"submitted\"', 1000 + ?1, 'input-extra-' || ?1, session_id, 'input:extra-' || ?1,
                  ingress_json, state, input_json, submission_digest, enqueued_at_ms,
                  admitted_run, terminal_at_ms FROM pending_turn_inputs WHERE input_id = ?2",
                 params![index, input_id])?;
-            tx.execute("INSERT INTO queued_work_batches
+            tx.execute_once("INSERT INTO queued_work_batches
                 (enqueue_seq, batch_id, session_id, source_key, delivery_policy, authority_json,
                  enqueued_at_ms, submission_digest, payload_json, settled_operation_key,
                  terminal_cause, terminal_at_ms)
@@ -531,13 +531,13 @@ async fn backlog_bodies(store: &SqliteStore, session: &SessionId) -> (u64, u64) 
         .conn
         .call(move |conn| {
             Ok((
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT COUNT(*) FROM pending_turn_inputs WHERE session_id = ?1
             AND state = 'completed' AND input_json IS NOT NULL",
                     [&session],
                     |row| row.get(0),
                 )?,
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT COUNT(*) FROM queued_work_batches WHERE session_id = ?1
             AND terminal_cause = 'applied' AND payload_json IS NOT NULL",
                     [&session],
@@ -557,7 +557,7 @@ async fn replay_evidence(
     store
         .conn
         .call(move |conn| {
-            conn.prepare(
+            conn.statement_once(
                 "SELECT input_id, submission_digest, admitted_run
         FROM pending_turn_inputs WHERE session_id = ?1 AND state = 'completed'
         UNION ALL SELECT batch_id, submission_digest, settled_operation_key
@@ -598,11 +598,11 @@ async fn retained_neighbor(store: &SqliteStore) {
     store
         .conn
         .write(move |tx| {
-            tx.execute(
+            tx.execute_once(
                 "INSERT INTO session_runs (session_id, run) VALUES ('other-owner', 'other-run')",
                 [],
             )?;
-            tx.execute(
+            tx.execute_once(
                 "UPDATE pending_turn_inputs SET admitted_run = 'other-run', admitted_by = 'admit'
             WHERE input_id = ?1",
                 [id],
@@ -636,7 +636,7 @@ async fn retained_neighbor(store: &SqliteStore) {
     store
         .conn
         .write(move |tx| {
-            tx.execute(
+            tx.execute_once(
                 "UPDATE session_runs SET terminal_kind = 'answered',
             terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 0,
             terminal_head_revision = ?1 WHERE session_id = 'other-owner' AND run = 'other-run'",

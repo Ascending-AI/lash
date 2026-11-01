@@ -9,7 +9,7 @@ impl SqliteProcessRegistry {
         conn: &Connection,
         process_id: &ProcessId,
     ) -> Result<u64, lash_execution_contracts::plugin_error::PluginError> {
-        conn.query_row(
+        conn.query_row_once(
             process_sql().event_horizon.select_released_through.sql(),
             params![process_id.as_str()],
             |row| row.get::<_, i64>(0),
@@ -67,7 +67,7 @@ impl SqliteProcessRegistry {
         let mut released_events = 0_u64;
         loop {
             let (end, count): (Option<i64>, i64) = conn
-                .prepare_cached(process_sql().event.page_release.sql())
+                .statement(process_sql().event.page_release.sql())
                 .map_err(process_sqlite_error)?
                 .query_row(
                     params![

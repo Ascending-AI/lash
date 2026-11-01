@@ -8,6 +8,7 @@
 //! claim, in this process or another on the file, so any node may run it
 //! (ADR 0109 §1.7).
 
+use crate::Prepare as _;
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
@@ -178,13 +179,13 @@ impl ObligationLedger for SqliteObligationLedger {
             .conn
             .write(move |tx| {
                 let ids = {
-                    let mut select = tx.prepare_cached(sql.select_due.sql())?;
+                    let mut select = tx.statement(sql.select_due.sql())?;
                     select
                         .query_map(rusqlite::params![now, limit], |row| row.get::<_, String>(0))?
                         .collect::<rusqlite::Result<Vec<_>>>()?
                 };
                 let mut claimed = Vec::with_capacity(ids.len());
-                let mut claim = tx.prepare_cached(sql.claim_due_row.sql())?;
+                let mut claim = tx.statement(sql.claim_due_row.sql())?;
                 for id in ids {
                     let mut rows =
                         claim.query(rusqlite::params![id, token.as_str(), until, now])?;
@@ -219,7 +220,7 @@ impl ObligationLedger for SqliteObligationLedger {
         let row = self
             .conn
             .write(move |tx| {
-                let mut claim = tx.prepare_cached(sql.claim.sql())?;
+                let mut claim = tx.statement(sql.claim.sql())?;
                 let mut rows = claim.query(rusqlite::params![id, bound.as_str(), until])?;
                 rows.next()?.map(|row| read_claim(kind, row)).transpose()
             })
@@ -343,7 +344,7 @@ impl ObligationLedger for SqliteObligationLedger {
         let rows: Vec<StalledRow> = self
             .conn
             .call(move |conn| {
-                let mut select = conn.prepare_cached(sql.select_stalled.sql())?;
+                let mut select = conn.statement(sql.select_stalled.sql())?;
                 select
                     .query_map(rusqlite::params![after, limit], |row| {
                         Ok((
@@ -386,7 +387,7 @@ impl ObligationLedger for SqliteObligationLedger {
         let count: i64 = self
             .conn
             .call(move |conn| {
-                conn.prepare_cached(sql.count_stalled.sql())
+                conn.statement(sql.count_stalled.sql())
                     .and_then(|mut statement| statement.query_row([], |row| row.get(0)))
             })
             .await
@@ -401,7 +402,7 @@ impl ObligationLedger for SqliteObligationLedger {
             .conn
             .call(move |conn| {
                 use rusqlite::OptionalExtension;
-                conn.prepare_cached(sql.select_standing.sql())
+                conn.statement(sql.select_standing.sql())
                     .and_then(|mut statement| {
                         statement
                             .query_row(rusqlite::params![id], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -434,7 +435,7 @@ pub(crate) fn arm_cleanup_tx(
     let kind = cleanup.referrer().kind().as_str();
     let referrer_id = cleanup.referrer().canonical_id();
     let row: Option<(String, String, String, String, String)> = tx
-        .prepare_cached(CLEANUPS.select_by_referrer.sql())
+        .statement(CLEANUPS.select_by_referrer.sql())
         .and_then(|mut statement| {
             statement.query_row(params![kind, referrer_id], |row| {
                 Ok((
@@ -467,7 +468,7 @@ pub(crate) fn arm_cleanup_tx(
     let decision = CleanupUpsert::decide(existing.as_ref(), cleanup);
     match decision {
         CleanupUpsert::Insert => {
-            tx.execute(
+            tx.execute_once(
                 CLEANUPS.insert_if_absent.sql(),
                 params![
                     kind,
@@ -481,7 +482,7 @@ pub(crate) fn arm_cleanup_tx(
             .map_err(sqlite_error)?;
         }
         CleanupUpsert::ReplaceGuard => {
-            tx.execute(
+            tx.execute_once(
                 CLEANUPS.replace_guard_with_ended.sql(),
                 params![
                     kind,
@@ -532,7 +533,7 @@ pub(crate) fn end_execution_tx(
     )
     .map_err(sqlite_error)?;
     let rows = tx
-        .prepare_cached(CLEANUPS.select_frame_cleanups.sql())
+        .statement(CLEANUPS.select_frame_cleanups.sql())
         .map_err(sqlite_error)?
         .query_map([journal.key()], |row| {
             Ok((
@@ -682,7 +683,7 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             .readers
             .next()
             .call(move |conn| {
-                conn.prepare_cached(CLEANUPS.select_by_id.sql())
+                conn.statement(CLEANUPS.select_by_id.sql())
                     .and_then(|mut statement| {
                         statement.query_row(rusqlite::params![id], |row| {
                             Ok((
@@ -735,7 +736,7 @@ mod artifact_cleanup_tests {
                 .expect("arm");
             for body in [serde_json::json!({"referrer": referrer, "plan": {"plan": "await_journal"}, "gate": null}).to_string(), r#"{"plan":"await_journal"}"#.to_owned()] {
                 let row_id = id.as_str().to_owned();
-                set.process_env_store().conn.call(move |conn| conn.execute("UPDATE artifact_cleanup_obligations SET cleanup_json = ?1 WHERE obligation_id = ?2", rusqlite::params![body, row_id])).await.expect("inject mismatched guard");
+                set.process_env_store().conn.call(move |conn| conn.execute_once("UPDATE artifact_cleanup_obligations SET cleanup_json = ?1 WHERE obligation_id = ?2", rusqlite::params![body, row_id])).await.expect("inject mismatched guard");
                 let result = ledger.load_cleanup(&id).await;
                 assert!(matches!(result, Err(StoreError::StoredDataCorrupt { .. })), "mismatched guard must be corrupt: {result:?}");
             }
@@ -765,7 +766,7 @@ mod artifact_cleanup_tests {
         let id = referrer.canonical_id();
         core.conn
             .call(move |conn| {
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT obligation_id, cleanup_json, obligation_state, obligation_attempts, \
                             obligation_due_at_ms, obligation_claim_token, obligation_stall_reason, \
                             obligation_last_error, obligation_settled_at_ms \
@@ -975,7 +976,7 @@ mod artifact_cleanup_tests {
         let replaced = arm_cleanup_tx(&conn, &ended, 102).expect("replace guard");
         assert_eq!(first, replaced);
         arm_cleanup_tx(&conn, &guard, 103).expect("guard cannot replace end");
-        let (body, state, due): (String, String, i64) = conn.query_row(
+        let (body, state, due): (String, String, i64) = conn.query_row_once(
             "SELECT cleanup_json, obligation_state, obligation_due_at_ms FROM artifact_cleanup_obligations",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).expect("read obligation");

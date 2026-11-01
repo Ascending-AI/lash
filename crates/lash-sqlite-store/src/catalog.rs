@@ -204,7 +204,7 @@ impl lash_execution_contracts::deployment::DeploymentStore for SqliteStore {
         let frame = frame.clone();
         self.read_connection()
             .read(move |conn| {
-                conn.prepare_cached(
+                conn.statement(
                     crate::session_sql::session_sql()
                         .graph_sqlite
                         .artifact_frame_is_retained
@@ -239,7 +239,7 @@ impl lash_execution_contracts::deployment::DeploymentStore for SqliteStore {
         let conn = self.read_connection();
         let (in_flight, held_by_stalled_close): (i64, i64) = conn
             .read(|conn| {
-                conn.prepare_cached(
+                conn.statement(
                     crate::turn_ingress::turn_ingress_sql()
                         .family
                         .count_unsettled_turns
@@ -274,7 +274,7 @@ impl lash_execution_contracts::deployment::DeploymentStore for SqliteStore {
         };
         conn.call(move |conn| {
             let sql = &crate::session_runs::session_runs_sql().intents;
-            let mut stmt = conn.prepare_cached(sql.list_after.sql())?;
+            let mut stmt = conn.statement(sql.list_after.sql())?;
             let rows = stmt
                 .query_map(
                     params![

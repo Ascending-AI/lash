@@ -4,6 +4,7 @@
 //! hints inside its savepoint only on success, and discards capture on every
 //! exit. Only the outer committed transaction rings listeners.
 
+use crate::Prepare as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -86,7 +87,7 @@ impl NodeWakeWriter {
             .values()
             .any(|wake| wake.owner.is_none() && wake.state == ActorState::Ready)
         {
-            tx.prepare_cached(crate::durable::NODE_WAKE_PEERS)?
+            tx.statement(crate::durable::NODE_WAKE_PEERS)?
                 .query_map([now], |row| row.get::<_, String>(0).map(NodeId::new))?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         } else {

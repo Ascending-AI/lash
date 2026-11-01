@@ -1,5 +1,6 @@
 //! Session-catalog view listing over the durable-core catalog.
 
+use crate::Prepare as _;
 use lash_core_store::session_catalog::SessionEntry;
 use lash_core_store::session_catalog::SessionListFilter;
 use lash_core_store::session_catalog::SessionRelationKind;
@@ -12,7 +13,7 @@ pub(crate) fn list_session_views(
     conn: &Connection,
     filter: &SessionListFilter,
 ) -> rusqlite::Result<Vec<SessionView>> {
-    let mut stmt = conn.prepare_cached(
+    let mut stmt = conn.statement(
         crate::session_sql::session_sql()
             .meta_sqlite
             .select_catalog

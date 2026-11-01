@@ -49,7 +49,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     )
     .expect("bind");
     connection
-        .execute(
+        .execute_once(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .settle_admitted
@@ -79,7 +79,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         .execute_batch(crate::durable::GRAPH_TABLES)
         .expect("graph schema");
     connection
-        .execute(
+        .execute_once(
             "UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}',
                  terminal_at_ms = 42, terminal_head_revision = 1",
             [],
@@ -90,7 +90,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
             .expect("revision");
     }
     connection
-        .execute(
+        .execute_once(
             "INSERT INTO session_head (session_id, head_revision) VALUES ('session', 2)",
             [],
         )
@@ -103,7 +103,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     .expect("pin");
     let retained_revisions = || {
         connection
-            .prepare("SELECT head_revision FROM session_revisions WHERE session_id = 'session' ORDER BY head_revision")
+            .statement_once("SELECT head_revision FROM session_revisions WHERE session_id = 'session' ORDER BY head_revision")
             .expect("retained revisions")
             .query_map([], |row| row.get::<_, i64>(0))
             .expect("read revisions")
@@ -128,7 +128,9 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         vec![1, 2],
         "the input pin retains revision 1"
     );
-    connection.execute("DELETE FROM pins", []).expect("unpin");
+    connection
+        .execute_once("DELETE FROM pins", [])
+        .expect("unpin");
     assert_eq!(
         retained_revisions(),
         vec![1, 2],
@@ -142,7 +144,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         vec![2],
         "collection releases the unpinned revision"
     );
-    let root: String = connection.query_row(
+    let root: String = connection.query_row_once(
         "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
     ).expect("the head retains its config graph");
     let root = lash_core_store::checkpoint_graph::NodeId::from_hex(&root).expect("node id");
@@ -159,7 +161,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     collect();
     assert_eq!(
         connection
-            .query_row(
+            .query_row_once(
                 "SELECT count(*) FROM sqlite_master WHERE name = 'session_run_inputs'",
                 [],
                 |row| row.get::<_, i64>(0)
@@ -184,7 +186,7 @@ fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
     )
     .expect("bind");
     connection
-        .execute(
+        .execute_once(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
                 .release_run
@@ -217,12 +219,12 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
     for ddl in crate::schema::provisioning_statements() {
         connection.execute_batch(ddl).expect("schema");
     }
-    connection.execute(
+    connection.execute_once(
         "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms)
          VALUES ('session', 'run', 'answered', '{\"cause\":\"commands_applied\"}', 42)",
         [],
     ).expect("terminal");
-    connection.execute(
+    connection.execute_once(
         "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq, input_id, session_id, source_key, ingress_json,
              state, input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
          VALUES ('\"submitted\"', 1, 'input', 'session', 'alias', '{\"scope\":\"next_turn\"}', 'completed', '{}', 'digest', 0, 'run', 42)", []
@@ -236,7 +238,7 @@ fn a_terminal_turn_refuses_registration_without_a_parent_end_row() {
     )
     .expect("close");
     let plans: i64 = connection
-        .query_row("SELECT count(*) FROM parent_end_plans", [], |row| {
+        .query_row_once("SELECT count(*) FROM parent_end_plans", [], |row| {
             row.get(0)
         })
         .expect("plans");
@@ -289,7 +291,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
         ("last_turns", Some(i64::from(u32::MAX) + 1), false),
         ("head_only", Some(1), false),
     ] {
-        let result = connection.execute(
+        let result = connection.execute_once(
             "INSERT OR REPLACE INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('session', 'root', ?1, ?2)",
             params![kind, turns],
         );
@@ -309,7 +311,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
         (Some("process"), Some("scope"), true),
         (Some("session"), Some("scope"), true),
     ] {
-        let result = connection.execute(
+        let result = connection.execute_once(
             "INSERT OR REPLACE INTO processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, change_seq, lifetime, lifetime_scope_kind, lifetime_scope_id, start_json, execution_json, lifecycle_json) VALUES ('process', 'host', 'engine', 0, 0, 0, 'until', ?1, ?2, '{}', '{}', '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"running\"}}')",
             params![kind, id],
         );
@@ -323,7 +325,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
         let owner = (mask & 1 != 0).then_some("owner");
         let run = (mask & 2 != 0).then_some(0);
         let call = (mask & 4 != 0).then_some("call");
-        let result = connection.execute(
+        let result = connection.execute_once(
             "INSERT OR REPLACE INTO model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call) VALUES ('session', 'turn:run', '0', 'call', 1, 0, ?1, ?2, ?3)",
             params![owner, run, call],
         );
@@ -335,7 +337,7 @@ fn nullable_domain_families_reject_missing_members_and_out_of_range_values() {
     }
     assert!(
         connection
-            .execute(
+            .execute_once(
                 "UPDATE model_call_records SET enclosing_run = -1 WHERE session_id = 'session'",
                 [],
             )
@@ -352,7 +354,7 @@ fn queued_work_checks_reject_illegal_vocabulary() {
         .expect("apply SQLite schema to CHECK witness");
     let assert_rejected = |statement: &str, constraint: &str| {
         let error = connection
-            .execute(statement, [])
+            .execute_once(statement, [])
             .expect_err("an illegal queued-work row must violate its schema CHECK");
         assert!(
             error.to_string().contains(constraint),
@@ -379,7 +381,7 @@ fn ingress_admission_binding_must_be_all_or_none() {
     // its step, or a step without its run, is unrepresentable (FIG-3927).
     for (fields, values) in [("admitted_run", "'root'"), ("admitted_by", "'admit'")] {
         let error = connection
-            .execute(
+            .execute_once(
                 &format!(
                     "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq,
                          input_id, session_id, ingress_json, state, input_json,
@@ -397,7 +399,7 @@ fn ingress_admission_binding_must_be_all_or_none() {
             "SQLite reported the wrong CHECK: {error}"
         );
         let error = connection
-            .execute(
+            .execute_once(
                 &format!(
                     "INSERT INTO queued_work_batches (enqueue_seq,
                          batch_id, session_id, delivery_policy, authority_json,
@@ -417,7 +419,7 @@ fn ingress_admission_binding_must_be_all_or_none() {
     }
     // A settled input is answered, so no run holds it.
     let error = connection
-        .execute(
+        .execute_once(
             "INSERT INTO pending_turn_inputs (origin_json, enqueue_seq,
                  input_id, session_id, ingress_json, state, input_json,
                  submission_digest, enqueued_at_ms,
@@ -462,10 +464,10 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
          ) VALUES ('\"submitted\"', ?1, ?2, 'session', ?3, '{\"scope\":\"next_turn\"}',
                    'deferred_next_turn', '{}', 'digest', 0)";
     connection
-        .execute(insert, rusqlite::params![1, "first", "key"])
+        .execute_once(insert, rusqlite::params![1, "first", "key"])
         .expect("admit the first row");
     let error = connection
-        .execute(insert, rusqlite::params![2, "second", "key"])
+        .execute_once(insert, rusqlite::params![2, "second", "key"])
         .expect_err("a duplicate (session_id, source_key) insert must abort");
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         without_sqlite_message(error),
@@ -481,7 +483,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
         "the duplicate source-key insert maps to the typed identity conflict: {mapped:?}"
     );
     let error = connection
-        .execute(insert, rusqlite::params![3, "first", "other-key"])
+        .execute_once(insert, rusqlite::params![3, "first", "other-key"])
         .expect_err("a duplicate input_id insert must abort");
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         without_sqlite_message(error),
@@ -495,7 +497,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     // The sequence primary key and NOT NULL failures are not input identities.
     for (sequence, input_id) in [(1, Some("third")), (4, None)] {
         let error = connection
-            .execute(insert, rusqlite::params![sequence, input_id, "third-key"])
+            .execute_once(insert, rusqlite::params![sequence, input_id, "third-key"])
             .expect_err("unrelated constraint must abort");
         let mapped = crate::sqlite_pending_turn_input_insert_error(
             without_sqlite_message(error),
@@ -522,10 +524,10 @@ fn queued_work_batches_reject_a_duplicate_source_key_insert() {
          ) VALUES (?1, ?2, 'session', 'key', 'earliest_safe_boundary',
                    '{}', 'digest', 0, json_object('type', 'session_command'))";
     connection
-        .execute(insert, rusqlite::params![1, "first"])
+        .execute_once(insert, rusqlite::params![1, "first"])
         .expect("admit the first row");
     let error = connection
-        .execute(insert, rusqlite::params![2, "second"])
+        .execute_once(insert, rusqlite::params![2, "second"])
         .expect_err("a duplicate (session_id, source_key) insert must abort");
     assert!(
         error.to_string().contains(
@@ -553,7 +555,7 @@ async fn a_file_store_set_runs_under_the_synchronous_mode_its_host_states() {
             .process_env_store()
             .conn
             .call(|connection| {
-                connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
+                connection.query_row_once("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
             })
             .await
             .expect("read the pragma");
@@ -586,12 +588,13 @@ async fn store_options_apply_connection_policy_on_connection_thread() {
         .conn
         .call(|connection| {
             Ok((
-                connection.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?,
-                connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row_once("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row_once("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?,
                 connection
-                    .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get::<_, i64>(0))?,
-                connection.query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))?,
-                connection.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?,
+                    .query_row_once("PRAGMA wal_autocheckpoint", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row_once("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))?,
+                connection
+                    .query_row_once("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?,
             ))
         })
         .await
@@ -1071,9 +1074,9 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
     store
         .conn
         .call(|conn| {
-            let pages: u64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+            let pages: u64 = conn.query_row_once("PRAGMA page_count", [], |row| row.get(0))?;
             let limit: u64 =
-                conn.query_row(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
+                conn.query_row_once(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
                     row.get(0)
                 })?;
             assert_eq!(limit, pages);
@@ -1100,7 +1103,7 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
     let receipts = store
         .conn
         .call(|conn| {
-            conn.query_row(
+            conn.query_row_once(
                 "SELECT count(*) FROM runtime_turn_commits WHERE session_id = 'real-full'",
                 [],
                 |row| row.get::<_, i64>(0),
@@ -1112,7 +1115,7 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
     store
         .conn
         .call(|conn| {
-            conn.query_row("PRAGMA max_page_count = 2147483646", [], |row| {
+            conn.query_row_once("PRAGMA max_page_count = 2147483646", [], |row| {
                 row.get::<_, u64>(0)
             })
         })
@@ -1145,7 +1148,7 @@ async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
     let receipts = reopened
         .conn
         .call(|conn| {
-            conn.query_row(
+            conn.query_row_once(
                 "SELECT count(*) FROM runtime_turn_commits WHERE session_id = 'real-full'",
                 [],
                 |row| row.get::<_, i64>(0),
@@ -1269,7 +1272,7 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     // anyway — restored from a pre-CHECK dump, or ALTERed by a host.
     raw.pragma_update(None, "ignore_check_constraints", true)
         .expect("permit manufacturing a row the DDL now forbids");
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_meta SET relation_kind = 'corrupt'
              WHERE session_id = ?1",
         params![request.session_id.as_str()],
@@ -1505,8 +1508,8 @@ fn partial_run_terminals_are_corruption_at_decode() {
     let session = SessionId::try_from("s".to_owned()).unwrap();
     let run = lash_vocabulary::identity::TurnId::try_from("r".to_owned()).unwrap();
     for bits in 0..8 {
-        conn.execute("DELETE FROM session_runs", []).unwrap();
-        conn.execute(
+        conn.execute_once("DELETE FROM session_runs", []).unwrap();
+        conn.execute_once(
             "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms) VALUES ('s', 'r', ?1, ?2, ?3)",
             rusqlite::params![(bits & 4 != 0).then_some("answered"), (bits & 2 != 0).then_some(r#"{"cause":"commands_applied"}"#), (bits & 1 != 0).then_some(1_i64)],
         ).unwrap();
@@ -1522,7 +1525,7 @@ fn partial_run_terminals_are_corruption_at_decode() {
             );
         }
     }
-    conn.execute("UPDATE session_runs SET terminal_kind = 'failed'", [])
+    conn.execute_once("UPDATE session_runs SET terminal_kind = 'failed'", [])
         .unwrap();
     assert!(matches!(
         crate::session_runs::run_terminal_conn(&conn, &session, &run),
@@ -1536,7 +1539,7 @@ async fn terminal_window_bytes(store: &SqliteStore) -> i64 {
     store
         .conn
         .call(|conn| {
-            conn.query_row(
+            conn.query_row_once(
                 "SELECT coalesce(sum(CASE WHEN terminal_window_revision IS NULL THEN 0 ELSE 8 END), 0)
                  FROM session_runs",
                 [],
@@ -1692,12 +1695,12 @@ async fn unchanged_config_is_stored_once_across_retained_revisions() {
         .conn
         .call(move |conn| {
             Ok((
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT count(*) FROM session_revisions WHERE session_id = ?1",
                     [session.as_str()],
                     |row| row.get::<_, i64>(0),
                 )?,
-                conn.query_row(
+                conn.query_row_once(
                     "SELECT count(*) FROM blobs WHERE hash = unhex(?1) AND content = ?2",
                     params![reference.as_str(), body],
                     |row| row.get::<_, i64>(0),
@@ -1725,9 +1728,9 @@ fn last_turns_pruning_work_and_statement_count_ignore_old_runs() {
             .expect("runs schema");
         conn.execute_batch(crate::durable::GRAPH_TABLES)
             .expect("graph schema");
-        conn.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('prune', 'root', 'last_turns', 2)", []).expect("policy");
+        conn.execute_once("INSERT INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('prune', 'root', 'last_turns', 2)", []).expect("policy");
         for revision in 1..=size {
-            conn.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES ('prune', ?1, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?2)", params![format!("run-{revision}"), revision]).expect("old run");
+            conn.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES ('prune', ?1, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?2)", params![format!("run-{revision}"), revision]).expect("old run");
         }
         for revision in size - 3..=size {
             crate::revisions::record_revision_conn(
@@ -1740,24 +1743,24 @@ fn last_turns_pruning_work_and_statement_count_ignore_old_runs() {
             )
             .expect("retained candidate");
         }
-        conn.execute("INSERT INTO session_head (session_id, head_revision, terminal_ordinal) VALUES ('prune', ?1, ?1)", [size]).expect("head");
+        conn.execute_once("INSERT INTO session_head (session_id, head_revision, terminal_ordinal) VALUES ('prune', ?1, ?1)", [size]).expect("head");
         for other in 0..size {
             let unrelated = SessionId::fixture(format!("unrelated-{other}"));
             crate::revisions::record_revision_conn(&conn, &unrelated, 0, None, None, "{}")
                 .expect("unrelated revision");
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)",
                 [unrelated.as_str()],
             )
             .expect("unrelated head");
         }
-        conn.execute(
+        conn.execute_once(
             "UPDATE session_revisions SET terminal_ordinal = head_revision WHERE session_id = 'prune'",
             [],
         )
         .expect("ordinals");
         let mut statement = conn
-            .prepare(
+            .statement_once(
                 crate::session_sql::session_sql()
                     .revisions
                     .prune_unretained
@@ -1860,7 +1863,7 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
     let original_blobs = store
         .conn
         .call(move |conn| {
-            conn.query_row(
+            conn.query_row_once(
                 "SELECT count(*) FROM blobs WHERE hash = unhex(?1)",
                 [original_root.as_str()],
                 |row| row.get::<_, i64>(0),
@@ -1903,7 +1906,7 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
     let bodies = store
         .conn
         .call(|conn| {
-            conn.prepare("SELECT result_json FROM runtime_turn_commits")?
+            conn.statement_once("SELECT result_json FROM runtime_turn_commits")?
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()
         })
@@ -2078,11 +2081,11 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
         ("other", "released", Some(1)),
     ] {
         match revision {
-            Some(revision) => conn.execute(
+            Some(revision) => conn.execute_once(
                 "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES (?1, ?2, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?3)",
                 params![session, run, revision],
             ),
-            None => conn.execute(
+            None => conn.execute_once(
                 "INSERT INTO session_runs (session_id, run) VALUES (?1, ?2)",
                 params![session, run],
             ),
@@ -2100,7 +2103,7 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
     )
     .expect("retained revision");
     let insert = |key: &str, session: &str, run: Option<&str>, settled: bool| {
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO tool_intent_submissions (replay_key, owner, execution_scope_id, tool_call_id, intent_index, payload_hash, submission_json, intent_json, settlement_json, owner_session_id, owner_run, admitted_at_ms) VALUES (?1, 'session:' || ?2, 'scope', 'call', 0, 'hash', '{}', '{\"payload\":true}', ?3, ?4, ?5, 0)",
             params![
                 key,
@@ -2128,7 +2131,7 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
     insert("other-session", "other", Some("released"), true);
 
     let payloads = |pattern: &str| -> i64 {
-        conn.query_row(
+        conn.query_row_once(
             "SELECT COUNT(*) FROM tool_intent_submissions WHERE replay_key LIKE ?1 AND intent_json IS NOT NULL",
             [pattern],
             |row| row.get(0),
@@ -2136,7 +2139,7 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
         .expect("count payloads")
     };
     let read_payload = |key: &str| -> Option<String> {
-        conn.query_row(
+        conn.query_row_once(
             crate::turn_ingress::tool_intent_sql()
                 .shared
                 .select_by_replay_key
@@ -2163,7 +2166,7 @@ fn settled_payload_release_is_bounded_and_takes_only_released_runs_payloads() {
     release(Some(SessionId::fixture("payloads")));
     assert_eq!(payloads("released-%"), 3, "one release drains one batch");
     let undrained: String = conn
-        .query_row(
+        .query_row_once(
             "SELECT replay_key FROM tool_intent_submissions WHERE replay_key LIKE 'released-%' AND intent_json IS NOT NULL ORDER BY replay_key LIMIT 1",
             [],
             |row| row.get(0),
@@ -2301,13 +2304,13 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
         .expect("head");
     let raw = Connection::open(&path).expect("corruption connection");
     let root: String = raw
-        .query_row(
+        .query_row_once(
             "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1",
             [owner.as_str()],
             |row| row.get(0),
         )
         .expect("owner root");
-    raw.execute(
+    raw.execute_once(
         "UPDATE session_revisions SET config_ref = unhex(?1) WHERE session_id = ?2",
         params![root, foreign.as_str()],
     )
@@ -2319,7 +2322,7 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
     assert!(
         matches!(error, StoreError::StoredDataCorrupt { record_kind: "SessionHeadMeta", message } if message.contains("row is keyed on session `config-foreign`"))
     );
-    raw.execute(
+    raw.execute_once(
         "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = unhex(?1)",
         [root],
     )

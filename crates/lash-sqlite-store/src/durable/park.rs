@@ -1,5 +1,6 @@
 //! Current park diagnostics and control redrive, committed under the actor fence.
 
+use crate::Prepare as _;
 use lash_durable::domain::{RedriveAnswer, RedriveRequest, SessionParksRedrive};
 use lash_durable::{ActorKey, ActorState, DurableInstant, Woken};
 use rusqlite::{Connection, OptionalExtension};
@@ -25,7 +26,7 @@ pub(super) fn redrive(
 ) -> Answer<(RedriveAnswer, Option<Woken>)> {
     let actor = request.actor.as_str();
     let park = tx
-        .prepare_cached(SQL.park.park_of.sql())?
+        .statement(SQL.park.park_of.sql())?
         .query_row([actor], |row| row.get::<_, Option<String>>(0))
         .optional()?
         .flatten();
@@ -33,7 +34,7 @@ pub(super) fn redrive(
         return Ok(Ok((RedriveAnswer::NotParked, None)));
     };
     let changed = tx
-        .prepare_cached(SQL.park.redrive_parked.sql())?
+        .statement(SQL.park.redrive_parked.sql())?
         .query_row(rusqlite::params![actor, now.0, park], |_| Ok(()))
         .optional()?;
     if changed.is_none() {
@@ -58,7 +59,7 @@ pub(super) fn redrive_session_parks(
     now: DurableInstant,
 ) -> Answer<(Vec<ActorKey>, Vec<Woken>)> {
     let parked = tx
-        .prepare_cached(SQL.park.parked_sessions.sql())?
+        .statement(SQL.park.parked_sessions.sql())?
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })?
@@ -70,7 +71,7 @@ pub(super) fn redrive_session_parks(
             continue;
         };
         let readied = tx
-            .prepare_cached(SQL.park.redrive_parked.sql())?
+            .statement(SQL.park.redrive_parked.sql())?
             .query_row(rusqlite::params![key, now.0, park], |_| Ok(()))
             .optional()?;
         if readied.is_none() {

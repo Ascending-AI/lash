@@ -1,6 +1,7 @@
 //! The durability engine's fencing laws (`lash_durable::laws`) over SQLite,
 //! in memory and in a file.
 
+use crate::Prepare as _;
 use lash_core_store::store::BlobRef;
 use std::sync::Arc;
 use std::time::Duration;
@@ -1077,7 +1078,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     set.session_store_factory()
         .conn
         .call(move |connection| {
-            connection.execute(
+            connection.execute_once(
                 "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
                 rusqlite::params![crate::codec::SqlHash(ordinary.as_str()), b"ordinary blob"],
             )?;
@@ -1131,9 +1132,11 @@ law!(
             let nodes = store
                 .connection_for_testing()
                 .call(|conn| {
-                    conn.query_row("SELECT count(*) FROM blobs WHERE encoding = 1", [], |row| {
-                        row.get::<_, i64>(0)
-                    })
+                    conn.query_row_once(
+                        "SELECT count(*) FROM blobs WHERE encoding = 1",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
                 })
                 .await
                 .unwrap();

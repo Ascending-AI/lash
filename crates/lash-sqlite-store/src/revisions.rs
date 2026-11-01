@@ -47,7 +47,7 @@ pub(crate) fn record_revision_conn(
     )?;
     let config_ref = root.blob_ref();
     let held: Option<String> = tx
-        .prepare_cached(session_sql().revisions.select_config_ref.sql())
+        .statement(session_sql().revisions.select_config_ref.sql())
         .and_then(|mut statement| {
             statement.query_row([session_id.as_str()], |row| {
                 crate::codec::hash_column(row, 0)
@@ -111,7 +111,7 @@ pub(crate) fn record_terminal_conn(
     let revision =
         i64::try_from(revision).map_err(|error| StoreError::Backend(error.to_string()))?;
     let ordinal: Option<i64> = tx
-        .prepare_cached(session_sql().revisions.mark_terminal.sql())
+        .statement(session_sql().revisions.mark_terminal.sql())
         .map_err(sqlite_error)?
         .query_row(params![session.as_str(), revision], |row| row.get(0))
         .optional()
@@ -144,7 +144,7 @@ pub(crate) fn release_unretained_conn(
 ) -> Result<(), StoreError> {
     let released = {
         let mut stmt = tx
-            .prepare_cached(session_sql().revisions.prune_unretained.sql())
+            .statement(session_sql().revisions.prune_unretained.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
@@ -200,7 +200,7 @@ pub(crate) fn retention_conn(
     conn: &Connection,
     session_id: &SessionId,
 ) -> Result<Option<Retention>, StoreError> {
-    conn.prepare_cached(session_sql().meta.select_retention.sql())
+    conn.statement(session_sql().meta.select_retention.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
@@ -218,7 +218,7 @@ pub(crate) fn retention_conn(
 fn require_session_conn(conn: &Connection, session_id: &SessionId) -> Result<(), StoreError> {
     persistence::ensure_session_not_deleted_conn(conn, session_id)?;
     let exists = conn
-        .prepare_cached(session_sql().meta_sqlite.exists_materialized.sql())
+        .statement(session_sql().meta_sqlite.exists_materialized.sql())
         .and_then(|mut statement| statement.query_row(params![session_id.as_str()], |_| Ok(())))
         .optional()
         .map_err(sqlite_error)?
@@ -235,7 +235,7 @@ fn require_session_conn(conn: &Connection, session_id: &SessionId) -> Result<(),
 /// The published pointer of `session_id`: its head.
 fn head_revision_conn(conn: &Connection, session_id: &SessionId) -> Result<u64, StoreError> {
     let head = conn
-        .prepare_cached(session_sql().revisions.select_head_revision.sql())
+        .statement(session_sql().revisions.select_head_revision.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], |row| row.get::<_, i64>(0))
         })
@@ -266,7 +266,7 @@ fn resolve_conn(
                 return of_run(&run);
             }
             let state: Option<String> = conn
-                .prepare_cached(
+                .statement(
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs
                         .select_state_by_id
@@ -323,7 +323,7 @@ fn revision_row_conn(
     let Ok(sql_revision) = i64::try_from(head_revision) else {
         return Ok(None);
     };
-    conn.prepare_cached(session_sql().revisions.select.sql())
+    conn.statement(session_sql().revisions.select.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str(), sql_revision], |row| {
                 Ok(RevisionRow {
@@ -345,7 +345,7 @@ fn resolved_pins_conn(
 ) -> Result<Vec<(Target, Option<u64>)>, StoreError> {
     let pins = {
         let mut stmt = conn
-            .prepare_cached(session_sql().pins.select_by_session.sql())
+            .statement(session_sql().pins.select_by_session.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |row| {
@@ -422,7 +422,7 @@ pub(crate) fn revisions_conn(
     require_session_conn(conn, session_id)?;
     let rows = {
         let mut stmt = conn
-            .prepare_cached(session_sql().revisions.select_by_session.sql())
+            .statement(session_sql().revisions.select_by_session.sql())
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |row| {

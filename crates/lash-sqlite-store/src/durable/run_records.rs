@@ -5,6 +5,7 @@
 //! fenced owner commit (or the mailbox commit), after the fence; a refusal
 //! rolls the whole commit back.
 
+use crate::Prepare as _;
 use std::sync::LazyLock;
 
 use lash_durable::domain::{
@@ -123,7 +124,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
         }
         RunFactWrite::Prune { owner, before } => {
             let pruned = tx
-                .prepare_cached(SQL.prune.sql())?
+                .statement(SQL.prune.sql())?
                 .query_map(
                     rusqlite::params![owner.stored(), integer::<i64>(before.0)?],
                     |row| crate::codec::hash_column(row, 0),
@@ -171,8 +172,8 @@ fn append_batch(tx: &Connection, epoch: Epoch, writes: &[&RunFactWrite]) -> Answ
             values.resize(values.len() + 4, rusqlite::types::Value::Null);
         }
         return Ok(Ok(tx
-            .prepare_cached(BATCH.append_small.sql())?
-            .query_map(rusqlite::params_from_iter(values), |_| Ok(()))?
+            .statement(BATCH.append_small.sql())?
+            .query_map(crate::statement::params_from_iter(values), |_| Ok(()))?
             .collect::<rusqlite::Result<Vec<_>>>()?
             .len()));
     }
@@ -181,7 +182,7 @@ fn append_batch(tx: &Connection, epoch: Epoch, writes: &[&RunFactWrite]) -> Answ
         Err(error) => return Ok(Err(error)),
     };
     Ok(Ok(tx
-        .prepare_cached(BATCH.append.sql())?
+        .statement(BATCH.append.sql())?
         .query_map(
             rusqlite::params![owner.stored(), integer::<i64>(run.0)?, epoch.0, rows],
             |_| Ok(()),
@@ -243,7 +244,7 @@ fn ordinal_taken(
     ordinal: u64,
 ) -> rusqlite::Result<bool> {
     Ok(tx
-        .prepare_cached(SQL.ordinal_taken.sql())?
+        .statement(SQL.ordinal_taken.sql())?
         .query_row(
             rusqlite::params![owner_key, integer::<i64>(run.0)?, integer::<i64>(ordinal)?],
             |_| Ok(()),
@@ -296,7 +297,7 @@ fn refused(
 /// Delete every fact of the owner stored as `owner_key`, answering the
 /// RoundFact nodes they held: the caller's to peel.
 pub(super) fn delete_owner(tx: &Connection, owner_key: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_owner.sql())?
+    tx.statement(SQL.delete_owner.sql())?
         .query_map([owner_key], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
@@ -304,7 +305,7 @@ pub(super) fn delete_owner(tx: &Connection, owner_key: &str) -> rusqlite::Result
 /// Delete every fact whose owner key starts with `prefix`, answering the
 /// RoundFact nodes they held: the caller's to peel.
 pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_under.sql())?
+    tx.statement(SQL.delete_under.sql())?
         .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
@@ -315,7 +316,7 @@ pub(super) fn delete_turn(
     session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.delete_turn.sql())?
+    tx.statement(SQL.delete_turn.sql())?
         .query_map(
             rusqlite::params![
                 OwnerKey::Turn(session.clone(), run.clone()).stored(),
@@ -352,9 +353,9 @@ fn read_limited(
             std::borrow::Cow::Owned(format!("{sql} LIMIT ?{}", params.len()))
         }
     };
-    let mut statement = tx.prepare_cached(&sql)?;
+    let mut statement = tx.statement(&sql)?;
     let rows = statement
-        .query_map(rusqlite::params_from_iter(params), |row| {
+        .query_map(crate::statement::params_from_iter(params), |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
@@ -479,7 +480,7 @@ pub(super) fn request_call_cancel(
     use lash_durable::domain::ToolCallCancelAnswer as A;
     let turn = OwnerKey::Turn(request.session.clone(), request.run.clone()).stored();
     let decision = tx
-        .prepare_cached(SQL.call_decision.sql())?
+        .statement(SQL.call_decision.sql())?
         .query_row(rusqlite::params![turn, request.call.as_str()], |row| {
             row.get::<_, String>(0)
         })
@@ -492,7 +493,7 @@ pub(super) fn request_call_cancel(
         _ => {}
     }
     let accepted = tx
-        .prepare_cached(SQL.call_cancel.sql())?
+        .statement(SQL.call_cancel.sql())?
         .query_row(
             rusqlite::params![
                 request.session.as_str(),
@@ -563,13 +564,13 @@ mod tests {
             OwnerKey::Process(lash_vocabulary::identity::ProcessId::fixture("other-owner")),
         ];
         let root = [7_u8; 32];
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 1)",
             [root.as_slice()],
         )
         .unwrap();
         for owner in &owners {
-            conn.execute(
+            conn.execute_once(
                 "INSERT INTO run_records VALUES (?1, 1, 0, 'admit', NULL, ?2, 1)",
                 rusqlite::params![owner.stored(), root.as_slice()],
             )
@@ -586,7 +587,7 @@ mod tests {
             vec![lash_core_store::checkpoint_graph::NodeId(root).to_hex(); 3]
         );
         let remaining = conn
-            .prepare("SELECT owner_key FROM run_records ORDER BY owner_key")
+            .statement_once("SELECT owner_key FROM run_records ORDER BY owner_key")
             .unwrap()
             .query_map([], |row| row.get::<_, String>(0))
             .unwrap()
@@ -645,11 +646,11 @@ mod tests {
         store
             .conn
             .call(move |conn| {
-                conn.execute(
+                conn.execute_once(
                     "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
                     rusqlite::params![root.0.as_slice(), node.as_ref()],
                 )?;
-                conn.query_row(
+                conn.query_row_once(
                     "INSERT INTO run_records
                         (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
@@ -707,12 +708,12 @@ mod tests {
                 let root = staging
                     .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
                     .expect("fact node");
-                conn.execute(
+                conn.execute_once(
                     "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
                     rusqlite::params![root.0.as_slice(), staging.nodes()[&root].bytes.as_ref()],
                 )
                 .expect("root blob");
-                conn.query_row(
+                conn.query_row_once(
                     "INSERT INTO run_records
                         (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
@@ -731,7 +732,7 @@ mod tests {
             }
         }
         for (id, node) in staging.nodes() {
-            conn.execute("INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1) ON CONFLICT DO NOTHING", rusqlite::params![id.0.as_slice(), node.bytes.as_ref()]).expect("blob");
+            conn.execute_once("INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1) ON CONFLICT DO NOTHING", rusqlite::params![id.0.as_slice(), node.bytes.as_ref()]).expect("blob");
         }
         super::super::graph::WALK_COUNTS.with_borrow_mut(|counts| *counts = Default::default());
         let recovered = facts(
@@ -858,7 +859,7 @@ mod tests {
                         .expect("fact node");
                     child = Some(root.child_ref());
                     if level == branch_depth - 1 {
-                        conn.execute(
+                        conn.execute_once(
                             "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
                             rusqlite::params![
                                 root.0.as_slice(),
@@ -866,7 +867,7 @@ mod tests {
                             ],
                         )
                         .expect("root body");
-                        conn.execute(
+                        conn.execute_once(
                             "INSERT INTO run_records VALUES (?1, 1, ?2, 'admit', NULL, ?3, 1)",
                             rusqlite::params![owner.stored(), ordinal, root.0.as_slice()],
                         )
@@ -875,7 +876,7 @@ mod tests {
                 }
             }
             for (id, node) in staging.nodes() {
-                conn.execute(
+                conn.execute_once(
                     "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1) ON CONFLICT DO NOTHING",
                     rusqlite::params![id.0.as_slice(), node.bytes.as_ref()],
                 )
@@ -961,7 +962,7 @@ mod tests {
             .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
             .expect("first root");
         let bytes = &staging.nodes()[&first].bytes;
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs VALUES (?1, ?2, 1)",
             rusqlite::params![first.0.as_slice(), bytes.as_ref()],
         )
@@ -969,7 +970,7 @@ mod tests {
         let later = NodeId([0; 32]);
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
             .expect("foreign corruption");
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs VALUES (?1, x'00', 7)",
             [later.0.as_slice()],
         )
@@ -999,7 +1000,7 @@ mod tests {
                 limit: 0
             })
         );
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs VALUES (?1, x'00', 1)",
             [missing.0.as_slice()],
         )
@@ -1013,7 +1014,7 @@ mod tests {
                 limit: 1
             })
         );
-        conn.execute(
+        conn.execute_once(
             "UPDATE blobs SET encoding = 9 WHERE hash = ?1",
             [missing.0.as_slice()],
         )
@@ -1029,7 +1030,7 @@ mod tests {
         );
         // Graph-only readers preserve the same encoding refusal, without
         // asking SQLite to convert a skipped opaque payload to a blob.
-        conn.execute(
+        conn.execute_once(
             "UPDATE blobs SET content = 'not a blob' WHERE hash = ?1",
             [missing.0.as_slice()],
         )
@@ -1037,7 +1038,7 @@ mod tests {
         assert!(
             matches!(super::super::graph::graph_closure(&conn, first, &limits).expect("read"), Err(refusal) if refusal == expected)
         );
-        conn.execute(
+        conn.execute_once(
             "UPDATE blobs SET encoding = 0 WHERE hash = ?1",
             [missing.0.as_slice()],
         )
@@ -1081,7 +1082,7 @@ mod tests {
             open_roots: Default::default(),
         };
         let record = lash_core_store::checkpoint_graph::NodeId([7; 32]);
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 1)",
             [record.0.as_slice()],
         )
@@ -1099,13 +1100,13 @@ mod tests {
             "an oversized identity must refuse its write"
         );
         assert_eq!(
-            conn.query_row("SELECT count(*) FROM run_records", [], |row| row
+            conn.query_row_once("SELECT count(*) FROM run_records", [], |row| row
                 .get::<_, i64>(0))
                 .expect("count"),
             0
         );
 
-        conn.execute(
+        conn.execute_once(
             "INSERT INTO run_records
                  (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
              VALUES (?1, -1, 0, 'admit', NULL, ?2, 1)",

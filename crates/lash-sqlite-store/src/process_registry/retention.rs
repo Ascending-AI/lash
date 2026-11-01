@@ -14,7 +14,7 @@ pub(super) async fn filter_unregistered_process_ids(
         .call(move |conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare(
+                    .statement_once(
                         process_sql()
                             .process_sqlite
                             .classify_unregistered_candidates
@@ -47,7 +47,7 @@ pub(super) async fn filter_tombstoned_process_ids(
         .call(move |conn| {
             Ok((|| {
                 let mut stmt = conn
-                    .prepare(
+                    .statement_once(
                         process_sql()
                             .process_sqlite
                             .classify_tombstoned_candidates

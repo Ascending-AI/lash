@@ -2,6 +2,7 @@
 //! connection thread behind a write that holds it, so the writes form one
 //! batch deterministically when it lets go.
 
+use crate::Prepare as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -99,7 +100,7 @@ impl World {
 fn committed(outside: &Mutex<rusqlite::Connection>) -> Vec<String> {
     let outside = outside.lock().expect("reader");
     let mut statement = outside
-        .prepare("SELECT member FROM rows ORDER BY rowid")
+        .statement_once("SELECT member FROM rows ORDER BY rowid")
         .expect("read rows");
     statement
         .query_map([], |row| row.get(0))
@@ -109,7 +110,7 @@ fn committed(outside: &Mutex<rusqlite::Connection>) -> Vec<String> {
 }
 
 fn insert(tx: &FencedTx<'_>, member: &str) -> rusqlite::Result<()> {
-    tx.execute("INSERT INTO rows (member) VALUES (?1)", [member])
+    tx.execute_once("INSERT INTO rows (member) VALUES (?1)", [member])
         .map(drop)
 }
 
@@ -274,7 +275,7 @@ async fn a_member_refusal_or_failure_leaves_its_siblings_committed_in_order() {
             ]
             .map(|sql| {
                 connection
-                    .prepare_cached(sql)
+                    .statement(sql)
                     .map(|statement| statement.get_status(rusqlite::StatementStatus::Run))
             })
             .into_iter()
@@ -346,13 +347,13 @@ async fn an_outer_commit_failure_fails_every_member() {
 /// transaction, not only the member's savepoint. Capacity is restored before
 /// the body returns, so the members after it can commit.
 fn exhaust(tx: &FencedTx<'_>) -> rusqlite::Result<String> {
-    let pages: u64 = tx.query_row("PRAGMA page_count", [], |row| row.get(0))?;
-    tx.query_row(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
+    let pages: u64 = tx.query_row_once("PRAGMA page_count", [], |row| row.get(0))?;
+    tx.query_row_once(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
         row.get::<_, u64>(0)
     })?;
     let full = insert(tx, &"x".repeat(524_288)).expect_err("SQLite must exhaust its pages");
     let ended = tx.is_autocommit();
-    tx.query_row("PRAGMA max_page_count = 2147483646", [], |row| {
+    tx.query_row_once("PRAGMA max_page_count = 2147483646", [], |row| {
         row.get::<_, u64>(0)
     })?;
     Ok(format!("ended={ended} {full}"))
@@ -446,7 +447,7 @@ async fn batch_bounds_cap_members_and_rows() {
             world.queue(
                 move |tx| {
                     let started_at: i64 =
-                        tx.query_row("SELECT COUNT(*) FROM rows", [], |row| row.get(0))?;
+                        tx.query_row_once("SELECT COUNT(*) FROM rows", [], |row| row.get(0))?;
                     batches
                         .lock()
                         .expect("batches")
@@ -560,7 +561,7 @@ async fn a_lone_write_is_a_plain_transaction_with_no_wait() {
 /// Leave `session` heading revision 7 with no such revision: a foreign key
 /// SQLite defers to the outermost `COMMIT`.
 fn dangle(tx: &FencedTx<'_>, session: &str) -> rusqlite::Result<TxOutcome<&'static str>> {
-    tx.execute(
+    tx.execute_once(
         "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 7)",
         [session],
     )?;
@@ -571,7 +572,7 @@ fn dangle(tx: &FencedTx<'_>, session: &str) -> rusqlite::Result<TxOutcome<&'stat
 fn heads(outside: &Mutex<rusqlite::Connection>) -> Vec<String> {
     let outside = outside.lock().expect("reader");
     let mut statement = outside
-        .prepare("SELECT session_id FROM session_head ORDER BY session_id")
+        .statement_once("SELECT session_id FROM session_head ORDER BY session_id")
         .expect("read heads");
     statement
         .query_map([], |row| row.get(0))
@@ -751,7 +752,7 @@ async fn a_memory_publication_queues_behind_its_reader_snapshot() {
         reader
             .read(move |tx| {
                 let count: u64 =
-                    tx.query_row("SELECT count(*) FROM observed", [], |row| row.get(0))?;
+                    tx.query_row_once("SELECT count(*) FROM observed", [], |row| row.get(0))?;
                 entered.send(count).expect("reader entered");
                 let _ = released.recv();
                 Ok(())
@@ -779,7 +780,7 @@ async fn a_memory_publication_queues_behind_its_reader_snapshot() {
             .expect("publication after reader"),
     }
     let count: u64 = writer
-        .read(|tx| tx.query_row("SELECT count(*) FROM observed", [], |row| row.get(0)))
+        .read(|tx| tx.query_row_once("SELECT count(*) FROM observed", [], |row| row.get(0)))
         .await
         .expect("published row");
     assert_eq!(

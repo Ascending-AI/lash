@@ -21,6 +21,7 @@
 //! boot's liveness lock, a file lock its listener holds
 //! ([`crate::liveness_locks`]).
 
+use crate::Prepare as _;
 #[cfg(feature = "testing")]
 mod test_writer;
 
@@ -224,7 +225,7 @@ pub(crate) fn engine_rows_for_testing(conn: &Connection) -> rusqlite::Result<Vec
         "SELECT 'turn_cancel_requests ' || session_id || ' ' || turn_id FROM turn_cancel_requests",
         "SELECT 'actors ' || actor_key || ' ' || state FROM actors",
     ] {
-        let mut statement = conn.prepare(sql)?;
+        let mut statement = conn.statement_once(sql)?;
         let read = statement
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -240,7 +241,7 @@ pub(crate) fn root_leases_for_testing(
     conn: &Connection,
     actor: &ActorKey,
 ) -> rusqlite::Result<Vec<(lash_durable::domain::pages::RootLeaseId, DurableInstant)>> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.statement_once(
         "SELECT lease_id, expires_at_ms FROM root_leases WHERE actor_key = ?1 ORDER BY lease_id",
     )?;
     statement
@@ -455,7 +456,7 @@ impl SqliteDurableStore {
                     Err(error) => return refuse(node_wakes::lock_failure(&error)),
                 };
                 let deleted = tx
-                    .prepare_cached(SQL.node.delete_boot.sql())?
+                    .statement(SQL.node.delete_boot.sql())?
                     .query_row([boot.node.as_str(), boot.boot.as_str()], |_| Ok(()))
                     .optional()?;
                 if deleted.is_none() {
@@ -486,7 +487,7 @@ impl SqliteDurableStore {
 
 /// Every registered boot, oldest node first.
 fn registered_boots(tx: &Connection) -> rusqlite::Result<Vec<Owner>> {
-    tx.prepare_cached(SQL.sqlite.boots.sql())?
+    tx.statement(SQL.sqlite.boots.sql())?
         .query_map([], |row| {
             Ok(Owner {
                 node: NodeId::new(row.get::<_, String>(0)?),
@@ -572,7 +573,7 @@ fn release_owned_by(
     owner: &Owner,
     now: DurableInstant,
 ) -> rusqlite::Result<Result<Vec<(ActorKey, Epoch)>, DurableError>> {
-    let mut statement = tx.prepare_cached(SQL.actor.release_owned_by.sql())?;
+    let mut statement = tx.statement(SQL.actor.release_owned_by.sql())?;
     let rows = statement
         .query_map(
             rusqlite::params![owner.node.as_str(), owner.boot.as_str(), now.0],
@@ -594,7 +595,7 @@ fn fenced(
     expected: StateRevision,
 ) -> rusqlite::Result<DurableError> {
     let current = tx
-        .prepare_cached(SQL.actor.epoch_of.sql())?
+        .statement(SQL.actor.epoch_of.sql())?
         .query_row([actor.as_str()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -630,7 +631,7 @@ fn node_live(tx: &Connection, node: &Owner) -> rusqlite::Result<bool> {
 
 /// Whether `node` is draining, or `None` when it holds no lease.
 fn node_draining(tx: &Connection, node: &Owner) -> rusqlite::Result<Option<bool>> {
-    tx.prepare_cached(SQL.sqlite.node_live.sql())?
+    tx.statement(SQL.sqlite.node_live.sql())?
         .query_row([node.node.as_str(), node.boot.as_str()], |row| {
             row.get::<_, bool>(0)
         })
@@ -658,7 +659,7 @@ pub(crate) fn wake_within(
         SQL.actor.wake.sql()
     };
     let woke = tx
-        .prepare_cached(statement)?
+        .statement(statement)?
         .query_row(rusqlite::params![actor.as_str(), now.0], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -705,7 +706,7 @@ pub(crate) fn bump_unclaimed_session(
     )
     .map_err(crate::sqlite_error)?;
     let claimed_epoch = tx
-        .query_row(SQL.actor.claimed_epoch.sql(), [actor.as_str()], |row| {
+        .query_row_once(SQL.actor.claimed_epoch.sql(), [actor.as_str()], |row| {
             row.get(0)
         })
         .optional()
@@ -718,7 +719,7 @@ pub(crate) fn bump_unclaimed_session(
         },
     )?;
     let bumped = tx
-        .query_row(SQL.actor.bump_unclaimed.sql(), [actor.as_str()], |row| {
+        .query_row_once(SQL.actor.bump_unclaimed.sql(), [actor.as_str()], |row| {
             row.get::<_, i64>(0)
         })
         .optional()
@@ -746,7 +747,7 @@ pub(crate) fn wake_session_within(
         Ok(actor) => actor,
         Err(error) => return Ok(Err(corrupt("session actor key", &error.to_string()))),
     };
-    tx.prepare_cached(SQL.actor.create.sql())?
+    tx.statement(SQL.actor.create.sql())?
         .query_row(
             rusqlite::params![
                 actor.as_str(),
@@ -773,7 +774,7 @@ pub(crate) fn wake_session_tx(
     at_ms: u64,
 ) -> Result<Option<Woken>, lash_core_store::store::StoreError> {
     let (meta, deleted): (i64, i64) = tx
-        .prepare_cached(SQL.session_mail.standing.sql())
+        .statement(SQL.session_mail.standing.sql())
         .and_then(|mut statement| {
             statement.query_row([session.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
         })
@@ -894,7 +895,7 @@ fn apply_mail_domain(
 
 fn refusal_for_unwakeable(tx: &Connection, actor: &ActorKey) -> rusqlite::Result<MailRefusal> {
     let state = tx
-        .prepare_cached(SQL.actor.epoch_of.sql())?
+        .statement(SQL.actor.epoch_of.sql())?
         .query_row([actor.as_str()], |row| row.get::<_, String>(1))
         .optional()?;
     Ok(match state {
@@ -918,7 +919,7 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
         match write {
             MailWrite::CreateActor { actor, formats } => {
                 let created = tx
-                    .prepare_cached(SQL.actor.create.sql())?
+                    .statement(SQL.actor.create.sql())?
                     .query_row(
                         rusqlite::params![
                             actor.as_str(),
@@ -998,7 +999,7 @@ impl DurableStore for SqliteDurableStore {
         let answer = self
             .write(CommitLabel::NODE_REGISTER, move |tx, now| {
                 let boots = tx
-                    .prepare_cached(SQL.node.delete_boots.sql())?
+                    .statement(SQL.node.delete_boots.sql())?
                     .query_map([spec.node.as_str()], |row| row.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 for boot in boots {
@@ -1047,7 +1048,7 @@ impl DurableStore for SqliteDurableStore {
         let ttl = node.ttl_millis;
         self.write(CommitLabel::HEARTBEAT, move |tx, now| {
             let renewed = tx
-                .prepare_cached(SQL.node.renew.sql())?
+                .statement(SQL.node.renew.sql())?
                 .query_row(
                     rusqlite::params![
                         owner.node.as_str(),
@@ -1076,7 +1077,7 @@ impl DurableStore for SqliteDurableStore {
                 });
             }
             let dead = tx
-                .prepare_cached(SQL.node.delete_expired.sql())?
+                .statement(SQL.node.delete_expired.sql())?
                 .query_map(
                     rusqlite::params![now.0, reaper.node.as_str(), reaper.boot.as_str()],
                     |row| {
@@ -1112,7 +1113,7 @@ impl DurableStore for SqliteDurableStore {
         let owner = node.owner.clone();
         self.write(CommitLabel::NODE_RELEASE, move |tx, now| {
             let deleted = tx
-                .prepare_cached(SQL.node.delete_boot.sql())?
+                .statement(SQL.node.delete_boot.sql())?
                 .query_row([owner.node.as_str(), owner.boot.as_str()], |_| Ok(()))
                 .optional()?;
             if deleted.is_none() {
@@ -1169,7 +1170,7 @@ impl DurableStore for SqliteDurableStore {
         let lease = node.clone();
         self.read(move |tx| {
             let rows = tx
-                .prepare_cached(SQL.actor.owned_by.sql())?
+                .statement(SQL.actor.owned_by.sql())?
                 .query_map([owner.node.as_str(), owner.boot.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1205,7 +1206,7 @@ impl DurableStore for SqliteDurableStore {
         let owner = node.owner.clone();
         self.write(CommitLabel::NODE_DRAIN, move |tx, _now| {
             let marked = tx
-                .prepare_cached(SQL.node.mark_draining.sql())?
+                .statement(SQL.node.mark_draining.sql())?
                 .query_row([owner.node.as_str(), owner.boot.as_str()], |_| Ok(()))
                 .optional()?;
             match marked {
@@ -1253,7 +1254,7 @@ impl DurableStore for SqliteDurableStore {
             lash_durable::ActorKind::Process => None,
         };
         self.query(move |connection| {
-            let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
+            let mut statement = connection.statement(SQL.sqlite.open.sql())?;
             let mut rows = statement.query(rusqlite::params![
                 actor.as_str(),
                 session
@@ -1330,7 +1331,7 @@ impl DurableStore for SqliteDurableStore {
         let actor = actor.clone();
         self.query(move |connection| {
             let row = connection
-                .prepare_cached(SQL.actor.authority.sql())?
+                .statement(SQL.actor.authority.sql())?
                 .query_row([actor.as_str()], |row| {
                     Ok((
                         Epoch(row.get(0)?),
@@ -1361,7 +1362,7 @@ impl DurableStore for SqliteDurableStore {
         let actor = actor.clone();
         let at = self.instant()?;
         self.query(move |connection| {
-            let mut statement = connection.prepare_cached(SQL.sqlite.open_retained.sql())?;
+            let mut statement = connection.statement(SQL.sqlite.open_retained.sql())?;
             let mut rows = statement.query(rusqlite::params![
                 actor.as_str(),
                 (actor.kind() == lash_durable::ActorKind::Session).then(|| actor.id()),
@@ -1494,7 +1495,7 @@ impl DurableStore for SqliteDurableStore {
         let actor = actor.clone();
         self.read(move |tx| {
             let row = tx
-                .prepare_cached(SQL.actor.snapshot.sql())?
+                .statement(SQL.actor.snapshot.sql())?
                 .query_row([actor.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1562,7 +1563,7 @@ impl DurableStore for SqliteDurableStore {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         self.read(move |tx| {
             let keys = tx
-                .prepare_cached(SQL.actor.in_formats.sql())?
+                .statement(SQL.actor.in_formats.sql())?
                 .query_map(rusqlite::params![formats, after, limit], |row| {
                     row.get::<_, String>(0)
                 })?

@@ -277,7 +277,7 @@ pub(crate) fn select_session_head_row(
     conn: &Connection,
     session_id: &SessionId,
 ) -> Result<Option<SessionHeadRow>, StoreError> {
-    conn.prepare_cached(crate::session_sql::session_sql().head.select_meta.sql())
+    conn.statement(crate::session_sql::session_sql().head.select_meta.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], SessionHeadRow::from_row)
         })

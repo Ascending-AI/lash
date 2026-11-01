@@ -22,13 +22,9 @@ thread_local! {
 struct Before {
     work: SqliteWork,
     changes: i64,
+    /// The statement's expanded text length, when its start knew it.
     #[cfg(feature = "perf-witness")]
-    binding: Option<BindingBytes>,
-}
-#[cfg(feature = "perf-witness")]
-struct BindingBytes {
-    expanded: usize,
-    value: Option<u64>,
+    expanded: Option<usize>,
 }
 
 // SQLite owns each callback's statement and connection for its entire duration.
@@ -84,8 +80,6 @@ unsafe fn expanded_sql(statement: *mut ffi::sqlite3_stmt) -> *mut std::ffi::c_ch
 #[derive(Clone, Copy)]
 struct BindingLengths {
     sql: &'static str,
-    #[cfg(feature = "perf-witness")]
-    value_bytes: u64,
     literal_bytes: u64,
     #[cfg(feature = "perf-witness")]
     expanded_bytes: usize,
@@ -109,27 +103,19 @@ impl Drop for TextBindings {
 /// Supply the lengths of one-use text parameters while their statement runs.
 pub(crate) fn text_bindings(sql: &'static str, values: &[&str]) -> TextBindings {
     debug_assert_eq!(placeholders(sql).count(), values.len());
-    let (value_bytes, literal_bytes) =
-        values
-            .iter()
-            .fold((0_u64, 0_u64), |(value, literal), text| {
-                // sqlite3_expanded_sql stops TEXT at its first NUL and doubles
-                // apostrophes. Keep those existing accounting semantics exactly.
-                let text = text.split('\0').next().unwrap_or_default();
-                let len = text.len() as u64;
-                let quotes = text.bytes().filter(|byte| *byte == b'\'').count() as u64;
-                (value + len, literal + len + quotes + 2)
-            });
+    let literal_bytes = values.iter().fold(0_u64, |literal, text| {
+        // sqlite3_expanded_sql stops TEXT at its first NUL and doubles
+        // apostrophes. Keep those existing accounting semantics exactly.
+        let text = text.split('\0').next().unwrap_or_default();
+        let quotes = text.bytes().filter(|byte| *byte == b'\'').count() as u64;
+        literal + text.len() as u64 + quotes + 2
+    });
     let bindings = BindingLengths {
         sql,
-        #[cfg(feature = "perf-witness")]
-        value_bytes,
         literal_bytes,
         #[cfg(feature = "perf-witness")]
         expanded_bytes: sql.len() - placeholder_bytes(sql) + literal_bytes as usize,
     };
-    #[cfg(not(feature = "perf-witness"))]
-    let _ = value_bytes;
     TextBindings(
         KNOWN_BINDINGS.with(|current| current.replace(Some(bindings))),
         std::marker::PhantomData,
@@ -149,15 +135,11 @@ pub(crate) fn with_blob_bindings<R>(
     lengths: impl IntoIterator<Item = usize>,
     work: impl FnOnce() -> R,
 ) -> R {
-    let (_value_bytes, literal_bytes) = lengths
+    let literal_bytes = lengths
         .into_iter()
-        .fold((0_u64, 0_u64), |(value, literal), len| {
-            (value + len as u64, literal + 2 * len as u64 + 3)
-        });
+        .fold(0_u64, |literal, len| literal + 2 * len as u64 + 3);
     let bindings = BindingLengths {
         sql,
-        #[cfg(feature = "perf-witness")]
-        value_bytes: _value_bytes,
         literal_bytes,
         #[cfg(feature = "perf-witness")]
         expanded_bytes: sql.len() - placeholder_bytes(sql) + literal_bytes as usize,
@@ -287,31 +269,21 @@ unsafe extern "C" fn trace(
                 }
                 if let Some(window) = &window {
                     #[cfg(feature = "perf-witness")]
-                    let mut binding = None;
+                    let mut expanded_bytes = None;
                     window.statement(&sql);
                     if let Some(known) = known_bindings(&sql) {
                         window.payload(&sql, 0, known.literal_bytes, 0);
                         #[cfg(feature = "perf-witness")]
                         {
-                            binding = Some(BindingBytes {
-                                expanded: known.expanded_bytes,
-                                value: Some(known.value_bytes),
-                            });
+                            expanded_bytes = Some(known.expanded_bytes);
                         }
                     } else {
                         let expanded = expanded_sql(statement);
                         if !expanded.is_null() {
-                            let expanded_bytes = CStr::from_ptr(expanded).to_bytes();
-                            let bytes = expanded_bytes.len();
+                            let bytes = CStr::from_ptr(expanded).to_bytes().len();
                             #[cfg(feature = "perf-witness")]
-                            if lash_core_ids::perf_witness::collecting() {
-                                let value = (ffi::sqlite3_stmt_readonly(statement) == 0
-                                    && ffi::sqlite3_bind_parameter_count(statement) > 0)
-                                    .then(|| bound_value_bytes(&sql, expanded_bytes));
-                                binding = Some(BindingBytes {
-                                    expanded: bytes,
-                                    value,
-                                });
+                            {
+                                expanded_bytes = Some(bytes);
                             }
                             window.payload(
                                 &sql,
@@ -333,7 +305,7 @@ unsafe extern "C" fn trace(
                                     statement,
                                 )),
                                 #[cfg(feature = "perf-witness")]
-                                binding,
+                                expanded: expanded_bytes,
                             },
                         )
                     });
@@ -384,52 +356,19 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, affected.max(0) as u64, 0, 0);
                 }
                 #[cfg(feature = "perf-witness")]
-                let mut binding = before.and_then(|before| before.binding).or_else(|| {
-                    known_bindings(&sql).map(|known| BindingBytes {
-                        expanded: known.expanded_bytes,
-                        value: Some(known.value_bytes),
-                    })
-                });
-                #[cfg(feature = "perf-witness")]
-                if lash_core_ids::perf_witness::collecting()
-                    && ffi::sqlite3_stmt_readonly(statement) == 0
-                    && ffi::sqlite3_bind_parameter_count(statement) > 0
-                {
-                    let value = binding
-                        .as_ref()
-                        .and_then(|binding| binding.value)
-                        .or_else(|| {
-                            let expanded = expanded_sql(statement);
-                            if expanded.is_null() {
-                                return None;
-                            }
-                            let bytes = CStr::from_ptr(expanded).to_bytes();
-                            let value = bound_value_bytes(&sql, bytes);
-                            binding = Some(BindingBytes {
-                                expanded: bytes.len(),
-                                value: Some(value),
-                            });
-                            ffi::sqlite3_free(expanded.cast());
-                            Some(value)
-                        });
-                    if let Some(value) = value {
-                        lash_core_ids::perf_witness::record_sql_bytes_written(value);
-                    }
-                }
-                #[cfg(feature = "perf-witness")]
                 if lash_core_ids::perf_witness::sql_receipts_enabled() {
-                    let bytes = binding.map_or_else(
-                        || {
-                            let expanded = expanded_sql(statement);
-                            if expanded.is_null() {
-                                return 0;
-                            }
-                            let bytes = CStr::from_ptr(expanded).to_bytes().len();
-                            ffi::sqlite3_free(expanded.cast());
-                            bytes
-                        },
-                        |binding| binding.expanded,
-                    );
+                    let expanded = before
+                        .and_then(|before| before.expanded)
+                        .or_else(|| known_bindings(&sql).map(|known| known.expanded_bytes));
+                    let bytes = expanded.unwrap_or_else(|| {
+                        let expanded = expanded_sql(statement);
+                        if expanded.is_null() {
+                            return 0;
+                        }
+                        let bytes = CStr::from_ptr(expanded).to_bytes().len();
+                        ffi::sqlite3_free(expanded.cast());
+                        bytes
+                    });
                     lash_core_ids::perf_witness::record_sql_statement_bytes(&sql, bytes);
                 } else {
                     lash_core_ids::perf_witness::record_sql_statement(&sql);
@@ -448,43 +387,14 @@ fn placeholder_bytes(sql: &str) -> usize {
     placeholders(sql).map(|span| span.len()).sum()
 }
 
-/// The bytes of the values bound to `sql`, read from its `expanded` text:
-/// a text's own bytes (not its quoting), a blob's bytes (not its hex
-/// spelling), eight for a number and none for NULL. Every use of a repeated
-/// parameter counts. Unlike WAL pages, this does not depend on where the
-/// rows land in the B-trees, so the same writes count the same every run.
+/// The spelling length of the SQL literal `text` starts with, as
+/// `sqlite3_expanded_sql` writes it.
 #[cfg(feature = "perf-witness")]
-fn bound_value_bytes(sql: &str, expanded: &[u8]) -> u64 {
-    let mut total = 0;
-    // Expanded text is the original with each placeholder spelled as its
-    // literal, so text between placeholders is identical in both.
-    let mut original = 0;
-    let mut at = 0;
-    for span in placeholders(sql) {
-        at += span.start - original;
-        original = span.end;
-        let Some(rest) = expanded.get(at..) else {
-            break;
-        };
-        let (spelled, value) = literal(rest);
-        at += spelled;
-        total += value;
-    }
-    total
-}
-
-/// The spelling length and value bytes of the SQL literal `text` starts
-/// with, as `sqlite3_expanded_sql` writes it.
-#[cfg(feature = "perf-witness")]
-fn literal(text: &[u8]) -> (usize, u64) {
+fn literal(text: &[u8]) -> usize {
     match text {
-        [b'x', b'\'', hex @ ..] => {
-            let digits = hex.iter().take_while(|byte| **byte != b'\'').count();
-            (digits + 3, (digits / 2) as u64)
-        }
+        [b'x', b'\'', hex @ ..] => hex.iter().take_while(|byte| **byte != b'\'').count() + 3,
         [b'\'', ..] => {
             let mut index = 1;
-            let mut value = 0;
             while index < text.len() {
                 if text[index] == b'\'' {
                     if text.get(index + 1) != Some(&b'\'') {
@@ -493,27 +403,21 @@ fn literal(text: &[u8]) -> (usize, u64) {
                     }
                     index += 1;
                 }
-                value += 1;
                 index += 1;
             }
-            (index, value)
+            index
         }
-        [b'N', b'U', b'L', b'L', ..] => (4, 0),
-        _ => {
-            let spelled = text
-                .iter()
-                .take_while(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-')
-                })
-                .count();
-            (spelled, 8)
-        }
+        [b'N', b'U', b'L', b'L', ..] => 4,
+        _ => text
+            .iter()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-'))
+            .count(),
     }
 }
 
 /// The byte spans of `sql`'s parameter placeholders, skipping quoted text
 /// and comments.
-fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
+pub(crate) fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
     let bytes = sql.as_bytes();
     let mut index = 0;
     std::iter::from_fn(move || {
@@ -614,10 +518,13 @@ pub(crate) fn open_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "perf-witness")]
+    use crate::statement::Prepare as _;
 
-    /// SQL-PAYLOAD-ONCE: the physical window and write witness share one
+    /// SQL-PAYLOAD-ONCE: the physical window and SQL receipts share one
     /// expansion for unknown bindings; known graph binding lengths need none
-    /// (FIG-7506). Both retain their distinct spelling/value byte counters.
+    /// (FIG-7506). Counting the value bytes a write binds expands nothing:
+    /// they come from the bound values (FIG-7581).
     #[cfg(feature = "perf-witness")]
     #[expect(
         clippy::disallowed_methods,
@@ -650,10 +557,10 @@ mod tests {
         }
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
-            .execute("CREATE TABLE payload(text TEXT)", [])
+            .execute_once("CREATE TABLE payload(text TEXT)", [])
             .unwrap();
         connection
-            .execute("CREATE TABLE blob_payload(a BLOB,b BLOB)", [])
+            .execute_once("CREATE TABLE blob_payload(a BLOB,b BLOB)", [])
             .unwrap();
         enable(&connection);
         let value = "é'a".repeat(4096);
@@ -669,7 +576,7 @@ mod tests {
                 let before = EXPANSIONS.with(std::cell::Cell::get);
                 Window::on_worker(observed.then(|| window.clone()), || {
                     connection
-                        .execute("INSERT INTO payload VALUES (?1)", [&value])
+                        .execute_once("INSERT INTO payload VALUES (?1)", [&value])
                         .unwrap();
                 });
                 let snapshot = collector.snapshot();
@@ -689,7 +596,7 @@ mod tests {
                 }
                 assert_eq!(
                     EXPANSIONS.with(std::cell::Cell::get) - before,
-                    1,
+                    usize::from(receipts || observed),
                     "one write must share its immutable expansion: receipts={receipts}, window={observed}"
                 );
                 const BLOB_SQL: &str = "INSERT INTO blob_payload VALUES (?1,?2)";
@@ -698,7 +605,7 @@ mod tests {
                 Window::on_worker(observed.then(|| blob_window.clone()), || {
                     with_blob_bindings(BLOB_SQL, [3, 5], || {
                         connection
-                            .execute(
+                            .execute_once(
                                 BLOB_SQL,
                                 rusqlite::params![&[0_u8, 39, 255][..], &[1_u8, 2, 3, 4, 5][..]],
                             )
@@ -724,16 +631,17 @@ mod tests {
                 );
                 const TEXT_SQL: &str = "INSERT INTO payload VALUES (?1)";
                 for text in [value.as_str(), "nul\0trailing"] {
-                    let mut expected = connection.prepare(TEXT_SQL).unwrap();
+                    let mut expected = connection.statement_once(TEXT_SQL).unwrap();
                     expected.raw_bind_parameter(1, text).unwrap();
                     let expanded = expected.expanded_sql().unwrap();
-                    let value_bytes = bound_value_bytes(TEXT_SQL, expanded.as_bytes());
+                    // A text's bytes up to its first NUL, as expansion spelled it.
+                    let value_bytes = text.split('\0').next().unwrap().len() as u64;
                     let snapshot = collector.snapshot();
                     let before = EXPANSIONS.with(std::cell::Cell::get);
                     let text_window = Window::new("known-text-payload", "sqlite");
                     Window::on_worker(observed.then(|| text_window.clone()), || {
                         let _binding = text_bindings(TEXT_SQL, &[text]);
-                        connection.execute(TEXT_SQL, [text]).unwrap();
+                        connection.execute_once(TEXT_SQL, [text]).unwrap();
                     });
                     let after = collector.snapshot();
                     assert_eq!(
@@ -797,7 +705,7 @@ mod tests {
         sql_shapes::with_origin("join-law", || {
             for value in [1_i64, 1, 2] {
                 let rows = connection
-                    .prepare_cached("SELECT a.id FROM a JOIN b ON a.id=b.id WHERE a.id=?1")
+                    .statement("SELECT a.id FROM a JOIN b ON a.id=b.id WHERE a.id=?1")
                     .unwrap()
                     .query_map([value], |r| r.get::<_, i64>(0))
                     .unwrap()
@@ -823,7 +731,7 @@ mod tests {
             serde_json::json!(["a", "b"])
         );
         // PROFILE precedes the truncate optimization's final total_changes.
-        connection.execute("DELETE FROM a", []).unwrap();
+        connection.execute_once("DELETE FROM a", []).unwrap();
         joined::flush(&connection);
         let work = collector.snapshot().sql_shapes.unwrap().work;
         assert!(work.complete && work.conserves());
@@ -839,13 +747,13 @@ mod tests {
         // REAL's 15-digit expanded spelling cannot prove parameter equality.
         for value in [1.234567890123456_f64, 1.234567890123457] {
             connection
-                .query_row("SELECT ?1", [value], |_| Ok(()))
+                .query_row_once("SELECT ?1", [value], |_| Ok(()))
                 .unwrap();
         }
         // TEXT is retained under the explicitly named embedded-NUL qualifier.
         for _ in 0..2 {
             connection
-                .query_row("SELECT ?1", ["é'a"], |_| Ok(()))
+                .query_row_once("SELECT ?1", ["é'a"], |_| Ok(()))
                 .unwrap();
         }
         joined::flush(&connection);
@@ -871,7 +779,7 @@ mod tests {
         // starts are not new invocations; one PROFILE completes the delete.
         let before = work.statements();
         let rows = connection
-            .prepare("DELETE FROM parent WHERE id=1 RETURNING id")
+            .statement_once("DELETE FROM parent WHERE id=1 RETURNING id")
             .unwrap()
             .query_map([], |r| r.get::<_, i64>(0))
             .unwrap()
@@ -925,9 +833,9 @@ mod tests {
             store
                 .conn
                 .call(move |conn| {
-                    conn.query_row("SELECT 41 AS baseline", [], |_| Ok(()))?;
+                    conn.query_row_once("SELECT 41 AS baseline", [], |_| Ok(()))?;
                     if extra {
-                        conn.query_row("SELECT 42 AS injected", [], |_| Ok(()))?;
+                        conn.query_row_once("SELECT 42 AS injected", [], |_| Ok(()))?;
                     }
                     Ok(())
                 })
@@ -991,7 +899,7 @@ mod tests {
     fn sql_payload_counts_actual_rows_and_cached_execution_bytes() {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
-            .execute(
+            .execute_once(
                 "CREATE TABLE sample (text TEXT, bytes BLOB, number INTEGER)",
                 [],
             )
@@ -1001,12 +909,12 @@ mod tests {
             let window = Window::new(format!("payload-{iteration}"), "sqlite");
             Window::on_worker(Some(window.clone()), || {
                 connection
-                    .prepare_cached("INSERT INTO sample VALUES (?1, ?2, ?3)")
+                    .statement("INSERT INTO sample VALUES (?1, ?2, ?3)")
                     .unwrap()
                     .execute(rusqlite::params!["é'a", &[0_u8, 1, 2][..], 42_i64])
                     .unwrap();
                 connection
-                    .prepare_cached("-- a real statement, not a trigger\nSELECT text, bytes, number FROM sample LIMIT 1")
+                    .statement("-- a real statement, not a trigger\nSELECT text, bytes, number FROM sample LIMIT 1")
                     .unwrap()
                     .query_row([], |_| Ok(()))
                     .unwrap();
@@ -1028,34 +936,6 @@ mod tests {
             );
             eprintln!("SQL_PAYLOAD {}", serde_json::to_string(&receipt).unwrap());
         }
-    }
-
-    /// SQL-BYTES-WRITTEN: a write counts the bytes of the values it binds,
-    /// not their SQL spelling: a text without its quoting, a blob without its
-    /// hex, eight per number, none for NULL, and every use of a repeated
-    /// parameter; placeholders inside comments and quoted text are not
-    /// parameters. The replay gate's depth slopes bind this count because it
-    /// does not move with B-tree page layout (FIG-6280).
-    #[cfg(feature = "perf-witness")]
-    #[test]
-    fn bound_value_bytes_count_values_not_their_spelling() {
-        let connection = rusqlite::Connection::open_in_memory().unwrap();
-        connection
-            .execute("CREATE TABLE sample (a, b, c, d, e, f)", [])
-            .unwrap();
-        let sql = "INSERT INTO sample VALUES (?1, :blob, ?3, -- ?9\n ?4, '?', ?1)";
-        let mut statement = connection.prepare(sql).unwrap();
-        statement.raw_bind_parameter(1, "it's é").unwrap();
-        statement
-            .raw_bind_parameter(2, &[0_u8, 1, 2, 3, 4][..])
-            .unwrap();
-        statement.raw_bind_parameter(3, -12.5_f64).unwrap();
-        statement
-            .raw_bind_parameter(4, rusqlite::types::Null)
-            .unwrap();
-        let expanded = statement.expanded_sql().unwrap();
-        // 7 text bytes twice, 5 blob bytes, one number, NULL.
-        assert_eq!(bound_value_bytes(sql, expanded.as_bytes()), 7 * 2 + 5 + 8);
     }
 
     /// GRAPH-INSTALL-WORK: count successful store insertions, including

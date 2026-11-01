@@ -53,7 +53,7 @@ impl LeaseRefusal {
 
 fn bundle_exists_tx(tx: &rusqlite::Connection, artifact_ref: &str) -> rusqlite::Result<bool> {
     Ok(tx
-        .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+        .statement(artifact_sql().refs.select_blob_ref.sql())
         .and_then(|mut statement| {
             statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |_| Ok(()))
         })
@@ -113,7 +113,7 @@ impl ToolMaterialStore for SqliteStore {
                     ],
                 )?;
                 let stored_blob_ref: String = tx
-                    .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
+                    .statement(artifact_sql().refs.select_blob_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
                             crate::codec::hash_column(row, 0)
@@ -216,7 +216,7 @@ impl ToolMaterialStore for SqliteStore {
             .conn
             .read(move |conn| {
                 let blob_ref = conn
-                    .prepare_cached(artifact_sql().refs.material_lease.sql())?
+                    .statement(artifact_sql().refs.material_lease.sql())?
                     .query_row(
                         params![
                             TOOL_MATERIAL_NAMESPACE,
@@ -268,7 +268,7 @@ pub(crate) fn release_material_tx(
 ) -> rusqlite::Result<()> {
     fence_artifact_referrer_tx(tx, referrer, now_ms)?;
     let held = tx
-        .prepare_cached(artifact_sql().refs.delete_namespace_edges.sql())?
+        .statement(artifact_sql().refs.delete_namespace_edges.sql())?
         .query_map(
             params![
                 referrer.kind().as_str(),

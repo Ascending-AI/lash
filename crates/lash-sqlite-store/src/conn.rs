@@ -49,6 +49,7 @@
 //!   ever deal in `rusqlite::Result<T>` and callers receive the inner
 //!   `rusqlite::Error` to feed through `sqlite_error` / `process_sqlite_error`.
 
+use crate::Prepare as _;
 use lash_core_store::compat::VersionRange;
 use lash_core_store::store::FleetFormat;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -772,12 +773,13 @@ impl SqliteConnection {
             connection
                 .call(move |c| {
                     c.busy_timeout(busy_timeout)?;
-                    c.query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
+                    c.query_row_once("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
                         row.get::<_, i64>(0)
                     })?;
-                    let mode: String = c.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+                    let mode: String =
+                        c.query_row_once("PRAGMA journal_mode", [], |row| row.get(0))?;
                     if mode.eq_ignore_ascii_case("wal") {
-                        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                        c.query_row_once("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
                             row.get::<_, i64>(0)
                         })?;
                     }
@@ -1098,9 +1100,9 @@ fn closed<T>() -> rusqlite::Result<T> {
 pub(crate) fn cached_execute(
     conn: &Connection,
     sql: &str,
-    params: impl rusqlite::Params,
+    params: impl crate::statement::Values,
 ) -> rusqlite::Result<usize> {
-    conn.prepare_cached(sql)?.execute(params)
+    crate::Prepare::statement(conn, sql)?.execute(params)
 }
 
 /// Collapse a `tokio_rusqlite::Result<rusqlite::Result<T>>` into a single
@@ -1184,7 +1186,7 @@ mod tests {
             .await
             .unwrap();
         reader
-            .call(|c| c.query_row("SELECT 1", [], |r| r.get::<_, u64>(0)))
+            .call(|c| c.query_row_once("SELECT 1", [], |r| r.get::<_, u64>(0)))
             .await
             .unwrap();
         let writer_thread = conn
@@ -1247,7 +1249,7 @@ mod tests {
         let mut first_work = None;
         for size in [2, 8, 2] {
             let (answer, receipt) = sql::collect(format!("known-select/{size}"), "sqlite", conn.call(move |c| {
-                let mut statement = c.prepare_cached("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < ?1) SELECT x FROM n")?;
+                let mut statement = c.statement("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < ?1) SELECT x FROM n")?;
                 statement.query_map([size], |row| row.get::<_, i64>(0))?.collect::<rusqlite::Result<Vec<_>>>()
             })).await;
             assert_eq!(answer.expect("query").len(), size as usize);
@@ -1377,14 +1379,14 @@ mod tests {
             .execute_batch("BEGIN")
             .expect("begin read transaction");
         reader
-            .query_row("SELECT COUNT(*) FROM payloads", [], |row| {
+            .query_row_once("SELECT COUNT(*) FROM payloads", [], |row| {
                 row.get::<_, i64>(0)
             })
             .expect("pin the reader snapshot");
         for _ in 0..80 {
             writer
                 .write(|tx| {
-                    tx.execute("INSERT INTO payloads VALUES (?1)", [vec![7_u8; 4096]])?;
+                    tx.execute_once("INSERT INTO payloads VALUES (?1)", [vec![7_u8; 4096]])?;
                     Ok(())
                 })
                 .await
@@ -1418,7 +1420,7 @@ mod tests {
                     let active_readers = Arc::clone(&active_readers);
                     connection
                         .read(move |tx| {
-                            tx.query_row("SELECT COUNT(*) FROM payloads", [], |row| {
+                            tx.query_row_once("SELECT COUNT(*) FROM payloads", [], |row| {
                                 row.get::<_, i64>(0)
                             })?;
                             active_readers.fetch_add(1, Ordering::Relaxed);

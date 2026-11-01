@@ -415,6 +415,7 @@ impl Connection {
 #[cfg(all(test, feature = "perf-witness"))]
 mod tests {
     use super::*;
+    use crate::Prepare as _;
     use lash_core_ids::perf_witness::queues::Collector;
     use std::future::Future;
 
@@ -447,7 +448,7 @@ mod tests {
         blocked.await.expect("worker entered");
         let reader = connection.clone();
         let mut second =
-            Box::pin(reader.call(|c| c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))));
+            Box::pin(reader.call(|c| c.query_row_once("SELECT 1", [], |r| r.get::<_, i64>(0))));
         std::future::poll_fn(|cx| {
             assert!(second.as_mut().poll(cx).is_pending());
             std::task::Poll::Ready(())
@@ -473,13 +474,14 @@ mod tests {
 
 #[cfg(test)]
 mod drop_tests {
+    use crate::Prepare as _;
     use crate::conn::tests::installed;
     use crate::conn::{SqliteConnectionPolicy, SqliteSynchronous};
     use crate::location::DatabaseTarget;
 
     async fn rows(connection: &crate::conn::SqliteConnection) -> i64 {
         connection
-            .call(|c| c.query_row("SELECT COUNT(*) FROM swept", [], |row| row.get(0)))
+            .call(|c| c.query_row_once("SELECT COUNT(*) FROM swept", [], |row| row.get(0)))
             .await
             .expect("count the swept rows")
     }
