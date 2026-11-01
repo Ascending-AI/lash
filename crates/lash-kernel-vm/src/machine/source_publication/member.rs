@@ -112,7 +112,9 @@ impl KernelMachine {
             }
             (handle, Member::Field(Arc::clone(name)))
         } else {
-            let key = key.expect("indexed operation has its evaluated key");
+            let Some(key) = key else {
+                return Err(malformed("an indexed member operation has no evaluated key").into());
+            };
             match target_value {
                 doc::Value::List(handle) => {
                     let Some(index) = crate::compile::position(&key) else {

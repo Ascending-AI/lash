@@ -165,7 +165,7 @@ impl Slab {
             .checked_add(callee.plan.slots)
             .and_then(|end| end.checked_add(callee.compiled.registers))
             .and_then(|end| end.checked_add(callee.compiled.pending_slots()))
-            .ok_or_else(|| lash_kernel_doc::heap::HeapFault::Exhausted {
+            .ok_or(lash_kernel_doc::heap::HeapFault::Exhausted {
                 resource: lash_kernel_doc::heap::HostResource::StagingBytes,
             })?;
         self.values

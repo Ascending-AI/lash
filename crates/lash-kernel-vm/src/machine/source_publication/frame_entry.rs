@@ -151,7 +151,9 @@ impl KernelMachine {
         let mut cells = handles.iter().zip(&shared_values).enumerate();
         for param in &code.params {
             if param.shared {
-                let (index, (handle, value)) = cells.next().expect("prepared shared parameter");
+                let (index, (handle, value)) = cells
+                    .next()
+                    .ok_or_else(|| malformed("a shared parameter has no prepared cell"))?;
                 let entity = EntityId {
                     family: FamilyId::PROVISIONAL,
                     ordinal: first
@@ -333,7 +335,7 @@ impl KernelMachine {
                 frame.invocation = invocation.id();
                 frame.logical = Some(roots);
                 frame.source_frontier = Some(frontier);
-                push.publish(arena, frame);
+                push.publish(frame);
             })
         })?;
         self.logical_memory.set(after);

@@ -84,7 +84,9 @@ impl EntryParameters<'_> {
         let mut cells = handles.iter().zip(&shared_values).enumerate();
         for param in &code.params {
             if param.shared {
-                let (index, (handle, value)) = cells.next().expect("prepared packet parameter");
+                let (index, (handle, value)) = cells
+                    .next()
+                    .ok_or_else(|| malformed("a shared packet parameter has no prepared cell"))?;
                 let entity = doc::heap::EntityId {
                     family: doc::heap::FamilyId::PROVISIONAL,
                     ordinal: first

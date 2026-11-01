@@ -786,7 +786,7 @@ impl Ledger {
             if state.entities.get(&key, access)?.is_some() {
                 return Err(invalid("a durable id is already a ledger key"));
             }
-            state.entities.write(key.to_vec(), row, access)?;
+            state.entities.write(key, row, access)?;
         }
         Ok(())
     }

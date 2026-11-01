@@ -123,7 +123,7 @@ impl StoragePreparation for ReadStorage<'_> {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    pub(in crate::machine::islands) fn source_read(
+    pub(in crate::machine::islands::execute) fn source_read(
         &mut self,
         frame: &mut Values<'_, '_>,
         read: SourceRead,
@@ -133,7 +133,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.source_input(frame, read, reg, Input::Native(value))
     }
 
-    pub(in crate::machine::islands) fn source_literal(
+    pub(in crate::machine::islands::execute) fn source_literal(
         &mut self,
         frame: &mut Values<'_, '_>,
         read: SourceRead,
@@ -346,7 +346,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         Ok(true)
     }
 
-    pub(in crate::machine::islands) fn source_inputs<const N: usize>(
+    pub(in crate::machine::islands::execute) fn source_inputs<const N: usize>(
         &mut self,
         frame: &mut Values<'_, '_>,
         reads: &[Read],

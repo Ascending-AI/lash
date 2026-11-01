@@ -242,6 +242,7 @@ pub(in crate::machine) fn call_resume_published(cold: bool) {
         count.set(counts);
     });
 }
+#[cfg(test)]
 pub(crate) fn call_enters() -> u64 {
     CALL_ENTER_PUBLICATIONS.with(|count| count.replace(0))
 }
@@ -249,6 +250,7 @@ pub(in crate::machine) fn call_enter_published() {
     CALL_ENTER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 /// Frames entered without an accepted source entry prefix.
+#[cfg(test)]
 pub(crate) fn logical_entry_fallbacks() -> u64 {
     LOGICAL_ENTRY_FALLBACKS.with(|count| count.replace(0))
 }

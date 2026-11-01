@@ -923,14 +923,18 @@ pub(super) struct PreparedFramePush<'a> {
     capture: Option<(ActIx, Pending)>,
 }
 impl PreparedFramePush<'_> {
-    pub(super) fn publish(self, arena: &mut lash_kernel_state::arena::Arena, frame: Box<Frame>) {
+    pub(super) fn publish(self, frame: Box<Frame>) {
         if let Some(awaiting) = self.awaiting {
-            self.frames.cache[self.parent.expect("prepared caller")]
-                .1
-                .awaiting = Some(awaiting);
+            let Some(parent) = self.parent else {
+                unreachable!("a prepared push that awaits has its caller");
+            };
+            self.frames.cache[parent].1.awaiting = Some(awaiting);
         }
         if let Some((act, pending)) = self.capture {
-            let caller = &mut self.frames.cache[self.parent.expect("prepared caller")].1;
+            let Some(parent) = self.parent else {
+                unreachable!("a prepared push that captures has its caller");
+            };
+            let caller = &mut self.frames.cache[parent].1;
             caller.stand_at(act, pending);
             caller.source_action = None;
         }

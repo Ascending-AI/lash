@@ -37,7 +37,7 @@ impl Operands {
             let owner = next
                 .roots
                 .as_ref()
-                .expect("prepared source bank")
+                .ok_or_else(|| HeapFault::Malformed("a resumed source bank has no roots".into()))?
                 .operand(&value.site)?;
             if value.reg.ix() >= extent
                 || next.positions[value.reg.ix()] != usize::MAX

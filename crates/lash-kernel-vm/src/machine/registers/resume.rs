@@ -91,10 +91,9 @@ impl Registers {
         }))
     }
     pub(in crate::machine) fn bind_source_resume(&mut self, ledger: &Ledger) {
-        let ready = self
-            .ready
-            .as_mut()
-            .expect("the accepted journal installed its bank");
+        let Some(ready) = self.ready.as_mut() else {
+            unreachable!("the accepted journal installed its bank");
+        };
         assert!(ready.stamp.is_none());
         ready.stamp = Some(ledger.stamp());
     }

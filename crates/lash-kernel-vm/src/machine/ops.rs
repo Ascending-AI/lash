@@ -283,8 +283,7 @@ impl KernelMachine {
 
     /// A fresh shared variable holding `value`, counted.
     pub(super) fn new_cell(&mut self, value: Value) -> ArenaHandle {
-        let cell = self.arena.borrow_mut().new_cell(value);
-        cell
+        self.arena.borrow_mut().new_cell(value)
     }
 
     /// The pin anchor: keeps the value in register `r`, which the

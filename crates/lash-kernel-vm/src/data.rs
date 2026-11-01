@@ -96,6 +96,7 @@ pub(crate) fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
 pub(crate) fn deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     view_deep_size(arena, value)
 }
+#[cfg(test)]
 pub(crate) fn graph_deep_size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     view_graph_deep_size(arena, value)
 }

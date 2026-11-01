@@ -181,9 +181,9 @@ impl Operands {
         for input in inputs.values {
             match input.kind {
                 Kind::Operand => {
-                    let operand = self
-                        .remove_value(input.reg)
-                        .expect("exclusively prepared entry operand");
+                    let Some(operand) = self.remove_value(input.reg) else {
+                        unreachable!("exclusively prepared entry operand");
+                    };
                     assert!(
                         operand.held.owner == input.owner && operand.held.value.same(&input.value)
                     );

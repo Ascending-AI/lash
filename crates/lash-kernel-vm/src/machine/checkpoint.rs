@@ -361,7 +361,7 @@ impl KernelMachine {
         arena.borrow_mut().watch_logical_members();
         let logical =
             lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
-        let mut machine = Self {
+        let machine = Self {
             logical: logical.clone(),
             logical_memory: Default::default(),
             active_link: program.link,
