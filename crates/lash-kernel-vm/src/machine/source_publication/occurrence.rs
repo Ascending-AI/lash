@@ -1,7 +1,7 @@
 //! Source positions distinguish an active loop body from its next header.
 use super::*;
 use crate::compile::{Executable, Form};
-use crate::machine::{Control, Frame};
+use crate::machine::{Control, Frame, TryPhase};
 use lash_kernel_value::sites::Site;
 
 pub(super) fn source_loops(
@@ -21,7 +21,14 @@ pub(super) fn source_loops(
                 *stmt,
                 started.saturating_sub(u64::from(index + 1 < frame.control.len())),
             ),
-            Control::Try { .. } => return Ok(None),
+            Control::Try {
+                phase: TryPhase::Finally(_),
+                ..
+            } => return Ok(None),
+            Control::Try {
+                phase: TryPhase::Body | TryPhase::Catch,
+                ..
+            } => continue,
             _ => continue,
         };
         loops.try_reserve(1).map_err(|_| HeapFault::Exhausted {

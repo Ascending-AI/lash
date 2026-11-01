@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let try_reads = crate::machine::islands::witness::precise_try_reads();
     let field_members = crate::machine::islands::witness::field_member_publications();
     let constructions = crate::machine::islands::witness::construction_publications();
     let native_reads = crate::machine::islands::witness::native_read_publications();
@@ -293,6 +294,18 @@ fn observe_source_or_register(
         assert!(
             packet_reads > 0,
             "packet reads must publish their actual source operands before their consumers: {mode:?} {packet_reads}"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_BAD_MEMBER)
+    {
+        assert!(
+            try_reads.iter().all(|count| *count > 0),
+            "try body and catch reads must acquire actual source operands before any failed write: {try_reads:?}"
         );
     }
     if mode == Mode::Source

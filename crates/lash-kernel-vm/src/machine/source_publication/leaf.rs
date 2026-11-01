@@ -183,6 +183,26 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_source_published();
+            if let Some(phase) = frame
+                .control
+                .iter()
+                .rev()
+                .find_map(|control| match control {
+                    crate::machine::Control::Try { phase, .. } => Some(phase),
+                    _ => None,
+                })
+            {
+                match phase {
+                    crate::machine::TryPhase::Body => {
+                        crate::machine::islands::witness::precise_try_read(false)
+                    }
+                    crate::machine::TryPhase::Catch => {
+                        crate::machine::islands::witness::precise_try_read(true)
+                    }
+                    crate::machine::TryPhase::Finally(_) => {}
+                }
+            }
+
             if matches!(running.stmt.form, crate::compile::Form::While { .. })
                 && **site == running.stmt.site.child(0)
                 && let doc::Value::Bool(taken) = value
