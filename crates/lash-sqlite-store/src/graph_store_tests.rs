@@ -808,13 +808,12 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
     );
 }
 
-/// GRAPH-INSTALL-BATCH-WORK: large installs need at most ceil(absent / 32)
-/// body statements; small installs (at most 64 bodies) need at most one per
-/// body, independent of held bodies. Edges need at most one statement.
-/// Each body statement installs at most 32 rows (64 bound parameters).
+/// GRAPH-INSTALL-BATCH-WORK: the absent bodies of one commit install in at
+/// most one body statement, whatever their number and independent of held
+/// bodies; edges need at most one statement.
 /// A held content or encoding mismatch refuses the whole batch before writes.
 #[tokio::test]
-async fn absent_graph_bodies_install_in_bounded_batches() {
+async fn absent_graph_bodies_install_in_one_statement() {
     use lash_core_store::checkpoint_graph::EncodeBudget;
     use lash_core_store::checkpoint_graph::ExplicitLimit;
     use lash_core_store::checkpoint_graph::GraphStaging;
@@ -870,19 +869,9 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
             .await;
             answer.unwrap();
             assert_eq!(receipt.unretained_shape_statements, 0, "{receipt:?}");
-            for (sql, shape) in &receipt.shapes {
-                if sql.starts_with("insert into main.blobs ") {
-                    assert!(shape.rows_affected <= 32 * shape.statements, "{receipt:?}");
-                }
-            }
             let inserts = count(&receipt, "blobs");
             assert!(
-                inserts
-                    <= if absent <= 64 {
-                        absent as u64
-                    } else {
-                        absent.div_ceil(32) as u64
-                    },
+                inserts <= u64::from(absent > 0),
                 "{absent} absent bodies used {inserts} statements: {receipt:?}"
             );
             assert!(
