@@ -1042,12 +1042,17 @@ impl KernelMachine {
         task: TaskId,
         exceeded: &mut BoundExceeded,
     ) -> Result<(), MachineError> {
-        let site = self
-            .task(task)
-            .map_err(machine_error)?
-            .frames
-            .bound_site()
-            .map_err(MachineError::Heap)?;
+        let site = match &exceeded.site {
+            // An initial statement charge refuses its next source head before
+            // the block advances. It is not an issued statement in the frame.
+            Some(site) => Some((**site).clone()),
+            None => self
+                .task(task)
+                .map_err(machine_error)?
+                .frames
+                .bound_site()
+                .map_err(MachineError::Heap)?,
+        };
         if exceeded.function.is_none() {
             exceeded.function = site.as_ref().and_then(|site| {
                 use lash_kernel_value::sites::Unit;

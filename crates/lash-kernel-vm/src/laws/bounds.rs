@@ -368,6 +368,54 @@ main {
         ),
         exceeded(Bound::RequestsPerPark, 2)
     );
+    // K-CHG-002: a refused statement charge names its unpaid source head,
+    // including the first statement in a newly entered nested block.
+    for (body, limit, path, printed) in [
+        ("print 7", 0, vec![0], vec![]),
+        ("if true { print 7 } return 9", 2, vec![0, 1, 0], vec![]),
+        (
+            "if true { do null print 8 } return 9",
+            4,
+            vec![0, 1, 1],
+            vec![],
+        ),
+    ] {
+        for mode in [
+            super::layout::ExecutionMode::Source,
+            super::layout::ExecutionMode::Generic,
+            super::layout::ExecutionMode::Specialized,
+        ] {
+            let mut run = Embedder::with(
+                &format!("main {{ {body} }}"),
+                Setup {
+                    bounds: Bounds {
+                        charge_limit: limit,
+                        ..ROOMY
+                    },
+                    ..Setup::default()
+                },
+            );
+            match mode {
+                super::layout::ExecutionMode::Source => run.machine.force_source_execution(),
+                super::layout::ExecutionMode::Generic => run.machine.force_generic_packets(),
+                super::layout::ExecutionMode::Specialized => {}
+            }
+            assert_eq!(
+                run.run_to_end(&[]),
+                End::Error(RunError::Bound(BoundExceeded {
+                    bound: Bound::Charge,
+                    limit,
+                    function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
+                    site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                        lash_kernel_value::sites::Unit::Main,
+                        path.clone()
+                    ))),
+                })),
+                "refused source head: {body}, {mode:?}"
+            );
+            assert_eq!(run.world.printed, printed);
+        }
+    }
 }
 
 /// KERNEL-DATA-POLICY: deployment value-depth guards reach tuple construction.

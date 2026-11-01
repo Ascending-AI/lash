@@ -914,7 +914,12 @@ impl KernelMachine {
             return self.block_ended(task, host, exe);
         };
         if self.charging {
-            self.charge(1)?;
+            self.charge(1).map_err(|mut halt| {
+                if let crate::machine::Halt::Bound(exceeded) = &mut halt {
+                    exceeded.site = Some(Box::new(exe.stmt(stmt).site.clone()));
+                }
+                halt
+            })?;
         } else if self.paced {
             self.charged += 1;
         }
