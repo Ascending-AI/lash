@@ -1456,9 +1456,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 64b642db2369f758); a call
+    -- Generated from this build's statements (registry adf037fab03183f1); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '64b642db2369f758'
+    IF p_registry IS DISTINCT FROM 'adf037fab03183f1'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1623,6 +1623,10 @@ BEGIN
                 IF v_row."decision_ref" IS NOT NULL THEN v_retired := v_retired || v_row."decision_ref"::BYTEA; END IF;
                 IF v_row."body_ref" IS NOT NULL THEN v_retired := v_retired || v_row."body_ref"::BYTEA; END IF;
             END LOOP;
+        WHEN 'durable_packages.end_execution' THEN
+            UPDATE lash_package_executions SET ended = 1 WHERE execution = (v_p->>0) AND actor_key = (v_p->>1);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.append' THEN
             INSERT INTO lash_model_call_records (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered) VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT), TRUE) ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref, ended_at_ms = COALESCE(lash_model_call_records.ended_at_ms, excluded.ended_at_ms), written_epoch = COALESCE(lash_model_call_records.written_epoch, excluded.written_epoch), answered = TRUE WHERE lash_model_call_records.call_id = excluded.call_id AND (lash_model_call_records.record_ref IS NULL OR lash_model_call_records.record_ref = excluded.record_ref);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
@@ -1948,7 +1952,8 @@ BEGIN
                     AND right(checked.item->>1, 2) = '"]'
                     AND substr(checked.item->>1, length(v_frame) + 1,
                         length(checked.item->>1) - length(v_frame) - 2) ~ '^[^"\\[:cntrl:]]+$')
-                    OR (checked.item->>0 = 'session' AND checked.item->>1 = p_session)
+                    OR (checked.item->>0 = 'environment_version'
+                        AND checked.item->>1 ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
                     OR EXISTS (
                         SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                         WHERE planned.item->>0 = checked.item->>0
@@ -2899,6 +2904,16 @@ BEGIN
     END IF;
     IF p_requires IS NOT NULL THEN
         UPDATE lash_actors SET base_requires = (p_requires), requires = (p_requires)
+             WHERE actor_key = (p_actor) AND NOT EXISTS (
+                 SELECT 1 FROM lash_package_executions WHERE actor_key = (p_actor) AND ended = 0
+             );
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        IF v_rows <> 1 THEN
+            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
+                USING ERRCODE = 'LX007';
+        END IF;
+    ELSIF COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
+        UPDATE lash_actors SET requires = base_requires
              WHERE actor_key = (p_actor) AND NOT EXISTS (
                  SELECT 1 FROM lash_package_executions WHERE actor_key = (p_actor) AND ended = 0
              );

@@ -139,8 +139,8 @@ pub(super) fn inline_statement(sql: &str, values: &[&str]) -> String {
 /// only for what needs no decoder: every plan a frame of the committing
 /// session, its id spelled canonically, with exactly the gated body the
 /// client computed; and every checked pair the ended referrer itself, one
-/// of those plans, a surviving reader that is a frame of the committing
-/// session spelled canonically, or the committing session itself
+/// of those plans, or a surviving reader that is a frame of the committing
+/// session or an environment version, its id spelled canonically
 /// (FIG-7576). Anything else declines the call, and the explicit form
 /// decides it.
 fn end_local(entry: &Entry) -> String {
@@ -172,7 +172,8 @@ fn end_local(entry: &Entry) -> String {
                 WHERE NOT COALESCE(
                     (checked.item->>0 = {kind} AND checked.item->>1 = {id})
                     OR {checked_frame}
-                    OR (checked.item->>0 = 'session' AND checked.item->>1 = p_session)
+                    OR (checked.item->>0 = 'environment_version'
+                        AND checked.item->>1 ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$')
                     OR EXISTS (
                         SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                         WHERE planned.item->>0 = checked.item->>0
@@ -333,6 +334,7 @@ pub(crate) fn function_ddl() -> String {
         executor.stamp_unregistered_requires.sql(),
         &["p_actor", "p_requires"],
     );
+    let restamp_requires = inline(executor.restamp_unregistered_requires.sql(), &["p_actor"]);
     let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
     let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
     let end = inline(SQL.actor.end.sql(), &["p_actor"]);
@@ -597,6 +599,13 @@ BEGIN
     END IF;
     IF p_requires IS NOT NULL THEN
         {stamp_requires};
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        IF v_rows <> 1 THEN
+            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
+                USING ERRCODE = 'LX007';
+        END IF;
+    ELSIF COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
+        {restamp_requires};
         GET DIAGNOSTICS v_rows = ROW_COUNT;
         IF v_rows <> 1 THEN
             RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'

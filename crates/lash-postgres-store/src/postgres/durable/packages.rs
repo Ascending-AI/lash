@@ -267,6 +267,27 @@ async fn commit_resolution(
     Ok(acknowledge(CommitResolution::Inserted(candidate)))
 }
 
+/// The committing actor `?2`'s execution `?1` ends.
+pub(super) static END_EXECUTION: super::steps::Entry = super::steps::Entry::new(
+    || &SQL.end_execution,
+    &[super::steps::Ty::Text, super::steps::Ty::Text],
+    super::steps::Shape::Exec,
+);
+
+/// `actor`'s execution `execution` ends, as a step: it must be the actor's.
+pub(super) fn end_execution_step(
+    actor: &lash_durable::ActorKey,
+    execution: &lash_durable::resolutions::ExecutionId,
+) -> super::steps::Step {
+    super::steps::Step::one(
+        &END_EXECUTION,
+        vec![
+            super::steps::Value::text(execution.0.clone()),
+            super::steps::Value::text(actor.as_str()),
+        ],
+    )
+}
+
 pub(super) async fn end_execution(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,

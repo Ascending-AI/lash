@@ -45,9 +45,9 @@ use lash_store_sql::Dialect;
 
 use super::steps::{Entry, Step};
 use super::{
-    PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, park, processes,
-    prompts, replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure,
-    tool_calls, turns, waits,
+    PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, packages, park,
+    processes, prompts, replay, retention, run_records, session_close, session_mail, snapshots,
+    sqlx_failure, tool_calls, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -83,6 +83,13 @@ lash_store_sql::statements! {
         /// `?1` has no live execution debt. Otherwise the explicit owner
         /// transaction must decode and merge its registrations and resolutions.
         stamp_unregistered_requires = "UPDATE actors SET base_requires = ?2, requires = ?2
+             WHERE actor_key = ?1 AND NOT EXISTS (
+                 SELECT 1 FROM package_executions WHERE actor_key = ?1 AND ended = 0
+             )";
+
+        /// Once an execution ended, actor `?1`'s effective requirements
+        /// are its base ones, when no live execution owes it more.
+        restamp_unregistered_requires = "UPDATE actors SET requires = base_requires
              WHERE actor_key = ?1 AND NOT EXISTS (
                  SELECT 1 FROM package_executions WHERE actor_key = ?1 AND ended = 0
              )";
@@ -195,6 +202,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &tool_calls::ANSWER,
         &tool_calls::COMPLETE,
         &tool_calls::EXPIRE,
+        &packages::END_EXECUTION,
         &model_calls::APPEND,
         &model_calls::RESERVE,
         &model_calls::ANSWERED,
@@ -319,8 +327,10 @@ pub(super) fn program(
 ) -> Result<Option<Vec<Step>>, DurableError> {
     match write {
         DomainWrite::Environment(write) => environment::steps(actor, epoch, write).map(Some),
+        DomainWrite::EndExecution(execution) => {
+            Ok(Some(vec![packages::end_execution_step(actor, execution)]))
+        }
         DomainWrite::RegisterExecution(_)
-        | DomainWrite::EndExecution(_)
         | DomainWrite::AdoptExecution(_)
         | DomainWrite::SeedResolution(_) => Ok(None),
         DomainWrite::Turn(write) => turns::steps(epoch, write),
@@ -389,6 +399,7 @@ fn mechanics() -> Vec<&'static str> {
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
         executor.stamp_unregistered_requires.sql(),
+        executor.restamp_unregistered_requires.sql(),
         SQL.park.stop_mail_after.sql(),
         SQL.park.park.sql(),
         SQL.postgres.ack_through.sql(),
@@ -565,11 +576,19 @@ impl Call {
                 _ => None,
             })
             .collect();
+        // An ended execution owes the actor nothing more: its effective
+        // requirements are recomputed, as the explicit form recomputes them.
+        let restamp = tx.requires().is_none()
+            && tx
+                .domain()
+                .iter()
+                .any(|write| matches!(write, DomainWrite::EndExecution(_)));
         call.steps = serde_json::json!({
             "version": 1,
             "expected_revision": tx.revision().0,
             "steps": steps,
             "publishing": publishing,
+            "restamp": restamp,
         });
         let publications: Vec<_> = tx
             .domain()

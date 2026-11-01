@@ -1059,6 +1059,56 @@ async fn a_session_opening_turn_commits_its_environment_in_one_call() {
     }
 }
 
+/// A commit that ends the turn's registered execution, as a session's
+/// publication does, is one call (FIG-7576): the end is a guarded step, and
+/// the actor's effective requirements return to its base ones in the call
+/// once no live execution owes it more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_execution_end_commits_in_one_call() {
+    use lash_durable::resolutions::{ExecutionId, ExecutionRegistration};
+    let Some(owned) = owned("round-trips-execution-end").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let run = TurnId::from("round-trips-turn");
+    let journal = lash_protocol_types::ExecutionScope::turn(owned.session.clone(), run.clone())
+        .journal_identity()
+        .expect("turn journal");
+    let execution = ExecutionId::cell(&owned.session, &run, "cell");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    tx.register_execution(ExecutionRegistration {
+        execution: execution.clone(),
+        uses: Default::default(),
+        referrer: lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal),
+        requirements: Default::default(),
+    });
+    store
+        .commit(tx, CommitLabel::CELL_SNAPSHOT)
+        .await
+        .expect("register the execution");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    tx.end_execution(execution.clone());
+    let (ended, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+    ended.expect("the execution ends");
+    within("an execution's end", trips, 1);
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    tx.end_execution(ExecutionId::cell(&owned.session, &run, "unregistered"));
+    assert_eq!(
+        store.commit(tx, CommitLabel::MODEL_START).await,
+        Err(lash_durable::packages::PackageRefusal::ExecutionUse.into()),
+        "an execution the actor never registered does not end"
+    );
+}
+
 /// The most round trips each commit of a session's close pays from its
 /// open (FIG-7576): the one call, which begins the close or records a step
 /// once the step before it is the one done, guarded in the call. The
