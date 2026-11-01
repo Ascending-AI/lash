@@ -1,15 +1,14 @@
 //! Call lookup agreement across the existing crash matrices.
 use lash_core_execution::call_store::{self, CallRead};
-use lash_durable::domain::CallOwner;
-use lash_protocol_types::ToolCallId;
+use lash_core_store::tool_run::AttemptOutcome;
+use lash_durable::domain::tool_calls::ToolCallSettlement;
+use lash_durable::domain::{CallOwner, ToolCallDecision};
+use lash_protocol_types::{ToolCallId, ToolCallOutcome};
 
 pub async fn check(
     reads: &dyn lash_durable::DurableReads,
     owner: &CallOwner,
-    expected: &[(
-        ToolCallId,
-        Option<lash_core_store::tool_run::AttemptOutcome>,
-    )],
+    expected: &[(ToolCallId, Option<AttemptOutcome>)],
 ) -> Vec<String> {
     let checked = async {
         let ids = expected.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
@@ -32,7 +31,17 @@ pub async fn check(
         for (id, outcome) in expected {
             let answer = call_store::call(reads, owner, id).await.map_err(|e| e.to_string())?;
             let valid = match (outcome, &answer) {
-                (Some(expected), CallRead::Settled { outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Execution(actual), .. }) => expected == actual.as_ref(),
+                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Execution(actual), record: None }) => expected == actual.as_ref(),
+                // A materialized answer lives in its canonical body; the row keeps only the winner.
+                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Materialized(decision), record: Some(record) }) => {
+                    let cancelled = matches!(expected, AttemptOutcome::Cancelled { .. });
+                    *decision == if cancelled { ToolCallDecision::Cancel } else { ToolCallDecision::Final }
+                        && match expected {
+                            AttemptOutcome::Completed(_) => matches!(record.output.outcome, ToolCallOutcome::Success(_)),
+                            AttemptOutcome::Cancelled { .. } => matches!(record.output.outcome, ToolCallOutcome::Cancelled(_)),
+                            _ => matches!(record.output.outcome, ToolCallOutcome::Failure(_)),
+                        }
+                }
                 (None, CallRead::Pending { .. }) => true,
                 _ => false,
             };
