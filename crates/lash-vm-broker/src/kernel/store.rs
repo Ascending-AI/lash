@@ -1119,28 +1119,15 @@ impl DurableSnapshotStore {
             }),
         )?;
         // Records no saved state can reach again go, in the transaction
-        // that saves the state that consumed them. What their settled
-        // members changed commits with the prune as the turn's run
-        // namespaces (FIG-5301): a pruned outcome is never the only copy of
-        // a value. The host's state, staged below, holds each consumed
-        // outcome first.
-        let oldest = ledger.oldest_reachable();
-        let changes = match (&self.exec, members.bodies()) {
-            (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => {
-                Some((session.clone(), run.clone(), bodies.run_changes(), bodies))
-            }
-            _ => None,
-        };
-        if let Some((session, run, namespaces, _)) = &changes
-            && !namespaces.is_empty()
-        {
-            tx.write_namespaces(session, run, namespaces)
-                .map_err(refused)?;
-        }
+        // that saves the state that consumed them. An in-turn cell keeps
+        // every record: they are its journal, which a run that starts again
+        // follows and the commit that consumes its answer reports and
+        // retires (FIG-7585).
         for write in with {
             tx.write(write);
         }
-        if oldest > 0 {
+        let oldest = ledger.oldest_reachable();
+        if oldest > 0 && !matches!(self.exec, ExecKey::Cell(..)) {
             tx.write(DomainWrite::RunFact(RunFactWrite::Prune {
                 owner: self.exec.owner(),
                 before: RunSeq(oldest),
@@ -1316,9 +1303,6 @@ impl DurableSnapshotStore {
             .book
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
-        if let Some((_, _, namespaces, bodies)) = &changes {
-            bodies.run_changes_committed(namespaces);
-        }
         if !admitted.is_empty() && !stopped {
             members.admitted(&admitted).map_err(refused)?;
         }

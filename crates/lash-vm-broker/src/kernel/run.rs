@@ -583,6 +583,24 @@ impl KernelBroker<'_> {
                 return Err(KernelFailure::EmptyCheckpoint);
             }
             let journal = self.store.journal(self.effects).await?;
+            // The host knows every call the journal admitted before any
+            // drive folds them: one that started and never settled runs
+            // again (or is interrupted) as its own call, not as a stranger.
+            let admitted: Vec<(AdmittedEffect, FrozenRequest)> = journal
+                .admitted
+                .values()
+                .filter_map(|resolved| match &resolved.admission.disposition {
+                    super::graph::Disposition::Execution { operation, pin } => Some((
+                        AdmittedEffect {
+                            operation: *operation,
+                            call: pin.call.clone(),
+                        },
+                        resolved.request.clone(),
+                    )),
+                    super::graph::Disposition::Refused => None,
+                })
+                .collect();
+            self.effects.resumed(&admitted)?;
             let activation = self.activation(None, binding, machines).await?;
             let machine = machines.start(binding, activation.pages.clone()).await?;
             let mut owner = CellKernelOwner {
