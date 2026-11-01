@@ -1043,12 +1043,25 @@ impl KernelMachine {
             // An initial statement charge refuses its next source head before
             // the block advances. It is not an issued statement in the frame.
             Some(site) => Some((**site).clone()),
-            None => self
-                .task(task)
-                .map_err(machine_error)?
-                .frames
-                .bound_site()
-                .map_err(MachineError::Heap)?,
+            // A task whose frames hold no authored statement stands where
+            // it was spawned (`TaskRecord::spawn_origin`).
+            None => {
+                let access = self.heap.pages().clone();
+                let running = self.task(task).map_err(machine_error)?;
+                match running.frames.bound_site().map_err(MachineError::Heap)? {
+                    Some(site) => Some(site),
+                    None => match &running.record.spawn_origin {
+                        Some(origin) => Some(
+                            origin
+                                .resolve(&access)
+                                .map_err(MachineError::Heap)?
+                                .as_ref()
+                                .clone(),
+                        ),
+                        None => None,
+                    },
+                }
+            }
         };
         if exceeded.function.is_none() {
             exceeded.function = site.as_ref().and_then(|site| {
