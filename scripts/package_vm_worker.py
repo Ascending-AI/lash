@@ -10,9 +10,12 @@ from pathlib import Path
 import subprocess
 import tarfile
 
+from generate_notices import generate_notices
+
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    content = str(path.readlink()).encode() if path.is_symlink() else path.read_bytes()
+    return hashlib.sha256(content).hexdigest()
 
 
 def package(source: Path, worker: Path, output: Path, version: str, target: str | None = None) -> Path:
@@ -35,8 +38,13 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
     paths = sorted(set(path for path in paths if path))
     for name in paths:
         path = source / name
-        if path.is_symlink() or not path.is_file():
+        if path.is_symlink():
+            if path.readlink().is_absolute() or not path.resolve().is_relative_to(source):
+                raise ValueError(f"source symlink must stay inside the SDK: {name}")
+        elif not path.is_file():
             raise ValueError(f"source must contain regular files: {name}")
+    triple = {"x86_64": "x86_64-unknown-linux-gnu", "aarch64": "aarch64-unknown-linux-gnu"}[info["arch"]]
+    notices = generate_notices(source, triple)
     manifest = {
         "version": version,
         "target": target,
@@ -44,6 +52,7 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
         "worker": info,
         "worker_binary": "bin/lash-vm-worker",
         "worker_sha256": digest(worker),
+        "notices": {"path": "THIRD-PARTY-NOTICES", "sha256": hashlib.sha256(notices).hexdigest()},
         "source_sha256": {name: digest(source / name) for name in paths},
         "build": "cargo build --locked --release -p lash-internal-vm-worker --bin lash-vm-worker --features dialect-typescript,dialect-python",
     }
@@ -51,6 +60,9 @@ def package(source: Path, worker: Path, output: Path, version: str, target: str 
     archive = output / f"lash-sdk-worker-{version}-{target}.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(worker, arcname="bin/lash-vm-worker")
+        notice_info = tarfile.TarInfo(manifest["notices"]["path"])
+        notice_info.size = len(notices)
+        tar.addfile(notice_info, io.BytesIO(notices))
         for name in paths:
             tar.add(source / name, arcname=f"sdk/{name}", recursive=False)
         encoded = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()

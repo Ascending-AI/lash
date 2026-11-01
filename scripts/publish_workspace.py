@@ -107,6 +107,9 @@ def main() -> int:
         print_plan(packages, args.version)
         return 0
 
+    from generate_notices import generate_published_notices
+
+    generate_published_notices(Path.cwd(), "x86_64-unknown-linux-gnu")
     completed: set[str] = set()
     for package_id, package in packages.items():
         if crate_version_visible(package["name"], package["version"]):

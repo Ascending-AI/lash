@@ -85,6 +85,8 @@ allow = [
 # MIT-0 dependent still fails until it is reviewed here.
 exceptions = [
     { allow = ["MIT-0"], crate = "borrow-or-share" },
+    # unicode_names2 1.3.0 bundles Unicode data under the permissive Unicode-DFS-2016 license.
+    { allow = ["Unicode-DFS-2016"], crate = "unicode_names2" },
 ]
 confidence-threshold = 0.8
 

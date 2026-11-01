@@ -3,6 +3,15 @@ name: Dependency policy
 on:
   pull_request:
     paths:
+      - "**/Cargo.toml"
+      - "**/LICENSE*"
+      - "**/COPYING*"
+      - tools/cargo-about/**
+      - scripts/generate_notices.py
+      - scripts/package_vm_worker.py
+      - scripts/package_workspace.py
+      - scripts/publish_workspace.py
+      - .github/workflows/release.yml
       - Cargo.lock
       - deny.toml
       - .github/workflows/deny.yml
@@ -10,6 +19,15 @@ on:
     branches:
       - main
     paths:
+      - "**/Cargo.toml"
+      - "**/LICENSE*"
+      - "**/COPYING*"
+      - tools/cargo-about/**
+      - scripts/generate_notices.py
+      - scripts/package_vm_worker.py
+      - scripts/package_workspace.py
+      - scripts/publish_workspace.py
+      - .github/workflows/release.yml
       - Cargo.lock
       - deny.toml
       - .github/workflows/deny.yml
@@ -62,3 +80,6 @@ jobs:
 
       - name: Check dependency policy
         run: cargo deny check
+
+      - name: Generate release worker license notices
+        run: python3 scripts/generate_notices.py --published --out "${RUNNER_TEMP}/THIRD-PARTY-NOTICES"

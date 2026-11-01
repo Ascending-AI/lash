@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The SDK worker archive records protocol diagnostics and rejects test/debug helpers."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("package_vm_worker", ROOT / "scripts/package_vm_worker.py")
@@ -28,6 +30,10 @@ class WorkerBundle(unittest.TestCase):
         subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", "commit", "-qm", "Fixture"], cwd=self.root, check=True)
         self.worker = self.root / "helper"
         self.write_worker()
+        self.notices = b"Generated dependency license notices\n"
+        mocked = patch.object(PACKAGER, "generate_notices", return_value=self.notices)
+        mocked.start()
+        self.addCleanup(mocked.stop)
 
     def write_worker(self, **changes):
         info = {"protocol_version": 1, "minimum_supported_protocol_version": 1,
@@ -40,6 +46,10 @@ class WorkerBundle(unittest.TestCase):
         archive = PACKAGER.package(self.root, self.worker, self.root / "out", "0.0.0-dev", "linux-x86_64")
         with tarfile.open(archive) as tar:
             manifest = json.load(tar.extractfile("manifest.json"))
+            self.assertEqual(
+                (manifest["notices"], tar.extractfile(manifest["notices"]["path"]).read()),
+                ({"path": "THIRD-PARTY-NOTICES", "sha256": hashlib.sha256(self.notices).hexdigest()}, self.notices),
+            )
             self.assertEqual(manifest["worker_sha256"], PACKAGER.digest(self.worker))
             self.assertEqual(manifest["worker"]["protocol_version"], 1)
             self.assertEqual(manifest["worker_binary"], "bin/lash-vm-worker")

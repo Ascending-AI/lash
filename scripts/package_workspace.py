@@ -78,6 +78,9 @@ def main() -> int:
     if args.version:
         publish_workspace.stamp_workspace(args.version)
 
+    from generate_notices import generate_published_notices
+
+    generate_published_notices(Path.cwd(), "x86_64-unknown-linux-gnu")
     packages = publish_workspace.load_publishable_workspace_packages()
     names = sorted(package["name"] for package in packages.values())
     if not names:

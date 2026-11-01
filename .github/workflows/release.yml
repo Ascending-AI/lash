@@ -622,6 +622,8 @@ jobs:
         with:
           ref: ${{ needs.prepare-release.outputs.release_sha }}
           persist-credentials: false
+      - name: Install Rust toolchain for locked dependency metadata
+        uses: ./.github/actions/rust-toolchain
       - name: Configure shared build cache
         uses: ./.github/actions/buck2-shared-cache
         env:
@@ -639,13 +641,13 @@ jobs:
           python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
           kiln() { scripts/hermetic-build.sh "$@"; }
           kiln sync
-          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_d800a611
+          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_43cdad03
           kiln build --config=optimized --materializations=final \
             --build-report "${RUNNER_TEMP}/sdk-worker-build.json" "${worker_label}"
           worker="$(python3 tools/buck2/outputs.py \
             --report "${RUNNER_TEMP}/sdk-worker-build.json" --label "${worker_label}" --single)"
           echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"
-      - name: Bundle helper and exact SDK source
+      - name: Bundle helper, exact SDK source and generated license notices
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
         run: |
