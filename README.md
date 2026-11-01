@@ -41,6 +41,16 @@ Key features:
 
 ## Embedding
 
+Linux worker releases require glibc 2.34 or newer. Choose a
+`lash-sdk-worker-VERSION-linux-x86_64-python-typescript.tar.gz`,
+`lash-sdk-worker-VERSION-linux-x86_64-typescript.tar.gz` or
+`lash-sdk-worker-VERSION-linux-x86_64-python.tar.gz` bundle to match your dialects.
+Each contains the stripped `bin/lash-vm-worker`, `THIRD-PARTY-NOTICES` and
+`manifest.json`, with an archive `.sha256` sidecar. The manifest records the
+release version, target, compiled dialects, protocol range, glibc floor and
+binary/notices SHA-256 digests. Source remains available in the release's source
+archives and Cargo packages.
+
 The SDK package is named `lash-runtime`; alias it as `lash` in your dependencies
 and enable the `mcp` feature for MCP support.
 

@@ -196,19 +196,19 @@ synthetic-next = [
 
 [dev-dependencies]
 lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-llm-transport = { workspace = true }
+lash-llm-transport = { package = "lash-internal-llm-transport", path = "../lash-llm-transport" }
 # The dev-dependencies' testing client is paired with a testing worker when
 # the `worker` feature links one (FIG-4409).
-lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
+lash-vm-worker = { package = "lash-internal-vm-worker", path = "../lash-vm-worker", features = ["testing", "dialect-typescript", "dialect-python"] }
 # The facade's laws run TypeScript and Python sessions and processes.
-lash-vm-runtime = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-vm-runtime = { package = "lash-internal-vm-runtime", path = "../lash-vm-runtime", features = ["dialect-typescript", "dialect-python"] }
 lash-conformance.workspace = true
-lash-core = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-postgres-store = { workspace = true, features = ["testing"] }
-lash-provider-anthropic = { workspace = true, features = ["testing"] }
-lash-provider-openai = { workspace = true, features = ["testing"] }
-lash-protocol-rlm = { workspace = true, features = ["testing"] }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
+lash-postgres-store = { package = "lash-internal-postgres-store", path = "../lash-postgres-store", features = ["testing"] }
+lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "../lash-provider-anthropic", features = ["testing"] }
+lash-provider-openai = { package = "lash-internal-provider-openai", path = "../lash-provider-openai", features = ["testing"] }
+lash-protocol-rlm = { package = "lash-internal-protocol-rlm", path = "../lash-protocol-rlm", features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 rusqlite = { version = "0.37", features = ["bundled"] }

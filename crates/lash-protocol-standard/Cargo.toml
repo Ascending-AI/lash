@@ -41,7 +41,7 @@ schemars = { workspace = true }
 default = []
 
 [dev-dependencies]
-lash = { workspace = true, features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 # The recording backend a storage-only test builds over a bare store set
 # (D1 F3).
 lash-conformance = { workspace = true }
@@ -50,10 +50,10 @@ insta = "1"
 # `cfg(test)`, to exempt one provably equivalent mutant from the Confidence
 # mutation gate (see `handle_exec_result` in src/lib.rs).
 mutants = "0.0.4"
-lash-core = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
 # The recorded-behaviour laws (FIG-4398) run over SQLite file stores and
 # PostgreSQL as well as SQLite memory.
-lash-postgres-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { package = "lash-internal-postgres-store", path = "../lash-postgres-store", features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

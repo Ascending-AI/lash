@@ -57,9 +57,9 @@ uuid = { workspace = true, features = ["v4"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
-lash.workspace = true
+lash = { package = "lash-runtime", path = "../lash" }
 lash-conformance = { workspace = true, features = ["lash-vm"] }
-lash-core = { workspace = true, features = ["testing"] }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }

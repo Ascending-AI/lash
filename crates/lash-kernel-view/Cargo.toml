@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES", "/kernel-workflow-view-v1.schema.json", "/kernel-workflow-view-v1.d.ts"]
 name = "lash-kernel-view"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The lash kernel's workflow view: the canvas read of a checked document's entry, with no dialect, editor or runtime."
 keywords = ["lash", "kernel", "workflow", "view"]
 categories = ["data-structures"]
-publish = false
 
 [lib]
 name = "lash_kernel_view"

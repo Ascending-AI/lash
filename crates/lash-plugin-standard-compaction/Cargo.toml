@@ -33,6 +33,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 lash-sansio = { workspace = true }
-lash = { workspace = true, features = ["testing"] }
-lash-core = { workspace = true, features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

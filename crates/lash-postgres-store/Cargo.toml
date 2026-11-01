@@ -56,13 +56,13 @@ lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable-test = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
-lash = { workspace = true, features = ["postgres", "mcp", "testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["postgres", "mcp", "testing"] }
 lash-conformance = { workspace = true, features = ["lash-vm"] }
-lash-core = { workspace = true, features = ["testing"] }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance
 # factory and probe impls), the same way lash-sqlite-store wires itself.
 lash-postgres-store = { package = "lash-internal-postgres-store", path = ".", features = ["testing"] }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time", "test-util"] }
 tracing-subscriber = { workspace = true }

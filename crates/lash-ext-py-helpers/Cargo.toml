@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-ext-py-helpers"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +10,6 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 description = "Dialect helper definitions independent of source lowering"
-publish = false
 
 [lib]
 doctest = false

@@ -475,19 +475,16 @@ jobs:
       # release version (stamped here exactly as the publisher stamps it), so
       # the manifests and lockfile are exercised as they will be uploaded.
       #
-      # --no-verify here skips only the per-crate verify *builds* of the
-      # packaged tarballs -- the same code validate-release-ref and the
-      # target's full-profile CI run already compile. Measured locally:
-      # packaging every publishable crate takes ~16s, while verify-building the
-      # tarballs is a cold dependency build per crate and runs into the
-      # hour-plus range, which no release-job budget covers. Run
-      # `just package-workspace` (verify on by default) for the verified form.
+      # Main CI covers the general per-crate build checks. The standalone
+      # kernel engine additionally builds from normalized packages with its
+      # dialect features, proving that it needs no workspace source files.
+      # `just package-workspace` verifies every package when needed.
       - name: Package every publishable crate at the release version
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
         run: |
           python3 scripts/package_workspace.py \
-            --no-verify \
+            --no-verify --verify-package lash-kernel-engine \
             --version "${RELEASE_TAG#v}" \
             --digests packaged-crate-digests.json
 
@@ -612,7 +609,11 @@ jobs:
 
 
   worker-artifacts:
-    name: Package Linux SDK worker
+    strategy:
+      fail-fast: false
+      matrix:
+        dialects: ["python,typescript", "typescript", "python"]
+    name: Package Linux SDK worker (${{ matrix.dialects }})
     needs: prepare-release
     environment: build-cache
     runs-on: ubuntu-24.04
@@ -641,25 +642,25 @@ jobs:
           python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
           kiln() { scripts/hermetic-build.sh "$@"; }
           kiln sync
-          worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_43cdad03
+          worker_label="$(python3 scripts/package_vm_worker.py --print-target --dialects '${{ matrix.dialects }}')"
           kiln build --config=optimized --materializations=final \
             --build-report "${RUNNER_TEMP}/sdk-worker-build.json" "${worker_label}"
           worker="$(python3 tools/buck2/outputs.py \
             --report "${RUNNER_TEMP}/sdk-worker-build.json" --label "${worker_label}" --single)"
           echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"
-      - name: Bundle helper, exact SDK source and generated license notices
+      - name: Bundle stripped helper, manifest and dependency license notices
         env:
           RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
         run: |
           python3 scripts/package_vm_worker.py --worker "$SDK_WORKER" \
-            --out worker-artifacts --version "${RELEASE_TAG#v}"
+            --dialects '${{ matrix.dialects }}' --out worker-artifacts --version "${RELEASE_TAG#v}"
       - name: Remove client credentials
         if: always()
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: sdk-worker-linux
+          name: sdk-worker-linux-${{ strategy.job-index }}
           path: worker-artifacts/*
           if-no-files-found: error
 
@@ -739,6 +740,10 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
+          body: |
+            Linux worker ABI floor: glibc 2.34. Worker bundles contain the stripped
+            executable, THIRD-PARTY-NOTICES and manifest.json, with a SHA-256 sidecar.
+            Choose python-typescript, typescript or python in the archive name.
           fail_on_unmatched_files: true
           files: |
             worker-artifacts/*.tar.gz

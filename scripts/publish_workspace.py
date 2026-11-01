@@ -153,9 +153,9 @@ def load_publishable_workspace_packages() -> dict[str, dict]:
         for package in metadata["packages"]
         if package["id"] in workspace_members and package.get("publish") != []
     }
-    package_id_by_dir = {
-        Path(package["manifest_path"]).parent.resolve(): package_id
-        for package_id, package in package_by_id.items()
+    all_by_dir = {
+        Path(package["manifest_path"]).parent.resolve(): package
+        for package in metadata["packages"] if package["id"] in workspace_members
     }
 
     result = {}
@@ -174,11 +174,13 @@ def load_publishable_workspace_packages() -> dict[str, dict]:
             dependency_path = dependency.get("path")
             if not dependency_path:
                 continue
-            dependency_id = package_id_by_dir.get(Path(dependency_path).resolve())
-            if dependency_id == package_id:
-                continue
-            if dependency_id in package_by_id:
-                workspace_dependencies.add(dependency_id)
+            sibling = all_by_dir.get(Path(dependency_path).resolve())
+            if sibling is None or sibling["id"] not in package_by_id:
+                raise ValueError(f"{package['name']} reaches an unpublished path dependency: {dependency['name']}")
+            if dependency.get("req") != "=" + sibling["version"]:
+                raise ValueError(f"{package['name']} must exactly pin {sibling['name']} {sibling['version']}")
+            if sibling["id"] != package_id:
+                workspace_dependencies.add(sibling["id"])
         result[package_id] = {
             "id": package_id,
             "name": package["name"],

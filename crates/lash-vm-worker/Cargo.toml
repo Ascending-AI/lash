@@ -101,15 +101,15 @@ lash-kernel-services = { workspace = true }
 stats_alloc = "0.1"
 sha2 = { workspace = true }
 lash-kernel-vm = { workspace = true, features = ["testing"] }
-lash-ext-helper-compiler = { workspace = true }
+lash-ext-helper-compiler = { path = "../lash-ext-helper-compiler" }
 blake3 = { workspace = true }
 tokio-util = { workspace = true }
 lash-protocol-types = { workspace = true }
 lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
 lash-durable-test = { workspace = true }
-lash-postgres-store = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { package = "lash-internal-postgres-store", path = "../lash-postgres-store", features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 lash-core-execution = { workspace = true, features = ["testing"] }

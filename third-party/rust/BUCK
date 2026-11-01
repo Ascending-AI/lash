@@ -17582,23 +17582,23 @@ alias(
 )
 
 third_party_http_archive(
-    name = "rustls-0.23.45.crate",
-    sha256 = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
-    strip_prefix = "rustls-0.23.45",
-    urls = ["https://static.crates.io/crates/rustls/0.23.45/download"],
+    name = "rustls-0.23.46.crate",
+    sha256 = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf",
+    strip_prefix = "rustls-0.23.46",
+    urls = ["https://static.crates.io/crates/rustls/0.23.46/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "rustls-0.23",
-    srcs = [":rustls-0.23.45.crate"],
+    srcs = [":rustls-0.23.46.crate"],
     crate = "rustls",
-    crate_root = "rustls-0.23.45.crate/src/lib.rs",
+    crate_root = "rustls-0.23.46.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "rustls",
         "CARGO_CRATE_NAME": "rustls",
-        "CARGO_MANIFEST_DIR": "rustls-0.23.45.crate",
+        "CARGO_MANIFEST_DIR": "rustls-0.23.46.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls is a modern TLS library written in Rust.",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rustls/rustls",
@@ -17606,10 +17606,10 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/rustls",
         "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "0.23.45",
+        "CARGO_PKG_VERSION": "0.23.46",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "23",
-        "CARGO_PKG_VERSION_PATCH": "45",
+        "CARGO_PKG_VERSION_PATCH": "46",
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :rustls-0.23-build-script-run[out_dir])",
     },
@@ -17638,14 +17638,14 @@ third_party_rust_library(
 
 third_party_rust_binary(
     name = "rustls-0.23-build-script-build",
-    srcs = [":rustls-0.23.45.crate"],
+    srcs = [":rustls-0.23.46.crate"],
     crate = "build_script_build",
-    crate_root = "rustls-0.23.45.crate/build.rs",
+    crate_root = "rustls-0.23.46.crate/build.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "build-script-build",
         "CARGO_CRATE_NAME": "build_script_build",
-        "CARGO_MANIFEST_DIR": "rustls-0.23.45.crate",
+        "CARGO_MANIFEST_DIR": "rustls-0.23.46.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls is a modern TLS library written in Rust.",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rustls/rustls",
@@ -17653,10 +17653,10 @@ third_party_rust_binary(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/rustls",
         "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "0.23.45",
+        "CARGO_PKG_VERSION": "0.23.46",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "23",
-        "CARGO_PKG_VERSION_PATCH": "45",
+        "CARGO_PKG_VERSION_PATCH": "46",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -17685,7 +17685,7 @@ third_party_buildscript_run(
         "CARGO_PKG_RUST_VERSION": "1.71",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "23",
-        "CARGO_PKG_VERSION_PATCH": "45",
+        "CARGO_PKG_VERSION_PATCH": "46",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -17699,7 +17699,7 @@ third_party_buildscript_run(
     },
     rustc_link_lib = True,
     rustc_link_search = True,
-    version = "0.23.45",
+    version = "0.23.46",
 )
 
 alias(
@@ -17899,23 +17899,23 @@ alias(
 )
 
 third_party_http_archive(
-    name = "rustls-webpki-0.103.15.crate",
-    sha256 = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
-    strip_prefix = "rustls-webpki-0.103.15",
-    urls = ["https://static.crates.io/crates/rustls-webpki/0.103.15/download"],
+    name = "rustls-webpki-0.103.16.crate",
+    sha256 = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281",
+    strip_prefix = "rustls-webpki-0.103.16",
+    urls = ["https://static.crates.io/crates/rustls-webpki/0.103.16/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "rustls-webpki-0.103",
-    srcs = [":rustls-webpki-0.103.15.crate"],
+    srcs = [":rustls-webpki-0.103.16.crate"],
     crate = "webpki",
-    crate_root = "rustls-webpki-0.103.15.crate/src/lib.rs",
+    crate_root = "rustls-webpki-0.103.16.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "webpki",
         "CARGO_CRATE_NAME": "webpki",
-        "CARGO_MANIFEST_DIR": "rustls-webpki-0.103.15.crate",
+        "CARGO_MANIFEST_DIR": "rustls-webpki-0.103.16.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Web PKI X.509 Certificate Verification.",
         "CARGO_PKG_HOMEPAGE": "",
@@ -17923,10 +17923,10 @@ third_party_rust_library(
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/webpki",
         "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "0.103.15",
+        "CARGO_PKG_VERSION": "0.103.16",
         "CARGO_PKG_VERSION_MAJOR": "0",
         "CARGO_PKG_VERSION_MINOR": "103",
-        "CARGO_PKG_VERSION_PATCH": "15",
+        "CARGO_PKG_VERSION_PATCH": "16",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -22369,34 +22369,34 @@ alias(
 )
 
 third_party_http_archive(
-    name = "tokio-1.52.3.crate",
-    sha256 = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe",
-    strip_prefix = "tokio-1.52.3",
-    urls = ["https://static.crates.io/crates/tokio/1.52.3/download"],
+    name = "tokio-1.54.1.crate",
+    sha256 = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3",
+    strip_prefix = "tokio-1.54.1",
+    urls = ["https://static.crates.io/crates/tokio/1.54.1/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "tokio-1",
-    srcs = [":tokio-1.52.3.crate"],
+    srcs = [":tokio-1.54.1.crate"],
     crate = "tokio",
-    crate_root = "tokio-1.52.3.crate/src/lib.rs",
+    crate_root = "tokio-1.54.1.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "tokio",
         "CARGO_CRATE_NAME": "tokio",
-        "CARGO_MANIFEST_DIR": "tokio-1.52.3.crate",
+        "CARGO_MANIFEST_DIR": "tokio-1.54.1.crate",
         "CARGO_PKG_AUTHORS": "Tokio Contributors <team@tokio.rs>",
         "CARGO_PKG_DESCRIPTION": "An event-driven, non-blocking I/O platform for writing asynchronous I/O\nbacked applications.\n",
         "CARGO_PKG_HOMEPAGE": "https://tokio.rs",
         "CARGO_PKG_NAME": "tokio",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/tokio-rs/tokio",
-        "CARGO_PKG_RUST_VERSION": "1.71",
-        "CARGO_PKG_VERSION": "1.52.3",
+        "CARGO_PKG_RUST_VERSION": "1.85",
+        "CARGO_PKG_VERSION": "1.54.1",
         "CARGO_PKG_VERSION_MAJOR": "1",
-        "CARGO_PKG_VERSION_MINOR": "52",
-        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_MINOR": "54",
+        "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
@@ -25861,34 +25861,34 @@ alias(
 )
 
 third_party_http_archive(
-    name = "webpki-root-certs-1.0.8.crate",
-    sha256 = "0d46a5a140e6f7afeccd8eae97eff335163939eac8b929834875168b29b3d267",
-    strip_prefix = "webpki-root-certs-1.0.8",
-    urls = ["https://static.crates.io/crates/webpki-root-certs/1.0.8/download"],
+    name = "webpki-root-certs-1.0.11.crate",
+    sha256 = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a",
+    strip_prefix = "webpki-root-certs-1.0.11",
+    urls = ["https://static.crates.io/crates/webpki-root-certs/1.0.11/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "webpki-root-certs-1",
-    srcs = [":webpki-root-certs-1.0.8.crate"],
+    srcs = [":webpki-root-certs-1.0.11.crate"],
     crate = "webpki_root_certs",
-    crate_root = "webpki-root-certs-1.0.8.crate/src/lib.rs",
+    crate_root = "webpki-root-certs-1.0.11.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "webpki_root_certs",
         "CARGO_CRATE_NAME": "webpki_root_certs",
-        "CARGO_MANIFEST_DIR": "webpki-root-certs-1.0.8.crate",
+        "CARGO_MANIFEST_DIR": "webpki-root-certs-1.0.11.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Mozilla trusted certificate authorities in self-signed X.509 format for use with crates other than webpki",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rustls/webpki-roots",
         "CARGO_PKG_NAME": "webpki-root-certs",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/webpki-roots",
-        "CARGO_PKG_RUST_VERSION": "1.70",
-        "CARGO_PKG_VERSION": "1.0.8",
+        "CARGO_PKG_RUST_VERSION": "1.71",
+        "CARGO_PKG_VERSION": "1.0.11",
         "CARGO_PKG_VERSION_MAJOR": "1",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "8",
+        "CARGO_PKG_VERSION_PATCH": "11",
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
@@ -25953,34 +25953,34 @@ alias(
 )
 
 third_party_http_archive(
-    name = "webpki-roots-1.0.8.crate",
-    sha256 = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf",
-    strip_prefix = "webpki-roots-1.0.8",
-    urls = ["https://static.crates.io/crates/webpki-roots/1.0.8/download"],
+    name = "webpki-roots-1.0.11.crate",
+    sha256 = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171",
+    strip_prefix = "webpki-roots-1.0.11",
+    urls = ["https://static.crates.io/crates/webpki-roots/1.0.11/download"],
     visibility = [],
 )
 
 third_party_rust_library(
     name = "webpki-roots-1",
-    srcs = [":webpki-roots-1.0.8.crate"],
+    srcs = [":webpki-roots-1.0.11.crate"],
     crate = "webpki_roots",
-    crate_root = "webpki-roots-1.0.8.crate/src/lib.rs",
+    crate_root = "webpki-roots-1.0.11.crate/src/lib.rs",
     edition = "2021",
     env = {
         "CARGO_BIN_NAME": "webpki_roots",
         "CARGO_CRATE_NAME": "webpki_roots",
-        "CARGO_MANIFEST_DIR": "webpki-roots-1.0.8.crate",
+        "CARGO_MANIFEST_DIR": "webpki-roots-1.0.11.crate",
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Mozilla's CA root certificates for use with webpki",
         "CARGO_PKG_HOMEPAGE": "https://github.com/rustls/webpki-roots",
         "CARGO_PKG_NAME": "webpki-roots",
         "CARGO_PKG_README": "README.md",
         "CARGO_PKG_REPOSITORY": "https://github.com/rustls/webpki-roots",
-        "CARGO_PKG_RUST_VERSION": "1.70",
-        "CARGO_PKG_VERSION": "1.0.8",
+        "CARGO_PKG_RUST_VERSION": "1.71",
+        "CARGO_PKG_VERSION": "1.0.11",
         "CARGO_PKG_VERSION_MAJOR": "1",
         "CARGO_PKG_VERSION_MINOR": "0",
-        "CARGO_PKG_VERSION_PATCH": "8",
+        "CARGO_PKG_VERSION_PATCH": "11",
         "CARGO_PKG_VERSION_PRE": "",
     },
     named_deps = {
@@ -26403,6 +26403,11 @@ third_party_rust_library(
     features = [
         "Win32",
         "Win32_Foundation",
+        "Win32_Storage",
+        "Win32_Storage_FileSystem",
+        "Win32_System",
+        "Win32_System_Console",
+        "Win32_System_SystemInformation",
         "Win32_UI",
         "Win32_UI_Shell",
         "default",

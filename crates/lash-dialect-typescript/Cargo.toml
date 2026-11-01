@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-dialect-typescript"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The TypeScript dialect of the lash kernel: a front end that lowers TypeScript to kernel documents, and the helper functions it emits calls to."
 keywords = ["lash", "kernel", "typescript", "dialect"]
 categories = ["compilers", "parser-implementations"]
-publish = false
 
 [lib]
 name = "lash_dialect_typescript"
@@ -27,8 +28,8 @@ lash-kernel-services = { workspace = true }
 lash-kernel-value = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
-lash-kernel-lib = { path = "../lash-kernel-lib" }
-lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
+lash-kernel-lib = { version = "=0.0.0-dev", path = "../lash-kernel-lib" }
+lash-ext-regex-ecma = { version = "=0.0.0-dev", path = "../lash-ext-regex-ecma" }
 ryu-js = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -37,9 +38,9 @@ swc_ecma_ast = { workspace = true }
 swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
-lash-ext-helper-compiler = { workspace = true }
+lash-ext-helper-compiler = { path = "../lash-ext-helper-compiler" }
 lash-kernel-package = { workspace = true, features = ["testing"] }
-lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-releases = { path = "../lash-kernel-releases", features = ["dialect-typescript", "dialect-python"] }
 libc = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-dialect-python = { path = "../lash-dialect-python" }
@@ -52,8 +53,8 @@ lash-kernel-edit = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
-lash-ext-ts-core = { workspace = true }
-lash-ext-py-core = { workspace = true }
+lash-ext-ts-core = { path = "../lash-ext-ts-core" }
+lash-ext-py-core = { path = "../lash-ext-py-core" }
 lash-kernel-vm = { workspace = true, features = ["perf-witness", "testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"

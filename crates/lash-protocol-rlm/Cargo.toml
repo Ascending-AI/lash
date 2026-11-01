@@ -71,23 +71,23 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 chrono = { workspace = true }
-lash-llm-transport = { workspace = true }
+lash-llm-transport = { package = "lash-internal-llm-transport", path = "../lash-llm-transport" }
 # The `dataframe` fixture the Package laws publish (FIG-6926).
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true, features = ["testing"] }
 # A testing client is paired with a testing worker, which the runtime links.
 # The laws run TypeScript and Python sessions, so their build holds both
 # dialects' helper releases.
-lash-vm-runtime = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
-lash-core = { workspace = true, features = ["testing"] }
+lash-vm-runtime = { package = "lash-internal-vm-runtime", path = "../lash-vm-runtime", features = ["testing", "dialect-typescript", "dialect-python"] }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 lash-protocol-types = { workspace = true }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 # The worker a Python-dialect law runs its cell in: this crate's test binary
 # re-entered as the worker of a host that names Python alone.
-lash-vm-worker = { workspace = true, features = ["testing", "dialect-typescript", "dialect-python"] }
+lash-vm-worker = { package = "lash-internal-vm-worker", path = "../lash-vm-worker", features = ["testing", "dialect-typescript", "dialect-python"] }
 # The prompt walker lowers every example a prompt shows with the dialect's
 # own front end.
 lash-dialect-typescript = { workspace = true }

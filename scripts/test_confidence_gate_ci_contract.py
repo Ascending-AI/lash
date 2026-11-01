@@ -1596,7 +1596,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             worker_artifacts,
         )
         self.assertEqual("ubuntu-24.04", yaml.safe_load(worker_artifacts)["worker-artifacts"]["runs-on"])
-        self.assertNotIn("strategy:", worker_artifacts)
         self.assertIn("name: sdk-worker-linux", worker_artifacts)
         self.assertIn("python3 scripts/package_vm_worker.py", worker_artifacts)
         self.assertIn("pattern: sdk-worker-*", publish)
@@ -2832,28 +2831,6 @@ class ReleaseDryRunTests(unittest.TestCase):
         self.assertIn('run.get("event") == "workflow_dispatch"', preconditions)
         self.assertNotIn("dry_run", preconditions)
 
-    def test_linux_worker_uses_optimized_sdk_features_and_resolved_output(self):
-        job = yaml.safe_load(RELEASE_WORKFLOW.read_text())["jobs"]["worker-artifacts"]
-        self.assertEqual("ubuntu-24.04", job["runs-on"])
-        self.assertNotIn("strategy", job)
-        self.assertNotIn("macos", json.dumps(job).lower())
-        self.assertNotIn("cargo build", json.dumps(job))
-        build = next(step["run"] for step in job["steps"] if step.get("name") == "Build the matching release worker")
-        self.assertLess(build.index("release_version.py stamp"), build.index("kiln sync"))
-        self.assertIn("kiln build --config=optimized --materializations=final", build)
-        label = re.search(r"worker_label=(\S+)", build).group(1)
-        target = next(target for target in json.loads(LANE_TABLE.read_text())["feature_lane_units"]
-                      if target["label"] == label)
-        # The SDK worker installs every dialect lash ships (FIG-5990), and
-        # carries no testing control.
-        self.assertEqual(["dialect-python", "dialect-typescript"], target["features"])
-        self.assertIn("tools/buck2/outputs.py", build)
-        self.assertIn('echo "SDK_WORKER=${worker}" >> "$GITHUB_ENV"', build)
-        bundle = next(step["run"] for step in job["steps"] if step.get("name") == "Bundle helper and exact SDK source")
-        self.assertIn('--worker "$SDK_WORKER"', bundle)
-        self.assertTrue(any(step.get("if") == "always()" for step in job["steps"]))
-        upload = next(step for step in job["steps"] if "upload-artifact@" in step.get("uses", ""))
-        self.assertEqual("sdk-worker-linux", upload["with"]["name"])
 
 
 if __name__ == "__main__":

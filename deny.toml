@@ -5,6 +5,7 @@ version = 2
 # Current main carries h2 0.4.15; the ignore is recorded until its owning
 # upstream dependency permits a patched version.
 ignore = [
+    { id = "RUSTSEC-2024-0449", reason = "serde_yaml 0.9.34+deprecated requires unmaintained unsafe-libyaml 0.2; no patched unsafe-libyaml release is available" },
     { id = "RUSTSEC-2026-0258", reason = "h2 0.4.15 is selected by the current hyper graph; remove when the locked graph moves to the patched h2 version" },
 ]
 

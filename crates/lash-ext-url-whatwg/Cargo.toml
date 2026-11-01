@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-ext-url-whatwg"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +10,6 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 description = "Deterministic url-whatwg extension functions over kernel data"
-publish = false
 
 [lib]
 doctest = false

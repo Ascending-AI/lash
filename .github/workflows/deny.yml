@@ -2,35 +2,9 @@ name: Dependency policy
 
 on:
   pull_request:
-    paths:
-      - "**/Cargo.toml"
-      - "**/LICENSE*"
-      - "**/COPYING*"
-      - tools/cargo-about/**
-      - scripts/generate_notices.py
-      - scripts/package_vm_worker.py
-      - scripts/package_workspace.py
-      - scripts/publish_workspace.py
-      - .github/workflows/release.yml
-      - Cargo.lock
-      - deny.toml
-      - .github/workflows/deny.yml
   push:
     branches:
       - main
-    paths:
-      - "**/Cargo.toml"
-      - "**/LICENSE*"
-      - "**/COPYING*"
-      - tools/cargo-about/**
-      - scripts/generate_notices.py
-      - scripts/package_vm_worker.py
-      - scripts/package_workspace.py
-      - scripts/publish_workspace.py
-      - .github/workflows/release.yml
-      - Cargo.lock
-      - deny.toml
-      - .github/workflows/deny.yml
   # Advisories are time-varying: a RUSTSEC entry published against an
   # unchanged Cargo.lock would otherwise stay invisible until an unrelated
   # dependency bump surfaces it as a surprise failure on that PR.

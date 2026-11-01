@@ -12,21 +12,18 @@ that was never packaged.
 
 Packaging is done in one `cargo package -p <crate> ...` invocation covering every
 publishable crate, so cargo resolves workspace siblings against the crates it
-just packaged instead of against crates.io — that is what makes a from-checkout
-dry run possible for crates whose dependencies are not published yet. If that
-combined run fails, the script re-packages crate by crate to attribute the
-failure: a crate that cannot be packaged *only* because a path dependency is not
-on crates.io yet is reported as a named exception (the publisher's layered
-ordering publishes that dependency first), and any other failure is fatal.
+just packaged instead of against crates.io. Any packaging failure stops the
+release; no unpublished-sibling exception can hide a missing artifact.
 
 Usage:
     python3 scripts/package_workspace.py [--version X.Y.Z] [--no-verify]
-                                         [--digests digests.json]
+                                         [--digests digests.json] [--verify-package CRATE]
 
 `--version` stamps the real release version into the checkout first (the working
 tree carries the `0.0.0-dev` placeholder), so packaging is exercised at exactly
 the version the publisher will upload. `--digests` writes the sha256 of every
-packaged `.crate` for the record.
+packaged `.crate` for the record. `--verify-package` builds a selected library
+with its dialect features using only packaged workspace sources.
 """
 
 from __future__ import annotations
@@ -35,14 +32,16 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import re
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import tomllib
 from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-MISSING_PACKAGE_PATTERN = re.compile(r"no matching package named `([^`]+)` found")
 
 
 def load_publish_workspace():
@@ -72,6 +71,10 @@ def main() -> int:
         default=None,
         help="write the sha256 of every packaged .crate to this JSON file",
     )
+    parser.add_argument(
+        "--verify-package", action="append", default=[], metavar="CRATE",
+        help="build this standalone crate from packaged workspace dependencies, including its dialect features",
+    )
     args = parser.parse_args()
 
     publish_workspace = load_publish_workspace()
@@ -89,24 +92,12 @@ def main() -> int:
     print(f"dry-run packaging {len(names)} publishable crates (verify={not args.no_verify})")
 
     result = run_cargo_package(names, no_verify=args.no_verify)
-    if result.returncode == 0:
-        packaged = names
-        exceptions: dict[str, str] = {}
-    else:
-        print(
-            "combined packaging run failed; re-packaging crate by crate to attribute it",
-            file=sys.stderr,
-        )
-        packaged, exceptions, failures = package_individually(
-            names, packages, no_verify=args.no_verify
-        )
-        if failures:
-            for name, reason in sorted(failures.items()):
-                print(f"PACKAGING FAILED: {name}: {reason}", file=sys.stderr)
-            return 1
+    if result.returncode != 0:
+        return result.returncode
+    packaged = names
 
     digests = crate_digests(target_directory(), packages)
-    report(packaged, exceptions, digests)
+    report(packaged, digests)
 
     if args.digests:
         Path(args.digests).write_text(
@@ -122,7 +113,37 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    for name in args.verify_package:
+        verify_packaged_crate(name, target_directory(), packages)
     return 0
+
+
+def verify_packaged_crate(name: str, target_dir: Path, packages: dict[str, dict]) -> None:
+    """Use only normalized .crate contents, with no workspace path dependencies."""
+    by_name = {package["name"]: package for package in packages.values()}
+    if name not in by_name:
+        raise ValueError(f"standalone verification requires a publishable crate: {name}")
+    with tempfile.TemporaryDirectory(prefix="lash-packaged-") as directory:
+        root = Path(directory)
+        shutil.copyfile(Path.cwd() / "rust-toolchain.toml", root / "rust-toolchain.toml")
+        config = []
+        for package in packages.values():
+            stem = f"{package['name']}-{package['version']}"
+            with tarfile.open(target_dir / "package" / f"{stem}.crate") as archive:
+                archive.extractall(root, filter="data")
+            config.extend(["--config", f'patch.crates-io.{package["name"]}.path={json.dumps(str(root / stem))}'])
+        package = by_name[name]
+        manifest = root / f"{name}-{package['version']}" / "Cargo.toml"
+        # Cargo emitted these manifests with registry dependencies. Patches
+        # stand in for this release's not-yet-uploaded packages, never sources
+        # from the checkout. Cargo still enforces their exact version pins.
+        features = sorted(feature for feature in tomllib.loads(manifest.read_text()).get("features", {})
+                          if feature.startswith("dialect-"))
+        command = ["cargo", "build", "--manifest-path", str(manifest), "--lib", *config]
+        if features:
+            command.extend(["--features", ",".join(features)])
+        subprocess.run(command, cwd=root, check=True)
+        print(f"standalone packaged build passed: {name}; dialect features {features}")
 
 
 def run_cargo_package(names: list[str], no_verify: bool) -> subprocess.CompletedProcess:
@@ -137,46 +158,6 @@ def run_cargo_package(names: list[str], no_verify: bool) -> subprocess.Completed
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
     return result
-
-
-def package_individually(
-    names: list[str], packages: dict[str, dict], no_verify: bool
-) -> tuple[list[str], dict[str, str], dict[str, str]]:
-    """Package one crate at a time and classify each crate that cannot be.
-
-    A crate whose only problem is a workspace sibling that is not on crates.io
-    yet is an expected exception from a checkout: the publisher publishes that
-    sibling first. Anything else is a packaging defect and fails the release.
-    """
-    workspace_crate_names = {package["name"] for package in packages.values()}
-    packaged: list[str] = []
-    exceptions: dict[str, str] = {}
-    failures: dict[str, str] = {}
-    for name in names:
-        result = run_cargo_package([name], no_verify=no_verify)
-        if result.returncode == 0:
-            packaged.append(name)
-            continue
-        output = result.stdout + result.stderr
-        unpublished = sorted(
-            {
-                match
-                for match in MISSING_PACKAGE_PATTERN.findall(output)
-                if match in workspace_crate_names
-            }
-        )
-        if unpublished:
-            exceptions[name] = (
-                "path dependencies not yet on crates.io: " + ", ".join(unpublished)
-            )
-        else:
-            failures[name] = last_error_line(output)
-    return packaged, exceptions, failures
-
-
-def last_error_line(output: str) -> str:
-    errors = [line.strip() for line in output.splitlines() if line.strip().startswith("error")]
-    return errors[-1] if errors else "cargo package failed"
 
 
 def target_directory() -> Path:
@@ -205,17 +186,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def report(packaged: list[str], exceptions: dict[str, str], digests: dict[str, str]) -> None:
+def report(packaged: list[str], digests: dict[str, str]) -> None:
     print(f"\npackaged {len(packaged)} crates:")
     for name in packaged:
         print(f"  {name} sha256={digests.get(name, 'missing')}")
-    if exceptions:
-        print(
-            f"\n{len(exceptions)} crates could not be dry-packaged from this checkout; "
-            "the publisher's layered ordering publishes their dependencies first:"
-        )
-        for name, reason in sorted(exceptions.items()):
-            print(f"  {name}: {reason}")
 
 
 if __name__ == "__main__":

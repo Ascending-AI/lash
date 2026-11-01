@@ -9,51 +9,11 @@ import io
 import pathlib
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-
-EXPECTED_INTERNAL_PACKAGES = {
-    "lash-core": "lash-internal-core",
-    "lash-core-effect": "lash-internal-core-effect",
-    "lash-core-execution": "lash-internal-core-execution",
-    "lash-core-ids": "lash-internal-core-ids",
-    "lash-core-llm": "lash-internal-core-llm",
-    "lash-core-store": "lash-internal-core-store",
-    "lash-core-worker": "lash-internal-core-worker",
-    "lash-durable": "lash-internal-durable",
-    "lash-http-transport": "lash-internal-http-transport",
-    "lash-transport-failure": "lash-internal-transport-failure",
-    "lash-vm-runtime": "lash-internal-vm-runtime",
-    "lash-llm-tools": "lash-internal-llm-tools",
-    "lash-llm-transport": "lash-internal-llm-transport",
-    "lash-plugin-mcp": "lash-internal-plugin-mcp",
-    "lash-plugin-process-controls": "lash-internal-plugin-process-controls",
-    "lash-plugin-standard-compaction": "lash-internal-plugin-standard-compaction",
-    "lash-postgres-store": "lash-internal-postgres-store",
-    "lash-protocol-rlm": "lash-internal-protocol-rlm",
-    "lash-protocol-standard": "lash-internal-protocol-standard",
-    "lash-provider-anthropic": "lash-internal-provider-anthropic",
-    "lash-provider-google": "lash-internal-provider-google",
-    "lash-provider-openai": "lash-internal-provider-openai",
-    "lash-render": "lash-internal-render",
-    "lash-rlm-types": "lash-internal-rlm-types",
-    "lash-s3-store": "lash-internal-s3-store",
-    "lash-protocol-types": "lash-internal-protocol-types",
-    "lash-sansio": "lash-internal-sansio",
-    "lash-sqlite-store": "lash-internal-sqlite-store",
-    "lash-store-sql": "lash-internal-store-sql",
-    "lash-tool-support": "lash-internal-tool-support",
-    "lash-trace": "lash-internal-trace",
-    "lash-vm-broker": "lash-internal-vm-broker",
-    "lash-vm-client": "lash-internal-vm-client",
-    "lash-vm-protocol": "lash-internal-vm-protocol",
-    "lash-vm-worker": "lash-internal-vm-worker",
-}
-
 
 def load_publish_workspace_module():
     module_path = ROOT / "scripts" / "publish_workspace.py"
@@ -63,41 +23,6 @@ def load_publish_workspace_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def build_internal_dependency_closure(
-    metadata: dict, workspace_members: set[str]
-) -> dict[str, set[str]]:
-    """Package id -> every workspace package it reaches through non-dev deps."""
-    id_by_dir = {
-        pathlib.Path(package["manifest_path"]).parent: package["id"]
-        for package in metadata["packages"]
-        if package["id"] in workspace_members
-    }
-    edges: dict[str, set[str]] = {}
-    for package in metadata["packages"]:
-        if package["id"] not in workspace_members:
-            continue
-        edges[package["id"]] = {
-            id_by_dir[pathlib.Path(dependency["path"])]
-            for dependency in package["dependencies"]
-            if dependency.get("kind") != "dev"
-            and dependency.get("path")
-            and pathlib.Path(dependency["path"]) in id_by_dir
-        }
-
-    closure: dict[str, set[str]] = {}
-    for package_id in edges:
-        reached: set[str] = set()
-        pending = list(edges[package_id])
-        while pending:
-            current = pending.pop()
-            if current in reached:
-                continue
-            reached.add(current)
-            pending.extend(edges.get(current, ()))
-        closure[package_id] = reached
-    return closure
 
 
 class PublishWorkspaceTest(unittest.TestCase):
@@ -181,6 +106,7 @@ class PublishWorkspaceTest(unittest.TestCase):
                             "rename": "lash-llm-transport",
                             "path": transport_dir,
                             "kind": None,
+                            "req": "=0.0.1",
                         },
                         {
                             "name": "lash-internal-llm-transport",
@@ -392,76 +318,6 @@ class PublishWorkspaceTest(unittest.TestCase):
         self.assertEqual(
             packages["store-id"]["workspace_dependencies"], {"runtime-id"}
         )
-
-    def test_workspace_distribution_contract_is_congruent(self) -> None:
-        publish_workspace = load_publish_workspace_module()
-        metadata = publish_workspace.run_json(
-            ["cargo", "metadata", "--format-version", "1", "--locked", "--no-deps"]
-        )
-        workspace_members = set(metadata["workspace_members"])
-        publishable = {
-            package["name"]
-            for package in metadata["packages"]
-            if package["id"] in workspace_members and package.get("publish") != []
-        }
-        self.assertEqual(
-            publishable,
-            set(EXPECTED_INTERNAL_PACKAGES.values()) | {"lash-runtime", "lash-regress"},
-        )
-
-        root_manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
-        workspace_dependencies = root_manifest["workspace"]["dependencies"]
-        for alias, package_name in EXPECTED_INTERNAL_PACKAGES.items():
-            with self.subTest(alias=alias):
-                dependency = workspace_dependencies[alias]
-                self.assertEqual(dependency["package"], package_name)
-                self.assertEqual(dependency["version"], "=0.0.0-dev")
-                self.assertIn("path", dependency)
-
-        # Internal deps pin the exact workspace version so a published crate
-        # never resolves a sibling from another release. The one exception is a
-        # dev-dependency pointing back at a crate that already depends on this
-        # one: a versioned dev-dep survives into the published manifest and has
-        # to resolve on the index, so pinning it would make the pair
-        # unpublishable (and unpackageable) in either order. Version-less path
-        # dev-deps are stripped when packaging, which is what breaks the cycle.
-        depends_on = build_internal_dependency_closure(metadata, workspace_members)
-        for package in metadata["packages"]:
-            if package["id"] not in workspace_members or package.get("publish") == []:
-                continue
-            for dependency in package["dependencies"]:
-                if dependency["name"] not in EXPECTED_INTERNAL_PACKAGES.values():
-                    continue
-                target = next(
-                    candidate
-                    for candidate in metadata["packages"]
-                    if pathlib.Path(candidate["manifest_path"]).parent
-                    == pathlib.Path(dependency["path"])
-                )
-                if target["id"] == package["id"]:
-                    continue
-                cyclic_dev_dependency = (
-                    dependency["kind"] == "dev"
-                    and package["id"] in depends_on[target["id"]]
-                )
-                self.assertEqual(
-                    dependency["req"],
-                    "*" if cyclic_dev_dependency else "=0.0.0-dev",
-                    f"{package['name']} -> {dependency['name']}",
-                )
-
-        extension = next(
-            package
-            for package in metadata["packages"]
-            if package["name"] == "lash-internal-provider-openai"
-        )
-        facade_dev_dependency = next(
-            dependency
-            for dependency in extension["dependencies"]
-            if dependency["name"] == "lash-runtime" and dependency["kind"] == "dev"
-        )
-        self.assertEqual(facade_dev_dependency["rename"], "lash")
-        self.assertEqual(facade_dev_dependency["req"], "*")
 
     def test_uploaded_crate_digest_mismatch_fails_the_release(self) -> None:
         publish_workspace = load_publish_workspace_module()

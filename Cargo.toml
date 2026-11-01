@@ -264,8 +264,8 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
-lash-dialect-conventions = { path = "crates/lash-dialect-conventions" }
-lash-kernel-engine = { path = "crates/lash-kernel-engine" }
+lash-dialect-conventions = { path = "crates/lash-dialect-conventions", version = "=0.0.0-dev" }
+lash-kernel-engine = { path = "crates/lash-kernel-engine", version = "=0.0.0-dev" }
 lash-kernel-value = { path = "crates/lash-kernel-value", version = "=0.0.0-dev" }
 lash-vocabulary = { package = "lash-internal-vocabulary", path = "crates/lash-vocabulary", version = "=0.0.0-dev" }
 foldhash = "0.2.0"

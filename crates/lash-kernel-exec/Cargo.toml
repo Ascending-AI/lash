@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-kernel-exec"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The lash kernel's executor interface: the Boundary model and step edges, the flat executor stream, its charge semantics and coverage checks."
 keywords = ["lash", "kernel", "workflow", "compiler"]
 categories = ["compilers"]
-publish = false
 
 [lib]
 name = "lash_kernel_exec"

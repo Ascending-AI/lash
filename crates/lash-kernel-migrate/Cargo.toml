@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-kernel-migrate"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The lash kernel's version migrations: documents, library functions and saved functions rewritten for the next kernel version."
 keywords = ["lash", "kernel", "workflow", "migration"]
 categories = ["data-structures"]
-publish = false
 
 [lib]
 name = "lash_kernel_migrate"

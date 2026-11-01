@@ -66,9 +66,9 @@ libc = { workspace = true }
 [dev-dependencies]
 axum = "0.8"
 rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
-lash = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true }
-lash-core = { workspace = true, features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
+lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "net", "io-util"] }
 tracing-subscriber = { workspace = true }

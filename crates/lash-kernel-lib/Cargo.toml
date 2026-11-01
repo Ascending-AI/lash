@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-kernel-lib"
 version.workspace = true
 edition.workspace = true
@@ -9,7 +11,6 @@ homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "Dialect-free kernel library functions and their content-addressed definitions."
-publish = false
 
 [lib]
 name = "lash_kernel_lib"
@@ -20,7 +21,7 @@ workspace = true
 
 [dependencies]
 lash-kernel-value = { workspace = true }
-lash-kernel-doc = { path = "../lash-kernel-doc" }
+lash-kernel-doc = { version = "=0.0.0-dev", path = "../lash-kernel-doc" }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 libm = { workspace = true }

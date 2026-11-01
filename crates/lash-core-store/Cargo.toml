@@ -52,8 +52,8 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
-lash-core = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-core = { package = "lash-internal-core", path = "../lash-core" }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
 lash-render = { workspace = true }
 lash-core-ids = { workspace = true, features = ["testing"] }
 lash-core-llm = { workspace = true, features = ["testing"] }

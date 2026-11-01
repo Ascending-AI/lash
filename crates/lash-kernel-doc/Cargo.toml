@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-kernel-doc"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The lash kernel's document: values, types, forms, function definitions, the native-function interface, validation and the kernel text notation."
 keywords = ["lash", "kernel", "workflow", "document"]
 categories = ["data-structures", "parser-implementations"]
-publish = false
 
 [lib]
 name = "lash_kernel_doc"

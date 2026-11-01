@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-dialect-python"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "The Python dialect of the lash kernel: a front end that lowers a Python subset to kernel documents, and the helper functions it emits calls to."
 keywords = ["lash", "kernel", "python", "dialect"]
 categories = ["compilers", "parser-implementations"]
-publish = false
 
 [lib]
 name = "lash_dialect_python"
@@ -38,15 +39,15 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 lash-kernel-package = { workspace = true, features = ["testing"] }
-lash-kernel-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-ext-helper-compiler = { workspace = true }
-lash-ext-py-core = { workspace = true }
+lash-kernel-releases = { path = "../lash-kernel-releases", features = ["dialect-typescript", "dialect-python"] }
+lash-ext-helper-compiler = { path = "../lash-ext-helper-compiler" }
+lash-ext-py-core = { path = "../lash-ext-py-core" }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 arbitrary = "1"
-lash-kernel-conformance = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
-lash-dialect-typescript = { workspace = true }
+lash-kernel-conformance = { path = "../lash-kernel-conformance", features = ["dialect-typescript", "dialect-python"] }
+lash-dialect-typescript = { path = "../lash-dialect-typescript" }
 lash-kernel-state = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }

@@ -24,7 +24,12 @@ def release_artifact_manifest_contains_only_sdk_and_operator_binary():
     packages = {package["id"]: package for package in metadata["packages"]}
     case = unittest.TestCase()
     case.assertTrue(manifest)
+    case.assertEqual(set(manifest), {key for key, package in packages.items() if package.get("publish") != []})
     case.assertIn("lash-runtime", {item["name"] for item in manifest.values()})
+    by_directory = {
+        pathlib.Path(package["manifest_path"]).parent.resolve(): package
+        for package in packages.values()
+    }
     for package_id in manifest:
         package = packages[package_id]
         directory = pathlib.Path(package["manifest_path"]).parent.relative_to(ROOT)
@@ -33,6 +38,16 @@ def release_artifact_manifest_contains_only_sdk_and_operator_binary():
             any("lib" in target["kind"] for target in package["targets"]),
             f"release package is not an SDK library: {package['name']}",
         )
+        for dependency in package["dependencies"]:
+            if not dependency.get("path"):
+                continue
+            if dependency["kind"] == "dev" and dependency["req"] == "*":
+                continue  # Cargo strips unversioned development-only dependencies.
+            sibling = by_directory[pathlib.Path(dependency["path"]).resolve()]
+            case.assertNotEqual(sibling.get("publish"), [],
+                                f"{package['name']} reaches private {sibling['name']}")
+            case.assertEqual(dependency["req"], "=" + sibling["version"],
+                             f"{package['name']} must exactly pin {sibling['name']}")
     operator = tomllib.loads((ROOT / "crates/lashctl/Cargo.toml").read_text())
     case.assertFalse(operator["package"]["autobins"])
     case.assertEqual([target["name"] for target in operator["bin"]], ["lashctl"])
@@ -46,8 +61,10 @@ def release_artifact_manifest_contains_only_sdk_and_operator_binary():
     case.assertIn("worker-artifacts/*.sha256", release_action)
     case.assertIn("needs: [prepare-release, publish-crates, worker-artifacts]", workflow)
     case.assertIn("python3 scripts/package_vm_worker.py", workflow)
-    case.assertIn("worker_label=//crates/lash-vm-worker:lash-vm-worker__bin__fv_43cdad03", workflow)
-    case.assertNotIn("--workspace", workflow.split("Build the matching release worker", 1)[1].split("Bundle helper", 1)[0])
+    case.assertIn("kiln build --config=optimized --materializations=final", workflow)
+    case.assertIn("--print-target --dialects", workflow)
+    case.assertNotIn("__fv_", workflow)
+    case.assertNotIn("--workspace", workflow.split("Build the matching release worker", 1)[1].split("Bundle stripped helper", 1)[0])
     case.assertNotIn("target/release/", release_action)
 
 

@@ -328,9 +328,13 @@ deadline or optimal host concurrency, and no portable CI latency gate rests
 on them. Hosts select their own configuration when their workload needs
 different bounds.
 
-Releases bundle an explicitly selected optimized helper, JSON diagnostics and
-reference SDK sources with checksums. Registry consumers build without the
-reference tree. The host passes `WorkerEntry::helper(path)` or
+Releases offer stripped Linux workers for Python and TypeScript together,
+TypeScript alone and Python alone. Each tarball contains `bin/lash-vm-worker`,
+`THIRD-PARTY-NOTICES` from that build's dependency closure and `manifest.json`;
+an archive SHA-256 sidecar accompanies it. The manifest records the release
+version, target, dialects, protocol range, glibc 2.34 floor and binary/notices
+digests. Packaging refuses a binary requiring a newer glibc symbol. Sources
+ship through Cargo packages and the release source archives. The host passes `WorkerEntry::helper(path)` or
 `Service::subprocess(path)`; the SDK default names the helper beside the host
 executable, with no PATH or monorepo discovery. `--version` reports the
 protocol range, crate version, target and build flags. Admission compares

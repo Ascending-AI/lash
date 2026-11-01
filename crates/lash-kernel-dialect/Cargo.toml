@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-kernel-dialect"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +13,6 @@ rust-version.workspace = true
 description = "What a lash kernel dialect is: a front end, a printer, typed diagnostics and the library functions the dialect ships."
 keywords = ["lash", "kernel", "workflow", "dialect"]
 categories = ["compilers"]
-publish = false
 
 [lib]
 name = "lash_kernel_dialect"
