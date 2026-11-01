@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let precise_returns = crate::machine::islands::witness::precise_returns();
     let try_scopes = crate::machine::islands::witness::precise_try_scopes();
     let try_reads = crate::machine::islands::witness::precise_try_reads();
     let field_members = crate::machine::islands::witness::field_member_publications();
@@ -542,6 +543,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
+        assert!(
+            precise_returns > 0,
+            "the precise callee return must transfer its actual operand and close the same source Invocation: {precise_returns}"
+        );
         assert!(
             members >= 5,
             "every precise append and replacement must publish its actual member journal: {members}"
