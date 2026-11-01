@@ -132,7 +132,14 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             call_depth,
             ..ROOMY
         };
-        Embedder::with(program, setup(bounds, u64::MAX)).run_to_end(&[])
+        crate::machine::islands::witness::begin();
+        let end = Embedder::with(program, setup(bounds, u64::MAX)).run_to_end(&[]);
+        let frames = crate::machine::islands::witness::packet_frame_entries();
+        assert!(
+            frames[0] > 0,
+            "the expression body chain must install real packet frames under bounded prospective entry: {frames:?}"
+        );
+        end
     };
     let chain = "main { return deep.d100(0) }";
     assert_eq!(result(run(chain, 101)), int(100));

@@ -1,5 +1,6 @@
 //! Call-owned frame entry preserves source operands and continuations.
 
+const SOURCE_SHARED_ENTRY: &str = "let makers = (call maker(3, 9), call maker(4)) let first = makers[0] let second = makers[1] return (apply first(), apply second())";
 use super::*;
 
 const SAVED_MEMBER: &str = "let container = [7] let change = fn() { set container[0] = 9 return 2 } let pair = fn(a, b) { return [a, b] } let answer = apply pair(container[0], apply change()) return (answer, container)";
@@ -243,6 +244,7 @@ fn observe_source_or_register(
     let call_resumes = crate::machine::islands::witness::call_resumes();
     let call_enters = crate::machine::islands::witness::call_enters();
     let packet_enters = crate::machine::islands::witness::packet_call_enters();
+    let packet_frames = crate::machine::islands::witness::packet_frame_entries();
     let precise_returns = crate::machine::islands::witness::precise_returns();
     if mode != Mode::Source
         && layout == Layout(0)
@@ -580,6 +582,18 @@ fn observe_source_or_register(
             "frame entry must prepare and commit its live callee/argument roles and pending caller together: {frame_captures:?}"
         );
     }
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_SHARED_ENTRY)
+    {
+        assert!(
+            packet_frames[1] > 0 && packet_frames[1] + frame_entries[1] >= 2,
+            "both maker calls must install their complete cell batches under prospective entry, and the packet path must run: source={frame_entries:?}, packet={packet_frames:?}"
+        );
+    }
     if mode == Mode::Source
         && layout == Layout(0)
         && !taped
@@ -830,11 +844,12 @@ fn direct_call_entry_agrees() {
         format!("definition {}\n", serde_json::to_string(&function).unwrap())
     };
     let definitions = format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         definition("literal(x: Any)", "return 1"),
         definition("pair(a: Any, b: Any)", "return (a, b)"),
         definition("pause(x: Any)", "do perform 0(x) as Any return x"),
         definition("typed(x: Int)", "return x"),
+        definition("maker(a: Any, b?: Any)", "return fn() { return (a, b) }"),
     );
     verify_checkpoint_maps(
         "main { let reader = fn(obj) { let value = 0 set value = invoke helper.element_map_any(obj, \"a\") return value } return apply reader(map{\"a\":255}) }",
@@ -898,6 +913,7 @@ fn direct_call_entry_agrees() {
         // afresh, even after another call supplied it or captured its cell.
         "let f = fn(a, b) { return (a, b) } let first = apply f(3, 9) let second = apply f(4) return (first, second)",
         "let make = fn(a, b) { return fn() { return (a, b) } } let first = apply make(3, 9) let second = apply make(4) return (apply first(), apply second())",
+        SOURCE_SHARED_ENTRY,
         // An early return leaves a waiting caller and cleanup state to restore.
         "let n = 0 let f = fn(x) { try { if flat.lt(x, 2) { return call pause(x) } return flat.add(x, 10) } finally { set n = flat.add(n, 1) } } let first = apply f(1) let second = apply f(3) return (first, second, n)",
         "let f = fn(a, b) { return (a, b) } return apply f(1, 2, 3)",

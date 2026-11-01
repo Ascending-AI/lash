@@ -232,6 +232,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
     ) -> Answer {
         self.record_entry(callee, None);
+        if let Some(mut active) = self
+            .publish_initial_frame(callee, args, inputs)
+            .map_err(|error| self.halt(error.into()))?
+        {
+            return self.execute(&mut active);
+        }
         let mut active = self.new_frame(callee, args);
         let mut slab = std::mem::take(&mut self.scratch.slab);
         let entered = self.source_enter(&slab.view(&mut active), inputs);
@@ -483,6 +489,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     let Some(continuation) = active.continuation else {
                         return Err(self.halt(fault("a call has no semantic continuation")));
                     };
+                    if self
+                        .publish_call_frame(
+                            active,
+                            target,
+                            continuation,
+                            boundary,
+                            slab,
+                            &mut callers,
+                        )
+                        .map_err(|error| self.halt(error.into()))?
+                    {
+                        slots += active.bindings.len();
+                        continue;
+                    }
                     let inputs = self
                         .source_call_inputs(
                             &slab.view(active),

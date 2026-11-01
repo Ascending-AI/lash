@@ -3,8 +3,11 @@ mod binding;
 mod calling;
 mod closure;
 mod construction;
+mod frame_entry;
+mod initial_entry;
 mod member;
 mod native;
+mod parameters;
 pub(in crate::machine::islands::execute) enum ValuePublication {
     Unavailable,
     Declined,

@@ -154,6 +154,27 @@ impl Slab {
         }
     }
 
+    /// This is host staging only. The caller's ranges and values stay intact
+    /// until its complete frame journal is accepted.
+    pub(super) fn reserve_call(
+        &mut self,
+        callee: Callee<'_>,
+    ) -> Result<(), lash_kernel_doc::heap::HeapFault> {
+        let required = self
+            .extent
+            .checked_add(callee.plan.slots)
+            .and_then(|end| end.checked_add(callee.compiled.registers))
+            .and_then(|end| end.checked_add(callee.compiled.pending_slots()))
+            .ok_or_else(|| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        self.values
+            .try_reserve(required.saturating_sub(self.values.len()))
+            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })
+    }
+
     pub(super) fn call(
         &mut self,
         caller: &mut Frame<'_>,
