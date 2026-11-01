@@ -11,11 +11,11 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointAdmission, CheckpointAdmissionRequest, GraphAppend, IngressSettlement, OperationId,
-    PersistedSessionConfig, RealizedNodeTimestamp, RuntimeCommit, RuntimeCommitReceipt,
-    RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp, SessionCommitStore, SessionHeadMeta,
-    SessionHeadPayload, StoreError, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
-    commit_runtime_state_verified,
+    CheckpointAdmission, CheckpointAdmissionRequest, CommitOperationId, GraphAppend,
+    IngressSettlement, PersistedSessionConfig, RealizedNodeTimestamp, RuntimeCommit,
+    RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, StoreError,
+    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState, commit_runtime_state_verified,
 };
 use lash::plugins::{
     AfterToolContributions, AfterToolDecision, BeforeToolDecision, CompactionContext,
@@ -47,7 +47,7 @@ fn shipped_host_contracts_are_public() -> (&'static str, &'static str) {
 }
 
 fn persistence_types_are_nameable(graph: GraphAppend) -> RuntimeCommit {
-    let operation = OperationId::turn("facade", "turn", "final");
+    let operation = CommitOperationId::turn("facade", "turn", "final");
     RuntimeCommit {
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,

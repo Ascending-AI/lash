@@ -202,6 +202,8 @@ pub use lash_core::facade_support::AttachmentReclamationReport;
 pub use lash_core::facade_support::RuntimeAttachmentStore;
 pub use lash_core::facade_support::reclaim_unreferenced_attachments;
 pub use lash_core::session_graph::WindowAnchor;
+/// The identity of one durable store commit, including its execution scope.
+pub use lash_core::store::OperationId as CommitOperationId;
 pub use lash_core::store::PluginWriterRangesFuture;
 /// A session's fault record (ADR 0109 §9): one segment of
 /// [`RuntimeStore`], implemented by every store a runtime executes.
@@ -227,7 +229,7 @@ pub use lash_core::store::{
 };
 pub use lash_core::store::{
     AppendRequestIdentity, CheckpointComponentDescriptor, CheckpointExecution, GraphAppend,
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, NamedManifest, OperationId, ParkReason,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, NamedManifest, ParkReason,
     ParkReasonCode, ParkReport, PhysicalTurn, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeStoreDecorator, RuntimeTurnCommitStamp, SemanticBoundaryOperation, SessionCheckpoint,
     SessionHeadMeta, SessionHeadPayload, TurnChange, TurnChangeCursor, TurnChangeKind,

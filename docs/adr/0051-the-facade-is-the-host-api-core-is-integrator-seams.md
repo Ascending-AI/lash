@@ -79,6 +79,10 @@ capability. Hosts never obtain or construct `ActorContext` or admitted scopes.
 Explicit actor contexts remain internal to runtime and conformance execution.
 Compactors receive scope facts and a bound direct-completion client.
 
+`lash::OperationId` names that host ingress operation.
+`lash::persistence::CommitOperationId` names one durable store commit within
+an execution scope; store implementors use it in `RuntimeTurnCommitStamp`.
+
 ## Plugin authoring
 
 `lash::plugins` exposes plugin operations, hook arguments, state access,
