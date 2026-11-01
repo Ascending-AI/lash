@@ -79,12 +79,23 @@ use lash_store_sql::{Dialect, Rendered};
 use sqlx::PgConnection;
 
 use super::graph::{self, db};
+use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
 use super::{PostgresDurableStore, Retired, Tx, sqlx_failure};
 
 lash_store_sql::statements! {
     /// Page statements only PostgreSQL issues: the array binding of a node
     /// list, its boolean holds and the row locks a lease and a step take.
     pub(crate) struct PagePostgresStatements @ "durable_pages_postgres" {
+        /// Lease execution `?7`'s root `?2`, owned as `?1`, to actor `?3`
+        /// at epoch `?4` for `?5` ms from `?6`, when `?2` is the root the
+        /// execution holds: answers the lease's id. A one-call owner
+        /// commit's lease of the root it publishes (FIG-7585).
+        lease_exec_root = "INSERT INTO root_leases (owner_key, root_ref, actor_key, epoch, ttl_ms, expires_at_ms)
+             SELECT ?1, snapshot.root_ref, ?3, ?4, ?5, ?6 + ?5 FROM exec_snapshots AS snapshot
+             WHERE snapshot.exec_key = ?7
+               AND snapshot.root_ref = (SELECT id FROM blobs WHERE hash = ?2)
+             RETURNING lease_id";
+
         /// Key-share lock every stored node of `?1` and `?2`, in digest
         /// order, and answer them: what a hold may name, locked against a
         /// peel before any hold row is written.
@@ -205,6 +216,97 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
 /// The hold statements the one-call commit runs: the lock, then the rows.
 pub(super) fn hold_statements() -> (&'static Rendered, &'static Rendered) {
     (&SQL.postgres.hold_lock, &SQL.postgres.hold)
+}
+
+/// A one-call owner commit's lease of an execution root it publishes: one
+/// row, the lease's id, or the call is refused (FIG-7585).
+pub(super) static LEASE_ROOT: Entry = Entry::new(
+    || &SQL.postgres.lease_exec_root,
+    &[
+        Ty::Bytes,
+        Ty::Key,
+        Ty::Text,
+        Ty::Int,
+        Ty::Int,
+        Ty::Now,
+        Ty::Text,
+    ],
+    Shape::Returning,
+)
+.collecting(Collect::Lease("lease_id"));
+
+/// A one-call owner commit's release of a lease: the root it held is
+/// retired once nothing else holds it. A lease already gone releases
+/// nothing.
+pub(super) static RELEASE_LEASE: Entry =
+    Entry::new(|| &SQL.pages.lease_release, &[Ty::Int], Shape::Returning).retiring("root_ref");
+
+/// The steps that lease the roots `tx` publishes, in request order; none
+/// when a request is not an owner's lease of an execution root, which the
+/// explicit form takes.
+pub(super) fn lease_steps(tx: &lash_durable::ActorTx) -> Option<Vec<Step>> {
+    tx.root_leases()
+        .iter()
+        .map(|request| {
+            let RootOwner::Exec(exec) = &request.owner else {
+                return None;
+            };
+            let LeaseFence::Actor { actor, epoch } = &request.fence else {
+                return None;
+            };
+            if request.ttl_millis <= 0 || actor != tx.actor() || *epoch != tx.epoch() {
+                return None;
+            }
+            Some(Step::one(
+                &LEASE_ROOT,
+                vec![
+                    Value::Bytes(Some(owner_bytes(&request.owner))),
+                    Value::key(request.expected.to_hex()),
+                    Value::text(actor.as_str()),
+                    Value::int(epoch.0),
+                    Value::int(request.ttl_millis),
+                    Value::Now,
+                    Value::text(exec.stored()),
+                ],
+            ))
+        })
+        .collect()
+}
+
+/// The steps that end the leases `tx` releases.
+pub(super) fn release_steps(tx: &lash_durable::ActorTx) -> Vec<Step> {
+    tx.released_root_leases()
+        .iter()
+        .map(|lease| {
+            Step::new(
+                &RELEASE_LEASE,
+                vec![Value::int(lease.0.cast_signed())],
+                None,
+            )
+        })
+        .collect()
+}
+
+/// The leases a one-call commit took for `requests`, by the ids it
+/// answered, each from the commit's clock `now`.
+pub(super) fn leased(
+    requests: &[RootLeaseRequest],
+    ids: &[i64],
+    now: DurableInstant,
+) -> Option<Vec<RootLease>> {
+    (requests.len() == ids.len()).then(|| {
+        requests
+            .iter()
+            .zip(ids)
+            .map(|(request, id)| RootLease {
+                id: RootLeaseId(id.cast_unsigned()),
+                expires_at: DurableInstant(now.0 + request.ttl_millis),
+                owner: request.owner.clone(),
+                root: request.expected,
+                fence: request.fence.clone(),
+            })
+            .collect()
+    })
 }
 
 /// A lease's acquisition, renewal and release.

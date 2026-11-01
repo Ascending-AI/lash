@@ -118,6 +118,10 @@ pub(super) enum Collect {
     Wake(&'static str),
     /// A graph root the row released for bounded inline reclamation.
     Peel(&'static str),
+    /// A root lease the row took: its id is in the commit's answer.
+    Lease(&'static str),
+    /// The whole row joins the commit's answer under this name.
+    Answer(&'static str),
 }
 
 impl Collect {
@@ -128,7 +132,9 @@ impl Collect {
             | Self::PhaseEnd(column)
             | Self::Ancestry(column)
             | Self::Wake(column)
-            | Self::Peel(column) => column,
+            | Self::Peel(column)
+            | Self::Lease(column)
+            | Self::Answer(column) => column,
         }
     }
 }
@@ -558,6 +564,11 @@ pub(super) async fn run_capturing(
         let mut leaves: BTreeSet<String> = step.ancestry.iter().cloned().collect();
         let mut owners = Vec::new();
         for collect in step.entry.collects() {
+            // A lease's id answers the one-call commit; the explicit form
+            // acquires its leases itself.
+            if let Collect::Lease(_) | Collect::Answer(_) = collect {
+                continue;
+            }
             let column = collect.column();
             for row in &rows {
                 if let Collect::Closures(_) = collect {
@@ -584,7 +595,7 @@ pub(super) async fn run_capturing(
                     Collect::Peel(_) => {
                         texts.insert(value);
                     }
-                    Collect::Closures(_) => {}
+                    Collect::Closures(_) | Collect::Lease(_) | Collect::Answer(_) => {}
                 }
             }
         }

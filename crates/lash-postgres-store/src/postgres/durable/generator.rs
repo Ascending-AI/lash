@@ -98,6 +98,11 @@ fn statement(entry: &Entry) -> String {
 
 /// What the function gathers from an answered row for `collect`.
 fn gather(collect: Collect) -> String {
+    if let Collect::Answer(name) = collect {
+        return format!(
+            "v_answered := v_answered || jsonb_build_object('{name}', to_jsonb(v_row));"
+        );
+    }
     let column = format!("v_row.\"{}\"", collect.column());
     let into = match collect {
         Collect::Closure(_) => "v_retired",
@@ -108,9 +113,12 @@ fn gather(collect: Collect) -> String {
         Collect::Ancestry(_) => "v_leaves",
         Collect::Wake(_) => "v_wakes",
         Collect::Peel(_) => "v_texts",
+        Collect::Lease(_) => "v_leases",
+        Collect::Answer(_) => unreachable!("an answered row is gathered whole"),
     };
     let ty = match collect {
         Collect::Ancestry(_) | Collect::Wake(_) => "TEXT",
+        Collect::Lease(_) => "BIGINT",
         _ => "BYTEA",
     };
     format!("IF {column} IS NOT NULL THEN {into} := {into} || {column}::{ty}; END IF;")
@@ -369,7 +377,8 @@ pub(crate) fn function_ddl() -> String {
             "jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', \
              jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, \
              v_cancel_reason, v_cancel_disposition, v_cancel_mode), \
-             'session_heads', v_session_heads)",
+             'session_heads', v_session_heads, 'root_leases', to_jsonb(v_leases), \
+             'now', v_now, 'answered', v_answered)",
         ],
     );
     let latch_sweep = inline(
@@ -391,7 +400,8 @@ pub(crate) fn function_ddl() -> String {
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT, p_profile BOOLEAN)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB, o_inserted BYTEA[])
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB, o_inserted BYTEA[],
+    o_root_leases BIGINT[], o_answered JSONB)
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -423,6 +433,8 @@ DECLARE
     v_first JSONB;
     v_slots JSONB := '{{}}';
     v_session_heads JSONB := '[]';
+    v_leases BIGINT[] := '{{}}';
+    v_answered JSONB := '{{}}';
     v_when JSONB;
     v_leaves TEXT[] := '{{}}';
     v_node TEXT;
@@ -639,7 +651,7 @@ BEGIN
     {latch_sweep};
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
-        v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END;
+        v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
 END
 $lash_owner_commit$;
 "

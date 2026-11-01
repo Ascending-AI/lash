@@ -45,9 +45,9 @@ use lash_store_sql::Dialect;
 
 use super::steps::{Entry, Step};
 use super::{
-    PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, packages, park,
-    processes, prompts, replay, retention, run_records, session_close, session_delete,
-    session_mail, snapshots, sqlx_failure, tool_calls, turns, waits,
+    PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, packages, pages,
+    park, process_view, processes, prompts, replay, retention, run_records, session_close,
+    session_delete, session_mail, snapshots, sqlx_failure, tool_calls, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -224,6 +224,9 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &model_calls::ANSWERED,
         &run_records::APPEND,
         &run_records::PRUNE,
+        &process_view::FRONTIER,
+        &pages::LEASE_ROOT,
+        &pages::RELEASE_LEASE,
         &snapshots::PUT_FIRST,
         &snapshots::PUT_NEXT,
         &snapshots::RETIRE,
@@ -490,14 +493,6 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
-        // Root-lease work uses the explicit transaction, which returns the
-        // acquired leases and applies releases under the owner fence.
-        if tx.process_preimage().is_some()
-            || !tx.root_leases().is_empty()
-            || !tx.released_root_leases().is_empty()
-        {
-            return None;
-        }
         let mut call = Self {
             steps: serde_json::Value::Null,
             body_hashes: Vec::new(),
@@ -513,13 +508,22 @@ impl Call {
             planned_fleet: None,
             hint: None,
         };
-        // The executions the commit ends are locked first, as publication
-        // locks them: referrer, then artifact.
-        let mut steps: Vec<serde_json::Value> = turns::lock_ending_executions(tx.domain())
-            .ok()?
-            .iter()
+        // A process step reads its process's frontier first, as the
+        // explicit form refreshes its view before it locks anything else:
+        // the answer carries it.
+        let mut steps: Vec<serde_json::Value> = process_view::frontier_step(tx)
+            .as_ref()
             .map(step_json)
+            .into_iter()
             .collect();
+        // The executions the commit ends are locked next, as publication
+        // locks them: referrer, then artifact.
+        steps.extend(
+            turns::lock_ending_executions(tx.domain())
+                .ok()?
+                .iter()
+                .map(step_json),
+        );
         // A head commit's checkpoint graph is installed with the commit's.
         let mut checkpoint_nodes = std::collections::BTreeMap::new();
         let mut prompt_reads = tx.reads().clone();
@@ -585,8 +589,15 @@ impl Call {
             };
             steps.extend(program.iter().map(step_json));
         }
+        // The roots the commit publishes are leased once every domain write
+        // ran, under the owner fence the call holds; the answer names the
+        // leases (FIG-7585).
+        steps.extend(pages::lease_steps(tx)?.iter().map(step_json));
         // What ends the commit once every domain write ran.
         steps.extend(environment::finish_steps(tx.domain()).iter().map(step_json));
+        // The leases the commit ends go after, as the explicit form ends
+        // them: a root nothing holds any more is retired with the commit.
+        steps.extend(pages::release_steps(tx).iter().map(step_json));
         // An owner the commit publishes may be named while it prepares.
         let publishing: Vec<String> = tx
             .domain()
@@ -918,12 +929,15 @@ impl PostgresDurableStore {
             .collect::<Result<_, _>>()
             .map_err(Attempt::Failed)?;
         answer(
-            tx.actor(),
+            tx,
             &serde_json::json!({
                 "revision": get::<i64>(&row, 0).map_err(Attempt::Failed)?,
                 "state": get::<String>(&row, 3).map_err(Attempt::Failed)?,
                 "cancel": cancel,
                 "session_heads": get::<serde_json::Value>(&row, 11).map_err(Attempt::Failed)?,
+                "root_leases": get::<Vec<i64>>(&row, 13).map_err(Attempt::Failed)?,
+                "now": get::<i64>(&row, 1).map_err(Attempt::Failed)?,
+                "answered": get::<serde_json::Value>(&row, 14).map_err(Attempt::Failed)?,
             }),
         )
         .map(Some)
@@ -973,7 +987,7 @@ impl PostgresDurableStore {
                     })));
                 }
                 Ok(Some(recorded)) => {
-                    return answer(tx.actor(), &recorded).map_err(Attempt::Failed);
+                    return answer(tx, &recorded).map_err(Attempt::Failed);
                 }
                 Err(error) => {
                     code = crate::support::storage_code(&error);
@@ -1026,10 +1040,19 @@ async fn settle_on(
 
 /// Decode a recorded answer: the commit's receipt.
 pub(super) fn answer(
-    actor: &lash_durable::ActorKey,
+    tx: &ActorTx,
     recorded: &serde_json::Value,
 ) -> Result<ActorCommit, DurableError> {
+    let actor = tx.actor();
     let corrupt = || super::corrupt("owner commit answer", &recorded.to_string());
+    let ids = recorded["root_leases"]
+        .as_array()
+        .ok_or_else(corrupt)?
+        .iter()
+        .map(|id| id.as_i64().ok_or_else(corrupt))
+        .collect::<Result<Vec<_>, _>>()?;
+    let now = lash_durable::DurableInstant(recorded["now"].as_i64().ok_or_else(corrupt)?);
+    let root_leases = pages::leased(tx.root_leases(), &ids, now).ok_or_else(corrupt)?;
     let revision = recorded["revision"].as_i64().ok_or_else(corrupt)?;
     let state = super::actor_state(recorded["state"].as_str().ok_or_else(corrupt)?)?;
     let cancel = recorded["cancel"].as_array().ok_or_else(corrupt)?;
@@ -1059,8 +1082,9 @@ pub(super) fn answer(
         }
         _ => None,
     };
+    let process_views = process_view::postimages(tx, &recorded["answered"]["process_frontier"])?;
     Ok(ActorCommit {
-        process_views: Vec::new(),
+        process_views,
         session_heads: recorded["session_heads"]
             .as_array()
             .ok_or_else(corrupt)?
@@ -1073,7 +1097,7 @@ pub(super) fn answer(
                 Ok(lash_durable::CommittedSessionHead { session, receipt })
             })
             .collect::<Result<_, DurableError>>()?,
-        root_leases: Vec::new(),
+        root_leases,
         revision: lash_durable::StateRevision(revision),
         state,
         turn_cancel,

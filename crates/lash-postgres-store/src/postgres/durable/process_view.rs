@@ -35,6 +35,14 @@ lash_store_sql::statements! {
              LEFT JOIN process_tombstones t ON t.process_id = ?2
              LEFT JOIN exec_snapshots s ON s.exec_key = ?3
              WHERE a.actor_key = ?1");
+        /// Process `?1`'s frontier under a row lock, each column named:
+        /// what a one-call owner commit answers for its process view
+        /// (FIG-7585).
+        control_answered = "SELECT (lifecycle_json::jsonb -> 'cancel_request')::text AS cancel,
+                    (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint AS last_event_sequence,
+                    (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint AS updated_at_ms,
+                    (lifecycle_json::jsonb -> 'external_ref')::text AS external_ref
+             FROM processes WHERE process_id = ?1 FOR UPDATE";
         control = "SELECT (lifecycle_json::jsonb -> 'cancel_request')::text,
                     (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
                     (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
@@ -235,23 +243,89 @@ pub(super) async fn refresh_view(
         .await
         .map_err(sqlx_failure)?;
     if let Some(row) = row {
-        let cancel = get::<Option<String>>(&row, 0)?
-            .filter(|json| json != "null")
-            .map(|json| {
-                serde_json::from_str(&json)
-                    .map_err(|error| corrupt("process frontier", &error.to_string()))
-            })
-            .transpose()?;
-        let frontier = lash_durable::domain::ProcessFrontier {
-            cancel,
-            last_event_sequence: super::integer::<u64>(get::<i64>(&row, 1)?)?,
-            updated_at_ms: super::integer::<u64>(get::<i64>(&row, 2)?)?,
-            external_ref: get::<Option<String>>(&row, 3)?.filter(|json| json != "null"),
-        };
-        lash_execution_contracts::process::registry_transitions::refresh_frontier(
-            &mut view, frontier,
-        )
-        .map_err(|error| corrupt("process frontier", &error.to_string()))?;
+        refreshed(
+            &mut view,
+            get::<Option<String>>(&row, 0)?,
+            get::<i64>(&row, 1)?,
+            get::<i64>(&row, 2)?,
+            get::<Option<String>>(&row, 3)?,
+        )?;
     }
     Ok(Some(view))
+}
+
+/// `view` with the frontier its process row holds: its cancel request and
+/// external reference as JSON text, its last event and its update time.
+fn refreshed(
+    view: &mut ProcessView,
+    cancel: Option<String>,
+    last_event_sequence: i64,
+    updated_at_ms: i64,
+    external_ref: Option<String>,
+) -> Result<(), DurableError> {
+    let cancel = cancel
+        .filter(|json| json != "null")
+        .map(|json| {
+            serde_json::from_str(&json)
+                .map_err(|error| corrupt("process frontier", &error.to_string()))
+        })
+        .transpose()?;
+    let frontier = lash_durable::domain::ProcessFrontier {
+        cancel,
+        last_event_sequence: super::integer::<u64>(last_event_sequence)?,
+        updated_at_ms: super::integer::<u64>(updated_at_ms)?,
+        external_ref: external_ref.filter(|json| json != "null"),
+    };
+    lash_execution_contracts::process::registry_transitions::refresh_frontier(view, frontier)
+        .map_err(|error| corrupt("process frontier", &error.to_string()))
+}
+
+/// A one-call owner commit's read of the frontier of the process whose
+/// view `tx` carries, before any of its writes: its row joins the call's
+/// answer as `process_frontier` (FIG-7585).
+pub(super) static FRONTIER: super::steps::Entry = super::steps::Entry::new(
+    || &SQL.control_answered,
+    &[super::steps::Ty::Text],
+    super::steps::Shape::Select,
+)
+.collecting(super::steps::Collect::Answer("process_frontier"));
+
+/// The frontier step of `tx`, when it carries a process view.
+pub(super) fn frontier_step(tx: &ActorTx) -> Option<super::steps::Step> {
+    tx.process_preimage()?;
+    Some(super::steps::Step::new(
+        &FRONTIER,
+        vec![super::steps::Value::text(tx.actor().id())],
+        None,
+    ))
+}
+
+/// The process views a one-call commit of `tx` leaves: the view it
+/// carried, refreshed with the frontier `answered` (null when its process
+/// row is gone), then each of its writes applied, as the explicit form
+/// derives them.
+pub(super) fn postimages(
+    tx: &ActorTx,
+    answered: &serde_json::Value,
+) -> Result<Vec<ProcessView>, DurableError> {
+    let Some(mut view) = tx.process_preimage().cloned() else {
+        return Ok(Vec::new());
+    };
+    let corrupt_answer = || corrupt("owner commit process frontier", &answered.to_string());
+    if !answered.is_null() {
+        let text = |name: &str| answered[name].as_str().map(str::to_owned);
+        let number = |name: &str| answered[name].as_i64().ok_or_else(corrupt_answer);
+        refreshed(
+            &mut view,
+            text("cancel"),
+            number("last_event_sequence")?,
+            number("updated_at_ms")?,
+            text("external_ref"),
+        )?;
+    }
+    let views = lash_durable::domain::processes::ProcessPostimages::from_view(Some(view));
+    for write in tx.domain() {
+        views.applied(write, tx.epoch());
+    }
+    Ok(views.into_views())
 }
