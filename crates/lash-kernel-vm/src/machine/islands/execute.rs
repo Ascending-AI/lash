@@ -288,6 +288,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 super::record(tape, callee.stream, close.region);
             }
         }
+        // The literal return is a statement the register program executed.
+        #[cfg(any(test, feature = "perf-witness"))]
+        execution::statements(
+            &self.scratch.census,
+            Owner::RegisterProgram,
+            1,
+            self.scratch.counting,
+        );
     }
 
     // One loop and instruction inventory serve both modes. The entry-fixed
