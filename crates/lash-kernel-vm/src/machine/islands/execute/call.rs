@@ -144,17 +144,18 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             return Err(self.at(site.pc));
                         }
                     }
-                    if !OBSERVING
-                        && self.retaining(&mut frame.state.transient, |island| {
-                            island.call_answer(
-                                site,
-                                (args, inputs.as_ref().map(|input| input.1)),
-                                &mut frame.regs,
-                                before,
-                                root_occurrence,
-                            )
-                        })?
-                    {
+                    // Observation is passive: an observed run takes the same
+                    // frameless answer, so it enters no activation the plain
+                    // run does not.
+                    if self.retaining(&mut frame.state.transient, |island| {
+                        island.call_answer(
+                            site,
+                            (args, inputs.as_ref().map(|input| input.1)),
+                            &mut frame.regs,
+                            before,
+                            root_occurrence,
+                        )
+                    })? {
                         return Ok(Next::Continue);
                     }
                 }
