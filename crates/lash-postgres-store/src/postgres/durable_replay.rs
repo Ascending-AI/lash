@@ -51,9 +51,12 @@ impl PostgresDurableStore {
         self.commit_owner_with(tx, label, None).await
     }
 
-    /// [`commit_owner`](Self::commit_owner) installing `candidate` beside
-    /// the owner's graph (FIG-6191): always the explicit form, each attempt
-    /// streaming the manifest again from its first entry.
+    /// [`commit_owner`](Self::commit_owner) publishing `candidate`
+    /// (FIG-6191): each attempt first installs the candidate's pages, then
+    /// commits the owner's write, which names only the candidate's root.
+    /// Pages are immutable and content-addressed, so installing them ahead
+    /// of the commit is idempotent: an attempt that never commits leaves
+    /// pages no root or edge reaches, which the orphan audit collects.
     pub(super) async fn commit_owner_with(
         &self,
         tx: ActorTx,
@@ -61,6 +64,10 @@ impl PostgresDurableStore {
         candidate: Option<&tokio::sync::Mutex<CandidatePublication>>,
     ) -> Result<ActorCommit, DurableError> {
         let deadline = self.deadline(label.capacity());
+        let root = match candidate {
+            Some(candidate) => Some(candidate.lock().await.manifest.summary().root),
+            None => None,
+        };
         self.within(
             label.capacity(),
             lash_core_ids::operational_metrics::sql::with_owner(
@@ -79,18 +86,18 @@ impl PostgresDurableStore {
                                 });
                             }
                             let tx = &tx;
-                            let call = if candidate.is_some() {
-                                None
-                            } else {
-                                executor::Call::of(
-                                    tx,
-                                    &self.pools.held_texts,
-                                    &self.pools.session_hints,
-                                    self.fence.fleet(),
-                                )
-                            };
+                            let call = executor::Call::of(
+                                tx,
+                                &self.pools.held_texts,
+                                &self.pools.session_hints,
+                                self.fence.fleet(),
+                            );
                             let call = &call;
                             self.replay(label, deadline, || async move {
+                                if let Some(candidate) = candidate {
+                                    self.install_pages(label, tx, &mut *candidate.lock().await)
+                                        .await?;
+                                }
                                 if let Some(call) = call
                                     && let Some(commit) =
                                         self.call_owner(label, tx, call, deadline).await?
@@ -99,10 +106,6 @@ impl PostgresDurableStore {
                                 }
                                 let (mut guarded, now, fence) =
                                     self.open_replayable(label, Some(tx)).await?;
-                                let mut publication = match candidate {
-                                    Some(candidate) => Some(candidate.lock().await),
-                                    None => None,
-                                };
                                 let outcome = Box::pin(apply_owner(
                                     &mut guarded,
                                     tx,
@@ -110,10 +113,27 @@ impl PostgresDurableStore {
                                     now,
                                     self.fence.fleet(),
                                     &self.pools,
-                                    publication.as_deref_mut(),
                                 ))
                                 .await;
-                                drop(publication);
+                                // The orphan audit took the root the
+                                // attempt installed: install it again.
+                                let outcome = match outcome {
+                                    Err(DurableError::Graph(
+                                        lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(
+                                            missing,
+                                        ),
+                                    )) if Some(missing) == root => {
+                                        Err(DurableError::Store(StoreFailure {
+                                            code: None,
+                                            kind: StoreFailureKind::Contended,
+                                            message: format!(
+                                                "the candidate root {missing} was collected \
+                                                 before its commit"
+                                            ),
+                                        }))
+                                    }
+                                    outcome => outcome,
+                                };
                                 self.settle(label, guarded, outcome, deadline).await
                             })
                             .await
@@ -125,6 +145,29 @@ impl PostgresDurableStore {
             ),
         )
         .await
+    }
+
+    /// Install `candidate`'s pages for owner commit `tx`, in one
+    /// transaction of its own under the owner's fence: its manifest streamed
+    /// in bounded batches of nodes, then of edges, every node the stream
+    /// names checked stored ([`pages::install_owned_candidate`]).
+    async fn install_pages(
+        &self,
+        label: CommitLabel,
+        tx: &ActorTx,
+        candidate: &mut CandidatePublication,
+    ) -> Result<(), Attempt<DurableError>> {
+        let publications: Vec<_> = tx
+            .domain()
+            .iter()
+            .flat_map(DomainWrite::publications)
+            .collect();
+        let checked =
+            lash_durable::domain::graph_commit::check_graph(tx.graph(), tx.reads(), &publications)
+                .map_err(|refusal| Attempt::Failed(DurableError::Graph(refusal)))?;
+        let (mut pages_tx, _) = self.open(label).await.map_err(attempt)?;
+        let outcome = pages::install_owned_candidate(&mut pages_tx, tx, &checked, candidate).await;
+        super::finish(pages_tx, outcome).await.map_err(attempt)
     }
 
     /// [`DurableStore::commit_mail`](lash_durable::DurableStore::commit_mail): the mailbox write, run again while the
@@ -294,9 +337,8 @@ impl PostgresDurableStore {
 /// Apply the owner's `write` after its ownership fence, which the commit's
 /// first statement ran ([`super::PostgresDurableStatements::owner_envelope`]):
 /// `fence` is what it read under the fence, `None` when the epoch was not
-/// current. A `candidate` is installed with the owner's own graph once the
-/// domain writes ran (FIG-6191); the roots the commit retired are held for
-/// retirement steps (D-RET).
+/// current. The roots the commit retired are held for retirement steps
+/// (D-RET).
 pub(super) async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
@@ -304,7 +346,6 @@ pub(super) async fn apply_owner(
     now: DurableInstant,
     fleet: lash_core_store::store::FleetFormat,
     pools: &crate::host::RolePools,
-    candidate: Option<&mut CandidatePublication>,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(fence) = fence else {
@@ -332,11 +373,10 @@ pub(super) async fn apply_owner(
         .iter()
         .flat_map(DomainWrite::publications)
         .collect();
-    if candidate.is_some()
-        || write
-            .domain()
-            .iter()
-            .any(|w| matches!(w, DomainWrite::Environment(_)))
+    if write
+        .domain()
+        .iter()
+        .any(|w| matches!(w, DomainWrite::Environment(_)))
         || !write.graph().is_empty()
         || !write.reads().is_empty()
         || !publications.is_empty()
@@ -357,22 +397,12 @@ pub(super) async fn apply_owner(
             })
             .collect();
         super::environment::validate_graph(tx, &checked, &publishing).await?;
-        // A candidate's pages are bounded by its stream, not the budget.
         if let Some(budget) = write.budget() {
             lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
                 .and_then(|measured| budget.admit(&measured))?;
         }
         graph::validate_exact_reads(tx, write.exact_reads()).await?;
-        match candidate {
-            Some(candidate) => {
-                pages::install_candidate(tx, write.domain(), &checked, candidate)
-                    .await
-                    .map_err(DurableError::Graph)?;
-            }
-            None => {
-                graph::install(tx, &checked).await?;
-            }
-        }
+        graph::install(tx, &checked).await?;
     }
     let process_view = super::process_view::refresh_preimage(tx, write).await?;
     let committing = Committing {
@@ -407,7 +437,16 @@ pub(super) async fn apply_owner(
     for request in write.root_leases() {
         root_leases.push(pages::acquire_in(tx, request.clone(), now).await?);
     }
-    super::environment::finish(tx, write.domain()).await?;
+    super::environment::finish(
+        tx,
+        &super::steps::Context {
+            retired: &committing.retired,
+            actor: committing.actor,
+            now: committing.now,
+        },
+        write.domain(),
+    )
+    .await?;
     for lease in write.released_root_leases() {
         if let Some(root) = pages::release_in(tx, *lease).await? {
             committing.retired.stored(root);

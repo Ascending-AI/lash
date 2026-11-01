@@ -323,13 +323,29 @@ async fn frontier_put(
     Ok(())
 }
 
+/// Installs owner `tx`'s `candidate` ahead of its commit, in the caller's
+/// transaction of its own: the owner's actor row share-locked at its epoch
+/// first, the fence an ownership transfer's epoch bump waits behind, so a
+/// fenced activation installs nothing; then [`install_candidate`].
+pub(super) async fn install_owned_candidate(
+    tx: &mut PgConnection,
+    owner: &ActorTx,
+    checked: &CheckedGraph,
+    candidate: &mut CandidatePublication,
+) -> Result<(), DurableError> {
+    fence(tx, owner.actor(), owner.epoch()).await??;
+    install_candidate(tx, owner.domain(), checked, candidate)
+        .await
+        .map_err(DurableError::Graph)
+}
+
 /// Installs `candidate` with the owner commit's own `checked` graph, in the
-/// caller's fenced transaction: every node the stream names is checked
+/// caller's transaction: every node the stream names is checked
 /// present and every node it supplies is compared or inserted, in global
 /// digest order a batch at a time; then every supplied node's edges once
 /// all node rows exist, each child checked stored. Nothing a named node
 /// reaches is read.
-pub(super) async fn install_candidate(
+async fn install_candidate(
     tx: &mut PgConnection,
     writes: &[DomainWrite],
     checked: &CheckedGraph,

@@ -45,8 +45,8 @@ use lash_store_sql::Dialect;
 
 use super::steps::{Entry, Step};
 use super::{
-    PostgresDurableStore, SQL, get, graph, head_commit, model_calls, park, processes, prompts,
-    replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure,
+    PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, park, processes,
+    prompts, replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure,
     tool_calls, turns, waits,
 };
 use crate::connection_sql::connection_sql;
@@ -194,6 +194,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &tool_calls::DECIDE,
         &tool_calls::ANSWER,
         &tool_calls::COMPLETE,
+        &tool_calls::EXPIRE,
         &model_calls::APPEND,
         &model_calls::RESERVE,
         &model_calls::ANSWERED,
@@ -242,6 +243,10 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &processes::RELEASE_HOLDS,
         &processes::FORGET_HOLDS,
         &session_close::SCOPE_ENDING,
+        &session_close::BEGIN,
+        &session_close::STEP_READY,
+        &session_close::RECORD_STEP,
+        &session_close::SCOPE_ENDED,
         &prompts::SETTLE,
         &prompts::EXPIRE_AUDITS,
         &prompts::ROOT_EDGES,
@@ -288,6 +293,18 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &head_commit::CLEANUP_INSERT,
         &head_commit::CLEANUP_REPLACE,
         &head_commit::CARRY_EDGE,
+        // A version owner's lifetime and the session's environment head.
+        &environment::PREPARE,
+        &environment::AWAIT_CLEANUP,
+        &environment::PREPARED,
+        &environment::PUBLISH,
+        &environment::RETIRE,
+        &environment::QUEUE_RETIRED,
+        &environment::HEAD_IS,
+        &environment::PUBLISHED_AT,
+        &environment::HEAD_PUT,
+        &environment::HEAD_REMOVE,
+        &environment::HAS_READER,
     ]
 }
 
@@ -301,8 +318,8 @@ pub(super) fn program(
     held: &HeldTexts,
 ) -> Result<Option<Vec<Step>>, DurableError> {
     match write {
-        DomainWrite::Environment(_)
-        | DomainWrite::RegisterExecution(_)
+        DomainWrite::Environment(write) => environment::steps(actor, epoch, write).map(Some),
+        DomainWrite::RegisterExecution(_)
         | DomainWrite::EndExecution(_)
         | DomainWrite::AdoptExecution(_)
         | DomainWrite::SeedResolution(_) => Ok(None),
@@ -317,9 +334,9 @@ pub(super) fn program(
         }
         DomainWrite::Wait(write) => Ok(waits::steps(write)),
         DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
-        DomainWrite::SessionCommit(_) | DomainWrite::SessionClose(_) => Ok(None),
+        DomainWrite::SessionCommit(_) => Ok(None),
+        DomainWrite::SessionClose(write) => Ok(session_close::steps(epoch, write)),
         DomainWrite::ModelCall(write) => Ok(Some(model_calls::steps(epoch, write))),
-        DomainWrite::ToolCall(lash_durable::domain::ToolCallWrite::Expire { .. }) => Ok(None),
         DomainWrite::ToolCall(write) => tool_calls::steps(epoch, write).map(Some),
         DomainWrite::ModelCallPin(write) => Ok(Some(model_calls::pin_steps(write))),
     }
@@ -372,6 +389,8 @@ fn mechanics() -> Vec<&'static str> {
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
         executor.stamp_unregistered_requires.sql(),
+        SQL.park.stop_mail_after.sql(),
+        SQL.park.park.sql(),
         SQL.postgres.ack_through.sql(),
         SQL.mail.delete_all.sql(),
         SQL.actor.end.sql(),
@@ -438,13 +457,6 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
-        if tx
-            .domain()
-            .iter()
-            .any(|w| matches!(w, DomainWrite::Environment(_)))
-        {
-            return None;
-        }
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
         if tx.process_preimage().is_some()
@@ -540,17 +552,40 @@ impl Call {
             };
             steps.extend(program.iter().map(step_json));
         }
-        call.steps =
-            serde_json::json!({"version": 1, "expected_revision": tx.revision().0, "steps": steps});
+        // What ends the commit once every domain write ran.
+        steps.extend(environment::finish_steps(tx.domain()).iter().map(step_json));
+        // An owner the commit publishes may be named while it prepares.
+        let publishing: Vec<String> = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::Environment(
+                    lash_durable::environment::EnvironmentWrite::Publish { owner },
+                ) => Some(owner.to_string()),
+                _ => None,
+            })
+            .collect();
+        call.steps = serde_json::json!({
+            "version": 1,
+            "expected_revision": tx.revision().0,
+            "steps": steps,
+            "publishing": publishing,
+        });
         let publications: Vec<_> = tx
             .domain()
             .iter()
             .flat_map(DomainWrite::publications)
             .collect();
+        // An environment write's body is measured against the budget, as
+        // the explicit form measures it, with or without a graph.
         if !tx.graph().is_empty()
             || !prompt_reads.is_empty()
             || !publications.is_empty()
             || !checkpoint_nodes.is_empty()
+            || tx
+                .domain()
+                .iter()
+                .any(|write| matches!(write, DomainWrite::Environment(_)))
         {
             if let Some(budget) = tx.budget() {
                 lash_durable::domain::graph_commit::measure_owner_commit(tx.graph(), tx.domain())
@@ -621,9 +656,18 @@ impl Call {
         }
         (call.release, call.due) = match tx.release() {
             None => (None, None),
-            // A park reads what reached the actor since its owner's read,
-            // which the explicit-transaction form compares (FIG-6099).
-            Some(Release::Parked) => return None,
+            // A park reads what reached the actor since its owner's read
+            // (FIG-6099): the stop mail after what the owner saw, and an
+            // immediate cancel its open did not read.
+            Some(Release::Parked) => {
+                call.steps["park"] = serde_json::json!({
+                    "seen": tx.seen().0,
+                    "read_immediate": tx.turn_cancel().is_some_and(|request| {
+                        request.mode == lash_protocol_types::TurnCancelMode::Immediate
+                    }),
+                });
+                (Some("parked"), None)
+            }
             Some(Release::Terminal) => (Some("terminal"), None),
             Some(Release::Waiting { next_due }) => (Some("waiting"), next_due.map(|due| due.0)),
             // A ready release that writes nothing else keeps the claim's

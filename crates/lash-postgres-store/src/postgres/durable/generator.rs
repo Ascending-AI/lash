@@ -138,9 +138,11 @@ pub(super) fn inline_statement(sql: &str, values: &[&str]) -> String {
 /// pairs and plans with the build's own decoders. The function vouches
 /// only for what needs no decoder: every plan a frame of the committing
 /// session, its id spelled canonically, with exactly the gated body the
-/// client computed; and every checked pair the ended referrer itself or
-/// one of those plans. Anything else declines the call, and the explicit
-/// form decides it.
+/// client computed; and every checked pair the ended referrer itself, one
+/// of those plans, a surviving reader that is a frame of the committing
+/// session spelled canonically, or the committing session itself
+/// (FIG-7576). Anything else declines the call, and the explicit form
+/// decides it.
 fn end_local(entry: &Entry) -> String {
     let args: Vec<String> = entry
         .params
@@ -163,17 +165,14 @@ fn end_local(entry: &Entry) -> String {
             IF EXISTS (
                 SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                 WHERE NOT COALESCE(
-                    planned.item->>0 = 'frame_environment'
-                    AND planned.item->>2 = {body}
-                    AND starts_with(planned.item->>1, v_frame)
-                    AND right(planned.item->>1, 2) = '\"]'
-                    AND substr(planned.item->>1, length(v_frame) + 1,
-                        length(planned.item->>1) - length(v_frame) - 2) ~ '^[^\"\\\\[:cntrl:]]+$',
+                    planned.item->>2 = {body} AND {planned_frame},
                     FALSE)
             ) OR EXISTS (
                 SELECT 1 FROM jsonb_array_elements(v_answer->'checks') AS checked(item)
                 WHERE NOT COALESCE(
                     (checked.item->>0 = {kind} AND checked.item->>1 = {id})
+                    OR {checked_frame}
+                    OR (checked.item->>0 = 'session' AND checked.item->>1 = p_session)
                     OR EXISTS (
                         SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                         WHERE planned.item->>0 = checked.item->>0
@@ -186,6 +185,21 @@ fn end_local(entry: &Entry) -> String {
             v_rows := 1;",
         kind = args[0],
         id = args[1],
+        planned_frame = own_frame("planned.item"),
+        checked_frame = own_frame("checked.item"),
+    )
+}
+
+/// Whether the stored pair `item` is a frame of the committing session
+/// (`v_frame` opens its id) whose id is spelled canonically: no character
+/// JSON escapes, so the id decodes and encodes back to itself.
+fn own_frame(item: &str) -> String {
+    format!(
+        "({item}->>0 = 'frame_environment'
+                    AND starts_with({item}->>1, v_frame)
+                    AND right({item}->>1, 2) = '\"]'
+                    AND substr({item}->>1, length(v_frame) + 1,
+                        length({item}->>1) - length(v_frame) - 2) ~ '^[^\"\\\\[:cntrl:]]+$')"
     )
 }
 
@@ -269,7 +283,12 @@ pub(crate) fn function_ddl() -> String {
     let lock_environment = inline(super::environment::commit_owners().sql(), &environment_args);
     let valid_environment = inline(
         super::environment::commit_versions_valid().sql(),
-        &[environment_args[0], environment_args[1], "v_environment"],
+        &[
+            environment_args[0],
+            environment_args[1],
+            "v_environment",
+            "ARRAY(SELECT jsonb_array_elements_text(COALESCE(p_steps->'publishing', '[]'::jsonb)))",
+        ],
     );
     let lock_nodes = perform(&inline(
         graph::lock_nodes().sql(),
@@ -326,6 +345,20 @@ pub(crate) fn function_ddl() -> String {
         &["p_actor", "'ready'", "p_due", "v_now"],
     );
     let unadvanced = inline(SQL.actor.unadvanced.sql(), &["p_actor"]);
+    let stop_mail_after = inline(
+        SQL.park.stop_mail_after.sql(),
+        &[
+            "p_actor",
+            "(p_steps->'park'->>'seen')::BIGINT",
+            &format!("'{}'", lash_durable::domain::CANCEL_MAIL),
+            &format!("'{}'", lash_durable::domain::SESSION_CLOSE_MAIL),
+        ],
+    );
+    let release_stopped = inline(
+        SQL.actor.release.sql(),
+        &["p_actor", "'ready'", "NULL::BIGINT", "v_now"],
+    );
+    let park = inline(SQL.park.park.sql(), &["p_actor"]);
     let latch_record = inline(
         executor.latch_record.sql(),
         &[
@@ -585,6 +618,18 @@ BEGIN
         {release_unadvanced}
         INTO v_state;
         {unadvanced};
+    WHEN 'parked' THEN
+        -- A stop that reached the actor since its owner's read is not lost
+        -- to the park: the actor goes ready, its park kept (FIG-6099).
+        IF (v_cancel_mode = 'immediate'
+                AND NOT (p_steps->'park'->>'read_immediate')::BOOLEAN)
+            OR EXISTS ({stop_mail_after}) THEN
+            {release_stopped}
+            INTO v_state;
+        ELSE
+            {park}
+            INTO v_state;
+        END IF;
     ELSE
         NULL;
     END CASE;

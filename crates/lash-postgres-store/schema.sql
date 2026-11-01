@@ -1343,6 +1343,8 @@ CREATE TABLE IF NOT EXISTS lash_environment_owners (
     preparing_epoch BIGINT NOT NULL,
     body_json TEXT,
     manifest_ref BYTEA NOT NULL UNIQUE,
+    -- The publication references the body owes, decoded at preparation.
+    publication_refs TEXT[] NOT NULL,
     CONSTRAINT ck_environment_owners_body CHECK ((state = 'retired') = (body_json IS NULL))
 );
 CREATE TABLE IF NOT EXISTS lash_environment_heads (
@@ -1454,9 +1456,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 8363d8ad26ce3796); a call
+    -- Generated from this build's statements (registry 64b642db2369f758); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '8363d8ad26ce3796'
+    IF p_registry IS DISTINCT FROM '64b642db2369f758'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1511,11 +1513,15 @@ BEGIN
             ORDER BY owner_id FOR UPDATE SKIP LOCKED) INTO v_environment;
     SELECT NOT EXISTS (
             SELECT 1 FROM lash_environment_owners
-            WHERE manifest_ref = ANY((p_named)::bytea[]) AND (state <> 'published' OR NOT (owner_id = ANY((v_environment)::text[])))
+            WHERE manifest_ref = ANY((p_named)::bytea[]) AND (NOT (state = 'published'
+                    OR (state = 'preparing' AND owner_id = ANY((ARRAY(SELECT jsonb_array_elements_text(COALESCE(p_steps->'publishing', '[]'::jsonb))))::text[])))
+                OR NOT (owner_id = ANY((v_environment)::text[])))
             ) AND NOT EXISTS (
             SELECT 1 FROM jsonb_array_elements((COALESCE(p_steps->'environment', '[]'::jsonb))::jsonb) AS supplied(value)
             LEFT JOIN lash_environment_owners AS owner ON owner.owner_id = supplied.value->>0
-            WHERE owner.owner_id IS NULL OR NOT (owner.owner_id = ANY((v_environment)::text[])) OR owner.state <> 'published'
+            WHERE owner.owner_id IS NULL OR NOT (owner.owner_id = ANY((v_environment)::text[]))
+               OR NOT (owner.state = 'published'
+                    OR (owner.state = 'preparing' AND owner.owner_id = ANY((ARRAY(SELECT jsonb_array_elements_text(COALESCE(p_steps->'publishing', '[]'::jsonb))))::text[])))
                OR (NOT (owner.manifest_ref = ANY((p_named)::bytea[])) AND owner.version_id <> supplied.value->>1))
             AND NOT EXISTS (SELECT 1 FROM lash_environment_owners WHERE owner_id = ANY((v_environment)::text[])
                 AND (owner_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -1607,6 +1613,16 @@ BEGIN
             UPDATE lash_tool_calls AS held SET decision = 'final', decision_ref = i.fact, answer_outcome = i.outcome, body_ref = i.body FROM (SELECT (v_p->>0) AS owner, (v_p->>1) AS call, (decode(v_p->>2, 'hex')) AS fact, (v_p->>3) AS outcome, (decode(v_p->>4, 'hex')) AS body, ((v_p->>5)::BOOLEAN) AS cancelled) AS i WHERE held.execution_owner = i.owner AND held.call_id = i.call AND NOT i.cancelled AND (i.outcome <> '"Read"' OR NOT held.cancellable) AND ((held.decision IS NULL AND held.answer_outcome IS NULL) OR ((held.decision, held.decision_ref) IS NOT DISTINCT FROM ('final', i.fact) AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body))));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_tool_call.delete_owner' THEN
+            v_rows := 0;
+            FOR v_row IN DELETE FROM lash_tool_calls WHERE owner_key = (v_p->>0) RETURNING decision_ref, body_ref LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."decision_ref" IS NOT NULL THEN v_retired := v_retired || v_row."decision_ref"::BYTEA; END IF;
+                IF v_row."body_ref" IS NOT NULL THEN v_retired := v_retired || v_row."body_ref"::BYTEA; END IF;
+            END LOOP;
         WHEN 'durable_model_call.append' THEN
             INSERT INTO lash_model_call_records (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered) VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT), TRUE) ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref, ended_at_ms = COALESCE(lash_model_call_records.ended_at_ms, excluded.ended_at_ms), written_epoch = COALESCE(lash_model_call_records.written_epoch, excluded.written_epoch), answered = TRUE WHERE lash_model_call_records.call_id = excluded.call_id AND (lash_model_call_records.record_ref IS NULL OR lash_model_call_records.record_ref = excluded.record_ref);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
@@ -1917,17 +1933,22 @@ BEGIN
             IF EXISTS (
                 SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                 WHERE NOT COALESCE(
-                    planned.item->>0 = 'frame_environment'
-                    AND planned.item->>2 = v_p->>5
+                    planned.item->>2 = v_p->>5 AND (planned.item->>0 = 'frame_environment'
                     AND starts_with(planned.item->>1, v_frame)
                     AND right(planned.item->>1, 2) = '"]'
                     AND substr(planned.item->>1, length(v_frame) + 1,
-                        length(planned.item->>1) - length(v_frame) - 2) ~ '^[^"\\[:cntrl:]]+$',
+                        length(planned.item->>1) - length(v_frame) - 2) ~ '^[^"\\[:cntrl:]]+$'),
                     FALSE)
             ) OR EXISTS (
                 SELECT 1 FROM jsonb_array_elements(v_answer->'checks') AS checked(item)
                 WHERE NOT COALESCE(
                     (checked.item->>0 = v_p->>0 AND checked.item->>1 = v_p->>1)
+                    OR (checked.item->>0 = 'frame_environment'
+                    AND starts_with(checked.item->>1, v_frame)
+                    AND right(checked.item->>1, 2) = '"]'
+                    AND substr(checked.item->>1, length(v_frame) + 1,
+                        length(checked.item->>1) - length(v_frame) - 2) ~ '^[^"\\[:cntrl:]]+$')
+                    OR (checked.item->>0 = 'session' AND checked.item->>1 = p_session)
                     OR EXISTS (
                         SELECT 1 FROM jsonb_array_elements(v_answer->'plans') AS planned(item)
                         WHERE planned.item->>0 = checked.item->>0
@@ -2081,6 +2102,30 @@ BEGIN
                  (session_id, scope_key, begun_at_ms, written_epoch)
              VALUES ((v_p->>0), (v_p->>1), (v_now), ((v_p->>3)::BIGINT))
              ON CONFLICT (session_id, scope_key) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_session_close.begin' THEN
+            INSERT INTO lash_session_close (session_id, done_step, begun_at_ms, written_epoch)
+             VALUES ((v_p->>0), NULL, (v_now), ((v_p->>2)::BIGINT))
+             ON CONFLICT (session_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_session_close_postgres.step_ready' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT done_step IS NOT DISTINCT FROM (v_p->>1) AS ready FROM lash_session_close
+             WHERE session_id = (v_p->>0) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."ready" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_session_close.record_step' THEN
+            UPDATE lash_session_close SET done_step = (v_p->>1), written_epoch = ((v_p->>2)::BIGINT)
+             WHERE session_id = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_session_close.scope_ended' THEN
+            DELETE FROM lash_session_scope_ends WHERE session_id = (v_p->>0) AND scope_key = (v_p->>1);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_prompt_postgres.settle' THEN
@@ -2656,6 +2701,107 @@ BEGIN
              ON CONFLICT DO NOTHING;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_environment_postgres.prepare' THEN
+            INSERT INTO lash_environment_owners
+            (owner_id, version_id, state, actor_key, preparing_epoch, body_json, manifest_ref,
+             publication_refs)
+            VALUES ((v_p->>0), (v_p->>1), 'preparing', (v_p->>2), ((v_p->>3)::BIGINT), (v_p->>4), (decode(v_p->>5, 'hex')), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[])
+            ON CONFLICT (owner_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'artifact_cleanup.insert_if_absent' THEN
+            INSERT INTO lash_artifact_cleanup_obligations
+             (referrer_kind, referrer_id, cleanup_json, obligation_id, obligation_state, obligation_due_at_ms, gate_execution)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), 'due', ((v_p->>4)::BIGINT), (v_p->>5))
+             ON CONFLICT (referrer_kind, referrer_id) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_environment_postgres.prepared' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT actor_key = (v_p->>1) AND preparing_epoch = ((v_p->>2)::BIGINT) AND state = 'preparing'
+                AND (NOT ((v_p->>3)::BOOLEAN)::boolean OR NOT EXISTS (
+                    SELECT 1 FROM unnest(publication_refs) AS owed(ref)
+                    WHERE NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges
+                        WHERE namespace = 'kernel_document' AND artifact_ref = owed.ref
+                          AND referrer_kind = 'environment_version' AND referrer_id = (v_p->>0)))) AS ready
+            FROM lash_environment_owners WHERE owner_id = (v_p->>0) FOR UPDATE LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."ready" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_environment.publish' THEN
+            UPDATE lash_environment_owners SET state = 'published'
+            WHERE owner_id = (v_p->>0) AND state = 'preparing' AND actor_key = (v_p->>1) AND preparing_epoch = ((v_p->>2)::BIGINT);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_environment.retire' THEN
+            UPDATE lash_environment_owners SET state = 'retired', body_json = NULL
+            WHERE owner_id = (v_p->>0) AND state <> 'retired';
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_environment.queue_retired' THEN
+            UPDATE lash_artifact_cleanup_obligations
+            SET cleanup_json = (v_p->>1), obligation_state = 'due', obligation_attempts = 0,
+                obligation_due_at_ms = 0, obligation_claim_token = NULL,
+                obligation_stall_reason = NULL, obligation_last_error = NULL,
+                obligation_last_error_code = NULL, obligation_settled_at_ms = NULL
+            WHERE referrer_kind = 'environment_version' AND referrer_id = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_environment_postgres.head_is' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT (SELECT root_ref FROM lash_environment_heads WHERE session_id = (v_p->>0))
+            IS NOT DISTINCT FROM (decode(v_p->>1, 'hex'))::bytea AS same LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."same" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_environment_postgres.published_at' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT state = 'published' AND version_id = (v_p->>1) AS published
+            FROM lash_environment_owners WHERE owner_id = (v_p->>0) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."published" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_environment_postgres.head_replace' THEN
+            v_rows := 0;
+            FOR v_row IN WITH old AS (SELECT root_ref FROM lash_environment_heads WHERE session_id = (v_p->>0)),
+            put AS (INSERT INTO lash_environment_heads (session_id, root_ref, written_epoch)
+                VALUES ((v_p->>0), (decode(v_p->>1, 'hex')), ((v_p->>2)::BIGINT)) ON CONFLICT (session_id) DO UPDATE
+                SET root_ref = excluded.root_ref, written_epoch = excluded.written_epoch)
+            SELECT root_ref FROM old LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."root_ref" IS NOT NULL THEN v_retired := v_retired || v_row."root_ref"::BYTEA; END IF;
+            END LOOP;
+        WHEN 'durable_environment.head_remove' THEN
+            v_rows := 0;
+            FOR v_row IN DELETE FROM lash_environment_heads WHERE session_id = (v_p->>0) RETURNING root_ref LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."root_ref" IS NOT NULL THEN v_retired := v_retired || v_row."root_ref"::BYTEA; END IF;
+            END LOOP;
+        WHEN 'durable_environment_postgres.owner_has_reader' THEN
+            v_rows := 0;
+            FOR v_row IN WITH RECURSIVE reachable AS (
+            SELECT hash FROM lash_blobs
+            WHERE hash = (SELECT manifest_ref FROM lash_environment_owners WHERE owner_id = (v_p->>0))
+            UNION SELECT e.parent_hash FROM lash_blob_edges e JOIN reachable r ON e.child_hash = r.hash
+            ) SELECT EXISTS(SELECT 1 FROM reachable
+                JOIN lash_graph_root_catalog roots ON roots.root_ref = reachable.hash) AS held LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."held" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
         ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
@@ -2804,6 +2950,33 @@ BEGIN
         INTO v_state;
         UPDATE lash_actors SET claimed_revision = state_revision
              WHERE actor_key = (p_actor) AND claimed_revision = state_revision - 1;
+    WHEN 'parked' THEN
+        -- A stop that reached the actor since its owner's read is not lost
+        -- to the park: the actor goes ready, its park kept (FIG-6099).
+        IF (v_cancel_mode = 'immediate'
+                AND NOT (p_steps->'park'->>'read_immediate')::BOOLEAN)
+            OR EXISTS (SELECT 1 FROM lash_actor_mail
+             WHERE actor_key = (p_actor) AND seq > ((p_steps->'park'->>'seen')::BIGINT) AND kind IN (('cancel'), ('session.close'))
+             LIMIT 1) THEN
+            UPDATE lash_actors
+             SET state = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                              THEN 'ready' ELSE CAST(('ready') AS TEXT) END,
+                 ready_at_ms = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                                    THEN CAST((v_now) AS BIGINT) ELSE NULL END,
+                 next_due_ms = CASE WHEN mail_seq > acked_seq OR CAST(('ready') AS TEXT) = 'ready'
+                                    THEN NULL ELSE CAST((NULL::BIGINT) AS BIGINT) END,
+                 epoch = epoch + 1, owner_node = NULL, owner_boot = NULL
+             WHERE actor_key = (p_actor)
+             RETURNING state
+            INTO v_state;
+        ELSE
+            UPDATE lash_actors
+             SET state = 'parked', ready_at_ms = NULL, next_due_ms = NULL, epoch = epoch + 1,
+                 owner_node = NULL, owner_boot = NULL
+             WHERE actor_key = (p_actor)
+             RETURNING state
+            INTO v_state;
+        END IF;
     ELSE
         NULL;
     END CASE;

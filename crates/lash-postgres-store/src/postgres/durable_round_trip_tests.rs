@@ -1,7 +1,9 @@
 //! The round trips the owner's commits pay on PostgreSQL (FIG-5275,
 //! FIG-5936), counted on an isolated database: the acceptance of one
 //! input, a turn's admission, `model.start`, a round's outcome, a VM park,
-//! `turn.commit` and every boundary of a five-tool turn (FIG-7576).
+//! `turn.commit`, every boundary of a five-tool turn, a session's opening
+//! turn and its close, and a commit publishing a candidate beside its pages
+//! (FIG-7576).
 
 // Test code: the server comes from the environment the target's runner
 // hands it.
@@ -396,14 +398,18 @@ async fn a_vm_park_stays_within_its_round_trip_budget() {
 const TURN_COMMIT_ROUND_TRIPS: u64 = 2;
 
 /// A turn's commit, its session's head commit with the run's terminal and
-/// its scope's end, stays within its round-trip budget.
+/// its scope's end, stays within its round-trip budget: without artifacts,
+/// with artifacts its execution and a gated frame read last, and with a
+/// later frame of the session still reading them (FIG-7576), which the call
+/// vouches for without a decoder.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_turn_commit_stays_within_its_round_trip_budget() {
-    turn_commit_round_trips(false).await;
-    turn_commit_round_trips(true).await;
+    turn_commit_round_trips(false, false).await;
+    turn_commit_round_trips(true, false).await;
+    turn_commit_round_trips(true, true).await;
 }
 
-async fn turn_commit_round_trips(holds_artifacts: bool) {
+async fn turn_commit_round_trips(holds_artifacts: bool, surviving_frame: bool) {
     use lash_core_store::store::SessionHistoryStore as _;
     use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
     let Some(owned) = owned("round-trips-turn-commit").await else {
@@ -455,12 +461,31 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
                 &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
                     lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(frame),
                     Vec::new(),
-                    Some(journal),
+                    Some(journal.clone()),
                 ),
                 1,
             )
             .await
             .expect("the frame waits for the turn to settle");
+        if surviving_frame {
+            let later = lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+                owned.session.clone(),
+                lash_core_store::session_identity::FrameNodeId::new("round-trips-new-frame")
+                    .expect("frame"),
+            );
+            artifacts
+                .acquire_module_artifact(
+                    &lash_core_store::artifact_referrer::ReferrerClaim::guarded(
+                        lash_core_store::artifact_referrer::ReferrerGuard::Frame {
+                            frame: later,
+                            creator: journal.clone(),
+                        },
+                    ),
+                    "round-trips-module",
+                )
+                .await
+                .expect("the session's later frame reads the artifact");
+        }
     }
     let factory = owned.storage.store();
     let mut state = lash_core_store::store::window_state(
@@ -549,10 +574,10 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
     })
     .await;
     within(
-        if holds_artifacts {
-            "turn.commit with execution and gated-frame edges"
-        } else {
-            "turn.commit without artifact edges"
+        match (holds_artifacts, surviving_frame) {
+            (false, _) => "turn.commit without artifact edges",
+            (true, false) => "turn.commit with execution and gated-frame edges",
+            (true, true) => "turn.commit with a surviving frame reader",
         },
         trips,
         TURN_COMMIT_ROUND_TRIPS,
@@ -561,9 +586,11 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
         artifacts
             .get_module_artifact("round-trips-module")
             .await
-            .expect("read artifact"),
-        None,
-        "the terminal reclaims the execution and gated frame's last-reader bytes"
+            .expect("read artifact")
+            .is_some(),
+        surviving_frame,
+        "the terminal reclaims the execution and gated frame's last-reader bytes, \
+         and keeps those a surviving frame reads"
     );
     assert!(
         matches!(
@@ -952,6 +979,264 @@ async fn a_five_tool_turn_commits_each_boundary_in_one_call() {
         within(&format!("{label} open"), *open, TOOL_TURN_OPEN_ROUND_TRIPS);
         within(label, *commit, TOOL_TURN_COMMIT_ROUND_TRIPS);
     }
+}
+
+/// The most round trips each open and each commit of a session's opening
+/// turn pays (FIG-7576): the open, and the one call, which also prepares
+/// the environment's version owner (`environment.prepare`) and publishes it
+/// with the session's environment head (`model.start`). The call compares
+/// the expected head with the stored one by its content-addressed root, so
+/// no commit decodes a head or an owner's body.
+const SESSION_OPEN_ROUND_TRIPS: u64 = 1;
+
+/// A session's opening turn prepares, publishes and heads its environment
+/// with each open and commit in one round trip, and the head it publishes
+/// is the one the store reads back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_opening_turn_commits_its_environment_in_one_call() {
+    use lash_core_store::environment::{EnvironmentHead, VersionOwnerState, assemble};
+    use lash_durable::environment::EnvironmentWrite;
+    let Some(owned) = owned("round-trips-session-open").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "session-open").await;
+    let run = TurnId::from("round-trips-turn");
+    let body = assemble(None, []).expect("an empty environment");
+    let owner = lash_core_store::environment::VersionOwner::preparing(body.id().clone());
+    let mut trips = Vec::new();
+    let (tx, open) = round_trips(store.begin(&owned.actor, owned.epoch, u64::MAX)).await;
+    let mut tx = tx.expect("open");
+    admit(&mut tx, &owned, &run, input);
+    tx.write(DomainWrite::Environment(
+        EnvironmentWrite::prepare(owner.clone(), &body).expect("the preparation"),
+    ));
+    let (prepared, commit) = round_trips(store.commit(tx, CommitLabel::ENVIRONMENT_PREPARE)).await;
+    prepared.expect("environment.prepare");
+    trips.push(("environment.prepare", open, commit));
+    let head = EnvironmentHead {
+        version: owner.version().clone(),
+        owner: owner.id().clone(),
+        input_frontier: Default::default(),
+    };
+    let (tx, open) = round_trips(store.begin(&owned.actor, owned.epoch, u64::MAX)).await;
+    let mut tx = tx.expect("open");
+    let mut nodes = lash_durable::environment::staging();
+    lash_durable::environment::stage_head(&mut nodes, &head).expect("the head stages");
+    tx.stage(nodes.into_nodes().into_values());
+    tx.write(DomainWrite::Environment(EnvironmentWrite::Publish {
+        owner: owner.id().clone(),
+    }));
+    tx.write(DomainWrite::Environment(EnvironmentWrite::Head {
+        expected: None,
+        head: Some(head.clone()),
+    }));
+    model_start(&mut tx, &owned, &run, 1);
+    let (started, commit) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+    started.expect("model.start");
+    trips.push(("model.start", open, commit));
+    let environments = store.environments();
+    assert_eq!(
+        environments
+            .environment_head(&owned.session)
+            .await
+            .expect("read the head"),
+        Some(head)
+    );
+    assert_eq!(
+        environments
+            .environment_owner(owner.id())
+            .await
+            .expect("read the owner")
+            .expect("the owner")
+            .owner
+            .state(),
+        VersionOwnerState::Published
+    );
+    for (label, open, commit) in &trips {
+        within(&format!("{label} open"), *open, SESSION_OPEN_ROUND_TRIPS);
+        within(label, *commit, SESSION_OPEN_ROUND_TRIPS);
+    }
+}
+
+/// The most round trips each commit of a session's close pays from its
+/// open (FIG-7576): the one call, which begins the close or records a step
+/// once the step before it is the one done, guarded in the call. The
+/// artifacts step, which deletes the session's rows, is not counted here.
+const SESSION_CLOSE_ROUND_TRIPS: u64 = 1;
+
+/// A session's close begins and records its steps each in one call, in
+/// order, and refuses a step out of order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_close_commits_each_step_in_one_call() {
+    use lash_durable::domain::{DomainRefusal, SessionCloseStep, SessionCloseWrite};
+    let Some(owned) = owned("round-trips-session-close").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let writes = [
+        (
+            CommitLabel::SESSION_CLOSE_BEGIN,
+            SessionCloseWrite::Begin {
+                session: owned.session.clone(),
+            },
+        ),
+        (
+            CommitLabel::SESSION_CLOSE_CANCEL,
+            SessionCloseWrite::Step {
+                session: owned.session.clone(),
+                step: SessionCloseStep::Cancel,
+            },
+        ),
+        (
+            CommitLabel::SESSION_CLOSE_REVOKE,
+            SessionCloseWrite::Step {
+                session: owned.session.clone(),
+                step: SessionCloseStep::Revoke,
+            },
+        ),
+        (
+            CommitLabel::SESSION_CLOSE_END_SCOPE,
+            SessionCloseWrite::Step {
+                session: owned.session.clone(),
+                step: SessionCloseStep::EndScope,
+            },
+        ),
+    ];
+    for (label, write) in writes {
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
+        tx.write(DomainWrite::SessionClose(write));
+        let (committed, trips) = round_trips(store.commit(tx, label)).await;
+        committed.expect("the close step");
+        within(label.as_str(), trips, SESSION_CLOSE_ROUND_TRIPS);
+    }
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
+        session: owned.session.clone(),
+        step: SessionCloseStep::Tombstone,
+    }));
+    assert_eq!(
+        store
+            .commit(tx, CommitLabel::SESSION_CLOSE_TOMBSTONE)
+            .await
+            .expect_err("the tombstone before the artifacts step"),
+        lash_durable::DurableError::Domain(DomainRefusal::SessionCloseOutOfOrder {
+            session: owned.session.clone(),
+            step: SessionCloseStep::Tombstone,
+            done: Some(SessionCloseStep::EndScope),
+        })
+    );
+}
+
+/// The round trips a candidate's page installation pays ahead of its
+/// owner commit (FIG-6191, FIG-7576): the transaction's `BEGIN`, its fence
+/// and clock read and the owner's share-locked fence row; for each batch of
+/// [`CandidateBuffers::DEFAULT`] manifest entries the key-share lock of its
+/// nodes and the insert of the absent ones (a third read of what another
+/// writer inserted meanwhile has no writer to race here); for each batch of
+/// edges the lock of their children and their insert; and `COMMIT`. The
+/// commit itself then names only the candidate's root, and is one call
+/// whatever else it writes.
+fn page_round_trips(summary: &lash_core_store::checkpoint_graph::stage::ManifestSummary) -> u64 {
+    let buffers = lash_durable::domain::graph_commit::CandidateBuffers::DEFAULT;
+    let entries = summary.fresh_nodes + summary.external;
+    let node_batches = entries.div_ceil(buffers.entries as u64);
+    let edge_batches = summary.fresh_edges.div_ceil(buffers.edges as u64);
+    3 + 2 * node_batches + 2 * edge_batches + 1
+}
+
+/// A round outcome publishing a candidate of many pages, with the next
+/// model call's start, commits in one call beside its page installation,
+/// whose round trips grow with the candidate's batches alone, and the store
+/// holds the record over the candidate's root.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_candidate_commit_is_one_call_beside_its_page_batches() {
+    use lash_durable::domain::pages::{CandidateOwner, CandidatePublication, PageStore as _};
+    let Some(owned) = owned("round-trips-candidate").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "candidate").await;
+    let run = TurnId::from("round-trips-turn");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    admit(&mut tx, &owned, &run, input);
+    model_start(&mut tx, &owned, &run, 1);
+    store
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("admit");
+    let manifest = lash_durable::laws::pages::GeneratedManifest::new(
+        "round-trips-candidate",
+        600,
+        64,
+        CommitId::mint(),
+    );
+    let summary = lash_core_store::checkpoint_graph::stage::CandidateManifest::summary(&manifest);
+    let owner = OwnerKey::Turn(owned.session.clone(), run.clone());
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let mut body = TokenWriter::new();
+    body.seq(2);
+    body.text("outcome over the candidate");
+    body.child(summary.root.child_ref());
+    let record = staging
+        .encode(NodeKind::ROUND_FACT, TypedBody::logical(&body.into_bytes()))
+        .expect("the record stages");
+    tx.stage_all(staging);
+    tx.write(DomainWrite::RunFact(RunFactWrite::Append {
+        owner: owner.clone(),
+        run: RunSeq(1),
+        ordinal: Ordinal(0),
+        kind: RunFactKind::XOutcome,
+        call: None,
+        record,
+    }));
+    model_start(&mut tx, &owned, &run, 2);
+    tx.write(DomainWrite::ModelCallPin(
+        lash_durable::domain::ModelCallPinWrite::Reserve {
+            key: lash_durable::domain::PromptCallKey {
+                session: owned.session.clone(),
+                call: lash_durable::domain::ModelCallId::Turn {
+                    run: run.clone(),
+                    ordinal: 2,
+                },
+            },
+            call_id: lash_protocol_types::llm::types::LlmCallId("candidate-2".into()),
+            attempt: 1,
+            enclosing: None,
+        },
+    ));
+    let (receipt, trips) = round_trips(store.commit_candidate(
+        tx,
+        CandidatePublication {
+            owner: CandidateOwner::RunFactAppend {
+                owner,
+                run: RunSeq(1),
+                ordinal: Ordinal(0),
+            },
+            manifest: Box::new(manifest),
+        },
+        CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+    ))
+    .await;
+    assert_eq!(receipt.expect("round.outcome").root, summary.root);
+    within(
+        "round.outcome+model.start with a candidate",
+        trips,
+        page_round_trips(&summary) + 1,
+    );
 }
 
 /// PREFIX-DELTA on the server-call boundary: a carried immutable prefix

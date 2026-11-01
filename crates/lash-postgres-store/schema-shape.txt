@@ -172,6 +172,7 @@ table lash_environment_owners
   column manifest_ref bytea not-null
   column owner_id text not-null
   column preparing_epoch bigint not-null
+  column publication_refs text[] not-null
   column state text not-null
   column version_id text not-null
   unique (manifest_ref)

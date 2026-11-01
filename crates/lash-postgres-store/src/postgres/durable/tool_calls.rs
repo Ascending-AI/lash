@@ -58,6 +58,11 @@ pub(super) static COMPLETE: Entry = Entry::new(
     Shape::Exec,
 );
 
+/// An owner's calls expire: their rows go, their roots retired.
+pub(super) static EXPIRE: Entry = Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Returning)
+    .retiring("decision_ref")
+    .retiring("body_ref");
+
 pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, DurableError> {
     let number =
         |value| i64::try_from(value).map_err(|_| corrupt("tool call ordinal", "out of range"));
@@ -67,7 +72,9 @@ pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, D
         return Err(corrupt("tool call", "settlement and body disagree"));
     }
     let (entry, values) = match write {
-        ToolCallWrite::Expire { .. } => return Ok(Vec::new()),
+        ToolCallWrite::Expire { owner } => {
+            return Ok(vec![Step::any(&EXPIRE, vec![Value::text(owner.stored())])]);
+        }
         ToolCallWrite::Admit {
             counted,
             logical,
@@ -165,12 +172,6 @@ pub(super) async fn apply(
     commit: &Committing<'_>,
     write: &ToolCallWrite,
 ) -> Result<(), DurableError> {
-    if let ToolCallWrite::Expire { owner } = write {
-        for root in delete_owner(tx, owner).await.map_err(sqlx_failure)? {
-            commit.retired.stored(root);
-        }
-        return Ok(());
-    }
     if super::steps::run(tx, &steps(commit.epoch, write)?, &commit.steps())
         .await?
         .is_some()
