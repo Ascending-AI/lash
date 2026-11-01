@@ -555,15 +555,6 @@ pub(super) async fn finish(
         Some(_) => Err(Refusal::NoReader.into()),
     }
 }
-pub(super) async fn remove_head(
-    tx: &mut PgConnection,
-    session: &lash_kernel_value::identity::SessionId,
-) -> Result<Vec<String>, sqlx::Error> {
-    crate::keys::query_scalar(ENV.head_remove.sql())
-        .bind(session.as_str())
-        .fetch_all(crate::observed_sql::executor(tx))
-        .await
-}
 #[async_trait::async_trait]
 impl EnvironmentStore for PostgresDurableStore {
     async fn environment_owner(

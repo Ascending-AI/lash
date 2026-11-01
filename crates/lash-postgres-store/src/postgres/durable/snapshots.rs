@@ -246,19 +246,3 @@ pub(super) async fn under_limited(
         })
         .collect()
 }
-
-/// Delete every execution root whose key starts with `prefix`, with the
-/// admissions of each: the cells one turn stopped in, at its
-/// end, or one session's, at its delete. Answers every root they held: the
-/// caller's to peel.
-pub(super) async fn retire_under(
-    tx: &mut PgConnection,
-    prefix: &str,
-) -> Result<Vec<String>, sqlx::Error> {
-    let mut roots: Vec<String> = crate::keys::query_scalar(SQL.clear_under.sql())
-        .bind(prefix)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    roots.extend(super::graph::clear_admissions_under(&mut *tx, prefix).await?);
-    Ok(roots)
-}

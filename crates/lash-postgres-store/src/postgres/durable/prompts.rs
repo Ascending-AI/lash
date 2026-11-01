@@ -144,6 +144,13 @@ pub(super) static SETTLE: Entry = Entry::new(
 pub(super) static RELEASE_PREFIX: Entry =
     Entry::new(|| &SQL.release_prefix, &[Ty::Text], Shape::Returning)
         .collecting(Collect::Peel("hash"));
+/// Every edge of a deleted session `?1`, each text it named released.
+pub(super) static RELEASE_SESSION_EDGES: Entry =
+    Entry::new(|| &SQL.release_session_edges, &[Ty::Text], Shape::Returning)
+        .collecting(Collect::Peel("hash"));
+/// Every root of a deleted session `?1`.
+pub(super) static RELEASE_SESSION_SNAPSHOTS: Entry =
+    Entry::new(|| &SQL.release_session_snapshots, &[Ty::Text], Shape::Exec);
 pub(super) static RECLAIM: Entry = Entry::new(|| &POSTGRES_SQL.reclaim, &[], Shape::GraphReclaim);
 
 /// The shared revision-material program collects former audit roots before

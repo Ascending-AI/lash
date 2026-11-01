@@ -28,6 +28,12 @@ lash_store_sql::statements! {
 static POSTGRES: LazyLock<ToolCallPostgresStatements> =
     LazyLock::new(|| ToolCallPostgresStatements::render(Dialect::postgres()));
 
+/// Every tool call of a deleted session `?1`, with the decision and body
+/// roots it held.
+pub(super) static DELETE_SESSION: Entry =
+    Entry::new(|| &SQL.delete_session, &[Ty::Text], Shape::Returning)
+        .retiring("decision_ref")
+        .retiring("body_ref");
 pub(super) static ADMIT: Entry = Entry::new(
     || &SQL.admit,
     &[
@@ -328,23 +334,6 @@ pub(super) async fn delete_owner(
     let rows: Vec<(Option<crate::keys::Key>, Option<crate::keys::Key>)> =
         crate::observed_sql::query_as(SQL.delete_owner.sql())
             .bind(owner.stored())
-            .fetch_all(crate::observed_sql::executor(tx))
-            .await?;
-    Ok(rows
-        .into_iter()
-        .flat_map(|(decision, body)| [decision, body])
-        .flatten()
-        .map(|key| key.0)
-        .collect())
-}
-
-pub(super) async fn delete_session(
-    tx: &mut PgConnection,
-    session: &lash_kernel_value::identity::SessionId,
-) -> Result<Vec<String>, sqlx::Error> {
-    let rows: Vec<(Option<crate::keys::Key>, Option<crate::keys::Key>)> =
-        crate::observed_sql::query_as(SQL.delete_session.sql())
-            .bind(session.as_str())
             .fetch_all(crate::observed_sql::executor(tx))
             .await?;
     Ok(rows

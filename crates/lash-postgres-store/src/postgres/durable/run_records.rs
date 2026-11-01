@@ -106,6 +106,10 @@ pub(super) static DELETE_TURN: Entry =
     Entry::new(|| &SQL.delete_turn, &[Ty::Text, Ty::Text], Shape::Returning).retiring("record_ref");
 pub(super) static PRUNE: Entry =
     Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Returning).retiring("record_ref");
+/// Every ledger whose owner key starts with `?1`: a deleted session's
+/// turns' or cells'.
+pub(super) static DELETE_UNDER: Entry =
+    Entry::new(|| &SQL.delete_under, &[Ty::Text], Shape::Returning).retiring("record_ref");
 
 /// `write`'s step program at `epoch`: an append is one conditional insert
 /// that must answer its row, a prune one delete.
@@ -274,18 +278,6 @@ pub(super) async fn delete_owner(
     key: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
     crate::keys::query_scalar(SQL.delete_owner.sql())
-        .bind(key)
-        .fetch_all(crate::observed_sql::executor(tx))
-        .await
-}
-
-/// Delete every fact whose owner key starts with `key`, answering the
-/// RoundFact nodes they held: the caller's to peel.
-pub(super) async fn delete_under(
-    tx: &mut PgConnection,
-    key: &str,
-) -> Result<Vec<String>, sqlx::Error> {
-    crate::keys::query_scalar(SQL.delete_under.sql())
         .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await

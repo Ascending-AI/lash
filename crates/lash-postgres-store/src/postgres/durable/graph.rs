@@ -1360,17 +1360,5 @@ impl PostgresDurableStore {
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
 
-/// Drop every admission whose execution key starts with `key`, answering
-/// the Admission nodes they held: the caller's to peel.
-pub(super) async fn clear_admissions_under(
-    tx: &mut PgConnection,
-    key: &str,
-) -> Result<Vec<String>, sqlx::Error> {
-    crate::keys::query_scalar(SQL.graph.admissions_clear_under.sql())
-        .bind(key)
-        .fetch_all(crate::observed_sql::executor(tx))
-        .await
-}
-
 #[cfg(test)]
 mod run_fact_tests;

@@ -79,19 +79,22 @@ mod pages;
 #[cfg(feature = "testing")]
 pub(crate) use pages::cut_retirement_holds;
 pub(crate) use pages::retire_roots;
+mod model_calls;
 mod park;
 mod process_view;
 pub(crate) mod processes;
 mod prompts;
-pub(crate) mod retention;
-pub(crate) use prompts::release as release_prompt_snapshots;
-mod model_calls;
 #[path = "../durable_reads.rs"]
 mod reads;
 #[path = "../durable_replay.rs"]
 mod replay;
+pub(crate) mod retention;
 mod run_records;
 mod session_close;
+mod session_delete;
+pub(crate) use session_delete::delete as delete_session_rows;
+#[cfg(test)]
+pub(crate) use session_delete::retire_session_rows;
 pub(crate) mod session_mail;
 mod tool_calls;
 #[cfg(any(test, feature = "testing"))]
@@ -242,32 +245,6 @@ impl std::fmt::Debug for PostgresDurableStore {
 }
 
 type Tx = GuardedTx<'static>;
-
-/// Delete every engine row `session` owns, in its physical delete: its
-/// turns' run facts (their tool-call ledgers), its cells' roots, admissions
-/// and facts, the waits its actor owns and its turns' wait tombstones. The
-/// session's actor row stays: its terminal fence, which session write
-/// locking takes first. Answers every graph root those rows held: the
-/// delete's to peel.
-pub(crate) async fn retire_session_rows(
-    tx: &mut PgConnection,
-    session: &lash_kernel_value::identity::SessionId,
-) -> Result<Vec<String>, sqlx::Error> {
-    use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
-
-    let cells = ExecKey::session_cells(session);
-    let mut roots = environment::remove_head(&mut *tx, session).await?;
-    roots.extend(run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
-    roots.extend(model_calls::delete_session(&mut *tx, session).await?);
-    roots.extend(tool_calls::delete_session(&mut *tx, session).await?);
-    roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
-    roots.extend(run_records::delete_under(&mut *tx, &cells).await?);
-    if let Ok(actor) = ActorKey::session(session.as_str()) {
-        waits::delete_owned(&mut *tx, &actor).await?;
-    }
-    waits::delete_under(tx, &ScopeKey::session_turns(session)).await?;
-    Ok(roots)
-}
 
 /// Delete `process`'s run facts and the waits it owns, in its prune: the
 /// process host API's tool calls go with its record. Answers the RoundFact

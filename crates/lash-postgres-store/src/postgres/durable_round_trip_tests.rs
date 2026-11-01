@@ -1260,11 +1260,12 @@ async fn execution_registration_adoption_and_seed_each_commit_in_one_call() {
 /// The most round trips each commit of a session's close pays from its
 /// open (FIG-7576): the one call, which begins the close or records a step
 /// once the step before it is the one done, guarded in the call. The
-/// artifacts step, which deletes the session's rows, is not counted here.
+/// artifacts step deletes the session's rows in the same call.
 const SESSION_CLOSE_ROUND_TRIPS: u64 = 1;
 
 /// A session's close begins and records its steps each in one call, in
-/// order, and refuses a step out of order.
+/// order, refuses a step out of order, and deletes the session in its
+/// artifacts step's one call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_session_close_commits_each_step_in_one_call() {
     use lash_durable::domain::{DomainRefusal, SessionCloseStep, SessionCloseWrite};
@@ -1330,6 +1331,27 @@ async fn a_session_close_commits_each_step_in_one_call() {
             done: Some(SessionCloseStep::EndScope),
         })
     );
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
+        session: owned.session.clone(),
+        step: SessionCloseStep::Artifacts,
+    }));
+    let label = CommitLabel::SESSION_CLOSE_ARTIFACTS;
+    let (committed, trips) = round_trips(store.commit(tx, label)).await;
+    committed.expect("the artifacts step");
+    within(label.as_str(), trips, SESSION_CLOSE_ROUND_TRIPS);
+    assert!(matches!(
+        lash_core_store::store::SessionCatalogStore::lookup_session(
+            &owned.storage.store(),
+            &owned.session
+        )
+        .await
+        .expect("look the session up"),
+        lash_core_store::store::SessionLookup::Deleted
+    ));
 }
 
 /// The round trips a candidate's page installation pays ahead of its

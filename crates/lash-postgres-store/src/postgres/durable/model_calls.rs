@@ -24,6 +24,9 @@ lash_store_sql::statements! {
 static POSTGRES: LazyLock<ModelCallPostgresStatements> =
     LazyLock::new(|| ModelCallPostgresStatements::render(Dialect::postgres()));
 
+/// Every call record of a deleted session `?1`.
+pub(super) static DELETE_SESSION: Entry =
+    Entry::new(|| &SQL.delete_session, &[Ty::Text], Shape::Returning).retiring("record_ref");
 pub(super) static APPEND: Entry = Entry::new(
     || &SQL.append,
     &[

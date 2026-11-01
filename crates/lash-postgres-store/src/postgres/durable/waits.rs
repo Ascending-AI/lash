@@ -95,6 +95,14 @@ pub(super) async fn apply(
     }
 }
 
+/// Every wait actor `?1` owns: a deleted session's.
+pub(super) static DELETE_OWNED: Entry =
+    Entry::new(|| &SQL.waits.delete_owned, &[Ty::Text], Shape::Exec);
+/// Every wait whose scope starts with `?1`: a deleted session's turns'
+/// tombstones.
+pub(super) static DELETE_UNDER: Entry =
+    Entry::new(|| &SQL.waits.delete_under, &[Ty::Text], Shape::Exec);
+
 /// The settlements of a scope's or a target's waits, each waking the
 /// owners it settled but the committing actor.
 pub(super) static REVOKE_SCOPE: Entry = Entry::new(
@@ -231,15 +239,6 @@ pub(super) async fn delete_owned(
 ) -> Result<(), sqlx::Error> {
     crate::observed_sql::query(SQL.waits.delete_owned.sql())
         .bind(owner.as_str())
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map(drop)
-}
-
-/// Delete every wait whose scope starts with `prefix`.
-pub(super) async fn delete_under(tx: &mut PgConnection, prefix: &str) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.waits.delete_under.sql())
-        .bind(prefix)
         .execute(crate::observed_sql::executor(tx))
         .await
         .map(drop)

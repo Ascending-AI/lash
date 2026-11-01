@@ -46,8 +46,8 @@ use lash_store_sql::Dialect;
 use super::steps::{Entry, Step};
 use super::{
     PostgresDurableStore, SQL, environment, get, graph, head_commit, model_calls, packages, park,
-    processes, prompts, replay, retention, run_records, session_close, session_mail, snapshots,
-    sqlx_failure, tool_calls, turns, waits,
+    processes, prompts, replay, retention, run_records, session_close, session_delete,
+    session_mail, snapshots, sqlx_failure, tool_calls, turns, waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -197,7 +197,7 @@ pub(crate) const FUNCTION: &str = "lash_owner_commit";
 
 /// Every statement a step may name: what the function dispatches on.
 pub(super) fn entries() -> Vec<&'static Entry> {
-    vec![
+    let mut entries = vec![
         &tool_calls::FINISH_READS,
         &tool_calls::ADMIT,
         &tool_calls::DECIDE,
@@ -329,7 +329,10 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &environment::HEAD_PUT,
         &environment::HEAD_REMOVE,
         &environment::HAS_READER,
-    ]
+    ];
+    // A session's deletion, the close's artifacts step.
+    entries.extend(session_delete::entries());
+    entries
 }
 
 /// `write`'s step program at `epoch`: `None` when it has none, and its
@@ -361,7 +364,7 @@ pub(super) fn program(
         DomainWrite::Wait(write) => Ok(waits::steps(write)),
         DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
         DomainWrite::SessionCommit(_) => Ok(None),
-        DomainWrite::SessionClose(write) => Ok(session_close::steps(epoch, write)),
+        DomainWrite::SessionClose(write) => session_close::steps(actor, epoch, write),
         DomainWrite::ModelCall(write) => Ok(Some(model_calls::steps(epoch, write))),
         DomainWrite::ToolCall(write) => tool_calls::steps(epoch, write).map(Some),
         DomainWrite::ModelCallPin(write) => Ok(Some(model_calls::pin_steps(write))),

@@ -851,21 +851,6 @@ pub(crate) async fn begin_session_close_tx(
     Ok((Some(intent), woken))
 }
 
-/// Forget the session's run records and their owned window references in its
-/// deletion transaction. A `close_session` intent stays: it is the tombstone
-/// the factory answers the deleted session's runs from.
-pub(crate) async fn delete_session_runs_conn(
-    conn: &mut PgConnection,
-    session_id: &SessionId,
-) -> Result<(), StoreError> {
-    crate::observed_sql::query(session_runs_sql().runs.delete_by_session.sql())
-        .bind(session_id.as_str())
-        .execute(crate::observed_sql::executor(&mut *conn))
-        .await
-        .map_err(store_sqlx_error)?;
-    Ok(())
-}
-
 #[async_trait::async_trait]
 impl RunStore for PostgresStore {
     async fn unfinished_run(
