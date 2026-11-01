@@ -21,6 +21,7 @@ pub(in crate::machine) struct ReturnInput<'a> {
     pub(in crate::machine) input: Owner,
     pub(in crate::machine) value: doc::Value,
     pub(in crate::machine) safe_point: u64,
+    pub(in crate::machine) loops: Vec<(Site, u64)>,
 }
 pub(in crate::machine) struct ReturnRecipe {
     pub(in crate::machine) prefix: Prefix,
@@ -42,6 +43,16 @@ impl ReturnInput<'_> {
         let Ok(interval) = source.compile_return_suffix(&at) else {
             return Ok(None);
         };
+        if !interval
+            .return_loops()
+            .ok_or_else(|| malformed("return has no source control proof"))?
+            .iter()
+            .eq(self.loops.iter().map(|(site, _)| site))
+        {
+            return Err(malformed(
+                "return loop owners differ from its authored controls",
+            ));
+        }
         let slots = source
             .owner_slots()
             .map_err(|_| malformed("return source owners failed verification"))?;
@@ -175,7 +186,7 @@ impl ReturnInput<'_> {
             occurrence: Occurrence {
                 task: self.task,
                 invocation: self.invocation.id(),
-                loops: vec![],
+                loops: self.loops,
                 action: None,
                 departure: None,
             },

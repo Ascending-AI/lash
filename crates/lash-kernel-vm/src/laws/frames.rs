@@ -73,6 +73,15 @@ fn probes(
         }
     }
     probes.push((
+        "deep.loop",
+        register(
+            "deep.loop",
+            "n: Any",
+            String::new(),
+            "let first = true while true { if first { set first = false } else { let saved = n return saved } } return 0",
+        ),
+    ));
+    probes.push((
         "deep.branch",
         register(
             "deep.branch",
@@ -193,14 +202,16 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
 
-    let scoped_observation = |source_only: bool| {
+    let scoped_observation = |name: &str, source_only: bool| {
         crate::machine::islands::witness::begin();
         let bounds = Bounds {
             call_depth: 2,
             ..ROOMY
         };
-        let mut embedder =
-            Embedder::with("main { return deep.branch([7]) }", setup(bounds, u64::MAX));
+        let mut embedder = Embedder::with(
+            &format!("main {{ return {name}([7]) }}"),
+            setup(bounds, u64::MAX),
+        );
         if source_only {
             embedder.machine.force_source_execution();
         }
@@ -208,25 +219,34 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         embedder.machine.record_charges(tape.clone());
         let value = result(embedder.run_to_end(&[]));
         assert_eq!(value, Datum::List(vec![int(7)]));
-        if source_only {
+        if name == "deep.branch" && source_only {
             assert!(
                 crate::machine::islands::witness::precise_scoped_returns() > 0,
                 "the precise source must publish the same entered block suffix"
             );
-        } else {
+        } else if name == "deep.branch" {
             assert!(
                 crate::machine::islands::witness::packet_scoped_returns() > 0,
                 "the entered if block must leave through its accepted return suffix"
             );
         }
 
+        if name == "deep.loop" {
+            assert_eq!(
+                crate::machine::islands::witness::loop_returns()[usize::from(source_only)],
+                2,
+                "the second body must return with its actual loop occurrence"
+            );
+        }
         (value, embedder.machine.meters(), tape.steps())
     };
-    assert_eq!(
-        scoped_observation(false),
-        scoped_observation(true),
-        "the accepted block suffix must preserve the source result, charge tape and terminal holdings"
-    );
+    for name in ["deep.branch", "deep.loop"] {
+        assert_eq!(
+            scoped_observation(name, false),
+            scoped_observation(name, true),
+            "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
+        );
+    }
     // A declined packet return resumes before the same library completion fee.
     let completed = || {
         let bounds = Bounds {

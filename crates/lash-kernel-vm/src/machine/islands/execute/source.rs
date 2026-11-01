@@ -37,11 +37,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if frame.state.resident
             || (frame.state.callee.plan.charged && frame.state.boundary.is_some())
             || frame.state.callee.compiled.cleanups
-            || !frame
-                .state
-                .control
-                .iter()
-                .all(|control| matches!(control, Position::Block(..)))
+            || !frame.state.control.iter().all(|control| match control {
+                Position::Block(..) => true,
+                Position::Loop {
+                    id,
+                    started,
+                    cursor: None,
+                    ..
+                } => {
+                    *started > 0
+                        && matches!(self.exe.stmt(*id).form, crate::compile::Form::While { .. })
+                }
+                _ => false,
+            })
         {
             return false;
         }

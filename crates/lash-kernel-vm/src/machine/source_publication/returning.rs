@@ -16,7 +16,7 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         let run_root =
             running.task == doc::TaskId::MAIN && self.task(running.task)?.frames.len() == 1;
-        let (source, link, invocation) = {
+        let (source, link, invocation, loops) = {
             let frame = self.frame(running.task)?;
             let code = running.exe.code(frame.code);
             if frame.public_result.is_some()
@@ -24,10 +24,12 @@ impl KernelMachine {
                 || frame.cleaning.is_some()
                 || frame.awaiting.is_some()
                 || frame.pending.peek().is_some()
-                || !frame
-                    .control
-                    .iter()
-                    .all(|control| matches!(control, Control::Block { .. }))
+                || !frame.control.iter().all(|control| {
+                    matches!(
+                        control,
+                        Control::Block { .. } | Control::While { started: 1.., .. }
+                    )
+                })
                 || frame
                     .source_frontier
                     .as_ref()
@@ -48,6 +50,8 @@ impl KernelMachine {
                 Arc::clone(&code.source_room),
                 frame.link,
                 roots.invocation().clone(),
+                source_loops(frame, running.exe)?
+                    .ok_or_else(|| malformed("return has no actual loop occurrence"))?,
             )
         };
         let Ok(interval) = source.compile_return_suffix(&room::Point {
@@ -62,11 +66,11 @@ impl KernelMachine {
                 .events()
                 .skip(1)
                 .map(|event| &event.point.site)
-                .eq(frame.control.iter().rev().map(|control| {
+                .eq(frame.control.iter().rev().filter_map(|control| {
                     let Control::Block { block, .. } = control else {
-                        unreachable!("return controls were checked")
+                        return None;
                     };
-                    &running.exe.block(*block).site
+                    Some(&running.exe.block(*block).site)
                 }))
             {
                 return Err(
@@ -90,6 +94,8 @@ impl KernelMachine {
         let store = self.logical.ledger();
         let ledger = store.borrow();
         let mut arena = self.arena.borrow_mut();
+        #[cfg(test)]
+        let loop_ordinal = loops.last().map(|(_, ordinal)| *ordinal);
         let Some(ReturnRecipe { prefix, program }) = (ReturnInput {
             source: &source,
             invocation: &invocation,
@@ -99,6 +105,7 @@ impl KernelMachine {
             input: bank.owner(),
             value,
             safe_point: self.charged,
+            loops,
         })
         .prepare(&ledger, &mut arena, &self.heap)?
         else {
@@ -169,6 +176,11 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_return_published(run_root);
+            #[cfg(test)]
+            if let Some(ordinal) = loop_ordinal {
+                crate::machine::islands::witness::loop_returned(true, ordinal);
+            }
+
             #[cfg(test)]
             if scoped {
                 crate::machine::islands::witness::precise_scoped_returned();

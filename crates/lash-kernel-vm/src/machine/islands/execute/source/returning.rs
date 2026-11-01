@@ -40,14 +40,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .events()
             .skip(1)
             .map(|event| &event.point.site)
-            .eq(frame.state.control.iter().rev().map(|control| {
+            .eq(frame.state.control.iter().rev().filter_map(|control| {
                 let Position::Block(block, _) = control else {
-                    unreachable!("return frame checked its controls")
+                    return None;
                 };
-                &self
-                    .exe
-                    .block(frame.state.callee.compiled.blocks[*block].id)
-                    .site
+                Some(
+                    &self
+                        .exe
+                        .block(frame.state.callee.compiled.blocks[*block].id)
+                        .site,
+                )
             }))
         {
             return Err(malformed(
@@ -82,6 +84,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if ledger.holding(input, self.heap.pages())?.is_none() {
             return Ok(ValuePublication::Unavailable);
         }
+        let loops = frame
+            .state
+            .control
+            .iter()
+            .filter_map(|control| match control {
+                Position::Loop { id, started, .. } => {
+                    Some((self.exe.stmt(*id).site.clone(), *started - 1))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        #[cfg(test)]
+        let loop_ordinal = loops.last().map(|(_, ordinal)| *ordinal);
         let Some(recipe) = (crate::machine::source_publication::return_storage::ReturnInput {
             source,
             invocation: &activation.invocation,
@@ -91,6 +106,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             input,
             value,
             safe_point: self.charged,
+            loops,
         })
         .prepare(&ledger, self.arena, self.heap)?
         else {
@@ -119,6 +135,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::return_published();
+            #[cfg(test)]
+            if let Some(ordinal) = loop_ordinal {
+                crate::machine::islands::witness::loop_returned(false, ordinal);
+            }
+
             #[cfg(test)]
             if frame.state.control.len() > 1 {
                 crate::machine::islands::witness::packet_scoped_returned();

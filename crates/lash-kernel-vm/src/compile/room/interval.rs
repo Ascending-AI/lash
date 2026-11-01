@@ -172,11 +172,13 @@ pub(crate) struct CompiledInterval {
     variables: usize,
     exit: ExitKind,
     whole: bool,
+    return_loops: Option<Box<[Site]>>,
 }
 impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
-    /// completed. Cleanup and loop departures require their separate recipes.
+    /// completed. Entered while bodies carry their actual loop occurrence;
+    /// protocol cursors and cleanup departures require separate recipes.
     pub(crate) fn compile_return_suffix(
         &self,
         at: &Point,
@@ -193,13 +195,18 @@ impl Source {
         let mut path = self.site.clone();
         let mut blocks = Vec::new();
         let mut choices = BTreeMap::new();
+        let mut return_loops = Vec::new();
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
                 doc::Node::Stmt(doc::Stmt::If { .. }) if matches!(*index, 1 | 2) => {
                     choices.insert(path.clone(), *index == 1);
                 }
-                // Loops and try regions need their own actual departure recipe.
+                doc::Node::Stmt(doc::Stmt::While { .. }) if *index == 1 => {
+                    choices.insert(path.clone(), true);
+                    return_loops.push(path.clone());
+                }
+                // Protocol cursors and try regions need their own departure recipe.
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -309,6 +316,7 @@ impl Source {
             variables,
             exit,
             whole: false,
+            return_loops: Some(return_loops.into()),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -391,6 +399,7 @@ impl Source {
             variables,
             exit,
             whole: false,
+            return_loops: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -519,6 +528,7 @@ impl Source {
             variables,
             exit: selected,
             whole: false,
+            return_loops: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -572,6 +582,7 @@ impl Source {
             variables,
             exit,
             whole: at == &self.site,
+            return_loops: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -620,6 +631,10 @@ impl evaluate::Events for Trace<'_> {
     }
 }
 impl CompiledInterval {
+    pub(crate) fn return_loops(&self) -> Option<&[Site]> {
+        self.return_loops.as_deref()
+    }
+
     pub(crate) fn owner(&self) -> doc::constant_pool::PoolOwner {
         self.owner
     }

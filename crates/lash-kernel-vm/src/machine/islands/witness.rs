@@ -119,6 +119,8 @@ pub(crate) fn begin() {
     PACKET_SCOPED_RETURNS.set(0);
     #[cfg(test)]
     PRECISE_SCOPED_RETURNS.set(0);
+    #[cfg(test)]
+    LOOP_RETURNS.set([0; 2]);
     PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
     PACKET_FRAME_ENTRIES.with(|count| count.set([0; 2]));
     PACKET_CALL_ENTERS.with(|count| count.set(0));
@@ -837,4 +839,20 @@ pub(crate) fn precise_scoped_returns() -> u64 {
 #[cfg(test)]
 pub(in crate::machine) fn precise_scoped_returned() {
     PRECISE_SCOPED_RETURNS.set(PRECISE_SCOPED_RETURNS.get() + 1);
+}
+
+#[cfg(test)]
+thread_local! {
+    static LOOP_RETURNS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+}
+#[cfg(test)]
+pub(crate) fn loop_returns() -> [u64; 2] {
+    LOOP_RETURNS.replace([0; 2])
+}
+
+#[cfg(test)]
+pub(in crate::machine) fn loop_returned(source: bool, ordinal: u64) {
+    let mut counts = LOOP_RETURNS.get();
+    counts[usize::from(source)] = ordinal + 1;
+    LOOP_RETURNS.set(counts);
 }
