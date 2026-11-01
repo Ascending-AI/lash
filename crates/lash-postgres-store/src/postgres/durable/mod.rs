@@ -853,13 +853,11 @@ async fn apply_domain(
     write: &DomainWrite,
 ) -> Result<(), DurableError> {
     match write {
-        DomainWrite::AdoptExecution(record) => packages::adopt(tx, committing.actor, record).await,
-        DomainWrite::SeedResolution(record) => packages::seed(tx, committing.actor, record).await,
+        DomainWrite::RegisterExecution(_)
+        | DomainWrite::AdoptExecution(_)
+        | DomainWrite::SeedResolution(_) => packages::apply(tx, &committing.steps(), write).await,
         DomainWrite::EndExecution(execution) => {
             packages::end_execution(tx, committing.actor, execution).await
-        }
-        DomainWrite::RegisterExecution(write) => {
-            packages::register(tx, committing.actor, write).await
         }
         DomainWrite::Environment(write) => environment::apply(tx, committing, write).await,
         DomainWrite::Turn(write) => turns::apply(tx, committing, write).await,

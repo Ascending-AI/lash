@@ -62,6 +62,9 @@ CREATE TABLE IF NOT EXISTS package_executions (
     execution TEXT PRIMARY KEY,
     actor_key TEXT NOT NULL REFERENCES actors(actor_key) ON DELETE CASCADE,
     referrer_json TEXT NOT NULL,
+    -- The referrer decoded, so its lock and fence need no JSON (FIG-7576).
+    referrer_kind TEXT NOT NULL,
+    referrer_id TEXT NOT NULL,
     requirements_json TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
 );
@@ -74,6 +77,9 @@ CREATE TABLE IF NOT EXISTS execution_uses (
     link TEXT NOT NULL,
     slot TEXT NOT NULL,
     use_json TEXT NOT NULL,
+    -- The declaration's requested name, as JSON: what an adoption keeps
+    -- and a winner must name.
+    requested TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
 );
 CREATE TABLE IF NOT EXISTS execution_resolutions (
@@ -82,6 +88,23 @@ CREATE TABLE IF NOT EXISTS execution_resolutions (
     slot TEXT NOT NULL,
     record_json TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
+);
+-- Claim debt decoded once at write time (FIG-7576), so the merge of an
+-- actor's debts is SQL: the stable debt of a registration (empty link and
+-- slot), a use's discovery debt and a winner's target debt, as atoms of
+-- family 'token' (merged by union), 'archive' (by the highest generation)
+-- or 'outside' (one token naming the union of the functions).
+CREATE TABLE IF NOT EXISTS execution_debts (
+    execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    source TEXT NOT NULL CONSTRAINT execution_debts_source_check
+        CHECK (source IN ('stable', 'discovery', 'target')),
+    family TEXT NOT NULL CONSTRAINT execution_debts_family_check
+        CHECK (family IN ('token', 'archive', 'outside')),
+    token TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot, source, family, token, detail)
 );
 
 CREATE TABLE IF NOT EXISTS actor_mail (

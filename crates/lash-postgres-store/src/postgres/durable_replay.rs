@@ -481,25 +481,8 @@ pub(super) async fn apply_owner(
             .await
             .map_err(sqlx_failure)?;
     }
-    if write.requires().is_some()
-        || write.domain().iter().any(|write| {
-            matches!(
-                write,
-                DomainWrite::RegisterExecution(_)
-                    | DomainWrite::EndExecution(_)
-                    | DomainWrite::AdoptExecution(_)
-                    | DomainWrite::SeedResolution(_)
-                    | DomainWrite::Process(lash_durable::domain::ProcessWrite::Terminal { .. })
-            )
-        })
-    {
-        let requires = packages::owner_requires(tx, write.actor(), write.requires()).await?;
-        crate::observed_sql::query(SQL.actor.stamp_effective_requires.sql())
-            .bind(actor)
-            .bind(lash_durable::encode_requires(&requires))
-            .execute(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(sqlx_failure)?;
+    if write.requires().is_some() || write.domain().iter().any(super::executor::changes_debt) {
+        packages::stamp_requires(tx, write.actor(), write.requires()).await?;
     }
     if let Some(through) = write.ack() {
         crate::observed_sql::query(SQL.postgres.ack_through.sql())

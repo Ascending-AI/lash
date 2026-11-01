@@ -122,26 +122,92 @@ fn validate_use(
     validate_resolution(candidate)
 }
 
+/// A registration as the stores write it: its JSON columns, its referrer
+/// decoded, and its debt decoded into atoms, so a store locks and fences the
+/// referrer and merges the debt without decoding JSON (FIG-7576).
+pub struct RegistrationRows {
+    pub referrer: String,
+    pub referrer_kind: &'static str,
+    pub referrer_id: String,
+    pub requirements: String,
+    /// A JSON array of `[link, slot, use_json, requested_json]`.
+    pub uses: String,
+    /// A JSON array of `[link, slot, source, family, token, detail]`: the
+    /// stable debt (empty link and slot) and each use's discovery debt.
+    pub debts: String,
+}
+
+/// Each atom of `requirements` ([`ClaimRequirements::atoms`]) as a debt row
+/// of `source` keyed by `link` and `slot`.
+fn debt_rows(
+    rows: &mut Vec<[String; 6]>,
+    link: &str,
+    slot: &str,
+    source: &str,
+    requirements: &ClaimRequirements,
+) {
+    for (family, token, detail) in requirements.atoms() {
+        rows.push([
+            link.to_owned(),
+            slot.to_owned(),
+            source.to_owned(),
+            family.to_owned(),
+            token,
+            detail,
+        ]);
+    }
+}
+
+/// The target debt a resolution owes once it wins its use, as debt rows
+/// ([`RegistrationRows::debts`]): none unless it resolved.
+pub fn resolution_debts(record: &ResolutionRecord) -> Result<String, DurableError> {
+    let mut rows = Vec::new();
+    if let ResolutionEntry::Resolved { requirements, .. } = &record.entry {
+        debt_rows(
+            &mut rows,
+            &record.key.use_.link.to_string(),
+            &record.key.use_.slot.to_string(),
+            "target",
+            requirements,
+        );
+    }
+    json(&rows)
+}
+
 impl ExecutionRegistration {
     /// Referrer, stable debt and a bulk array of keyed current declarations.
-    /// The array is an insertion parameter, never a second stored membership.
-    pub fn storage_rows(&self) -> Result<(String, String, String), DurableError> {
+    /// The arrays are insertion parameters, never a second stored membership.
+    pub fn storage_rows(&self) -> Result<RegistrationRows, DurableError> {
+        let mut debts = Vec::new();
+        debt_rows(&mut debts, "", "", "stable", &self.requirements);
         let uses = self
             .uses
             .iter()
             .map(|(key, declaration)| {
+                let (link, slot) = (key.link.to_string(), key.slot.to_string());
+                debt_rows(
+                    &mut debts,
+                    &link,
+                    &slot,
+                    "discovery",
+                    &declaration.discovery,
+                );
                 Ok((
-                    key.link.to_string(),
-                    key.slot.to_string(),
+                    link,
+                    slot,
                     json(declaration)?,
+                    json(&declaration.requested)?,
                 ))
             })
             .collect::<Result<Vec<_>, DurableError>>()?;
-        Ok((
-            json(&self.referrer)?,
-            json(&self.requirements)?,
-            json(&uses)?,
-        ))
+        Ok(RegistrationRows {
+            referrer: json(&self.referrer)?,
+            referrer_kind: self.referrer.kind().as_str(),
+            referrer_id: self.referrer.canonical_id(),
+            requirements: json(&self.requirements)?,
+            uses: json(&uses)?,
+            debts: json(&debts)?,
+        })
     }
 
     /// Reconstruct current membership under the store's protected transaction.
@@ -212,50 +278,6 @@ pub fn validate_resolution(candidate: &ResolutionRecord) -> Result<(), DurableEr
         }
     }
     Ok(())
-}
-
-/// A stable-debt row, or a current keyed declaration with its optional winner.
-/// Only current use rows are joined; inactive resolution history is not read.
-pub type ExecutionDebtRow = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
-/// Fold stable debt and the winners of current membership directly, without
-/// constructing a historical winner map or another claim registry.
-pub fn requirements_of(rows: Vec<ExecutionDebtRow>) -> Result<ClaimRequirements, DurableError> {
-    let mut requirements = ClaimRequirements::default();
-    for row in rows {
-        match row {
-            (Some(stable), None, None, None, None, None) => {
-                requirements.extend(&decode::<ClaimRequirements>(&stable)?)
-            }
-            (None, Some(execution), Some(link), Some(slot), Some(declaration), winner) => {
-                let key = use_key(&ExecutionId(execution), &link, &slot)?;
-                let declaration: DeferredUse = decode(&declaration)?;
-                match winner {
-                    Some(json) => {
-                        let record: ResolutionRecord = decode(&json)?;
-                        validate_use(&key, &declaration, &record)?;
-                        if let ResolutionEntry::Resolved {
-                            requirements: target,
-                            ..
-                        } = &record.entry
-                        {
-                            requirements.extend(target);
-                        }
-                    }
-                    None => requirements.extend(&declaration.discovery),
-                }
-            }
-            _ => return Err(corrupt("incomplete execution debt row")),
-        }
-    }
-    Ok(requirements)
 }
 
 impl ExecutionRegistration {

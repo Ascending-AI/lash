@@ -788,6 +788,59 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             .all(|(key, debt)| key != &actor || debt.is_empty()),
         "last discovery debt remained in the materialized claim filter"
     );
+    // Helper debt merges across live executions as `extend` merges it, not
+    // as a union of tokens: one archive token at its highest generation,
+    // and one token per helper release naming every function reached
+    // (FIG-7576). A use's discovery debt merges the same way.
+    let archive = lash_kernel_value::HelperLibraryId::of_members([function(61)]);
+    let release_id = lash_kernel_value::HelperLibraryId::of_members([function(62)]);
+    let helpers = |generation: u32, reached: &[u8]| ClaimRequirements {
+        machine: NodeRequirements {
+            helpers: lash_kernel_value::claims::HelperRequirements::new(
+                [(archive, generation)].into(),
+                [(release_id, reached.iter().map(|n| function(*n)).collect())].into(),
+            ),
+            ..NodeRequirements::default()
+        },
+        ..ClaimRequirements::default()
+    };
+    let mut older = registration.clone();
+    older.execution = ExecutionId("process:resolution-owner:helpers-older".into());
+    older.uses.clear();
+    older.requirements = helpers(3, &[64, 63]);
+    let mut newer = registration.clone();
+    newer.execution = ExecutionId("process:resolution-owner:helpers-newer".into());
+    for declared in newer.uses.values_mut() {
+        declared.discovery = helpers(2, &[65]);
+    }
+    newer.requirements = helpers(5, &[63]);
+    let mut merged = shared.clone();
+    for debt in [&older.requirements, &newer.requirements, &helpers(2, &[65])] {
+        merged.extend(debt);
+    }
+    let mut owed = ClaimRequirements::default();
+    for debt in [&older.requirements, &newer.requirements, &helpers(2, &[65])] {
+        owed.extend(debt);
+    }
+    let mut both = store.begin(&actor, epoch, u64::MAX).await?;
+    both.register_execution(older)
+        .register_execution(newer)
+        .set_requires(shared.tokens().collect());
+    store
+        .commit(both, CommitLabel::new("law.resolution.helpers"))
+        .await?;
+    let expected: Vec<String> = merged.tokens().collect();
+    let stored = store.actor_requirements(None, 8).await?;
+    super::ensure!(
+        stored
+            .iter()
+            .any(|(key, debt)| key == &actor && *debt == expected),
+        "helper debt of two executions did not merge: {stored:?} != {expected:?}"
+    );
+    super::ensure!(
+        resolutions.requirements(&actor).await? == owed,
+        "the merged helper debt read back differs"
+    );
     let mut release = store.begin(&actor, epoch, u64::MAX).await?;
     release.give_up(Release::Ready);
     store

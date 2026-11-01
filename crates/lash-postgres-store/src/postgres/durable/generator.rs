@@ -330,11 +330,11 @@ pub(crate) fn function_ddl() -> String {
     let ancestor_retire = inline(session_sql().graph_postgres.retire.sql(), &["v_node"]);
     let wake = inline(SQL.actor.wake.sql(), &["v_owner", "v_now"]);
     let stamp_formats = inline(SQL.actor.stamp_formats.sql(), &["p_actor", "p_formats"]);
+    let debt_tokens = inline(super::packages::SQL.debt_tokens.sql(), &["p_actor"]);
     let stamp_requires = inline(
-        executor.stamp_unregistered_requires.sql(),
-        &["p_actor", "p_requires"],
+        executor.stamp_requires.sql(),
+        &["p_actor", "p_requires", "v_debts"],
     );
-    let restamp_requires = inline(executor.restamp_unregistered_requires.sql(), &["p_actor"]);
     let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
     let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
     let end = inline(SQL.actor.end.sql(), &["p_actor"]);
@@ -438,6 +438,7 @@ DECLARE
     v_tchildren BYTEA[];
     v_answer JSONB;
     v_frame TEXT;
+    v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
     -- Generated from this build's statements (registry {registry}); a call
@@ -597,20 +598,12 @@ BEGIN
     IF p_formats IS NOT NULL THEN
         {stamp_formats};
     END IF;
-    IF p_requires IS NOT NULL THEN
+    -- The actor's requirements: its base ones merged with what its live
+    -- executions owe, merged here (FIG-7576).
+    IF p_requires IS NOT NULL OR COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
+        SELECT COALESCE(array_agg(debt.token), '{{}}') INTO v_debts
+        FROM ({debt_tokens}) AS debt(token);
         {stamp_requires};
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN
-            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
-                USING ERRCODE = 'LX007';
-        END IF;
-    ELSIF COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
-        {restamp_requires};
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN
-            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
-                USING ERRCODE = 'LX007';
-        END IF;
     END IF;
     IF p_ack IS NOT NULL THEN
         {ack_through};

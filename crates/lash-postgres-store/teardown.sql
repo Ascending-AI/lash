@@ -122,6 +122,8 @@ DROP TABLE IF EXISTS lash_execution_uses CASCADE;
 
 DROP TABLE IF EXISTS lash_execution_resolutions CASCADE;
 
+DROP TABLE IF EXISTS lash_execution_debts CASCADE;
+
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
 
 DROP TABLE IF EXISTS lash_model_call_records CASCADE;

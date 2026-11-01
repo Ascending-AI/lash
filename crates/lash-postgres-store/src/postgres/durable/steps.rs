@@ -365,6 +365,17 @@ impl Step {
         self
     }
 
+    /// This step, which runs only when `slot` holds a row exactly when
+    /// `holds`.
+    pub(super) fn when_row(mut self, slot: u8, holds: bool) -> Self {
+        self.when = Some(When {
+            slot,
+            column: None,
+            holds,
+        });
+        self
+    }
+
     /// `entry` run with `values`, refusing unless it answers one row.
     pub(super) fn one(entry: &'static Entry, values: Vec<Value>) -> Self {
         Self::new(entry, values, Some(1))

@@ -11,7 +11,7 @@ use sqlx::PgConnection;
 
 use super::sqlx_failure;
 
-static SQL: LazyLock<PackageStatements> =
+pub(super) static SQL: LazyLock<PackageStatements> =
     LazyLock::new(|| PackageStatements::render(Dialect::postgres()));
 
 /// Every node live at `now`, by node id.
@@ -44,66 +44,14 @@ pub(super) async fn actor_requirements(
     lash_durable::packages::requirement_rows(rows)
 }
 
+use super::steps::{Entry, Shape, Step, Ty, Value};
 use super::{CommitCapacity, PostgresDurableStore, finish};
+use lash_core_store::artifact_referrer::ArtifactReferrer;
+use lash_durable::packages::PackageRefusal;
 use lash_durable::resolutions::{
     AcknowledgedResolution, CommitResolution, ExecutionRegistration, ExecutionResolutions,
     ResolutionKey, ResolutionOwner, ResolutionRecord,
 };
-
-pub(super) async fn register(
-    tx: &mut PgConnection,
-    actor: &lash_durable::ActorKey,
-    record: &ExecutionRegistration,
-) -> Result<(), DurableError> {
-    crate::artifact_store::lock_referrer_tx(tx, &record.referrer)
-        .await
-        .map_err(sqlx_failure)?;
-    if crate::artifact_store::is_fenced_tx(tx, &record.referrer).await? {
-        return Err(
-            lash_durable::packages::PackageRefusal::ReferrerEnded(record.referrer.clone()).into(),
-        );
-    }
-    let (referrer, requirements, uses) = record.storage_rows()?;
-    let inserted = crate::observed_sql::query(SQL.register_execution.sql())
-        .bind(&record.execution.0)
-        .bind(actor.as_str())
-        .bind(&referrer)
-        .bind(&requirements)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?
-        .rows_affected();
-    if inserted != 0 {
-        replace_uses(tx, &record.execution, &uses).await?;
-    }
-    if registration_rows(tx, &record.execution)
-        .await?
-        .is_some_and(|(owner, stored, _live)| owner == actor.as_str() && stored == *record)
-    {
-        Ok(())
-    } else {
-        Err(lash_durable::packages::PackageRefusal::ExecutionUse.into())
-    }
-}
-
-async fn replace_uses(
-    tx: &mut PgConnection,
-    execution: &lash_durable::resolutions::ExecutionId,
-    rows: &str,
-) -> Result<(), DurableError> {
-    crate::observed_sql::query(SQL.clear_uses.sql())
-        .bind(&execution.0)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    crate::observed_sql::query(POSTGRES.insert_uses.sql())
-        .bind(&execution.0)
-        .bind(rows)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    Ok(())
-}
 
 async fn load(
     tx: &mut PgConnection,
@@ -132,16 +80,433 @@ async fn load(
 }
 
 lash_store_sql::statements! {
-    /// Lock ownership before classifying a resolution or reading its winner.
-    struct ResolutionPostgresStatements @ "durable_resolutions_postgres" {
+    /// Lock ownership before classifying a resolution or reading its winner,
+    /// and the statements of the registration, adoption and seed programs.
+    pub(super) struct ResolutionPostgresStatements @ "durable_resolutions_postgres" {
         owner = "SELECT epoch, state, state_revision, base_requires FROM actors WHERE actor_key = ?1 FOR UPDATE";
-        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json)
-             SELECT ?1, item ->> 0, item ->> 1, item ->> 2
+        /// Execution `?1`'s current uses from the array `?2` of
+        /// `[link, slot, use_json, requested_json]`.
+        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json, requested)
+             SELECT ?1, item ->> 0, item ->> 1, item ->> 2, item ->> 3
              FROM jsonb_array_elements(?2::jsonb) AS declarations(item)";
+        /// Execution `?1`'s debt atoms from the array `?2` of
+        /// `[link, slot, source, family, token, detail]`.
+        insert_debts = "INSERT INTO execution_debts (execution, link, slot, source, family, token, detail)
+             SELECT ?1, item ->> 0, item ->> 1, item ->> 2, item ->> 3, item ->> 4, item ->> 5
+             FROM jsonb_array_elements(?2::jsonb) AS debts(item)";
+        /// Whether referrer `?1`/`?2` ended.
+        referrer_fenced = "SELECT EXISTS (
+                 SELECT 1 FROM referrer_fences WHERE referrer_kind = ?1 AND referrer_id = ?2
+             ) AS fenced";
+        /// Execution `?1` is registered to actor `?2` exactly as referrer
+        /// `?3`, debt `?4` and the current uses `?5` (an array of
+        /// `[link, slot, use_json, ...]`) say, live or ended.
+        same_registration = "SELECT 1 FROM package_executions e
+             WHERE e.execution = ?1 AND e.actor_key = ?2
+               AND e.referrer_json = ?3 AND e.requirements_json = ?4
+               AND (SELECT count(*) FROM execution_uses u WHERE u.execution = ?1)
+                   = jsonb_array_length(?5::jsonb)
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(?5::jsonb) AS declared(item)
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM execution_uses u
+                       WHERE u.execution = ?1 AND u.link = item ->> 0 AND u.slot = item ->> 1
+                         AND u.use_json = item ->> 2
+                   )
+               )";
+        /// Actor `?2`'s live execution `?1`, registered as referrer `?3`,
+        /// may adopt the uses `?4` (an array of `[link, slot, use_json,
+        /// requested_json]`): no use it keeps names another request.
+        adoptable = "SELECT 1 FROM package_executions e
+             WHERE e.execution = ?1 AND e.actor_key = ?2 AND e.ended = 0
+               AND e.referrer_json = ?3
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(?4::jsonb) AS successor(item)
+                   WHERE EXISTS (
+                       SELECT 1 FROM execution_uses u
+                       WHERE u.execution = ?1 AND u.link = item ->> 0
+                         AND u.slot = item ->> 1 AND u.requested <> item ->> 3
+                   )
+               )";
+        /// Use `?2`/`?3` of actor `?4`'s live execution `?1` requests `?5`.
+        use_registered = "SELECT 1 FROM package_executions e
+             JOIN execution_uses u ON u.execution = e.execution
+             WHERE e.execution = ?1 AND u.link = ?2 AND u.slot = ?3
+               AND e.ended = 0 AND e.actor_key = ?4 AND u.requested = ?5";
+        /// Lock execution `?1`'s referrer, as `lock_xact_by_text` locks the
+        /// key `crate::artifact_store::referrer_lock_key` spells.
+        lock_execution_referrer = "SELECT pg_advisory_xact_lock(hashtextextended(
+                 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0))
+             FROM package_executions WHERE execution = ?1";
+        /// Whether execution `?1`'s referrer ended.
+        execution_fenced = "SELECT EXISTS (
+                 SELECT 1 FROM package_executions e
+                 JOIN referrer_fences f
+                     ON f.referrer_kind = e.referrer_kind AND f.referrer_id = e.referrer_id
+                 WHERE e.execution = ?1
+             ) AS fenced";
+        /// Seed winner `?4` of use `?2`/`?3` of execution `?1`, unless one won.
+        seed_resolution = "INSERT INTO execution_resolutions (execution, link, slot, record_json)
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (execution, link, slot) DO NOTHING";
+        /// The winner of use `?2`/`?3` of execution `?1` is `?4`.
+        same_resolution = "SELECT 1 FROM execution_resolutions
+             WHERE execution = ?1 AND link = ?2 AND slot = ?3 AND record_json = ?4";
     }
 }
-static POSTGRES: LazyLock<ResolutionPostgresStatements> =
+pub(super) static POSTGRES: LazyLock<ResolutionPostgresStatements> =
     LazyLock::new(|| ResolutionPostgresStatements::render(Dialect::postgres()));
+
+/// A referrer's lock, by its key.
+fn lock_referrer(referrer: &ArtifactReferrer) -> Step {
+    Step::any(
+        &super::turns::LOCK_KEY,
+        vec![Value::text(crate::artifact_store::referrer_lock_key(
+            referrer,
+        ))],
+    )
+}
+
+/// The capture slot of whether a registration or a seed inserted its row.
+const INSERTED: u8 = 40;
+
+pub(super) static INSERT_USES: Entry =
+    Entry::new(|| &POSTGRES.insert_uses, &[Ty::Text, Ty::Text], Shape::Exec);
+pub(super) static INSERT_DEBTS: Entry = Entry::new(
+    || &POSTGRES.insert_debts,
+    &[Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static CLEAR_USES: Entry = Entry::new(|| &SQL.clear_uses, &[Ty::Text], Shape::Exec);
+pub(super) static CLEAR_DEBTS: Entry = Entry::new(|| &SQL.clear_debts, &[Ty::Text], Shape::Exec);
+pub(super) static REFERRER_FENCED: Entry = Entry::new(
+    || &POSTGRES.referrer_fenced,
+    &[Ty::Text, Ty::Text],
+    Shape::Select,
+)
+.flagged("fenced");
+pub(super) static REGISTER: Entry = Entry::new(
+    || &SQL.register_execution,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static SAME_REGISTRATION: Entry = Entry::new(
+    || &POSTGRES.same_registration,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+);
+pub(super) static ADOPTABLE: Entry = Entry::new(
+    || &POSTGRES.adoptable,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+);
+pub(super) static ADOPT: Entry = Entry::new(
+    || &SQL.adopt_execution,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static USE_REGISTERED: Entry = Entry::new(
+    || &POSTGRES.use_registered,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+);
+pub(super) static LOCK_EXECUTION_REFERRER: Entry = Entry::new(
+    || &POSTGRES.lock_execution_referrer,
+    &[Ty::Text],
+    Shape::Select,
+);
+pub(super) static EXECUTION_FENCED: Entry =
+    Entry::new(|| &POSTGRES.execution_fenced, &[Ty::Text], Shape::Select).flagged("fenced");
+pub(super) static SEED: Entry = Entry::new(
+    || &POSTGRES.seed_resolution,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static SAME_RESOLUTION: Entry = Entry::new(
+    || &POSTGRES.same_resolution,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    Shape::Select,
+);
+
+/// What a step's refusal means.
+enum Refusal {
+    /// The write named a use or registration the store does not hold so.
+    ExecutionUse,
+    /// The referrer ended: the one named, or the registration's own.
+    ReferrerEnded(Option<ArtifactReferrer>),
+    /// Another winner holds the use.
+    Immutable(String),
+    /// No refusal: the step answers whatever it must.
+    None,
+}
+
+/// A registration, adoption or seed as a program with each step's refusal.
+type Program = Vec<(Step, Refusal)>;
+
+/// Actor `actor` registers `record`: under its referrer's lock, unless the
+/// referrer ended, the registration is inserted with its uses and decoded
+/// debt once, and replay must name exactly what is stored.
+fn register_program(
+    actor: &lash_durable::ActorKey,
+    record: &ExecutionRegistration,
+) -> Result<Program, DurableError> {
+    let rows = record.storage_rows()?;
+    let execution = || Value::text(record.execution.0.clone());
+    Ok(vec![
+        (lock_referrer(&record.referrer), Refusal::None),
+        (
+            Step::none(
+                &REFERRER_FENCED,
+                vec![
+                    Value::text(rows.referrer_kind),
+                    Value::text(rows.referrer_id.clone()),
+                ],
+            ),
+            Refusal::ReferrerEnded(Some(record.referrer.clone())),
+        ),
+        (
+            Step::any(
+                &REGISTER,
+                vec![
+                    execution(),
+                    Value::text(actor.as_str()),
+                    Value::text(rows.referrer.clone()),
+                    Value::text(rows.requirements.clone()),
+                    Value::text(rows.referrer_kind),
+                    Value::text(rows.referrer_id),
+                ],
+            )
+            .capturing(INSERTED),
+            Refusal::None,
+        ),
+        (
+            Step::any(
+                &INSERT_USES,
+                vec![execution(), Value::text(rows.uses.clone())],
+            )
+            .when_row(INSERTED, true),
+            Refusal::None,
+        ),
+        (
+            Step::any(&INSERT_DEBTS, vec![execution(), Value::text(rows.debts)])
+                .when_row(INSERTED, true),
+            Refusal::None,
+        ),
+        (
+            Step::one(
+                &SAME_REGISTRATION,
+                vec![
+                    execution(),
+                    Value::text(actor.as_str()),
+                    Value::text(rows.referrer),
+                    Value::text(rows.requirements),
+                    Value::text(rows.uses),
+                ],
+            ),
+            Refusal::ExecutionUse,
+        ),
+    ])
+}
+
+/// Actor `actor`'s live execution adopts `successor`'s uses and stable
+/// debt, its referrer unchanged and every use it keeps naming the same
+/// request; historical winners stay in their own rows.
+fn adopt_program(
+    actor: &lash_durable::ActorKey,
+    successor: &ExecutionRegistration,
+) -> Result<Program, DurableError> {
+    let rows = successor.storage_rows()?;
+    let execution = || Value::text(successor.execution.0.clone());
+    Ok(vec![
+        (
+            Step::one(
+                &ADOPTABLE,
+                vec![
+                    execution(),
+                    Value::text(actor.as_str()),
+                    Value::text(rows.referrer),
+                    Value::text(rows.uses.clone()),
+                ],
+            ),
+            Refusal::ExecutionUse,
+        ),
+        (lock_referrer(&successor.referrer), Refusal::None),
+        (
+            Step::none(
+                &REFERRER_FENCED,
+                vec![
+                    Value::text(rows.referrer_kind),
+                    Value::text(rows.referrer_id),
+                ],
+            ),
+            Refusal::ReferrerEnded(Some(successor.referrer.clone())),
+        ),
+        (
+            Step::one(
+                &ADOPT,
+                vec![
+                    execution(),
+                    Value::text(actor.as_str()),
+                    Value::text(rows.requirements),
+                ],
+            ),
+            Refusal::ExecutionUse,
+        ),
+        (Step::any(&CLEAR_USES, vec![execution()]), Refusal::None),
+        (
+            Step::any(&INSERT_USES, vec![execution(), Value::text(rows.uses)]),
+            Refusal::None,
+        ),
+        (Step::any(&CLEAR_DEBTS, vec![execution()]), Refusal::None),
+        (
+            Step::any(&INSERT_DEBTS, vec![execution(), Value::text(rows.debts)]),
+            Refusal::None,
+        ),
+    ])
+}
+
+/// Actor `actor` seeds `record` for one of its live execution's uses: under
+/// the registration's referrer lock, unless it ended, the winner is
+/// inserted with its target debt, or must be the one already stored.
+fn seed_program(
+    actor: &lash_durable::ActorKey,
+    record: &ResolutionRecord,
+) -> Result<Program, DurableError> {
+    lash_durable::resolutions::validate_resolution(record)?;
+    let requested = serde_json::to_string(&record.requested)
+        .map_err(|error| super::corrupt("resolution", &error.to_string()))?;
+    let stored = serde_json::to_string(record)
+        .map_err(|error| super::corrupt("resolution", &error.to_string()))?;
+    let debts = lash_durable::resolutions::resolution_debts(record)?;
+    let key = || {
+        vec![
+            Value::text(record.key.execution.0.clone()),
+            Value::text(record.key.use_.link.to_string()),
+            Value::text(record.key.use_.slot.to_string()),
+        ]
+    };
+    let execution = || Value::text(record.key.execution.0.clone());
+    let mut registered = key();
+    registered.extend([Value::text(actor.as_str()), Value::text(requested)]);
+    let mut insert = key();
+    insert.push(Value::text(stored.clone()));
+    let mut same = key();
+    same.push(Value::text(stored));
+    Ok(vec![
+        (
+            Step::one(&USE_REGISTERED, registered),
+            Refusal::ExecutionUse,
+        ),
+        (
+            Step::any(&LOCK_EXECUTION_REFERRER, vec![execution()]),
+            Refusal::None,
+        ),
+        (
+            Step::none(&EXECUTION_FENCED, vec![execution()]),
+            Refusal::ReferrerEnded(None),
+        ),
+        (Step::any(&SEED, insert).capturing(INSERTED), Refusal::None),
+        (
+            Step::any(&INSERT_DEBTS, vec![execution(), Value::text(debts)])
+                .when_row(INSERTED, true),
+            Refusal::None,
+        ),
+        (
+            Step::one(&SAME_RESOLUTION, same).when_row(INSERTED, false),
+            Refusal::Immutable(format!("resolution {:?}", record.key)),
+        ),
+    ])
+}
+
+/// The program of an execution write: a registration, an adoption or a
+/// seed, each with its steps' refusals.
+fn program(
+    actor: &lash_durable::ActorKey,
+    write: &lash_durable::DomainWrite,
+) -> Result<Option<Program>, DurableError> {
+    use lash_durable::DomainWrite;
+    match write {
+        DomainWrite::RegisterExecution(record) => register_program(actor, record).map(Some),
+        DomainWrite::AdoptExecution(record) => adopt_program(actor, record).map(Some),
+        DomainWrite::SeedResolution(record) => seed_program(actor, record).map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// An execution write's steps, as the one-call commit ships them.
+pub(super) fn steps(
+    actor: &lash_durable::ActorKey,
+    write: &lash_durable::DomainWrite,
+) -> Result<Option<Vec<Step>>, DurableError> {
+    Ok(program(actor, write)?.map(|program| program.into_iter().map(|(step, _)| step).collect()))
+}
+
+/// Run an execution write's program in `tx`, naming the refusal of the
+/// step that refused.
+pub(super) async fn apply(
+    tx: &mut PgConnection,
+    context: &super::steps::Context<'_>,
+    write: &lash_durable::DomainWrite,
+) -> Result<(), DurableError> {
+    let Some(program) = program(context.actor, write)? else {
+        return Err(super::corrupt(
+            "execution write",
+            "a write without a program",
+        ));
+    };
+    let (steps, refusals): (Vec<_>, Vec<_>) = program.into_iter().unzip();
+    let Some(refused) = super::steps::run(tx, &steps, context).await? else {
+        return Ok(());
+    };
+    Err(match refusals.into_iter().nth(refused.index) {
+        Some(Refusal::ExecutionUse) => PackageRefusal::ExecutionUse.into(),
+        Some(Refusal::ReferrerEnded(Some(referrer))) => {
+            PackageRefusal::ReferrerEnded(referrer).into()
+        }
+        Some(Refusal::ReferrerEnded(None)) => {
+            let lash_durable::DomainWrite::SeedResolution(record) = write else {
+                return Err(super::corrupt("execution write", "an unnamed referrer"));
+            };
+            let (_, referrer, _, _): (String, String, String, bool) =
+                crate::observed_sql::query_as(SQL.registration.sql())
+                    .bind(&record.key.execution.0)
+                    .fetch_one(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            PackageRefusal::ReferrerEnded(
+                serde_json::from_str(&referrer)
+                    .map_err(|_| super::corrupt("execution referrer", &referrer))?,
+            )
+            .into()
+        }
+        Some(Refusal::Immutable(detail)) => PackageRefusal::Immutable(detail).into(),
+        Some(Refusal::None) | None => {
+            super::corrupt("execution write", "an unguarded step refused")
+        }
+    })
+}
+
+/// Stamp actor `actor`'s effective requirements: its base ones (`requested`,
+/// which become its base, or those it holds) merged with its executions'
+/// debt, which the store merges ([`PackageStatements::debt_tokens`]).
+pub(super) async fn stamp_requires(
+    tx: &mut PgConnection,
+    actor: &lash_durable::ActorKey,
+    requested: Option<&[String]>,
+) -> Result<(), DurableError> {
+    let debts: Vec<String> = crate::observed_sql::query_scalar(SQL.debt_tokens.sql())
+        .bind(actor.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    crate::observed_sql::query(super::executor::EXECUTOR_SQL.stamp_requires.sql())
+        .bind(actor.as_str())
+        .bind(requested.map(lash_durable::encode_requires))
+        .bind(debts)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(())
+}
 
 #[async_trait::async_trait]
 impl ExecutionResolutions for PostgresDurableStore {
@@ -257,13 +622,13 @@ async fn commit_resolution(
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let requires = owner_requires(tx, &owner.actor, None).await?;
-    crate::observed_sql::query(super::SQL.actor.stamp_effective_requires.sql())
-        .bind(owner.actor.as_str())
-        .bind(lash_durable::encode_requires(&requires))
+    crate::observed_sql::query(POSTGRES.insert_debts.sql())
+        .bind(&candidate.key.execution.0)
+        .bind(lash_durable::resolutions::resolution_debts(&candidate)?)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    stamp_requires(tx, &owner.actor, None).await?;
     Ok(acknowledge(CommitResolution::Inserted(candidate)))
 }
 
@@ -306,85 +671,19 @@ pub(super) async fn end_execution(
     Ok(())
 }
 
+/// Actor `actor`'s merged execution debt.
 async fn requirements(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,
 ) -> Result<lash_durable::resolutions::ClaimRequirements, DurableError> {
-    let rows: Vec<lash_durable::resolutions::ExecutionDebtRow> =
-        crate::observed_sql::query_as(SQL.requirements_rows.sql())
-            .bind(actor.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
-    lash_durable::resolutions::requirements_of(rows)
-}
-
-pub(super) async fn owner_requires(
-    tx: &mut PgConnection,
-    actor: &lash_durable::ActorKey,
-    requested: Option<&[String]>,
-) -> Result<Vec<String>, DurableError> {
-    let mut requires = match requested {
-        Some(requires) => {
-            crate::observed_sql::query(super::SQL.actor.stamp_requires.sql())
-                .bind(actor.as_str())
-                .bind(lash_durable::encode_requires(requires))
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            requires.to_vec()
-        }
-        None => {
-            let row: (i64, String, i64, Option<String>) =
-                crate::observed_sql::query_as(SQL.owner_revision.sql())
-                    .bind(actor.as_str())
-                    .fetch_one(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            lash_durable::parse_requires(row.3.as_deref())
-                .map_err(|_| super::corrupt("actor requirements", actor.as_str()))?
-        }
-    };
-    requires.extend(requirements(tx, actor).await?.tokens());
-    requires.sort();
-    requires.dedup();
-    Ok(requires)
-}
-
-// Metadata and membership stay under the actor's existing write lock, or
-// the new actor insertion, for the whole reconstruction and replacement.
-async fn registration_rows(
-    tx: &mut PgConnection,
-    execution: &lash_durable::resolutions::ExecutionId,
-) -> Result<Option<(String, ExecutionRegistration, bool)>, DurableError> {
-    let row: Option<(String, String, String, bool)> =
-        crate::observed_sql::query_as(SQL.registration.sql())
-            .bind(&execution.0)
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
-    let Some((owner, referrer, requirements, live)) = row else {
-        return Ok(None);
-    };
-    let uses: Vec<(String, String, String)> = crate::observed_sql::query_as(SQL.current_uses.sql())
-        .bind(&execution.0)
+    let tokens: Vec<String> = crate::observed_sql::query_scalar(SQL.debt_tokens.sql())
+        .bind(actor.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let record =
-        ExecutionRegistration::from_storage(execution.clone(), &referrer, &requirements, uses)?;
-    Ok(Some((owner, record, live)))
-}
-
-async fn registered(
-    tx: &mut PgConnection,
-    actor: &lash_durable::ActorKey,
-    execution: &lash_durable::resolutions::ExecutionId,
-) -> Result<ExecutionRegistration, DurableError> {
-    match registration_rows(tx, execution).await? {
-        Some((owner, record, true)) if owner == actor.as_str() => Ok(record),
-        _ => Err(lash_durable::packages::PackageRefusal::ExecutionUse.into()),
-    }
+    Ok(lash_vocabulary::claims::ObligationToken::requirements_of(
+        tokens.iter().map(String::as_str),
+    ))
 }
 
 async fn registered_use(
@@ -401,67 +700,6 @@ async fn registered_use(
             .await
             .map_err(sqlx_failure)?;
     lash_durable::resolutions::validate_current_use(actor, candidate, row)
-}
-
-pub(super) async fn adopt(
-    tx: &mut PgConnection,
-    actor: &lash_durable::ActorKey,
-    successor: &ExecutionRegistration,
-) -> Result<(), DurableError> {
-    let old = registered(tx, actor, &successor.execution).await?;
-    let record = old.adopt(successor)?;
-    crate::artifact_store::lock_referrer_tx(tx, &record.referrer)
-        .await
-        .map_err(sqlx_failure)?;
-    if crate::artifact_store::is_fenced_tx(tx, &record.referrer).await? {
-        return Err(lash_durable::packages::PackageRefusal::ReferrerEnded(record.referrer).into());
-    }
-    let (_, requirements, uses) = record.storage_rows()?;
-    crate::observed_sql::query(SQL.adopt_execution.sql())
-        .bind(&record.execution.0)
-        .bind(actor.as_str())
-        .bind(&requirements)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    replace_uses(tx, &record.execution, &uses).await?;
-    Ok(())
-}
-
-pub(super) async fn seed(
-    tx: &mut PgConnection,
-    actor: &lash_durable::ActorKey,
-    record: &ResolutionRecord,
-) -> Result<(), DurableError> {
-    let referrer = registered_use(tx, actor, record).await?;
-    crate::artifact_store::lock_referrer_tx(tx, &referrer)
-        .await
-        .map_err(sqlx_failure)?;
-    if crate::artifact_store::is_fenced_tx(tx, &referrer).await? {
-        return Err(lash_durable::packages::PackageRefusal::ReferrerEnded(referrer).into());
-    }
-    if let Some(stored) = load(tx, &record.key).await? {
-        return if stored == *record {
-            Ok(())
-        } else {
-            Err(lash_durable::packages::PackageRefusal::Immutable(format!(
-                "resolution {:?}",
-                record.key
-            ))
-            .into())
-        };
-    }
-    let json = serde_json::to_string(record)
-        .map_err(|error| super::corrupt("resolution", &error.to_string()))?;
-    crate::observed_sql::query(SQL.insert_resolution.sql())
-        .bind(&record.key.execution.0)
-        .bind(record.key.use_.link.to_string())
-        .bind(record.key.use_.slot.to_string())
-        .bind(json)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    Ok(())
 }
 
 /// Actor creation and inherited resolution debt are one registrar commit.
@@ -486,18 +724,27 @@ pub(crate) async fn register_process_execution(
     }
     let actor = lash_durable::ActorKey::process(process.as_str())
         .map_err(|_| lash_durable::packages::PackageRefusal::ExecutionUse)?;
-    register(tx, &actor, execution).await?;
+    let retired = super::Retired::default();
+    let context = super::steps::Context {
+        retired: &retired,
+        actor: &actor,
+        now: DurableInstant(0),
+    };
+    apply(
+        tx,
+        &context,
+        &lash_durable::DomainWrite::RegisterExecution(execution.clone()),
+    )
+    .await?;
     for record in initial {
-        seed(tx, &actor, record).await?;
+        apply(
+            tx,
+            &context,
+            &lash_durable::DomainWrite::SeedResolution(record.clone()),
+        )
+        .await?;
     }
-    let requires = owner_requires(tx, &actor, None).await?;
-    crate::observed_sql::query(super::SQL.actor.stamp_effective_requires.sql())
-        .bind(actor.as_str())
-        .bind(lash_durable::encode_requires(&requires))
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    Ok(())
+    stamp_requires(tx, &actor, None).await
 }
 
 pub(super) async fn end_actor_executions(

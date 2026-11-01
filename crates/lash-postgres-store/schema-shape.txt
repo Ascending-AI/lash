@@ -188,6 +188,16 @@ table lash_exec_snapshots
   column written_epoch bigint not-null
   primary-key (exec_key)
   foreign-key (root_ref) references lash_blobs (id) on delete restrict
+table lash_execution_debts
+  column detail text not-null
+  column execution text not-null
+  column family text not-null
+  column link text not-null
+  column slot text not-null
+  column source text not-null
+  column token text not-null
+  primary-key (execution, link, slot, source, family, token, detail)
+  foreign-key (execution) references lash_package_executions (execution) on delete cascade
 table lash_execution_resolutions
   column execution text not-null
   column link text not-null
@@ -198,6 +208,7 @@ table lash_execution_resolutions
 table lash_execution_uses
   column execution text not-null
   column link text not-null
+  column requested text not-null
   column slot text not-null
   column use_json text not-null
   primary-key (execution, link, slot)
@@ -289,7 +300,9 @@ table lash_package_executions
   column actor_key text not-null
   column ended integer not-null default
   column execution text not-null
+  column referrer_id text not-null
   column referrer_json text not-null
+  column referrer_kind text not-null
   column requirements_json text not-null
   primary-key (execution)
   foreign-key (actor_key) references lash_actors (actor_key) on delete cascade

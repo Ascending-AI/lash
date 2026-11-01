@@ -1109,6 +1109,154 @@ async fn an_execution_end_commits_in_one_call() {
     );
 }
 
+/// A registration, an adoption and a seed each commit in one call
+/// (FIG-7576), with live execution debt and new base requirements: the
+/// referrer lock and fence, the registration's replay equality, the
+/// adoption's kept requests and the seed's winner run as guarded steps, and
+/// the call merges the actor's debt into its effective requirements. A
+/// refused adoption or seed is named as the explicit form names it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execution_registration_adoption_and_seed_each_commit_in_one_call() {
+    use lash_durable::packages::PackageRefusal;
+    use lash_durable::resolutions::{
+        DeferredUse, ExecutionId, ExecutionRegistration, ResolutionEntry, ResolutionKey,
+        ResolutionRecord,
+    };
+    use lash_kernel_value::names::{ImportSlot, OperationUse, QualifiedName};
+    let Some(owned) = owned("round-trips-execution-writes").await else {
+        return;
+    };
+    let run = TurnId::from("round-trips-turn");
+    let journal = lash_protocol_types::ExecutionScope::turn(owned.session.clone(), run.clone())
+        .journal_identity()
+        .expect("turn journal");
+    let name = |member: &str| QualifiedName {
+        package: lash_kernel_value::names::PackagePath::parse("wip").expect("package"),
+        member: lash_kernel_value::names::Segment::new(member).expect("member"),
+        type_member: None,
+    };
+    let use_ = OperationUse {
+        link: lash_kernel_value::package::LinkId::from_bytes([7; 32]),
+        slot: ImportSlot(1).into(),
+    };
+    let kernel = |version: u32| lash_durable::ClaimRequirements {
+        machine: lash_kernel_value::claims::NodeRequirements {
+            kernels: [version].into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let registration = ExecutionRegistration {
+        execution: ExecutionId::cell(&owned.session, &run, "cell"),
+        uses: [(
+            use_,
+            DeferredUse {
+                requested: name("lookup"),
+                discovery: kernel(2),
+            },
+        )]
+        .into(),
+        referrer: lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal),
+        requirements: kernel(1),
+    };
+    async fn counted(
+        owned: &Owned,
+        write: impl FnOnce(&mut ActorTx),
+    ) -> (
+        Result<lash_durable::ActorCommit, lash_durable::DurableError>,
+        u64,
+    ) {
+        let store = owned.storage.durable_store();
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
+        write(&mut tx);
+        round_trips(store.commit(tx, CommitLabel::CELL_SNAPSHOT)).await
+    }
+    let (registered, trips) = counted(&owned, |tx| {
+        tx.register_execution(registration.clone())
+            .set_requires(vec!["kernel:9".to_owned()]);
+    })
+    .await;
+    registered.expect("register the execution");
+    within("an execution's registration", trips, 1);
+    let mut successor = registration.clone();
+    successor.requirements = kernel(3);
+    let (adopted, trips) = counted(&owned, |tx| {
+        tx.adopt_execution(successor.clone());
+    })
+    .await;
+    adopted.expect("adopt the execution");
+    within("an execution's adoption", trips, 1);
+    let winner = ResolutionRecord {
+        key: ResolutionKey {
+            execution: registration.execution.clone(),
+            use_,
+        },
+        requested: name("lookup"),
+        entry: ResolutionEntry::Refused {
+            note: "first".into(),
+        },
+    };
+    let (seeded, trips) = counted(&owned, |tx| {
+        tx.seed_resolution(winner.clone());
+    })
+    .await;
+    seeded.expect("seed the winner");
+    within("a resolution's seed", trips, 1);
+    let mut stored = owned
+        .storage
+        .durable_store()
+        .actor_requirements(None, 8)
+        .await
+        .expect("requirements");
+    stored.retain(|(actor, _)| *actor == owned.actor);
+    assert_eq!(
+        stored,
+        vec![(
+            owned.actor.clone(),
+            vec!["kernel:3".to_owned(), "kernel:9".to_owned()]
+        )],
+        "the base requirement and the adopted stable debt, the use's discovery \
+         debt settled by its winner"
+    );
+    let mut conflicting = winner.clone();
+    conflicting.entry = ResolutionEntry::Refused {
+        note: "second".into(),
+    };
+    let (refused, _) = counted(&owned, |tx| {
+        tx.seed_resolution(conflicting);
+    })
+    .await;
+    assert!(
+        matches!(
+            refused,
+            Err(lash_durable::DurableError::Package(
+                PackageRefusal::Immutable(_)
+            ))
+        ),
+        "another winner is refused as immutable: {refused:?}"
+    );
+    let mut renamed = successor;
+    renamed.uses.insert(
+        use_,
+        DeferredUse {
+            requested: name("other"),
+            discovery: Default::default(),
+        },
+    );
+    let (refused, _) = counted(&owned, |tx| {
+        tx.adopt_execution(renamed);
+    })
+    .await;
+    assert_eq!(
+        refused,
+        Err(PackageRefusal::ExecutionUse.into()),
+        "an adoption that renames a kept use is refused"
+    );
+}
+
 /// The most round trips each commit of a session's close pays from its
 /// open (FIG-7576): the one call, which begins the close or records a step
 /// once the step before it is the one done, guarded in the call. The

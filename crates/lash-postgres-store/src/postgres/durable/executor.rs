@@ -79,20 +79,22 @@ lash_store_sql::statements! {
              FROM unnest(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
              WHERE staged.digest = ANY(?3::bytea[])";
 
-        /// Replace base and effective requirements together only when actor
-        /// `?1` has no live execution debt. Otherwise the explicit owner
-        /// transaction must decode and merge its registrations and resolutions.
-        stamp_unregistered_requires = "UPDATE actors SET base_requires = ?2, requires = ?2
-             WHERE actor_key = ?1 AND NOT EXISTS (
-                 SELECT 1 FROM package_executions WHERE actor_key = ?1 AND ended = 0
-             )";
-
-        /// Once an execution ended, actor `?1`'s effective requirements
-        /// are its base ones, when no live execution owes it more.
-        restamp_unregistered_requires = "UPDATE actors SET requires = base_requires
-             WHERE actor_key = ?1 AND NOT EXISTS (
-                 SELECT 1 FROM package_executions WHERE actor_key = ?1 AND ended = 0
-             )";
+        /// Stamp actor `?1`'s requirements: its base ones become `?2`
+        /// unless it is null, and its effective ones the base ones merged
+        /// with its executions' merged debt tokens `?3`, in the canonical
+        /// spelling `lash_durable::encode_requires` writes.
+        stamp_requires = "UPDATE actors SET base_requires = COALESCE(?2, base_requires),
+                 requires = (
+                     SELECT COALESCE('[' || string_agg(to_json(merged.token)::text, ','
+                         ORDER BY merged.token COLLATE \"C\") || ']', '[]')
+                     FROM (
+                         SELECT jsonb_array_elements_text(
+                             COALESCE(?2, base_requires, '[]')::jsonb) AS token
+                         UNION
+                         SELECT unnest(?3::text[])
+                     ) AS merged
+                 )
+             WHERE actor_key = ?1";
 
         /// Record the answer `?3` of call `?1` at `?2`: the call's last
         /// write.
@@ -203,6 +205,20 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &tool_calls::COMPLETE,
         &tool_calls::EXPIRE,
         &packages::END_EXECUTION,
+        &packages::REGISTER,
+        &packages::SAME_REGISTRATION,
+        &packages::ADOPTABLE,
+        &packages::ADOPT,
+        &packages::USE_REGISTERED,
+        &packages::LOCK_EXECUTION_REFERRER,
+        &packages::EXECUTION_FENCED,
+        &packages::REFERRER_FENCED,
+        &packages::SEED,
+        &packages::SAME_RESOLUTION,
+        &packages::INSERT_USES,
+        &packages::INSERT_DEBTS,
+        &packages::CLEAR_USES,
+        &packages::CLEAR_DEBTS,
         &model_calls::APPEND,
         &model_calls::RESERVE,
         &model_calls::ANSWERED,
@@ -332,7 +348,7 @@ pub(super) fn program(
         }
         DomainWrite::RegisterExecution(_)
         | DomainWrite::AdoptExecution(_)
-        | DomainWrite::SeedResolution(_) => Ok(None),
+        | DomainWrite::SeedResolution(_) => packages::steps(actor, write),
         DomainWrite::Turn(write) => turns::steps(epoch, write),
         DomainWrite::RunFact(write) => run_records::steps(epoch, write),
         DomainWrite::ExecRoot(write) => snapshots::steps(epoch, write),
@@ -398,8 +414,8 @@ fn mechanics() -> Vec<&'static str> {
         super::pages::hold_statements().0.sql(),
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
-        executor.stamp_unregistered_requires.sql(),
-        executor.restamp_unregistered_requires.sql(),
+        packages::SQL.debt_tokens.sql(),
+        executor.stamp_requires.sql(),
         SQL.park.stop_mail_after.sql(),
         SQL.park.park.sql(),
         SQL.postgres.ack_through.sql(),
@@ -577,13 +593,9 @@ impl Call {
                 _ => None,
             })
             .collect();
-        // An ended execution owes the actor nothing more: its effective
-        // requirements are recomputed, as the explicit form recomputes them.
-        let restamp = tx.requires().is_none()
-            && tx
-                .domain()
-                .iter()
-                .any(|write| matches!(write, DomainWrite::EndExecution(_)));
+        // A write that changes what the actor's executions owe restamps
+        // its effective requirements, as the explicit form does.
+        let restamp = tx.requires().is_none() && tx.domain().iter().any(changes_debt);
         call.steps = serde_json::json!({
             "version": 1,
             "expected_revision": tx.revision().0,
@@ -703,6 +715,19 @@ impl Call {
         };
         Some(call)
     }
+}
+
+/// Whether `write` changes what the actor's executions owe it, so its
+/// commit stamps the actor's effective requirements again.
+pub(super) fn changes_debt(write: &DomainWrite) -> bool {
+    matches!(
+        write,
+        DomainWrite::RegisterExecution(_)
+            | DomainWrite::EndExecution(_)
+            | DomainWrite::AdoptExecution(_)
+            | DomainWrite::SeedResolution(_)
+            | DomainWrite::Process(lash_durable::domain::ProcessWrite::Terminal { .. })
+    )
 }
 
 /// The call's SQL.

@@ -100,6 +100,7 @@ pub const TABLES: &[&str] = &[
     durable::packages::EXECUTIONS_TABLE,
     durable::packages::USES_TABLE,
     durable::packages::RESOLUTIONS_TABLE,
+    durable::packages::DEBTS_TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
     artifact::lash_vm_artifacts::TABLE,

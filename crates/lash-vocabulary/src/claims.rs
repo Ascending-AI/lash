@@ -467,6 +467,43 @@ impl ClaimRequirements {
     pub fn tokens(&self) -> impl Iterator<Item = String> {
         ObligationToken::for_requirements(self).map(ObligationToken::into_string)
     }
+
+    /// The debt as the stores keep it decoded, so that a store merges the
+    /// debts of many registrations in SQL exactly as [`Self::extend`] merges
+    /// them (FIG-7576). Each atom is `(family, token, detail)`:
+    ///
+    /// - `token`: a whole token, merged by union (`detail` empty);
+    /// - `archive`: a helper archive's token prefix and its zero-padded
+    ///   generation, merged by the highest generation;
+    /// - `outside`: a helper release's token prefix with an empty `detail`,
+    ///   and the prefix once more for each function it reaches, merged into
+    ///   one token naming the union of the functions in ascending order.
+    ///
+    /// The merged token is the prefix, `:` and the merged detail: the
+    /// spelling [`claim_tokens`] gives the merged requirements.
+    #[must_use]
+    pub fn atoms(&self) -> Vec<(&'static str, String, String)> {
+        let helpers = &self.machine.helpers;
+        let mut atoms = Vec::new();
+        for (archive, generation) in helpers.archives() {
+            atoms.push((
+                "archive",
+                format!("{ARCHIVE}{archive}"),
+                format!("{generation:010}"),
+            ));
+        }
+        for (release, functions) in helpers.outside() {
+            let token = format!("{OUTSIDE}{release}");
+            atoms.push(("outside", token.clone(), String::new()));
+            for function in functions {
+                atoms.push(("outside", token.clone(), function.to_string()));
+            }
+        }
+        let mut rest = self.clone();
+        rest.machine.helpers = lash_kernel_value::claims::HelperRequirements::default();
+        atoms.extend(rest.tokens().map(|token| ("token", token, String::new())));
+        atoms
+    }
 }
 
 impl lash_kernel_value::tokens::TokenCodec for ClaimRequirements {

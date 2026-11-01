@@ -14,13 +14,31 @@ static SQL: LazyLock<PackageStatements> =
 
 lash_store_sql::statements! {
     struct SqlitePackageStatements @ "durable_sqlite_packages" {
-        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json)
-             SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
+        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json, requested)
+             SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+                 json_extract(value, '$[2]'), json_extract(value, '$[3]')
+             FROM json_each(?2)";
+        /// Execution `?1`'s debt atoms from the array `?2` of
+        /// `[link, slot, source, family, token, detail]`.
+        insert_debts = "INSERT INTO execution_debts (execution, link, slot, source, family, token, detail)
+             SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+                 json_extract(value, '$[2]'), json_extract(value, '$[3]'),
+                 json_extract(value, '$[4]'), json_extract(value, '$[5]')
              FROM json_each(?2)";
     }
 }
 static SQLITE: LazyLock<SqlitePackageStatements> =
     LazyLock::new(|| SqlitePackageStatements::render(crate::schema_layout::MAIN));
+
+fn insert_debts(
+    tx: &Connection,
+    execution: &lash_durable::resolutions::ExecutionId,
+    rows: &str,
+) -> rusqlite::Result<()> {
+    tx.statement(SQLITE.insert_debts.sql())?
+        .execute(rusqlite::params![execution.0, rows])?;
+    Ok(())
+}
 
 fn replace_uses(
     tx: &Connection,
@@ -87,7 +105,7 @@ pub(super) fn register(
         )
         .into()));
     }
-    let (referrer, requirements, uses) = match record.storage_rows() {
+    let rows = match record.storage_rows() {
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
@@ -96,11 +114,14 @@ pub(super) fn register(
         .execute(rusqlite::params![
             record.execution.0,
             actor.as_str(),
-            referrer,
-            requirements
+            rows.referrer,
+            rows.requirements,
+            rows.referrer_kind,
+            rows.referrer_id
         ])?;
     if inserted != 0 {
-        replace_uses(tx, &record.execution, &uses)?;
+        replace_uses(tx, &record.execution, &rows.uses)?;
+        insert_debts(tx, &record.execution, &rows.debts)?;
     }
     let observed = match registration_rows(tx, &record.execution)? {
         Ok(observed) => observed,
@@ -268,6 +289,10 @@ impl ExecutionResolutions for SqliteDurableStore {
                         candidate.key.use_.slot.to_string(),
                         json
                     ])?;
+                match lash_durable::resolutions::resolution_debts(&candidate) {
+                    Ok(debts) => insert_debts(tx, &candidate.key.execution, &debts)?,
+                    Err(error) => return refuse(error),
+                }
                 let requires = match owner_requires(tx, &owner.actor, None)? {
                     Ok(requires) => requires,
                     Err(error) => return refuse(error),
@@ -295,24 +320,23 @@ pub(super) fn end_execution(
     })
 }
 
+/// Actor `actor`'s merged debt tokens, which the store merges.
+fn debt_tokens(tx: &Connection, actor: &lash_durable::ActorKey) -> rusqlite::Result<Vec<String>> {
+    tx.statement(SQL.debt_tokens.sql())?
+        .query_map([actor.as_str()], |row| row.get(0))?
+        .collect()
+}
+
 fn requirements(
     tx: &Connection,
     actor: &lash_durable::ActorKey,
 ) -> Answer<lash_durable::resolutions::ClaimRequirements> {
-    let rows = tx
-        .statement(SQL.requirements_rows.sql())?
-        .query_map([actor.as_str()], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<lash_durable::resolutions::ExecutionDebtRow>>>()?;
-    Ok(lash_durable::resolutions::requirements_of(rows))
+    let tokens = debt_tokens(tx, actor)?;
+    Ok(Ok(
+        lash_vocabulary::claims::ObligationToken::requirements_of(
+            tokens.iter().map(String::as_str),
+        ),
+    ))
 }
 
 pub(super) fn owner_requires(
@@ -332,15 +356,10 @@ pub(super) fn owner_requires(
             }
         }
     };
-    match requirements(tx, actor)? {
-        Ok(debt) => {
-            requires.extend(debt.tokens());
-            requires.sort();
-            requires.dedup();
-            Ok(Ok(requires))
-        }
-        Err(error) => Ok(Err(error)),
-    }
+    requires.extend(debt_tokens(tx, actor)?);
+    requires.sort();
+    requires.dedup();
+    Ok(Ok(requires))
 }
 
 // The owner fence (or new actor insertion) protects metadata and membership
@@ -427,7 +446,7 @@ pub(super) fn adopt(
         )
         .into()));
     }
-    let (_, requirements, uses) = match record.storage_rows() {
+    let rows = match record.storage_rows() {
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
@@ -435,9 +454,12 @@ pub(super) fn adopt(
         .execute(rusqlite::params![
             record.execution.0,
             actor.as_str(),
-            requirements
+            rows.requirements
         ])?;
-    replace_uses(tx, &record.execution, &uses)?;
+    replace_uses(tx, &record.execution, &rows.uses)?;
+    tx.statement(SQL.clear_debts.sql())?
+        .execute([&record.execution.0])?;
+    insert_debts(tx, &record.execution, &rows.debts)?;
     Ok(Ok(()))
 }
 
@@ -480,6 +502,10 @@ pub(super) fn seed(
             record.key.use_.slot.to_string(),
             json
         ])?;
+    match lash_durable::resolutions::resolution_debts(record) {
+        Ok(debts) => insert_debts(tx, &record.key.execution, &debts)?,
+        Err(error) => return Ok(Err(error)),
+    }
     Ok(Ok(()))
 }
 

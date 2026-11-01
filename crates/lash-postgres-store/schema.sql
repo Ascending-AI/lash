@@ -961,6 +961,9 @@ CREATE TABLE IF NOT EXISTS lash_package_executions (
     execution TEXT PRIMARY KEY,
     actor_key TEXT NOT NULL REFERENCES lash_actors(actor_key) ON DELETE CASCADE,
     referrer_json TEXT NOT NULL,
+    -- The referrer decoded, so its lock and fence need no JSON (FIG-7576).
+    referrer_kind TEXT NOT NULL,
+    referrer_id TEXT NOT NULL,
     requirements_json TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0 CONSTRAINT lash_package_executions_ended_check
         CHECK (ended IN (0, 1))
@@ -974,6 +977,9 @@ CREATE TABLE IF NOT EXISTS lash_execution_uses (
     link TEXT NOT NULL,
     slot TEXT NOT NULL,
     use_json TEXT NOT NULL,
+    -- The declaration's requested name, as JSON: what an adoption keeps
+    -- and a winner must name.
+    requested TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
 );
 CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
@@ -982,6 +988,23 @@ CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
     slot TEXT NOT NULL,
     record_json TEXT NOT NULL,
     PRIMARY KEY (execution, link, slot)
+);
+-- Claim debt decoded once at write time (FIG-7576), so the merge of an
+-- actor's debts is SQL: the stable debt of a registration (empty link and
+-- slot), a use's discovery debt and a winner's target debt, as atoms of
+-- family 'token' (merged by union), 'archive' (by the highest generation)
+-- or 'outside' (one token naming the union of the functions).
+CREATE TABLE IF NOT EXISTS lash_execution_debts (
+    execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    source TEXT NOT NULL CONSTRAINT lash_execution_debts_source_check
+        CHECK (source IN ('stable', 'discovery', 'target')),
+    family TEXT NOT NULL CONSTRAINT lash_execution_debts_family_check
+        CHECK (family IN ('token', 'archive', 'outside')),
+    token TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot, source, family, token, detail)
 );
 
 -- An actor's mailbox: rows only non-owners append and only the owner
@@ -1458,11 +1481,12 @@ DECLARE
     v_tchildren BYTEA[];
     v_answer JSONB;
     v_frame TEXT;
+    v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 91282d2ccc344b33); a call
+    -- Generated from this build's statements (registry c0121d580b174d71); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '91282d2ccc344b33'
+    IF p_registry IS DISTINCT FROM 'c0121d580b174d71'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1629,6 +1653,134 @@ BEGIN
             END LOOP;
         WHEN 'durable_packages.end_execution' THEN
             UPDATE lash_package_executions SET ended = 1 WHERE execution = (v_p->>0) AND actor_key = (v_p->>1);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_packages.register_execution' THEN
+            INSERT INTO lash_package_executions
+                 (execution, actor_key, referrer_json, requirements_json, referrer_kind, referrer_id)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (v_p->>4), (v_p->>5)) ON CONFLICT (execution) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_resolutions_postgres.same_registration' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT 1 FROM lash_package_executions e
+             WHERE e.execution = (v_p->>0) AND e.actor_key = (v_p->>1)
+               AND e.referrer_json = (v_p->>2) AND e.requirements_json = (v_p->>3)
+               AND (SELECT count(*) FROM lash_execution_uses u WHERE u.execution = (v_p->>0))
+                   = jsonb_array_length((v_p->>4)::jsonb)
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements((v_p->>4)::jsonb) AS declared(item)
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM lash_execution_uses u
+                       WHERE u.execution = (v_p->>0) AND u.link = item ->> 0 AND u.slot = item ->> 1
+                         AND u.use_json = item ->> 2
+                   )
+               ) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.adoptable' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT 1 FROM lash_package_executions e
+             WHERE e.execution = (v_p->>0) AND e.actor_key = (v_p->>1) AND e.ended = 0
+               AND e.referrer_json = (v_p->>2)
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements((v_p->>3)::jsonb) AS successor(item)
+                   WHERE EXISTS (
+                       SELECT 1 FROM lash_execution_uses u
+                       WHERE u.execution = (v_p->>0) AND u.link = item ->> 0
+                         AND u.slot = item ->> 1 AND u.requested <> item ->> 3
+                   )
+               ) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_packages.adopt_execution' THEN
+            UPDATE lash_package_executions SET requirements_json = (v_p->>2)
+             WHERE execution = (v_p->>0) AND actor_key = (v_p->>1) AND ended = 0;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_resolutions_postgres.use_registered' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT 1 FROM lash_package_executions e
+             JOIN lash_execution_uses u ON u.execution = e.execution
+             WHERE e.execution = (v_p->>0) AND u.link = (v_p->>1) AND u.slot = (v_p->>2)
+               AND e.ended = 0 AND e.actor_key = (v_p->>3) AND u.requested = (v_p->>4) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.lock_execution_referrer' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended(
+                 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0))
+             FROM lash_package_executions WHERE execution = (v_p->>0) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.execution_fenced' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT EXISTS (
+                 SELECT 1 FROM lash_package_executions e
+                 JOIN lash_referrer_fences f
+                     ON f.referrer_kind = e.referrer_kind AND f.referrer_id = e.referrer_id
+                 WHERE e.execution = (v_p->>0)
+             ) AS fenced LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."fenced" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.referrer_fenced' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT EXISTS (
+                 SELECT 1 FROM lash_referrer_fences WHERE referrer_kind = (v_p->>0) AND referrer_id = (v_p->>1)
+             ) AS fenced LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                IF v_row."fenced" THEN v_rows := v_rows + 1; END IF;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.seed_resolution' THEN
+            INSERT INTO lash_execution_resolutions (execution, link, slot, record_json)
+             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3)) ON CONFLICT (execution, link, slot) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_resolutions_postgres.same_resolution' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT 1 FROM lash_execution_resolutions
+             WHERE execution = (v_p->>0) AND link = (v_p->>1) AND slot = (v_p->>2) AND record_json = (v_p->>3) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_resolutions_postgres.insert_uses' THEN
+            INSERT INTO lash_execution_uses (execution, link, slot, use_json, requested)
+             SELECT (v_p->>0), item ->> 0, item ->> 1, item ->> 2, item ->> 3
+             FROM jsonb_array_elements((v_p->>1)::jsonb) AS declarations(item);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_resolutions_postgres.insert_debts' THEN
+            INSERT INTO lash_execution_debts (execution, link, slot, source, family, token, detail)
+             SELECT (v_p->>0), item ->> 0, item ->> 1, item ->> 2, item ->> 3, item ->> 4, item ->> 5
+             FROM jsonb_array_elements((v_p->>1)::jsonb) AS debts(item);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_packages.clear_uses' THEN
+            DELETE FROM lash_execution_uses WHERE execution = (v_p->>0);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_packages.clear_debts' THEN
+            DELETE FROM lash_execution_debts
+             WHERE execution = (v_p->>0) AND source IN ('stable', 'discovery');
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.append' THEN
@@ -2915,26 +3067,47 @@ BEGIN
     IF p_formats IS NOT NULL THEN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
     END IF;
-    IF p_requires IS NOT NULL THEN
-        UPDATE lash_actors SET base_requires = (p_requires), requires = (p_requires)
-             WHERE actor_key = (p_actor) AND NOT EXISTS (
-                 SELECT 1 FROM lash_package_executions WHERE actor_key = (p_actor) AND ended = 0
-             );
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN
-            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
-                USING ERRCODE = 'LX007';
-        END IF;
-    ELSIF COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
-        UPDATE lash_actors SET requires = base_requires
-             WHERE actor_key = (p_actor) AND NOT EXISTS (
-                 SELECT 1 FROM lash_package_executions WHERE actor_key = (p_actor) AND ended = 0
-             );
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        IF v_rows <> 1 THEN
-            RAISE EXCEPTION 'lash_owner_commit: live execution requirements need decoding'
-                USING ERRCODE = 'LX007';
-        END IF;
+    -- The actor's requirements: its base ones merged with what its live
+    -- executions owe, merged here (FIG-7576).
+    IF p_requires IS NOT NULL OR COALESCE((p_steps->>'restamp')::BOOLEAN, FALSE) THEN
+        SELECT COALESCE(array_agg(debt.token), '{}') INTO v_debts
+        FROM (WITH atoms AS (
+                 SELECT d.family, d.token, d.detail
+                 FROM lash_package_executions e
+                 JOIN lash_execution_debts d ON d.execution = e.execution
+                 WHERE e.actor_key = (p_actor) AND e.ended = 0 AND d.source = 'stable'
+                 UNION ALL
+                 SELECT d.family, d.token, d.detail
+                 FROM lash_package_executions e
+                 JOIN lash_execution_uses u ON u.execution = e.execution
+                 JOIN lash_execution_debts d
+                     ON d.execution = u.execution AND d.link = u.link AND d.slot = u.slot
+                 LEFT JOIN lash_execution_resolutions r
+                     ON r.execution = u.execution AND r.link = u.link AND r.slot = u.slot
+                 WHERE e.actor_key = (p_actor) AND e.ended = 0
+                   AND ((d.source = 'discovery' AND r.execution IS NULL)
+                        OR (d.source = 'target' AND r.execution IS NOT NULL))
+             )
+             SELECT token FROM atoms WHERE family = 'token'
+             UNION
+             SELECT token || ':' || max(detail) FROM atoms WHERE family = 'archive' GROUP BY token
+             UNION
+             SELECT token || ':' || COALESCE(
+                     string_agg(detail, ',' ORDER BY detail) FILTER (WHERE detail <> ''), '')
+             FROM (SELECT DISTINCT token, detail FROM atoms WHERE family = 'outside') AS reached
+             GROUP BY token) AS debt(token);
+        UPDATE lash_actors SET base_requires = COALESCE((p_requires), base_requires),
+                 requires = (
+                     SELECT COALESCE('[' || string_agg(to_json(merged.token)::text, ','
+                         ORDER BY merged.token COLLATE "C") || ']', '[]')
+                     FROM (
+                         SELECT jsonb_array_elements_text(
+                             COALESCE((p_requires), base_requires, '[]')::jsonb) AS token
+                         UNION
+                         SELECT unnest((v_debts)::text[])
+                     ) AS merged
+                 )
+             WHERE actor_key = (p_actor);
     END IF;
     IF p_ack IS NOT NULL THEN
         WITH acked AS (
