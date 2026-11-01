@@ -12151,6 +12151,43 @@
         }
       ]
     },
+    "ToolCallCommit": {
+      "description": "The output the owning commit holds for a tool call, against the call's\nlive `ToolCallReturned` in the same execution.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The commit holds the output the call's `ToolCallReturned` carried.",
+          "properties": {
+            "kind": {
+              "const": "returned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The commit holds this output: no live return of the call carried it\n(a call refused before dispatch, Interrupted on recovery) or the\ncommit replaced the returned one (a successor's fold).",
+          "properties": {
+            "kind": {
+              "const": "output",
+              "type": "string"
+            },
+            "output": {
+              "$ref": "#/$defs/ToolCallOutput"
+            }
+          },
+          "required": [
+            "kind",
+            "output"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ToolCallLimitExceeded": {
       "additionalProperties": false,
       "description": "A tool call refused by the session's [`MaxToolCalls`]: the program asked\nfor more tool calls than its recorded limit admits.\n\nIt is the program's failure, never the host's: the limit is recorded\nconfig and the count is a fact of the program's own history, so a replay\nor a redrive refuses the same call. Nothing of the refused calls is\njournaled or dispatched.",
@@ -16670,7 +16707,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/turn-activity/v8",
+  "$id": "https://lash.dev/schemas/turn-activity/v9",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "App-facing semantic activity emitted during a turn.\n\n`id` is unique per emitted activity event. `correlation_id` groups related\nevents in the same logical activity, such as code start/completion, tool\nstart/completion, or text deltas from one output block.",
   "oneOf": [
@@ -17062,12 +17099,14 @@
       "type": "object"
     },
     {
-      "description": "The accepted commit holds this outcome, including Interrupted on recovery.",
+      "description": "The accepted commit holds this call's outcome, including Interrupted\non recovery. The call's arguments are on its `ToolCallStarted` and\n`ToolCallReturned`; `commit` names the committed output.",
       "properties": {
-        "args": true,
         "call_id": {
           "description": "Lash's identity for the call (ADR 0117).",
           "type": "string"
+        },
+        "commit": {
+          "$ref": "#/$defs/ToolCallCommit"
         },
         "duration_ms": {
           "description": "The observed call window, absent when unmeasured.",
@@ -17088,9 +17127,6 @@
         "name": {
           "type": "string"
         },
-        "output": {
-          "$ref": "#/$defs/ToolCallOutput"
-        },
         "provider_call_id": {
           "description": "The model provider's id for the call, when a model issued it.",
           "type": [
@@ -17107,8 +17143,7 @@
         "type",
         "call_id",
         "name",
-        "args",
-        "output"
+        "commit"
       ],
       "type": "object"
     },
@@ -17233,6 +17268,6 @@
   ],
   "title": "TurnActivity",
   "type": "object",
-  "x-lash-schema-version": 8,
+  "x-lash-schema-version": 9,
   "x-lash-version-constant": "TURN_ACTIVITY_SCHEMA_VERSION"
 }

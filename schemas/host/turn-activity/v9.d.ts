@@ -1,4 +1,4 @@
-// Derived from v8.schema.json by scripts/generate-workflow-schemas.py.
+// Derived from v9.schema.json by scripts/generate-workflow-schemas.py.
 // JSON Schema remains authoritative for value constraints and validation.
 
 /**
@@ -126,11 +126,11 @@ export type TurnActivity = (({
   "type": "tool_call_returned";
   [key: string]: unknown;
 } | {
-  "args": unknown;
   /**
    * Lash's identity for the call (ADR 0117).
    */
   "call_id": string;
+  "commit": ToolCallCommit;
   /**
    * The observed call window, absent when unmeasured.
    */
@@ -141,7 +141,6 @@ export type TurnActivity = (({
    */
   "graph_key"?: (string | null);
   "name": string;
-  "output": ToolCallOutput;
   /**
    * The model provider's id for the call, when a model issued it.
    */
@@ -3752,6 +3751,17 @@ export type ToolCallClassification = ({
 } | {
   "kind": "unrecorded_read";
   "read": ToolReadMetadata;
+});
+
+/**
+ * The output the owning commit holds for a tool call, against the call's
+ * live `ToolCallReturned` in the same execution.
+ */
+export type ToolCallCommit = ({
+  "kind": "returned";
+} | {
+  "kind": "output";
+  "output": ToolCallOutput;
 });
 
 /**

@@ -174,12 +174,12 @@ host_schemas! {
     }
     turn_activity {
         TYPESCRIPT_DECLARATION: (
-            include_str!("../../host-schemas/turn-activity/v8.d.ts"),
-            include_str!("../../../../schemas/host/turn-activity/v8.d.ts")
+            include_str!("../../host-schemas/turn-activity/v9.d.ts"),
+            include_str!("../../../../schemas/host/turn-activity/v9.d.ts")
         ),
         JSON_SCHEMA: (
-            include_str!("../../host-schemas/turn-activity/v8.schema.json"),
-            include_str!("../../../../schemas/host/turn-activity/v8.schema.json")
+            include_str!("../../host-schemas/turn-activity/v9.schema.json"),
+            include_str!("../../../../schemas/host/turn-activity/v9.schema.json")
         ),
     }
     trace_record {
