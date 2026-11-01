@@ -259,11 +259,12 @@ impl<E: Events> Run<'_, E> {
                     }
                     match self.child(node, site, 1)? {
                         ExitKind::Normal => {}
+                        // A selected Catch ends a suffix carrying its departure.
                         ExitKind::Continue => {
-                            self.step(site, Phase::Catch)?;
+                            self.step_departure(site, Phase::Catch, Some(ExitKind::Continue))?;
                         }
                         ExitKind::Break => {
-                            self.step(site, Phase::Catch)?;
+                            self.step_departure(site, Phase::Catch, Some(ExitKind::Break))?;
                             broken = true;
                             break;
                         }
@@ -316,11 +317,12 @@ impl<E: Events> Run<'_, E> {
                     self.step(site, Phase::Test)?;
                     match self.child(node, site, 1)? {
                         ExitKind::Normal => {}
+                        // A selected Catch ends a suffix carrying its departure.
                         ExitKind::Continue => {
-                            self.step(site, Phase::Catch)?;
+                            self.step_departure(site, Phase::Catch, Some(ExitKind::Continue))?;
                         }
                         ExitKind::Break => {
-                            self.step(site, Phase::Catch)?;
+                            self.step_departure(site, Phase::Catch, Some(ExitKind::Break))?;
                             broken = true;
                             break;
                         }

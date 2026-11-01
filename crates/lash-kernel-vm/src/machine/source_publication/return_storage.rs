@@ -21,6 +21,9 @@ pub(in crate::machine) struct ReturnInput<'a> {
     pub(in crate::machine) carried: Option<Carried<'a>>,
     pub(in crate::machine) safe_point: u64,
     pub(in crate::machine) loops: Vec<(Site, u64)>,
+    /// A for continue its loop catches resumes where its actual cursor
+    /// goes, and depends on the collection that cursor walks.
+    pub(in crate::machine) cursor: Option<(Point, Option<ArenaHandle>)>,
 }
 pub(in crate::machine) struct Carried<'a> {
     pub(in crate::machine) rhs: &'a Site,
@@ -144,6 +147,27 @@ impl ReturnInput<'_> {
                 });
                 continue;
             }
+            // The target loop takes a break or continue record.
+            if event.point.phase == SourcePhase::Catch {
+                facts.0.insert(
+                    event.point.clone(),
+                    LeafFacts {
+                        dependencies: self
+                            .cursor
+                            .as_ref()
+                            .and_then(|(_, walked)| *walked)
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    },
+                );
+                leave = Some(event.point.clone());
+                events.push(JournalEvent {
+                    inputs: vec![departure],
+                    ..Default::default()
+                });
+                continue;
+            }
             if event.point.phase != SourcePhase::Leave {
                 return Err(malformed("return suffix has another source departure"));
             }
@@ -232,7 +256,10 @@ impl ReturnInput<'_> {
         };
         let next = SourcePosition {
             at: leave,
-            unpaid: interval.resume().cloned(),
+            unpaid: interval
+                .resume()
+                .or(self.cursor.as_ref().map(|(head, _)| head))
+                .cloned(),
             ..start.clone()
         };
         let allowance = Allowance {

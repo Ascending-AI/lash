@@ -183,7 +183,8 @@ impl Source {
     /// or catch block; an entered catch follows a raised body. The innermost
     /// cleanup ends the suffix at its Suspend, which holds the departure.
     /// A Break or Continue departs the same way toward its innermost loop;
-    /// only a cleanup inside that loop suspends it. A Throw publishes only
+    /// a cleanup inside that loop suspends it, otherwise the loop's Catch
+    /// takes it. A Throw publishes only
     /// when the innermost try it reaches suspends it in cleanup.
     pub(crate) fn compile_departure_suffix(
         &self,
@@ -206,6 +207,7 @@ impl Source {
         let mut raised = std::collections::BTreeSet::new();
         let mut suspend: Option<(Site, Site)> = None;
         let mut target: Option<Site> = None;
+        let mut target_while = false;
         // The innermost try a raise reaches takes it: true by its catch.
         let mut handler: Option<(Site, bool)> = None;
         for index in &at.site.path[self.site.path.len()..] {
@@ -218,12 +220,14 @@ impl Source {
                     choices.insert(path.clone(), true);
                     return_loops.push(path.clone());
                     target = Some(path.clone());
+                    target_while = true;
                 }
                 doc::Node::Stmt(doc::Stmt::For { .. }) if *index == 1 => {
                     choices.insert(path.clone(), true);
                     return_loops.push(path.clone());
                     for_sites.insert(path.clone());
                     target = Some(path.clone());
+                    target_while = false;
                 }
                 doc::Node::Stmt(doc::Stmt::Try(t))
                     if *index == 0 || (t.catch.is_some() && *index == 1) =>
@@ -261,31 +265,57 @@ impl Source {
         {
             return Err(Refused::Path);
         }
+        // A break or continue whose target loop holds no cleanup inside it
+        // ends at that loop's Catch, which takes the value-less record.
+        let mut caught = None;
         if matches!(departing, ExitKind::Break | ExitKind::Continue) {
-            // A cleanup outside the target loop does not take its departure;
-            // the loop's own Catch is the unsuspended suffix.
-            let suspended = match (&suspend, &target) {
-                (Some((try_site, _)), Some(target)) => try_site.path.len() > target.path.len(),
-                _ => false,
-            };
-            if !suspended {
-                return Err(Refused::Path);
+            let target = target.ok_or(Refused::Path)?;
+            if suspend
+                .as_ref()
+                .is_none_or(|(try_site, _)| try_site.path.len() < target.path.len())
+            {
+                suspend = None;
+                caught = Some(target);
             }
         }
-        let resume = match &suspend {
-            Some((_, cleanup)) => Some(self.first_event(cleanup)?),
-            None => None,
+        let resume = match (&suspend, &caught) {
+            (Some((_, cleanup)), _) => Some(self.first_event(cleanup)?),
+            (None, Some(target)) if departing == ExitKind::Break => Some(
+                self.room
+                    .peak_extra
+                    .get(&point(target, Phase::Commit))
+                    .ok_or(Refused::Path)?
+                    .point
+                    .clone(),
+            ),
+            (None, Some(target)) if target_while => Some(self.first_event(&child(target, 0))?),
+            // A for's next head depends on its actual cursor.
+            (None, Some(_)) => None,
+            (None, None) => None,
         };
         let suspend = suspend.map(|(try_site, _)| try_site);
-        let end = match &suspend {
-            Some(try_site) => Point {
-                site: try_site.clone(),
-                phase: Phase::Suspend,
-            },
-            None => Point {
-                site: self.site.clone(),
-                phase: Phase::Leave,
-            },
+        let (end, bound) = match (&suspend, &caught) {
+            (Some(try_site), _) => (
+                Point {
+                    site: try_site.clone(),
+                    phase: Phase::Suspend,
+                },
+                Some(try_site),
+            ),
+            (None, Some(target)) => (
+                Point {
+                    site: target.clone(),
+                    phase: Phase::Catch,
+                },
+                Some(target),
+            ),
+            (None, None) => (
+                Point {
+                    site: self.site.clone(),
+                    phase: Phase::Leave,
+                },
+                None,
+            ),
         };
         let route: Box<[_]> = std::iter::once(Selection::Event {
             at: at.clone(),
@@ -295,11 +325,7 @@ impl Source {
             blocks
                 .iter()
                 .rev()
-                .take_while(|site| {
-                    suspend
-                        .as_ref()
-                        .is_none_or(|try_site| site.path.len() > try_site.path.len())
-                })
+                .take_while(|site| bound.is_none_or(|bound| site.path.len() > bound.path.len()))
                 .map(|site| Selection::Event {
                     at: Point {
                         site: site.clone(),
@@ -308,7 +334,7 @@ impl Source {
                     exit: ExitKind::Normal,
                 }),
         )
-        .chain(suspend.is_some().then(|| Selection::Event {
+        .chain(bound.is_some().then(|| Selection::Event {
             at: end.clone(),
             exit: ExitKind::Normal,
         }))
@@ -743,7 +769,9 @@ impl CompiledInterval {
     pub(crate) fn return_loops(&self) -> Option<&[Site]> {
         self.return_loops.as_deref()
     }
-    /// A suspended return resumes at its cleanup block's first event.
+    /// A suspended departure resumes at its cleanup block's first event; a
+    /// caught break at its loop's Commit, a caught while continue at its
+    /// condition. A caught for continue resumes where its cursor goes.
     pub(crate) fn resume(&self) -> Option<&Point> {
         self.resume.as_ref()
     }

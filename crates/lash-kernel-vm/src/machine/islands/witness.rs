@@ -122,6 +122,8 @@ pub(crate) fn begin() {
     #[cfg(test)]
     PRECISE_SUSPENDED_DEPARTURES.set(0);
     #[cfg(test)]
+    PRECISE_CAUGHT_DEPARTURES.set(0);
+    #[cfg(test)]
     LOOP_RETURNS.set([0; 2]);
     PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
     PACKET_FRAME_ENTRIES.with(|count| count.set([0; 2]));
@@ -837,6 +839,20 @@ pub(crate) fn precise_suspended_departures() -> u64 {
 #[cfg(test)]
 pub(in crate::machine) fn precise_suspended_departed() {
     PRECISE_SUSPENDED_DEPARTURES.set(PRECISE_SUSPENDED_DEPARTURES.get() + 1);
+}
+
+#[cfg(test)]
+thread_local! {
+    static PRECISE_CAUGHT_DEPARTURES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// Breaks and continues published into their loop's Catch.
+#[cfg(test)]
+pub(crate) fn precise_caught_departures() -> u64 {
+    PRECISE_CAUGHT_DEPARTURES.replace(0)
+}
+#[cfg(test)]
+pub(in crate::machine) fn precise_caught_departed() {
+    PRECISE_CAUGHT_DEPARTURES.set(PRECISE_CAUGHT_DEPARTURES.get() + 1);
 }
 
 #[cfg(test)]

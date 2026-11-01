@@ -150,6 +150,42 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.halt",
+        register(
+            "deep.halt",
+            "n: Any",
+            String::new(),
+            "while true { let saved = n break } return n",
+        ),
+    ));
+    probes.push((
+        "deep.pass",
+        register(
+            "deep.pass",
+            "n: Any",
+            String::new(),
+            "let first = true while first { set first = false let saved = n continue } return n",
+        ),
+    ));
+    probes.push((
+        "deep.stop",
+        register(
+            "deep.stop",
+            "n: Any",
+            String::new(),
+            "for item in n { let saved = n break } return n",
+        ),
+    ));
+    probes.push((
+        "deep.next",
+        register(
+            "deep.next",
+            "n: Any",
+            String::new(),
+            "for item in n { let saved = n continue } return n",
+        ),
+    ));
+    probes.push((
         "deep.fault",
         register(
             "deep.fault",
@@ -294,7 +330,11 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             call_depth: 2,
             ..ROOMY
         };
-        let args = if name == "deep.walk" { "[7, 8]" } else { "[7]" };
+        let args = if matches!(name, "deep.walk" | "deep.next") {
+            "[7, 8]"
+        } else {
+            "[7]"
+        };
         let mut embedder = Embedder::with(
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
@@ -321,7 +361,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         let value = result(embedder.run_to_end(&[]));
         assert_eq!(
             value,
-            Datum::List(if name == "deep.walk" {
+            Datum::List(if matches!(name, "deep.walk" | "deep.next") {
                 vec![int(7), int(8)]
             } else {
                 vec![int(7)]
@@ -352,6 +392,15 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 "the departure must move into its cleanup's pending departure: {name}"
             );
         }
+        let caught = matches!(name, "deep.halt" | "deep.pass" | "deep.stop" | "deep.next");
+        if caught && source_only {
+            assert_eq!(
+                crate::machine::islands::witness::precise_caught_departures(),
+                // A decline takes the ordinary unwind once.
+                u64::from(name == "deep.next") + u64::from(!declined),
+                "the departure must move into its loop's Catch: {name}"
+            );
+        }
         if name == "deep.loop" || name == "deep.walk" {
             assert_eq!(
                 crate::machine::islands::witness::loop_returns()[usize::from(source_only)],
@@ -370,6 +419,10 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.supersede",
         "deep.brake",
         "deep.skip",
+        "deep.halt",
+        "deep.pass",
+        "deep.stop",
+        "deep.next",
         "deep.fault",
         "deep.rethrow",
         "deep.loop",
@@ -388,6 +441,10 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 | "deep.supersede"
                 | "deep.brake"
                 | "deep.skip"
+                | "deep.halt"
+                | "deep.pass"
+                | "deep.stop"
+                | "deep.next"
                 | "deep.fault"
                 | "deep.rethrow"
         ) {

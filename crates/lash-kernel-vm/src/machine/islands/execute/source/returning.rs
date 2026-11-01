@@ -107,6 +107,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             ),
             safe_point: self.charged,
             loops,
+            cursor: None,
         })
         .prepare(&ledger, self.arena, self.heap)?
         else {

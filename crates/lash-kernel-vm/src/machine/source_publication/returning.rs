@@ -1,5 +1,6 @@
 //! A prepared direct return closes its entered Invocation before physical unwind.
-//! A suspended break or continue moves its record into the cleanup it enters.
+//! A suspended break or continue moves its record into the cleanup it enters;
+//! otherwise its loop's Catch takes the record.
 use super::*;
 use crate::machine::{Completion, Control, Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
@@ -87,19 +88,32 @@ impl KernelMachine {
             .last()
             .filter(|event| event.point.phase == room::Phase::Suspend)
             .map(|event| event.point.site.clone());
+        // A break or continue whose loop takes it stays in its invocation.
+        let caught = interval
+            .events()
+            .last()
+            .filter(|event| event.point.phase == room::Phase::Catch)
+            .map(|event| event.point.site.clone());
         #[cfg(test)]
-        if suspend.is_some() && crate::machine::islands::witness::take_suspended_departure_decline()
+        if (suspend.is_some() || caught.is_some())
+            && crate::machine::islands::witness::take_suspended_departure_decline()
         {
             return Ok(None);
         }
-        {
+        let cursor = {
+            let arena = std::rc::Rc::clone(&self.arena);
             let frame = self.frame(running.task)?;
-            let cleanup = |control: &Control| {
-                matches!(control, Control::Try { stmt, .. }
-                    if suspend.as_ref() == Some(&running.exe.stmt(*stmt).site))
+            let cleanup = |control: &Control| match control {
+                Control::Try { stmt, .. } => {
+                    suspend.as_ref() == Some(&running.exe.stmt(*stmt).site)
+                }
+                Control::While { stmt, .. } | Control::For { stmt, .. } => {
+                    caught.as_ref() == Some(&running.exe.stmt(*stmt).site)
+                }
+                Control::Block { .. } => false,
             };
-            if suspend.is_some() && !frame.control.iter().any(cleanup) {
-                return Err(malformed("precise return has no entered cleanup").into());
+            if (suspend.is_some() || caught.is_some()) && !frame.control.iter().any(cleanup) {
+                return Err(malformed("precise departure has no entered target").into());
             }
             if !interval
                 .events()
@@ -122,7 +136,34 @@ impl KernelMachine {
                     malformed("precise return differs from its entered source blocks").into(),
                 );
             }
-        }
+            // A for continue resumes where its actual cursor goes next.
+            match frame.control.iter().rev().find(|control| cleanup(control)) {
+                Some(Control::For {
+                    stmt,
+                    cursor,
+                    guard: None,
+                    ..
+                }) if departing == room::ExitKind::Continue => {
+                    let crate::compile::Form::For {
+                        site, via: None, ..
+                    } = &running.exe.stmt(*stmt).form
+                    else {
+                        return Ok(None);
+                    };
+                    let Some(Ok((_, next))) = cursor.resident_step(&arena.borrow()) else {
+                        return Ok(None);
+                    };
+                    let Ok(head) = source.next_after_for_cursor(site, next.is_some()) else {
+                        return Ok(None);
+                    };
+                    Some((head, cursor.walked().and_then(|value| value.handle())))
+                }
+                Some(Control::For { .. }) if departing == room::ExitKind::Continue => {
+                    return Ok(None);
+                }
+                _ => None,
+            }
+        };
         let roles = match src {
             Some(_) => match running.stmt.source_roles_at(running.stream, pc) {
                 Some(roles) => Some(roles),
@@ -145,7 +186,7 @@ impl KernelMachine {
         let metered = self.bounds.charge == crate::Charge::Exact;
         let caller = self.task(running.task)?.frames.caller_charging()?;
         let fee = match &self.frame(running.task)?.library {
-            Some(call) if suspend.is_none() && caller.unwrap_or(metered) => {
+            Some(call) if suspend.is_none() && caught.is_none() && caller.unwrap_or(metered) => {
                 Some((call.lib, call.args.clone()))
             }
             _ => None,
@@ -204,6 +245,7 @@ impl KernelMachine {
             }),
             safe_point: self.charged,
             loops,
+            cursor,
         })
         .prepare(&ledger, &mut arena, &self.heap)?
         else {
@@ -273,7 +315,7 @@ impl KernelMachine {
                 }
                 // The ordinary unwind then takes the physical blocks and
                 // records the same pending holding the journal transferred.
-                if suspend.is_none() {
+                if suspend.is_none() && caught.is_none() {
                     *logical = None;
                 }
                 if fee.is_some() {
@@ -291,8 +333,12 @@ impl KernelMachine {
         if published && suspend.is_some() {
             crate::machine::islands::witness::precise_suspended_departed();
         }
+        #[cfg(test)]
+        if published && caught.is_some() {
+            crate::machine::islands::witness::precise_caught_departed();
+        }
         #[cfg(any(test, feature = "testing"))]
-        if published && suspend.is_none() {
+        if published && suspend.is_none() && caught.is_none() {
             crate::machine::islands::witness::precise_return_published(run_root);
             #[cfg(test)]
             if let Some(ordinal) = loop_ordinal {
