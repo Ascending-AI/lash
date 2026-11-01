@@ -963,11 +963,8 @@ impl KernelMachine {
         frame.link = defining_link;
         frame.convention = export.map(|export| export.convention.clone());
         frame.public_result = export.map(|export| export.result.clone());
-        frame.slots.fresh(code.slots_by_at.len());
-        frame.control.push(Control::Block {
-            block: code.body,
-            next: 0,
-        });
+        frame.slots.prepare_fresh(code.slots_by_at.len())?;
+        frame.control.prepare_block(code.body)?.publish();
         if let Some(lib) = library {
             // Nested calls are covered by their caller's schedule. A new
             // task has no enclosing library frame, so its root bills its own
@@ -985,6 +982,23 @@ impl KernelMachine {
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
+        }
+        if admission.is_none() {
+            frame = match self.publish_prepared_frame_entry(
+                task,
+                exe,
+                super::source_publication::frame_entry::EntryCall {
+                    code: code_id,
+                    args: base,
+                    owners,
+                    given,
+                    awaited_by,
+                },
+                frame,
+            )? {
+                None => return Ok(()),
+                Some(frame) => frame,
+            };
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);

@@ -1,6 +1,7 @@
 //! Initialized scratch survives a statement; its logical values do not.
 use std::ops::Index;
 use std::slice::SliceIndex;
+mod entry;
 mod resume;
 mod source;
 pub(super) use resume::{ResumeAt, ResumeValue};

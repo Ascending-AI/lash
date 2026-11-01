@@ -636,7 +636,7 @@ impl KernelMachine {
             NestedCallee::CheckedHelper(lib) => (self.build_helper_target(exe, *lib), args),
             NestedCallee::Import(slot, _) => (self.import_target(exe, *slot)?, args),
             NestedCallee::Read => {
-                let value = self.take(args);
+                let value = self.regs[args];
                 (self.target(exe, value)?, args + 1)
             }
         })

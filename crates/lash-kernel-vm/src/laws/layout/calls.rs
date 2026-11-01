@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let frame_entries = crate::machine::islands::witness::prepared_frame_entries();
     let callee_reads = crate::machine::islands::witness::callee_reads();
     let call_resumes = crate::machine::islands::witness::call_resumes();
     let call_enters = crate::machine::islands::witness::call_enters();
@@ -557,8 +558,24 @@ fn observe_source_or_register(
         && !taped
         && slice == u64::MAX
         && bounds == super::super::embedder::ROOMY
+        && source.contains("let make = fn(a, b) { return fn() { return (a, b) } }")
+    {
+        assert!(
+            frame_entries[1] >= 2,
+            "both shared-parameter batches, including the omitted argument, must install under accepted frame entry: {frame_entries:?}"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
+        assert!(
+            frame_entries[0] > 0,
+            "callee frames must install their complete prepared entry under prospective source acceptance: {frame_entries:?}"
+        );
         assert!(
             callee_reads > 0,
             "the value callee must acquire its source holding before the argument expressions: {callee_reads}"

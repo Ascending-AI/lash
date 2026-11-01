@@ -120,6 +120,28 @@ impl Registration<'_> {
         self.reserve_objects(Batch::Bodies(values))?;
         Ok(handle)
     }
+    pub(super) fn reserve_cells(
+        &mut self,
+        values: &[Value],
+    ) -> Result<Vec<ArenaHandle>, NativeError> {
+        let mut bodies = Vec::new();
+        let mut handles = Vec::new();
+        for result in [
+            bodies.try_reserve(values.len()),
+            handles.try_reserve(values.len()),
+        ] {
+            result.map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        }
+        for value in values {
+            let handle = self.arena.objects.reserve();
+            handles.push(handle);
+            bodies.push((handle, Body::Cell(*value)));
+        }
+        self.reserve_objects(Batch::Bodies(bodies))?;
+        Ok(handles)
+    }
     fn reserve_objects(&mut self, batch: Batch) -> Result<(), NativeError> {
         assert_eq!(self.batch.len(), 0);
         self.batch = batch;

@@ -1,7 +1,9 @@
 //! Values owned by source occurrences, independent of register mirrors.
+mod entry;
 mod resume;
 use crate::compile::{Stmt, Stream};
 use crate::machine::logical_held::{BankRoots, Held, Projection};
+pub(super) use entry::EntryInputs;
 use lash_kernel_doc::{Value, heap::HeapFault};
 use lash_kernel_state::kernel_internals::logical::{Lifecycle, Owner, Slot, SourceValue};
 fn invalid(problem: &str) -> HeapFault {

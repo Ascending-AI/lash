@@ -375,6 +375,16 @@ impl Arena {
         Ok((handle, Self::prepare_registered(registration)?))
     }
 
+    /// Prepare every shared parameter cell in one atomic installation.
+    pub fn prepare_cells(
+        &mut self,
+        values: &[Value],
+    ) -> Result<(Vec<ArenaHandle>, PreparedInstallation<'_>), NativeError> {
+        let mut registration = self.registration()?;
+        let handles = registration.reserve_cells(values)?;
+        Ok((handles, Self::prepare_registered(registration)?))
+    }
+
     /// Prepare a closure and its actual capture cells before source acceptance.
     /// The local code cache is implementation state, installed with the body.
     pub fn prepare_closure(

@@ -1,0 +1,381 @@
+//! Canonical frame entry is an accepted prefix before any body suffix.
+use super::*;
+use crate::compile::room::{Phase, Point, publication::Occurrence};
+use crate::compile::{CodeId, Executable, NestedCallee, NestedKind, StmtId};
+use crate::machine::{Eval, Frame, KernelMachine, SlotState, exec::ArgumentOwners, fault};
+use lash_kernel_doc::{
+    TaskId, Value,
+    heap::{EntityId, FamilyId, Identity, PageValue},
+};
+use lash_kernel_state::kernel_internals::logical::{
+    FrameEvent, JournalEvent, Owner, PublicationValue as PV, Slot, VirtualBody, VirtualEntity,
+};
+use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+
+pub(in crate::machine) struct EntryCall {
+    pub(in crate::machine) code: CodeId,
+    pub(in crate::machine) args: usize,
+    pub(in crate::machine) owners: ArgumentOwners,
+    pub(in crate::machine) given: usize,
+    pub(in crate::machine) awaited_by: Option<StmtId>,
+}
+fn buffer<T>(count: usize) -> Result<Vec<T>, HeapFault> {
+    let mut values = Vec::new();
+    values
+        .try_reserve(count)
+        .map_err(|_| HeapFault::Exhausted {
+            resource: doc::heap::HostResource::StagingBytes,
+        })?;
+    Ok(values)
+}
+impl KernelMachine {
+    /// A miss returns the detached frame. It has not advanced a caller, moved
+    /// an argument, granted an invocation, or installed a shared parameter.
+    pub(in crate::machine) fn publish_prepared_frame_entry(
+        &mut self,
+        task_id: TaskId,
+        exe: &Executable,
+        call: EntryCall,
+        mut frame: Box<Frame>,
+    ) -> Eval<Option<Box<Frame>>> {
+        let code = exe.code(call.code);
+        let source = Arc::clone(&code.source_room);
+        source
+            .verify()
+            .map_err(|_| malformed("frame entry source failed verification"))?;
+        if frame.logical.is_some() || frame.invocation != 0 {
+            return Err(malformed("prepared frame still owns an invocation").into());
+        }
+        if source.params.len() != code.params.len() || call.given > code.params.len() {
+            return Err(malformed("frame parameters differ from their source").into());
+        }
+        for (index, param) in code.params.iter().enumerate() {
+            let slot = code
+                .slots
+                .get(param.slot as usize)
+                .ok_or_else(|| malformed("entry parameter slot is absent"))?;
+            if slot.name != source.params[index]
+                || slot.declared != source.site
+                || slot.shared != param.shared
+                || param.shared
+                    != source
+                        .shared
+                        .get(&(source.site.clone(), source.params[index].clone()))
+                        .copied()
+                        .unwrap_or(false)
+                || code.slots_by_at.get(param.at as usize) != Some(&param.slot)
+            {
+                return Err(malformed(
+                    "entry parameter mapping differs from its source declaration",
+                )
+                .into());
+            }
+        }
+        let mut encoding = TokenWriter::new();
+        encoding.seq(6);
+        encoding.text("lash.source.frame-entry");
+        frame.link.encode(&mut encoding);
+        source.site.encode(&mut encoding);
+        encoding.unsigned(call.given as u64);
+        // The caller's real admitted action and saved continuation survive the
+        // handoff. Uncounted body/control and external entries have no ordinal.
+        let mut callee = None;
+        let mut issued = None;
+        #[cfg(any(test, feature = "testing"))]
+        let has_caller = !self.task(task_id)?.frames.is_empty();
+        if let Some(statement) = call.awaited_by {
+            let caller = self.frame(task_id)?;
+            encoding.unsigned(caller.invocation);
+            if let Some(act) = caller.nested {
+                let (stream, _, _) = exe.statement(statement);
+                let entry = stream
+                    .nested
+                    .get(act.ix())
+                    .ok_or_else(|| fault("entry caller has no nested source"))?;
+                let pending = caller
+                    .pending
+                    .peek()
+                    .ok_or_else(|| fault("entry caller has no continuation"))?;
+                if pending.site != entry.suffix {
+                    return Err(malformed("entry caller names another source continuation").into());
+                }
+                if entry.guest && matches!(entry.kind, NestedKind::Call(_)) {
+                    let Some(ordinal) = pending.occurrence else {
+                        return Ok(Some(frame));
+                    };
+                    let Some(frontier) = &caller.source_frontier else {
+                        return Ok(Some(frame));
+                    };
+                    let at = &frontier.position().at;
+                    if at.site != entry.site || at.phase != Phase::Enter {
+                        // A reconstructed packet call has not yet published its
+                        // caller Enter through this precise consumer.
+                        return Ok(Some(frame));
+                    }
+                    if frontier.position().occurrence.invocation != caller.invocation
+                        || frontier.position().occurrence.action.as_ref()
+                            != Some(&(at.clone(), ordinal))
+                        || pending.phase != lash_kernel_state::paged::PhaseRecord::Called
+                    {
+                        return Err(
+                            malformed("entry caller lost its accepted source action").into()
+                        );
+                    }
+                    if matches!(entry.kind, NestedKind::Call(NestedCallee::Read)) {
+                        callee = Some(entry.dst);
+                    }
+                    issued = Some((entry.occurrence, ordinal));
+                    encoding.seq(2);
+                    entry.site.encode(&mut encoding);
+                    encoding.unsigned(ordinal);
+                } else {
+                    encoding.seq(0);
+                }
+            } else {
+                encoding.seq(0);
+            }
+        } else {
+            encoding.unsigned(0);
+            encoding.seq(0);
+        }
+        if let Some((index, ordinal)) = issued
+            && self
+                .task(task_id)?
+                .counters
+                .current(index)
+                .is_none_or(|count| ordinal >= count)
+        {
+            return Err(malformed("frame entry action was not admitted by its task").into());
+        }
+        let document = exe
+            .instances
+            .get(&frame.link)
+            .ok_or_else(|| malformed("frame entry has no admitted defining link"))?;
+        let kernel = doc::KernelVersion::of(document.kernel())
+            .ok_or_else(|| malformed("frame entry kernel is unsupported"))?;
+        let at = Point {
+            site: source.site.clone(),
+            phase: Phase::Enter,
+        };
+        let unpaid = if source.body.is_empty() {
+            Point {
+                site: source.site.clone(),
+                phase: Phase::Fallthrough,
+            }
+        } else {
+            source
+                .first_event(&source.site.child(0))
+                .map_err(|_| malformed("frame body has no first source event"))?
+        };
+        let Some(bank) = self.regs.prepare_frame_entry(
+            call.args,
+            call.given,
+            callee,
+            matches!(call.owners, ArgumentOwners::Control),
+        )?
+        else {
+            return Ok(Some(frame));
+        };
+        let mut arguments = buffer(call.given)?;
+        arguments.extend(bank.arguments());
+        let mut inputs = buffer(call.given + usize::from(callee.is_some()))?;
+        inputs.extend(bank.owners());
+        let mut shared_values = buffer(code.params.len())?;
+        for (index, param) in code.params.iter().enumerate() {
+            let value = arguments
+                .get(index)
+                .map_or(Value::Absent, |(_, value)| *value);
+            if param.shared {
+                shared_values.push(value);
+            } else {
+                frame.set_slot(param.at, SlotState::Value(value));
+            }
+        }
+        #[cfg(any(test, feature = "testing"))]
+        let shared = !shared_values.is_empty();
+        let store = self.logical.ledger();
+        let ledger = store.borrow();
+        let invocation = ledger.prospective_invocation(task_id);
+        let mut arena = self.arena.borrow_mut();
+        let first = arena.next_ordinal();
+        let (handles, mut installation) =
+            arena.prepare_cells(&shared_values).map_err(native_fault)?;
+        let mut entities = buffer(handles.len())?;
+        let mut shared_ids = buffer(handles.len())?;
+        let mut cells = handles.iter().zip(&shared_values).enumerate();
+        for param in &code.params {
+            if param.shared {
+                let (index, (handle, value)) = cells.next().expect("prepared shared parameter");
+                let entity = EntityId {
+                    family: FamilyId::PRIMARY,
+                    ordinal: first
+                        .checked_add(index as u64)
+                        .ok_or_else(|| malformed("parameter identity overflow"))?,
+                };
+                installation
+                    .bind_entity(*handle, entity)
+                    .map_err(native_fault)?;
+                entities.push(VirtualEntity {
+                    entity,
+                    body: VirtualBody::NativeVariable(*value),
+                });
+                shared_ids.push((*handle, entity));
+                frame.set_slot(param.at, SlotState::Cell(*handle));
+            }
+        }
+        let mut outputs = buffer(code.slots_by_at.len())?;
+        for (index, state) in frame.slot_states().iter().enumerate() {
+            if matches!(state, SlotState::Empty) {
+                continue;
+            }
+            let owner = source
+                .binding_root(code.slots_by_at[index], task_id, invocation.id())
+                .ok_or_else(|| malformed("entry binding has no canonical source owner"))?;
+            let Owner::Value { slot, .. } = owner else {
+                return Err(malformed("entry binding names another owner kind").into());
+            };
+            let value = match state {
+                SlotState::Empty => unreachable!(),
+                SlotState::Cell(handle) if matches!(slot, Slot::Capture(_)) => PV::Capture(*handle),
+                SlotState::Cell(handle) => {
+                    match shared_ids.iter().find(|(cell, _)| cell == handle) {
+                        Some((_, entity)) => PV::Page(PageValue::Ref(Identity::Object(*entity))),
+                        None => PV::Native(Value::ObjectRef(*handle)),
+                    }
+                }
+                SlotState::Value(value) => {
+                    let parameter = code
+                        .params
+                        .iter()
+                        .position(|param| param.at as usize == index)
+                        .ok_or_else(|| malformed("entry value is not a source parameter"))?;
+                    match arguments.get(parameter).and_then(|(owner, _)| *owner) {
+                        Some(owner) => PV::Existing(owner),
+                        None => PV::Native(*value),
+                    }
+                }
+            };
+            outputs.push((owner, value));
+        }
+        let roots = crate::machine::logical_held::FrameRoots::prepared(
+            self.logical.clone(),
+            task_id,
+            invocation.clone(),
+            Arc::clone(&source),
+            Arc::clone(&code.slots_by_at),
+        )?;
+        let position = Position {
+            at,
+            unpaid: Some(unpaid),
+            recovery: logical_digest(&encoding.into_bytes()),
+            occurrence: Occurrence {
+                task: task_id,
+                invocation: invocation.id(),
+                loops: vec![],
+                action: None,
+                departure: None,
+            },
+        };
+        let frontier = source
+            .frontier(
+                &ledger,
+                &self.heap,
+                &invocation,
+                frame.link,
+                kernel,
+                position,
+            )
+            .map_err(|_| malformed("entry frontier failed authentication"))?;
+        let program = Program::new(vec![JournalEvent {
+            frame: Some(FrameEvent::Enter {
+                task: task_id,
+                invocation: invocation.id(),
+            }),
+            inputs,
+            outputs,
+            entities,
+            ..Default::default()
+        }]);
+        let (mut registration, batch) = installation.into_parts();
+        let evaluated = program
+            .clone()
+            .evaluate(&ledger, registration.arena())
+            .ok_or_else(|| malformed("entry source dependencies are unavailable"))?;
+        let prepared = evaluated
+            .prepare(&ledger, registration, &self.heap, program)
+            .map_err(|error| match error {
+                lash_kernel_state::kernel_internals::logical::MemberFault::Heap(error) => error,
+                lash_kernel_state::kernel_internals::logical::MemberFault::Native(error) => {
+                    native_fault(error)
+                }
+            })?;
+        let after = prepared.balance()?.total()?;
+        let task = self
+            .tasks
+            .get_mut(task_id.0 as usize)?
+            .ok_or_else(|| fault("no task"))?;
+        let depth =
+            (task.frames.len() + usize::from(task_id != TaskId::MAIN || !self.session_cell)) as u64;
+        let push = task.frames.prepare_push(call.awaited_by)?;
+        let safe_point = self.charged;
+        let allowance = Allowance {
+            occurrences: vec![],
+            before: 0,
+            units: 0,
+            close: None,
+            strict: false,
+            depth: 0,
+            safe_point,
+        };
+        let resources = SourceResources {
+            charged: &mut self.charged,
+            counters: &mut task.counters,
+            bound: if self.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+            slice: self.slice_end,
+            depth,
+            limit: u64::from(self.bounds.call_depth),
+            safe_point,
+        };
+        let facts = resources
+            .facts(&allowance)
+            .ok_or_else(|| malformed("entry resource facts are absent"))?;
+        let Some(accepted) = prepared.admit(self.bounds.memory) else {
+            return Ok(Some(frame));
+        };
+        let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
+            return Ok(Some(frame));
+        };
+        drop(ledger);
+        accepted.commit(|accepted| {
+            accepted.publish_materialized(&mut store.borrow_mut(), |arena, edits, _| {
+                assert!(edits.is_empty());
+                batch.publish(arena);
+                bank.publish();
+                frame.invocation = invocation.id();
+                frame.logical = Some(roots);
+                frame.source_frontier = Some(frontier);
+                push.publish(arena, frame);
+            })
+        })?;
+        self.logical_memory.set(after);
+        drop(arena);
+        #[cfg(test)]
+        {
+            self.storage.value_moves += call.given;
+        }
+        #[cfg(any(test, feature = "testing"))]
+        if has_caller {
+            crate::machine::islands::witness::prepared_frame_entered(shared);
+        }
+        self.grown();
+        self.observe(crate::observe::Event::Push {
+            task: task_id,
+            code: call.code,
+        });
+        Ok(None)
+    }
+}

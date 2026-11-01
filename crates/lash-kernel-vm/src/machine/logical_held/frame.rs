@@ -21,6 +21,30 @@ pub(in crate::machine) struct FrameRoots {
     active_departure: Cell<bool>,
 }
 impl FrameRoots {
+    pub(in crate::machine) fn prepared(
+        lifecycle: Lifecycle,
+        task: TaskId,
+        invocation: Invocation,
+        source: Arc<Source>,
+        by_at: Arc<[u32]>,
+    ) -> Result<Self, HeapFault> {
+        let slots = source.owner_slots().map_err(|_| {
+            HeapFault::Malformed("entry source ownership verification failed".into())
+        })?;
+        Ok(Self {
+            bank: super::BankRoots {
+                lifecycle,
+                task,
+                invocation: invocation.id(),
+                slots,
+            },
+            invocation,
+            source,
+            by_at,
+            control_owners: RefCell::new(BTreeSet::new()),
+            active_departure: Cell::new(false),
+        })
+    }
     pub(in crate::machine) fn invocation(&self) -> &Invocation {
         &self.invocation
     }

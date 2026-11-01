@@ -282,6 +282,25 @@ impl Slots {
         }
         Ok(Some(PreparedBinding { slots: self, at }))
     }
+    pub(super) fn prepare_fresh(&mut self, len: usize) -> Result<(), HeapFault> {
+        self.values
+            .try_reserve(len.saturating_sub(self.values.len()))
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        self.changed
+            .try_reserve(len.saturating_sub(self.changed.len()))
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        self.edits
+            .try_reserve(len)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        self.fresh(len);
+        Ok(())
+    }
     pub(super) fn fresh(&mut self, len: usize) {
         self.clear();
         self.values.resize(len, SlotState::Empty);
@@ -888,7 +907,53 @@ pub(crate) fn take_most_visited() -> usize {
     MOST_VISITED.replace(0)
 }
 
+pub(super) struct PreparedFramePush<'a> {
+    frames: &'a mut Frames,
+    parent: Option<usize>,
+    awaiting: Option<crate::compile::StmtId>,
+}
+impl PreparedFramePush<'_> {
+    pub(super) fn publish(self, arena: &mut lash_kernel_state::arena::Arena, frame: Box<Frame>) {
+        if let Some(awaiting) = self.awaiting {
+            self.frames.cache[self.parent.expect("prepared caller")]
+                .1
+                .awaiting = Some(awaiting);
+        }
+        assert!(self.frames.cache.len() < self.frames.cache.capacity());
+        arena.grow_control(resident::frame_bytes(&frame));
+        self.frames.cache.push((self.frames.len, frame));
+        self.frames.active = Some(self.frames.cache.len() - 1);
+        self.frames.len += 1;
+        self.frames.arrival = Arrival::Fresh;
+    }
+}
 impl Frames {
+    pub(super) fn prepare_push(
+        &mut self,
+        awaiting: Option<crate::compile::StmtId>,
+    ) -> Result<PreparedFramePush<'_>, HeapFault> {
+        self.len
+            .checked_add(1)
+            .ok_or_else(|| HeapFault::Malformed("frame depth overflow".into()))?;
+        let parent = if awaiting.is_some() {
+            if self.last_mut()?.is_none() {
+                return Err(HeapFault::Malformed("prepared entry has no caller".into()));
+            }
+            self.active
+        } else {
+            None
+        };
+        self.cache
+            .try_reserve(1)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        Ok(PreparedFramePush {
+            frames: self,
+            parent,
+            awaiting,
+        })
+    }
     pub(super) fn logical_context(
         &mut self,
         task: lash_kernel_doc::TaskId,
