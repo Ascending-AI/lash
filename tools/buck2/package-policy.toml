@@ -590,9 +590,11 @@ durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"]
 
 [filegroups.lash-dialect-typescript]
 # The vendored Test262 selection, its harness renderings and main's outcome
-# record, which the kernel dialect's runner reads.
+# record and the stress modes' divergence ratchets, which the kernel
+# dialect's runner reads.
 test262_corpus = { glob = [
     "tests/test262/harness-shim/**",
+    "tests/test262/divergences/**",
     "tests/test262/outcomes/**",
     "tests/test262/sample.tsv",
     "tests/test262/test/**",

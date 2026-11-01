@@ -2210,3 +2210,84 @@ fn numeric_accumulators_do_not_dispatch_list_extension() {
         "a closed numeric accumulator cannot extend a list"
     );
 }
+
+/// The host of a FIG-7589 stress run: [`Console`]'s reads, with every
+/// printed value kept as it was printed.
+#[derive(Default)]
+struct Printer {
+    prints: Vec<Datum>,
+}
+
+impl Host for Printer {
+    fn perform(
+        &mut self,
+        use_: &lash_kernel_value::OperationUse,
+        _: &[Datum],
+        _: &lash_kernel_value::sites::PositionLabel,
+        _: &lash_kernel_value::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        crate::tests::linked::read(use_, 0)
+    }
+
+    fn print(&mut self, value: &Datum) {
+        self.prints.push(value.clone());
+    }
+
+    fn cancel_requested(&mut self) -> bool {
+        false
+    }
+}
+
+/// `source` lowered as a first cell and run over `prepared`, driven as
+/// `drive` says, answering the oldest pending request at each park as
+/// [`run`] does: what a FIG-7589 stress mode compares.
+pub(super) fn stress_observation(
+    source: &str,
+    prepared: &PreparedLibrary,
+    drive: &lash_kernel_conformance::stress::Drive,
+) -> Result<lash_kernel_conformance::stress::Observation, String> {
+    let lowered = lower(source).map_err(|error| error.to_string())?;
+    let program =
+        crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared.clone());
+    let session = Session::default();
+    let start = lash_kernel_vm::CellStart {
+        owner: pages::OWNER,
+        target: lash_kernel_vm::Target::Main,
+        args: Vec::new(),
+        session: None,
+        modes: crate::tests::linked::modes(&program),
+        host: Vec::new(),
+    };
+    let mut host = Printer::default();
+    let mut pending: Vec<Request> = Vec::new();
+    let run = lash_kernel_conformance::stress::drive(
+        &program,
+        BOUNDS,
+        start,
+        &|| Box::new(session.source.clone()),
+        &mut host,
+        drive,
+        &mut |park| {
+            pending.retain(|request| {
+                let Request::Effect(effect) = request;
+                !park
+                    .cancel_requests
+                    .iter()
+                    .any(|cancel| cancel.wait() == effect.wait && !cancel.retains_wait())
+            });
+            pending.extend(park.requests.iter().cloned());
+            if !park.cancel_requests.is_empty() {
+                return Ok(Vec::new());
+            }
+            if pending.is_empty() {
+                return Err("a park with nothing pending".to_string());
+            }
+            Ok(vec![answer(&pending.remove(0))])
+        },
+    )?;
+    lash_kernel_conformance::stress::Observation::of(
+        run,
+        host.prints,
+        Box::new(session.source.clone()),
+    )
+}

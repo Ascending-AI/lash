@@ -25,7 +25,7 @@ jobs:
   test262-full:
     name: Test262 full selection
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     environment: build-cache
     steps:
       - name: Check out repository
@@ -82,6 +82,26 @@ jobs:
             | awk -F '\t' '$1 == "outcome" { print $2 "\t" $3 "\t" $4 }' > "$observed"
           python3 scripts/check_test262_ratchet.py --base HEAD --kernel-outcomes "$observed" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # FIG-7589: the same selection, and the Python corpus, run once plain
+      # and once parked everywhere or on kernel bodies only; the two runs
+      # must agree. A mode action takes up to 25 minutes (2026-11-02:
+      # 1697 s wall for both modes against 756 s for the plain selection),
+      # past the default 300 s action bound. The modes are ignored laws, so neither a merge nor
+      # `kiln test` runs them. Each mode's known divergences are a ratchet
+      # under `divergences/`; a new one fails here.
+      - name: Run the stress modes uncached
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ci/buck2-test.sh test262-stress-modes \
+            --no-test-cache --test_timeout 3600 --test_arg=--ignored --test_arg=--nocapture \
+            //crates/lash-dialect-typescript:test262_kernel__test
+          scripts/ci/buck2-test.sh python-corpus-stress-modes \
+            --no-test-cache --test_arg=--ignored --test_arg=--nocapture \
+            --test_arg=tests::conformance::the_corpus_runs_alike \
+            //crates/lash-dialect-python:lash-dialect-python__unit_test
 
       - name: Remove client credentials
         if: always()

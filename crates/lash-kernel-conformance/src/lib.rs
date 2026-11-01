@@ -14,6 +14,7 @@ pub mod package;
 mod pages;
 mod projection;
 pub mod smith;
+pub mod stress;
 
 pub use case::{
     Case, CaseBounds, Delivery, Environment, Expected, ExpectedEnd, HostAnswer, Observations,
@@ -63,4 +64,4 @@ mod document_fixture;
 #[cfg(feature = "shipped-library")]
 mod installed;
 #[cfg(feature = "shipped-library")]
-pub use installed::installed_functions;
+pub use installed::{installed_bodies, installed_functions};

@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
 
+use lash_kernel_conformance::stress::{Agreement, Mode};
+
 use super::machine::{self, Recorded};
 
 #[derive(Deserialize)]
@@ -191,4 +193,91 @@ fn conditional_functions_keep_their_written_signatures() {
                 .any(|written| written.signature.contains("right"))
         );
     }
+}
+
+/// FIG-7589: every case the corpus records as passing runs alike plain and
+/// in `mode` (end, prints, requests, exact charge, carried session), except
+/// the divergences the mode's ratchet shard names, each of which still
+/// diverges in the field it records.
+fn stress_mode(mode: Mode, shard: &str) {
+    use lash_kernel_conformance::stress::{self, Drive};
+    let manifest: Manifest = serde_json::from_str(include_str!("../../conformance/manifest.json"))
+        .expect("the reviewed admission manifest");
+    let outcomes: BTreeMap<String, Outcome> =
+        serde_json::from_str(include_str!("../../conformance/outcomes.json"))
+            .expect("the per-case outcome ratchet");
+    let plain_library = machine::installed().prepared.clone();
+    let mode_library = match mode {
+        Mode::ParkEverywhere => plain_library.clone(),
+        Mode::BodiesOnly => lash_kernel_vm::PreparedLibrary::with_helpers(
+            std::sync::Arc::new(
+                lash_kernel_conformance::installed_bodies().expect("installed kernel bodies"),
+            ),
+            std::sync::Arc::clone(
+                &lash_kernel_releases::helper_release()
+                    .expect("build helpers")
+                    .helpers,
+            ),
+        ),
+    };
+    let started = std::time::Instant::now();
+    let observations: Vec<(String, Agreement)> = manifest
+        .cases
+        .iter()
+        .map(|case| {
+            let source = case.cell.as_deref().unwrap_or(&case.source);
+            let agreement = if case.status == "admitted" && outcomes[&case.path].status == "pass" {
+                let plain = machine::stress_observation(source, &plain_library, &Drive::Straight)
+                    .unwrap_or_else(|error| panic!("{}: the plain run: {error}", case.path));
+                let drive = match mode {
+                    Mode::ParkEverywhere => Drive::ParkEverywhere {
+                        stops: stress::stops(&case.path, plain.charged),
+                    },
+                    Mode::BodiesOnly => Drive::Straight,
+                };
+                Agreement::of(
+                    &plain,
+                    machine::stress_observation(source, &mode_library, &drive),
+                )
+            } else {
+                Agreement::Skipped
+            };
+            println!("mode\t{}\t{}\t{agreement:?}", mode.name(), case.path);
+            (case.path.clone(), agreement)
+        })
+        .collect();
+    let count = |wanted: fn(&Agreement) -> bool| {
+        observations
+            .iter()
+            .filter(|(_, agreement)| wanted(agreement))
+            .count()
+    };
+    println!(
+        "mode-total\t{}\tagreed={} diverged={} skipped={}\t{:.1}s",
+        mode.name(),
+        count(|agreement| *agreement == Agreement::Agreed),
+        count(|agreement| matches!(agreement, Agreement::Diverged { .. })),
+        count(|agreement| *agreement == Agreement::Skipped),
+        started.elapsed().as_secs_f64()
+    );
+    let problems = stress::ratchet(&observations, &stress::known_divergences(shard));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+#[ignore = "a nightly stress mode: run with --ignored"]
+fn the_corpus_runs_alike_parked_everywhere() {
+    stress_mode(
+        Mode::ParkEverywhere,
+        include_str!("../../conformance/divergences/park-everywhere.tsv"),
+    );
+}
+
+#[test]
+#[ignore = "a nightly stress mode: run with --ignored"]
+fn the_corpus_runs_alike_on_kernel_bodies() {
+    stress_mode(
+        Mode::BodiesOnly,
+        include_str!("../../conformance/divergences/bodies-only.tsv"),
+    );
 }

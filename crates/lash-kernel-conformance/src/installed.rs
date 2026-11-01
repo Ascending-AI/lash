@@ -24,3 +24,25 @@ pub fn installed_functions() -> Result<FunctionRegistry, LibraryError> {
     }
     Ok(registry)
 }
+
+/// [`installed_functions`] with every native that stands beside a kernel
+/// body removed, and no generated plans: each library function a body
+/// defines answers from that body. A native without a body stays, for
+/// nothing else answers it.
+///
+/// # Errors
+/// [`installed_functions`]'s.
+pub fn installed_bodies() -> Result<FunctionRegistry, LibraryError> {
+    let installed = installed_functions()?;
+    let mut registry = lash_kernel_releases::helper_release()?.functions.clone();
+    for (function, registered) in installed.iter() {
+        if let Some(native) = registered.native()
+            && !registered.has_body()
+        {
+            registry
+                .implement(*function, std::sync::Arc::clone(native))
+                .map_err(LibraryError::new)?;
+        }
+    }
+    Ok(registry)
+}

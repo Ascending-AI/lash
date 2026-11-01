@@ -16,14 +16,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lash_dialect_typescript::DiagnosticCode;
+use lash_kernel_conformance::stress::{self, Agreement, Drive, Mode, Observation};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_value::names::Name;
-use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, RunError, Step, Target,
-};
+use lash_kernel_vm::{Bounds, CellStart, End, Host, PreparedLibrary, RunError, Target};
 
 #[path = "../../src/tests/linked.rs"]
 mod linked;
@@ -92,7 +91,10 @@ impl Observed {
 
 /// Runs lowered programs on the production kernel machine.
 pub(crate) fn executor() -> Box<dyn Executor> {
-    Box::new(OnMachine::<KernelMachine>::new(Arc::clone(registry())))
+    Box::new(OnMachine {
+        library: prepared(registry()),
+        drive: Drive::Straight,
+    })
 }
 
 /// All lowering and execution use the same content-addressed definitions.
@@ -102,6 +104,25 @@ fn registry() -> &'static Arc<FunctionRegistry> {
     REGISTRY.get_or_init(|| {
         Arc::new(lash_kernel_conformance::installed_functions().expect("installed package natives"))
     })
+}
+
+/// [`registry`] with every native that stands beside a kernel body removed.
+fn bodies_registry() -> &'static Arc<FunctionRegistry> {
+    static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        Arc::new(lash_kernel_conformance::installed_bodies().expect("installed kernel bodies"))
+    })
+}
+
+fn prepared(registry: &Arc<FunctionRegistry>) -> PreparedLibrary {
+    PreparedLibrary::with_helpers(
+        Arc::clone(registry),
+        Arc::clone(
+            &lash_kernel_releases::helper_release()
+                .expect("build helpers")
+                .helpers,
+        ),
+    )
 }
 
 /// Test262 executes the worker's operation implementations, including their
@@ -117,8 +138,7 @@ fn conformance_registry_installs_the_workers_operation_natives() {
 }
 
 pub(crate) struct Execution {
-    end: End,
-    prints: Vec<Datum>,
+    observed: Observation,
     completed: bool,
 }
 
@@ -126,26 +146,11 @@ pub(crate) trait Executor: Sync {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String>;
 }
 
-/// Runs a document on any implementation of the kernel's machine interface.
-pub(crate) struct OnMachine<M> {
+/// Runs a document on the kernel machine over `library`, driven as `drive`
+/// says.
+pub(crate) struct OnMachine {
     library: PreparedLibrary,
-    machine: std::marker::PhantomData<fn() -> M>,
-}
-
-impl<M: Machine> OnMachine<M> {
-    pub(crate) fn new(registry: Arc<FunctionRegistry>) -> Self {
-        Self {
-            library: PreparedLibrary::with_helpers(
-                registry,
-                Arc::clone(
-                    &lash_kernel_releases::helper_release()
-                        .expect("build helpers")
-                        .helpers,
-                ),
-            ),
-            machine: std::marker::PhantomData,
-        }
-    }
+    drive: Drive,
 }
 
 /// The host of a conformance run: it answers no effect, and its clock and
@@ -175,7 +180,7 @@ impl Host for TestHost {
     }
 }
 
-impl<M: Machine> Executor for OnMachine<M> {
+impl Executor for OnMachine {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = linked::program(Arc::clone(lowered.document.shared()), self.library.clone());
         let modes = pages::modes(&program);
@@ -188,50 +193,44 @@ impl<M: Machine> Executor for OnMachine<M> {
             session: None,
             host: Vec::new(),
         };
-        let mut machine = M::start(program, BOUNDS, start, Box::new(session.source.clone()))
-            .map_err(|error| error.to_string())?;
         let mut host = TestHost::default();
         // The value the program's `finish` call ended it with.
         let mut finished_with = None;
-        loop {
-            match machine
-                .run(&mut host, u64::MAX)
-                .map_err(|error| error.to_string())?
-            {
-                Step::Ended(mut end) => {
-                    if let (End::Finished(finished), Some(value)) = (&mut end, finished_with) {
-                        finished.result = value;
-                    }
-                    let completed = match &end {
-                        End::Finished(finished) => completed(finished, &session.source)?,
-                        _ => false,
-                    };
-                    return Ok(Execution {
-                        end,
-                        prints: host.prints,
-                        completed,
-                    });
+        let mut run = stress::drive(
+            &program,
+            BOUNDS,
+            start,
+            &|| Box::new(session.source.clone()),
+            &mut host,
+            &self.drive,
+            &mut |park| match park.requests.as_slice() {
+                [lash_kernel_vm::Request::Effect(effect)]
+                    if linked::operation(&effect.use_).as_str() == "host.finish"
+                        && finished_with.is_none() =>
+                {
+                    finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
+                    Ok(vec![(
+                        effect.wait,
+                        lash_kernel_vm::Outcome::Completed(Datum::Null),
+                    )])
                 }
-                Step::Slice => {}
-                Step::Parked(park) => match park.requests.as_slice() {
-                    [lash_kernel_vm::Request::Effect(effect)]
-                        if linked::operation(&effect.use_).as_str() == "host.finish"
-                            && finished_with.is_none() =>
-                    {
-                        finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
-                        machine
-                            .deliver(effect.wait, lash_kernel_vm::Outcome::Completed(Datum::Null))
-                            .map_err(|error| error.to_string())?;
-                    }
-                    requests => {
-                        return Err(format!(
-                            "the program waits on {} request(s); the Test262 host answers only `host.finish`",
-                            requests.len()
-                        ));
-                    }
-                },
-            }
+                requests => Err(format!(
+                    "the program waits on {} request(s); the Test262 host answers only `host.finish`",
+                    requests.len()
+                )),
+            },
+        )?;
+        if let (End::Finished(finished), Some(value)) = (&mut run.end, finished_with) {
+            finished.result = value;
         }
+        let completed = match &run.end {
+            End::Finished(finished) => completed(finished, &session.source)?,
+            _ => false,
+        };
+        Ok(Execution {
+            observed: Observation::of(run, host.prints, Box::new(session.source.clone()))?,
+            completed,
+        })
     }
 }
 
@@ -325,12 +324,9 @@ fn completed(finished: &lash_kernel_vm::Finished, source: &pages::Source) -> Res
     ))
 }
 
-fn judge(execution: Execution, meta: &Metadata) -> Observed {
-    let Execution {
-        end,
-        prints,
-        completed,
-    } = execution;
+fn judge(execution: &Execution, meta: &Metadata) -> Observed {
+    let Observation { end, prints, .. } = &execution.observed;
+    let completed = execution.completed;
     if meta.flags.contains(&TestFlag::Async) {
         // doneprintHandle.js is Test262's completion protocol. A successful
         // script end without $DONE, a failure, or repeated completion fails.
@@ -349,7 +345,7 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
     }
     match (end, &meta.negative) {
         (End::Error(RunError::Uncaught { error, .. }), Some(negative))
-            if thrown_name(&error).as_deref() == Some(negative.error_type.as_str()) =>
+            if thrown_name(error).as_deref() == Some(negative.error_type.as_str()) =>
         {
             Observed::Pass
         }
@@ -379,8 +375,9 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     )
 }
 
-/// Lowers and runs one vendored test, `test/...`.
-pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
+/// Lowers one vendored test, `test/...`, for a run, or gives the
+/// observation that settles it without one.
+fn prepare(relative: &str) -> Result<(Lowered, Metadata), Observed> {
     let path = data_path(relative);
     let meta = metadata::read_metadata(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
     if let Some(include) = meta
@@ -391,12 +388,12 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
         // The test's own body may be refused whatever the include holds;
         // that refusal is the more exact observation.
         let body = source_without_unshimmed(&path, &meta, meta.negative.is_none());
-        return match lower(&body) {
+        return Err(match lower(&body) {
             Err(diagnostic) if diagnostic.code() != DiagnosticCode::UnknownBinding => {
                 Observed::Refused(diagnostic.code().as_str().to_string(), diagnostic.message)
             }
             _ => Observed::Harness(include.to_string()),
-        };
+        });
     }
     let parse_negative = meta
         .negative
@@ -407,22 +404,106 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
     let lowered = match lower(&source) {
         Ok(lowered) => lowered,
         Err(diagnostic) if parse_negative && EARLY_ERROR_CODES.contains(&diagnostic.code()) => {
-            return Observed::Pass;
+            return Err(Observed::Pass);
         }
         Err(diagnostic) => {
-            return Observed::Refused(diagnostic.code().as_str().to_string(), diagnostic.message);
+            return Err(Observed::Refused(
+                diagnostic.code().as_str().to_string(),
+                diagnostic.message,
+            ));
         }
     };
     if let Some(negative) = meta.negative.as_ref().filter(|_| parse_negative) {
-        return Observed::Diverged(format!(
+        return Err(Observed::Diverged(format!(
             "expected an early {} but the program lowered",
             negative.error_type.as_str()
-        ));
+        )));
     }
+    Ok((lowered, meta))
+}
+
+/// Lowers and runs one vendored test, `test/...`.
+pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
+    let (lowered, meta) = match prepare(relative) {
+        Ok(prepared) => prepared,
+        Err(observed) => return observed,
+    };
     match executor.run(&lowered) {
-        Ok(end) => judge(end, &meta),
+        Ok(execution) => judge(&execution, &meta),
         Err(problem) => Observed::Diverged(problem),
     }
+}
+
+/// Whole-corpus stress modes (FIG-7589): each case runs plain and in the
+/// mode, and the two runs must agree on their end, prints, requests, exact
+/// charge and carried session; a case whose plain run does not pass is
+/// skipped, for the mode judges agreement, not conformance.
+///
+/// Park everywhere does not seal at every unit: a cold reopen per unit of
+/// every case costs far more than three plain passes. It reopens at every
+/// park and at the charge points [`stress::stops`] draws for the case: its
+/// first unit, its last, and eight more from a hash of its path.
+/// Runs `relative` plain and in `mode`, and compares the runs.
+pub(crate) fn compare(relative: &str, mode: Mode) -> Agreement {
+    let Ok((lowered, meta)) = prepare(relative) else {
+        return Agreement::Skipped;
+    };
+    let plain = match executor().run(&lowered) {
+        Ok(plain) if judge(&plain, &meta) == Observed::Pass => plain,
+        _ => return Agreement::Skipped,
+    };
+    let in_mode = match mode {
+        Mode::ParkEverywhere => OnMachine {
+            library: prepared(registry()),
+            drive: Drive::ParkEverywhere {
+                stops: stress::stops(relative, plain.observed.charged),
+            },
+        },
+        Mode::BodiesOnly => OnMachine {
+            library: prepared(bodies_registry()),
+            drive: Drive::Straight,
+        },
+    };
+    Agreement::of(
+        &plain.observed,
+        in_mode.run(&lowered).map(|execution| execution.observed),
+    )
+}
+
+/// `mode`'s ratchet shard, next to the outcome record.
+pub(crate) fn known_divergences(mode: Mode) -> BTreeMap<String, (String, String)> {
+    let shard = data_path("divergences").join(format!("{}.tsv", mode.name()));
+    stress::known_divergences(
+        &std::fs::read_to_string(&shard)
+            .unwrap_or_else(|error| panic!("read {}: {error}", shard.display())),
+    )
+}
+
+/// One line per directory: how many of its cases agreed, diverged and were
+/// skipped in a mode, then the divergences by first differing field.
+pub(crate) fn mode_report(observations: &[(String, Agreement)]) -> String {
+    let mut rows: BTreeMap<String, [usize; 3]> = BTreeMap::new();
+    let mut fields: BTreeMap<&str, usize> = BTreeMap::new();
+    for (path, agreement) in observations {
+        let row = rows.entry(directory(path)).or_default();
+        match agreement {
+            Agreement::Agreed => row[0] += 1,
+            Agreement::Diverged { field, .. } => {
+                row[1] += 1;
+                *fields.entry(field).or_default() += 1;
+            }
+            Agreement::Skipped => row[2] += 1,
+        }
+    }
+    let mut out = String::from("directory\tagreed\tdiverged\tskipped\n");
+    for (directory, [agreed, diverged, skipped]) in &rows {
+        writeln!(out, "{directory}\t{agreed}\t{diverged}\t{skipped}").expect("write to a string");
+    }
+    out.push_str("\nfirst-divergence\tcount\n");
+    for (field, count) in fields {
+        writeln!(out, "{field}\t{count}").expect("write to a string");
+    }
+    out
 }
 
 /// The class main's record holds for every selected test: `pass`,
@@ -576,6 +657,7 @@ fn execute(source: &str) -> End {
     executor()
         .run(&lowered)
         .expect("the kernel executes the witness")
+        .observed
         .end
 }
 
@@ -870,6 +952,6 @@ fn async_tests_are_judged_by_done_completion() {
             validated: false,
         };
         let end = executor().run(&lowered).unwrap();
-        assert_eq!(judge(end, &meta) == Observed::Pass, expected, "{prints}");
+        assert_eq!(judge(&end, &meta) == Observed::Pass, expected, "{prints}");
     }
 }

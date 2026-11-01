@@ -154,6 +154,7 @@ filegroup(
     name = "test262_corpus",
     srcs = glob([
         "tests/test262/harness-shim/**",
+        "tests/test262/divergences/**",
         "tests/test262/outcomes/**",
         "tests/test262/sample.tsv",
         "tests/test262/test/**",

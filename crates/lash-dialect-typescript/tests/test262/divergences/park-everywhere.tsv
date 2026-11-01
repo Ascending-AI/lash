@@ -1,0 +1,14 @@
+# FIG-7589: the park-everywhere stress mode's known divergences, a ratchet that only shrinks.
+# path	first differing field	ticket
+test/built-ins/Array/prototype/forEach/15.4.4.18-4-12.js	run	FIG-7591
+test/built-ins/Array/prototype/forEach/15.4.4.18-5-23.js	run	FIG-7591
+test/built-ins/Array/prototype/forEach/15.4.4.18-7-c-ii-10.js	run	FIG-7591
+test/built-ins/Array/prototype/forEach/15.4.4.18-8-13.js	run	FIG-7591
+test/built-ins/Array/prototype/map/create-non-array-invalid-len.js	run	FIG-7591
+test/built-ins/Array/prototype/some/15.4.4.17-7-c-iii-11.js	run	FIG-7591
+test/built-ins/Date/prototype/setMinutes/this-value-non-date.js	run	FIG-7591
+test/built-ins/String/prototype/match/S15.5.4.10_A2_T12.js	run	FIG-7591
+test/language/expressions/assignment/dstr/array-elem-init-assignment.js	run	FIG-7591
+test/language/expressions/assignment/dstr/array-rest-nested-obj-undefined-hole.js	run	FIG-7591
+test/language/statements/const/dstr/obj-ptrn-id-init-skipped.js	run	FIG-7591
+test/language/statements/variable/dstr/obj-ptrn-id-init-skipped.js	run	FIG-7591
