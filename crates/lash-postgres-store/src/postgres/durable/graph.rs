@@ -203,180 +203,47 @@ lash_store_sql::statements! {
         peel_plan = "SELECT * FROM lash_graph_peel_plan(?1, ?2, ?3)";
         peel_delete = "SELECT lash_graph_peel_delete(?1)";
 
-        /// Execution `?1`'s root, with every blob it reaches along stored
-        /// edges and their bytes, in one statement: the root column (no row
-        /// when the owner is gone), then each node, short of what a
-        /// persistent-heap page reaches (envelope kind 1000 to 1999, a
-        /// two-byte varint after the magic): the page is a leaf.
-        /// Each `hydrate_*` statement is this one over its own root source.
-        hydrate_exec = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM exec_snapshots WHERE exec_key = ?1),
+        /// The root owner `?1` (its kind) names, with every blob it reaches
+        /// along stored edges and their bytes, in one statement: the root
+        /// column (no row, or a null one, when the owner is gone), then each
+        /// node. Owner keys are `?2` to `?4` as text, `?5` and `?6` as
+        /// integers and `?7` as bytes, as each kind's source names them. A
+        /// walk stops at what a persistent-heap page reaches (envelope kind
+        /// 1000 to 1999, a two-byte varint after the magic) unless `?8`
+        /// asks for the whole closure: the page is a leaf.
+        hydrate = "WITH RECURSIVE root AS (
+                 SELECT root_ref AS hash FROM exec_snapshots WHERE ?1 = 'exec' AND exec_key = ?2
+                 UNION ALL SELECT record_ref FROM run_records
+                     WHERE ?1 = 'run_fact' AND owner_key = ?2 AND run_seq = ?5 AND ordinal = ?6
+                 UNION ALL SELECT decision_ref FROM tool_calls
+                     WHERE ?1 = 'tool_call_decision' AND execution_owner = ?2 AND call_id = ?3
+                 UNION ALL SELECT body_ref FROM tool_calls
+                     WHERE ?1 = 'tool_call_answer' AND execution_owner = ?2 AND call_id = ?3
+                 UNION ALL SELECT record_ref FROM model_call_records
+                     WHERE ?1 = 'model_call' AND session_id = ?2 AND run = ?3 AND call = ?4
+                       AND record_ref IS NOT NULL
+                 UNION ALL SELECT admission_ref FROM effect_admissions
+                     WHERE ?1 = 'admission' AND exec_key = ?2 AND effect_id = ?7
+                 UNION ALL SELECT checkpoint_ref FROM turn_phases
+                     WHERE ?1 = 'phase' AND session_id = ?2 AND run = ?3
+                 UNION ALL SELECT working_execution_ref FROM turn_phases
+                     WHERE ?1 = 'working' AND session_id = ?2 AND run = ?3
+                 UNION ALL SELECT answer_ref FROM turn_phases
+                     WHERE ?1 = 'answer' AND session_id = ?2 AND run = ?3
+                 UNION ALL SELECT terminal_transcript_ref FROM session_runs
+                     WHERE ?1 = 'transcript' AND session_id = ?2 AND run = ?3
+                 UNION ALL SELECT graph_root_ref FROM turn_namespaces
+                     WHERE ?1 = 'namespace' AND session_id = ?2 AND run = ?3 AND plugin = ?4
+                 UNION ALL SELECT checkpoint_ref FROM session_revisions
+                     WHERE ?1 = 'revision' AND session_id = ?2 AND head_revision = ?5
+                 UNION ALL SELECT admission_base_checkpoint_ref FROM session_meta
+                     WHERE ?1 = 'admission_base' AND session_id = ?2
+                 UNION ALL SELECT graph_ref FROM lash_vm_artifacts
+                     WHERE ?1 = 'artifact' AND namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Owner `?1`'s run `?2` fact `?3`'s node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_run_fact = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM run_records WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        hydrate_tool_call_decision = "WITH RECURSIVE root AS (SELECT decision_ref AS hash FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        hydrate_tool_call_answer = "WITH RECURSIVE root AS (SELECT body_ref AS hash FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref IS NOT NULL),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Effect `?2` of execution `?1`'s Admission node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_admission = "WITH RECURSIVE root AS (SELECT admission_ref AS hash FROM effect_admissions WHERE exec_key = ?1 AND effect_id = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?2` of session `?1`'s PhaseRoot, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_phase = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?2` of session `?1`'s working execution, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_working = "WITH RECURSIVE root AS (SELECT working_execution_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?2` of session `?1`'s receipt, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_answer = "WITH RECURSIVE root AS (SELECT answer_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?2` of session `?1`'s transcript, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_transcript = "WITH RECURSIVE root AS (SELECT terminal_transcript_ref AS hash FROM session_runs WHERE session_id = ?1 AND run = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Plugin `?3`'s namespace values for run `?2` of session `?1`, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_namespace = "WITH RECURSIVE root AS (SELECT graph_root_ref AS hash FROM turn_namespaces WHERE session_id = ?1 AND run = ?2 AND plugin = ?3),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Session `?1`'s revision `?2`'s checkpoint, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_revision = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Session `?1`'s admission base, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_admission_base = "WITH RECURSIVE root AS (SELECT admission_base_checkpoint_ref AS hash FROM session_meta WHERE session_id = ?1),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Artifact `?2` of namespace `?1`'s graph node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_artifact = "WITH RECURSIVE root AS (SELECT graph_ref AS hash FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2 AND storage_kind = 1),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE CASE
+                 WHERE ?8::boolean OR CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -703,71 +570,125 @@ type HydrateRow = (
 );
 
 /// The one statement that hydrates `owner`'s root on `connection`: its root
-/// column and every blob it reaches.
+/// column and every blob it reaches. Each kind names its source by its key
+/// columns; a model answer and a run transcript are read as whole closures.
 async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answer<Vec<HydrateRow>> {
-    let sql = &SQL.postgres;
-    let query = |statement| crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement);
-    let bound = match owner {
-        RootOwner::Exec(exec) => query(sql.hydrate_exec.sql()).bind(exec.stored()),
+    let mut text: [Option<String>; 3] = [None, None, None];
+    let mut numbers: [Option<i64>; 2] = [None, None];
+    let mut bytes = None;
+    let mut whole = false;
+    let kind = match owner {
+        RootOwner::Exec(exec) => {
+            text[0] = Some(exec.stored());
+            "exec"
+        }
         RootOwner::RunFact {
             owner,
             run,
             ordinal,
-        } => query(sql.hydrate_run_fact.sql())
-            .bind(owner.stored())
-            .bind(number::<i64>(run.0)?)
-            .bind(number::<i64>(ordinal.0)?),
-        RootOwner::ToolCall { owner, call, part } => query(match part {
-            lash_durable::domain::tool_calls::ToolCallRoot::Decision => {
-                sql.hydrate_tool_call_decision.sql()
+        } => {
+            text[0] = Some(owner.stored());
+            numbers = [Some(number(run.0)?), Some(number(ordinal.0)?)];
+            "run_fact"
+        }
+        RootOwner::ToolCall { owner, call, part } => {
+            text[0] = Some(owner.stored());
+            text[1] = Some(call.as_str().to_owned());
+            match part {
+                lash_durable::domain::tool_calls::ToolCallRoot::Decision => "tool_call_decision",
+                lash_durable::domain::tool_calls::ToolCallRoot::Answer => "tool_call_answer",
             }
-            lash_durable::domain::tool_calls::ToolCallRoot::Answer => {
-                sql.hydrate_tool_call_answer.sql()
-            }
-        })
-        .bind(owner.stored())
-        .bind(call.as_str()),
-        RootOwner::ModelCall(key) => query(sql.hydrate_model_call.sql())
-            .bind(key.session.as_str())
-            .bind(key.call.owner_column())
-            .bind(key.call.call_column()),
-        RootOwner::EffectAdmission { exec, effect } => query(sql.hydrate_admission.sql())
-            .bind(exec.stored())
-            .bind(effect.0.to_vec()),
-        RootOwner::TurnPhase { session, run } => query(sql.hydrate_phase.sql())
-            .bind(session.as_str())
-            .bind(run.as_str()),
-        RootOwner::WorkingExecution { session, run } => query(sql.hydrate_working.sql())
-            .bind(session.as_str())
-            .bind(run.as_str()),
-        RootOwner::ModelAnswer { session, run } => query(sql.hydrate_answer.sql())
-            .bind(session.as_str())
-            .bind(run.as_str()),
-        RootOwner::RunTranscript { session, run } => query(sql.hydrate_transcript.sql())
-            .bind(session.as_str())
-            .bind(run.as_str()),
+        }
+        RootOwner::ModelCall(key) => {
+            text = [
+                Some(key.session.as_str().to_owned()),
+                Some(key.call.owner_column()),
+                Some(key.call.call_column()),
+            ];
+            "model_call"
+        }
+        RootOwner::EffectAdmission { exec, effect } => {
+            text[0] = Some(exec.stored());
+            bytes = Some(effect.0.to_vec());
+            "admission"
+        }
+        RootOwner::TurnPhase { session, run } => {
+            text = [
+                Some(session.as_str().to_owned()),
+                Some(run.as_str().to_owned()),
+                None,
+            ];
+            "phase"
+        }
+        RootOwner::WorkingExecution { session, run } => {
+            text = [
+                Some(session.as_str().to_owned()),
+                Some(run.as_str().to_owned()),
+                None,
+            ];
+            "working"
+        }
+        RootOwner::ModelAnswer { session, run } => {
+            text = [
+                Some(session.as_str().to_owned()),
+                Some(run.as_str().to_owned()),
+                None,
+            ];
+            whole = true;
+            "answer"
+        }
+        RootOwner::RunTranscript { session, run } => {
+            text = [
+                Some(session.as_str().to_owned()),
+                Some(run.as_str().to_owned()),
+                None,
+            ];
+            whole = true;
+            "transcript"
+        }
         RootOwner::TurnNamespace {
             session,
             run,
             plugin,
-        } => query(sql.hydrate_namespace.sql())
-            .bind(session.as_str())
-            .bind(run.as_str())
-            .bind(plugin.as_str()),
-        RootOwner::SessionRevision { session, revision } => query(sql.hydrate_revision.sql())
-            .bind(session.as_str())
-            .bind(number::<i64>(*revision)?),
+        } => {
+            text = [
+                Some(session.as_str().to_owned()),
+                Some(run.as_str().to_owned()),
+                Some(plugin.as_str().to_owned()),
+            ];
+            "namespace"
+        }
+        RootOwner::SessionRevision { session, revision } => {
+            text[0] = Some(session.as_str().to_owned());
+            numbers[0] = Some(number(*revision)?);
+            "revision"
+        }
         RootOwner::SessionAdmissionBase { session } => {
-            query(sql.hydrate_admission_base.sql()).bind(session.as_str())
+            text[0] = Some(session.as_str().to_owned());
+            "admission_base"
         }
         RootOwner::ArtifactBridge {
             namespace,
             artifact,
-        } => query(sql.hydrate_artifact.sql())
-            .bind(namespace.as_str())
-            .bind(artifact.as_str()),
+        } => {
+            text = [
+                Some(namespace.as_str().to_owned()),
+                Some(artifact.as_str().to_owned()),
+                None,
+            ];
+            "artifact"
+        }
     };
-    bound
+    let [first, second, third] = text;
+    crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(SQL.postgres.hydrate.sql())
+        .bind(kind)
+        .bind(first)
+        .bind(second)
+        .bind(third)
+        .bind(numbers[0])
+        .bind(numbers[1])
+        .bind(bytes)
+        .bind(whole)
         .fetch_all(crate::observed_sql::executor(connection))
         .await
         .map_err(db)
