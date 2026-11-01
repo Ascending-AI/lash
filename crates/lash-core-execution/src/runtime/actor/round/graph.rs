@@ -939,33 +939,44 @@ pub fn stage_material<T: NamesMaterial>(
     staging: &mut GraphStaging,
     material: &Material<T>,
 ) -> Result<MaterialNode, GraphRefusal> {
+    stage_material_with_body(staging, material).map(|(node, _)| node)
+}
+
+/// Stage a material and carry its canonical call body to the directory writer.
+/// This transient identity is not part of the stored material representation.
+pub(super) fn stage_material_with_body<T: NamesMaterial>(
+    staging: &mut GraphStaging,
+    material: &Material<T>,
+) -> Result<(MaterialNode, Option<NodeId>), GraphRefusal> {
     if let Some(output) = material.typed::<ProcessReadOutput>() {
-        return output.stage(staging).map(MaterialNode::ProcessReadOutput);
+        return output
+            .stage(staging)
+            .map(|node| (MaterialNode::ProcessReadOutput(node), None));
     }
     if let Some(record) = material.typed::<ArchivalCall>() {
         return CallBody {
             record: record.0.clone(),
         }
         .stage(staging)
-        .map(MaterialNode::CallRecord);
+        .map(|node| (MaterialNode::CallRecord(node), Some(node)));
     }
     if let Some(completed) = material.typed::<CompletedCall>() {
         let outcome = CallOutcome::of(completed, None, 0);
-        let node = outcome.stage(staging)?;
+        let (node, body) = outcome.stage_with_body(staging)?;
         // The completion's digest was minted over its value: the outcome
         // stands for it only when it gives back that value, field for field
         // ([`CallOutcome::completed`]). One that does not keeps its text.
         let mut decoder = GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32));
         let staged = CallOutcome::load(&mut decoder, node)?;
         if staged == outcome && staged.presented().ok().as_ref() == Some(&completed.model_return) {
-            return Ok(MaterialNode::CallPayload(node));
+            return Ok((MaterialNode::CallPayload(node), Some(body)));
         }
     }
     let text = material.payload();
     let node = stage_value(staging, &serde_json::Value::String(text.to_owned()))?;
     let mut decoder = GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32));
     match load_value(&mut decoder, node.node())? {
-        serde_json::Value::String(staged) if staged == text => Ok(node),
+        serde_json::Value::String(staged) if staged == text => Ok((node, None)),
         _ => Err(GraphRefusal::PublicationMismatch),
     }
 }

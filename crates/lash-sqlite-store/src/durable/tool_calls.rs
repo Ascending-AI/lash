@@ -57,6 +57,11 @@ pub(super) fn apply(
     _commit: &Committing<'_>,
     write: &ToolCallWrite,
 ) -> Answer<()> {
+    if let ToolCallWrite::Answer { answer, .. } | ToolCallWrite::Complete { answer, .. } = write
+        && !answer.valid()
+    {
+        return Ok(Err(corrupt("tool call", "settlement and body disagree")));
+    }
     let changed = match write {
         ToolCallWrite::Expire { owner } => {
             for root in delete_owner(tx, owner)? {

@@ -41,6 +41,9 @@ fn decode(selected: &ToolCalls) -> Result<Vec<CallRead>, DurableError> {
                     decision: row.decision,
                 });
             };
+            if !answer.valid() {
+                return Err(corrupt("a call settlement and its body disagree"));
+            }
             let record = answer
                 .body
                 .map(|body| {

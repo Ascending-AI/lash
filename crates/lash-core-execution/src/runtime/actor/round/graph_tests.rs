@@ -380,7 +380,11 @@ fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
         Material::journal_local(owner(), MaterialRole::AttemptOutput, text.clone()).reference(),
         "the typed digest is the text digest"
     );
-    let material = stage_material(&mut staged, &typed).unwrap();
+    let (material, staged_body) = stage_material_with_body(&mut staged, &typed).unwrap();
+    let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
+    let expected_body = CallOutcome::body_node(&mut decoder, material.node()).unwrap();
+    assert_eq!(staged_body, Some(expected_body));
+    assert_eq!(stage_material(&mut staged, &typed).unwrap(), material);
     assert_eq!(
         material,
         MaterialNode::CallPayload(CallOutcome::of(&call, None, 0).stage(&mut staged).unwrap()),

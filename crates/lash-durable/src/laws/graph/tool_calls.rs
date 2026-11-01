@@ -69,7 +69,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         call: control.clone(),
         fact: control_root,
         answer: ToolCallAnswer {
-            outcome: ToolCallSettlement::execution(AttemptOutcome::Interrupted),
+            outcome: ToolCallSettlement::Materialized(ToolCallDecision::Final),
             body: Some(control_root),
         },
     };
@@ -95,6 +95,21 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         vec![DomainWrite::ToolCall(complete.clone())],
     )
     .await?;
+    let mut malformed = complete.clone();
+    if let ToolCallWrite::Complete { answer, .. } = &mut malformed {
+        answer.body = None;
+    }
+    ensure!(
+        owner_commit(
+            tier,
+            &owner,
+            BTreeMap::new(),
+            vec![DomainWrite::ToolCall(malformed)]
+        )
+        .await
+        .is_err(),
+        "a materialized settlement committed without its canonical body"
+    );
     let mut conflicting = complete;
     if let ToolCallWrite::Complete { answer, .. } = &mut conflicting {
         answer.body = Some(calls[0].1);

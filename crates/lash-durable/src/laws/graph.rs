@@ -968,8 +968,8 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                         owner: facts.clone(),
                         call,
                         answer: ToolCallAnswer {
-                            outcome: crate::domain::tool_calls::ToolCallSettlement::execution(
-                                lash_core_store::tool_run::AttemptOutcome::Interrupted,
+                            outcome: crate::domain::tool_calls::ToolCallSettlement::Materialized(
+                                ToolCallDecision::Final,
                             ),
                             body: Some(root),
                         },

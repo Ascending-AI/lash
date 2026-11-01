@@ -60,6 +60,11 @@ pub(super) static COMPLETE: Entry = Entry::new(
 pub(super) fn steps(_epoch: Epoch, write: &ToolCallWrite) -> Result<Vec<Step>, DurableError> {
     let number =
         |value| i64::try_from(value).map_err(|_| corrupt("tool call ordinal", "out of range"));
+    if let ToolCallWrite::Answer { answer, .. } | ToolCallWrite::Complete { answer, .. } = write
+        && !answer.valid()
+    {
+        return Err(corrupt("tool call", "settlement and body disagree"));
+    }
     let (entry, values) = match write {
         ToolCallWrite::Expire { .. } => return Ok(Vec::new()),
         ToolCallWrite::Admit {

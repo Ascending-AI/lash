@@ -489,6 +489,13 @@ impl ActorTx {
                 && held_call == call
                 && answer.body.is_none()
             {
+                let decision = if answer.cancelled() {
+                    crate::domain::ToolCallDecision::Cancel
+                } else {
+                    crate::domain::ToolCallDecision::Final
+                };
+                answer.outcome =
+                    crate::domain::tool_calls::ToolCallSettlement::Materialized(decision);
                 answer.body = Some(body);
                 return true;
             }

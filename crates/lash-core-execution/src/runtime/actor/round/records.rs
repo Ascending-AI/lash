@@ -109,12 +109,12 @@ impl Record {
 fn settled_fact(
     staging: &mut GraphStaging,
     output: &SettledOutput,
-) -> Result<(SettledFact, bool), GraphRefusal> {
+) -> Result<(SettledFact, bool, Option<NodeId>), GraphRefusal> {
     fn staged<T: NamesMaterial>(
         staging: &mut GraphStaging,
         material: &Material<T>,
-    ) -> Result<(MaterialNode, bool), GraphRefusal> {
-        let node = graph::stage_material(staging, material)?;
+    ) -> Result<(MaterialNode, bool, Option<NodeId>), GraphRefusal> {
+        let (node, body) = graph::stage_material_with_body(staging, material)?;
         let held = match node {
             MaterialNode::CallPayload(_) => material.typed::<CompletedCall>().is_some(),
             MaterialNode::CallRecord(_) => material.typed::<graph::ArchivalCall>().is_some(),
@@ -124,9 +124,9 @@ fn settled_fact(
             MaterialNode::Value(_) => material.holds_text(),
             MaterialNode::Outcome(_) => false,
         };
-        Ok((node, held))
+        Ok((node, held, body))
     }
-    let (material, held) = match output {
+    let (material, held, body) = match output {
         SettledOutput::Completed(material) => staged(staging, material)?,
         SettledOutput::Failed(material) => staged(staging, material)?,
         SettledOutput::Waiting(material) => staged(staging, material)?,
@@ -139,6 +139,7 @@ fn settled_fact(
                     material: None,
                 },
                 true,
+                None,
             ));
         }
     };
@@ -148,6 +149,7 @@ fn settled_fact(
             material: Some(material),
         },
         held,
+        body,
     ))
 }
 
@@ -156,7 +158,8 @@ fn settled_fact(
 fn stage(
     staging: &mut GraphStaging,
     record: &Record,
-) -> Result<(NodeId, bool, Option<MaterialNode>), GraphRefusal> {
+) -> Result<(NodeId, bool, Option<MaterialNode>, Option<NodeId>), GraphRefusal> {
+    let mut call_body = None;
     let (fact, held) = match record {
         Record::Admit(body) if body.admissions.is_empty() => (
             RoundFact::Admit {
@@ -190,7 +193,7 @@ fn stage(
             true,
         ),
         Record::Wait(body) => {
-            let (output, held) = settled_fact(staging, &body.output)?;
+            let (output, held, _) = settled_fact(staging, &body.output)?;
             (
                 RoundFact::Wait {
                     start: body.start,
@@ -200,7 +203,8 @@ fn stage(
             )
         }
         Record::Outcome(body) | Record::FinalOutcome(body) => {
-            let (output, held) = settled_fact(staging, &body.output)?;
+            let (output, held, body_node) = settled_fact(staging, &body.output)?;
+            call_body = body_node;
             let fact = if matches!(record, Record::FinalOutcome(_)) {
                 RoundFact::FinalOutcome {
                     start: body.start,
@@ -226,7 +230,7 @@ fn stage(
             )
         }
         Record::Retry(body) => {
-            let (output, held) = settled_fact(staging, &body.output)?;
+            let (output, held, _) = settled_fact(staging, &body.output)?;
             (
                 RoundFact::Retry {
                     start: body.start,
@@ -274,7 +278,7 @@ fn stage(
         && GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32))
             .decode::<RoundFact>(node, NodeKind::ROUND_FACT)
             .is_ok_and(|read| read == fact);
-    Ok((node, held, material))
+    Ok((node, held, material, call_body))
 }
 
 /// `row`'s body, read from `facts`: refused unless its RoundFact is of the
@@ -460,7 +464,7 @@ fn append_held(
         reason = "a fact's typed body always encodes, and an unbounded staging area places \
                   every value it holds"
     )]
-    let (node, held, material) = stage(&mut staging, record).expect("a run fact stages");
+    let (node, held, material, call_body) = stage(&mut staging, record).expect("a run fact stages");
     if let Some(call) = call {
         use lash_durable::domain::{ToolCallAnswer, ToolCallDecision, ToolCallWrite};
         let decision = match record {
@@ -477,21 +481,15 @@ fn append_held(
             }));
         }
         if let Record::Outcome(body) | Record::FinalOutcome(body) = record {
-            let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 32));
             let body_node = match material {
-                Some(MaterialNode::CallRecord(node)) => Some(node),
-                Some(MaterialNode::Outcome(node) | MaterialNode::CallPayload(node)) =>
-                {
-                    #[expect(
-                        clippy::expect_used,
-                        reason = "a staged outcome owns its archival body"
-                    )]
-                    Some(
-                        graph::CallOutcome::body_node(&mut decoder, node)
-                            .expect("staged call body"),
-                    )
-                }
+                Some(
+                    MaterialNode::CallRecord(_)
+                    | MaterialNode::Outcome(_)
+                    | MaterialNode::CallPayload(_),
+                ) => call_body,
                 Some(MaterialNode::ProcessReadOutput(node)) => {
+                    let mut decoder =
+                        GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 32));
                     #[expect(
                         clippy::expect_used,
                         reason = "the process output and reads were just staged"
@@ -521,11 +519,19 @@ fn append_held(
                 }
                 Some(MaterialNode::Value(_)) | None => None,
             };
-            let answer = ToolCallAnswer {
-                outcome: lash_durable::domain::tool_calls::ToolCallSettlement::execution(
-                    body.output.outcome(),
-                ),
-                body: body_node,
+            let answer = if let Some(body_node) = body_node {
+                ToolCallAnswer {
+                    outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Materialized(
+                        if matches!(body.output, SettledOutput::Cancelled { .. }) {
+                            ToolCallDecision::Cancel
+                        } else {
+                            ToolCallDecision::Final
+                        },
+                    ),
+                    body: Some(body_node),
+                }
+            } else {
+                ToolCallAnswer::execution(body.output.outcome(), None)
             };
             tx.write(DomainWrite::ToolCall(
                 if matches!(record, Record::FinalOutcome(_)) {

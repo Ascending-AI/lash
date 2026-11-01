@@ -70,7 +70,7 @@ pub fn request_owner(
 }
 
 /// The committed winner, before its protected work necessarily finishes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ToolCallDecision {
     Final,
     Cancel,
@@ -86,6 +86,8 @@ pub struct ToolCallAnswer {
 /// A recorded execution terminal or a caller-owned read saved without an attempt.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ToolCallSettlement {
+    /// The canonical body holds the answer; only its winner is needed here.
+    Materialized(ToolCallDecision),
     Execution(Box<lash_core_store::tool_run::AttemptOutcome>),
     Read,
 }
@@ -98,9 +100,49 @@ impl ToolCallSettlement {
 }
 
 impl ToolCallAnswer {
+    /// Body-free terminals retain their typed payload. Materialized answers
+    /// share the canonical body instead of copying its material reference.
+    pub fn execution(
+        outcome: lash_core_store::tool_run::AttemptOutcome,
+        body: Option<NodeId>,
+    ) -> Self {
+        let outcome = if body.is_some() {
+            ToolCallSettlement::Materialized(
+                if matches!(
+                    outcome,
+                    lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
+                ) {
+                    ToolCallDecision::Cancel
+                } else {
+                    ToolCallDecision::Final
+                },
+            )
+        } else {
+            ToolCallSettlement::execution(outcome)
+        };
+        Self { outcome, body }
+    }
+
+    pub fn valid(&self) -> bool {
+        matches!(
+            (&self.outcome, self.body),
+            (ToolCallSettlement::Execution(_), None)
+                | (
+                    ToolCallSettlement::Materialized(_) | ToolCallSettlement::Read,
+                    Some(_)
+                )
+        )
+    }
+
     pub fn cancelled(&self) -> bool {
-        matches!(&self.outcome, ToolCallSettlement::Execution(outcome)
-            if matches!(outcome.as_ref(), lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }))
+        match &self.outcome {
+            ToolCallSettlement::Materialized(decision) => *decision == ToolCallDecision::Cancel,
+            ToolCallSettlement::Execution(outcome) => matches!(
+                outcome.as_ref(),
+                lash_core_store::tool_run::AttemptOutcome::Cancelled { .. }
+            ),
+            ToolCallSettlement::Read => false,
+        }
     }
 }
 
