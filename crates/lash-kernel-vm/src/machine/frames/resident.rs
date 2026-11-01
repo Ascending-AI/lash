@@ -5,7 +5,7 @@
 //! capacity meter recounts the resident frames here (FIG-6791).
 
 use lash_kernel_doc::heap::{HeapFault, PageValue};
-use lash_kernel_state::arena::{Arena, Reach, Reached, VALUE_BYTES};
+use lash_kernel_state::arena::{Arena, Reach, Reached};
 use lash_kernel_state::kernel_internals::resident::frame_values;
 use lash_kernel_state::kernel_internals::tree::Cell;
 use lash_kernel_state::paged::FrameRecord;
