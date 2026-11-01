@@ -119,6 +119,10 @@ pub struct WorkloadReceipt {
     pub rounds: Vec<RoundRecord>,
     pub compactions: Vec<RoundRecord>,
     pub summary: BTreeMap<String, MetricSummary>,
+    /// Figures comparable with other code-mode engines, for a workload that
+    /// asks for them (FIG-7590).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comparable: Option<super::comparable::Comparable>,
 }
 
 /// One round: every session's turn `turn`, sent at once.
@@ -389,6 +393,12 @@ pub fn table(receipt: &ReplayReceipt) -> String {
             ));
         }
     }
+    let comparable: Vec<_> = receipt
+        .workloads
+        .iter()
+        .filter_map(|workload| Some((workload.workload.as_str(), workload.comparable.as_ref()?)))
+        .collect();
+    out.push_str(&super::comparable::table(&comparable));
     out
 }
 

@@ -153,6 +153,7 @@ mod tests {
             summary: summarize(&rounds),
             rounds,
             compactions: Vec::new(),
+            comparable: None,
         };
         let receipt = ReplayReceipt {
             format: RECEIPT_FORMAT.to_owned(),

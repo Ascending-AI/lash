@@ -6,6 +6,7 @@
 //! See `docs/perf/instruments/replay-workloads.md`.
 
 mod capture;
+pub mod comparable;
 pub mod control;
 mod effect_phases;
 pub mod gate;
@@ -254,7 +255,7 @@ async fn run_workloads(
             .join()
             .map_err(|_| anyhow::anyhow!("the counted replay thread panicked"))?
         } else {
-            runner::run(workload, &options).await
+            Box::pin(runner::run(workload, &options)).await
         };
         receipt
             .workloads

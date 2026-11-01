@@ -202,6 +202,7 @@ pub fn script<'a>(
         memory_limit_mib: None,
         sessions: 1,
         compact_every: None,
+        comparable: false,
         turns,
     })
 }

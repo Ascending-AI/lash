@@ -538,7 +538,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 workload.protocol == Protocol::Python,
                 &options.worker_profile_dir,
                 workload.instruction_limit,
-                options.worker_resources,
+                options.worker_resources || workload.comparable,
                 options.instructions,
                 match &options.store {
                     StoreChoice::CountedSqliteFile(dir) => Some(dir.as_path()),
@@ -548,7 +548,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         })
         .transpose()?;
     let workers = workers.map(|service| {
-        if options.effect_phases.is_some() && !options.effect_phases_off {
+        if workload.comparable || (options.effect_phases.is_some() && !options.effect_phases_off) {
             service.with_effect_phases(32_768)
         } else {
             service
@@ -564,6 +564,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         geometry["cell_instruction_limit"] = serde_json::json!(limit);
     }
     geometry["cell_memory_mib"] = serde_json::json!(workload.memory_limit_mib.unwrap_or(512));
+    if workload.comparable {
+        geometry["comparable"] = serde_json::json!(super::comparable::OBSERVERS);
+    }
     if options.effect_phases.is_some() {
         geometry["effect_phases"] = serde_json::json!(if options.effect_phases_off {
             "off; identity receipts only"
@@ -588,9 +591,13 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .any(|turn| turn.capability_turn.is_some())
         .then(|| super::capabilities::HostTools::new(workload.host.as_ref()))
         .transpose()?;
-    let tools = match &host_tools {
-        Some(host) => host.counted(&capability_counts),
-        None => provider::fixtures()?,
+    let comparable = workload
+        .comparable
+        .then(|| Arc::new(super::comparable::Observer::default()));
+    let tools = match (&host_tools, &comparable) {
+        (Some(host), _) => host.counted(&capability_counts),
+        (None, Some(observer)) => provider::observed_fixtures(Some(observer.hook()))?,
+        (None, None) => provider::fixtures()?,
     };
     let turn_sink = options
         .turn_report
@@ -632,6 +639,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .map(lash::vm::WorkerService::pool)
         .transpose()
         .map_err(|error| anyhow::anyhow!("start the worker pool: {error}"))?;
+    if let Some(observer) = &comparable {
+        observer.attach(pool.clone())?;
+    }
     meter.attach_workers(pool);
     let live_before = crate::GLOBAL_ALLOCATOR.stats();
     let mut lanes = Vec::with_capacity(workload.sessions);
@@ -708,6 +718,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         )?;
     }
     let mut rounds = Vec::with_capacity(turns);
+    let mut comparable_turns = Vec::new();
     let mut compactions = Vec::new();
     let mut frame_depth = 0;
     let mut model_calls = 0_u64;
@@ -746,6 +757,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         let phase_first = phase_capture
             .as_ref()
             .and_then(super::effect_phases::Capture::cut);
+        let comparable_before = comparable
+            .as_ref()
+            .map(|observer| observer.cut())
+            .transpose()?;
         let callbacks_before = host_tools
             .as_ref()
             .map(|_| capability_counts.provider_snapshot());
@@ -970,6 +985,14 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             shape_rounds.push(row);
         }
         metrics.insert("wall_ms".to_owned(), wall_ms);
+        if let (Some(observer), Some(before)) = (&comparable, comparable_before) {
+            comparable_turns.push(observer.turn(
+                turn + 1,
+                lanes[0].inputs[turn].0.setup,
+                before,
+                &metrics,
+            )?);
+        }
         rounds.push(RoundRecord {
             turn: turn + 1,
             history_depth: turn,
@@ -1128,6 +1151,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         summary: summarize(&rounds),
         rounds,
         compactions,
+        comparable: comparable.map(|_| super::comparable::section(comparable_turns)),
     })
 }
 

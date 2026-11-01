@@ -38,6 +38,10 @@ pub struct Workload {
     /// Compact each session's context after every this many turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_every: Option<usize>,
+    /// Export the receipt's `comparable` section: cell timings, per-park
+    /// checkpoint sizes and cold resume, with the observers they need.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub comparable: bool,
     pub turns: Vec<TurnGroup>,
 }
 
@@ -202,6 +206,10 @@ impl Workload {
             self.name
         );
         ensure!(!self.turns.is_empty(), "`{}` has no turns", self.name);
+        ensure!(
+            !self.comparable || (self.sessions == 1 && self.protocol != Protocol::Standard),
+            "comparable figures require one code-mode session"
+        );
         for group in &self.turns {
             if group.oracle.is_some() {
                 ensure!(
@@ -335,7 +343,7 @@ fn expand_reply(reply: &Reply, vars: &[(&str, String)]) -> Reply {
 }
 
 /// The committed corpus, compiled in so a test target needs no runfiles.
-pub const CORPUS: [(&str, &str); 11] = [
+pub const CORPUS: [(&str, &str); 14] = [
     (
         "host-document",
         include_str!("../../workloads/replay/host-document.json"),
@@ -379,6 +387,18 @@ pub const CORPUS: [(&str, &str); 11] = [
     (
         "crash-resume",
         include_str!("../../workloads/replay/crash-resume.json"),
+    ),
+    (
+        "ts-codemode-tool-heavy",
+        include_str!("../../workloads/replay/ts-codemode-tool-heavy.json"),
+    ),
+    (
+        "py-codemode-tool-heavy",
+        include_str!("../../workloads/replay/py-codemode-tool-heavy.json"),
+    ),
+    (
+        "ts-codemode-waiting",
+        include_str!("../../workloads/replay/ts-codemode-waiting.json"),
     ),
 ];
 

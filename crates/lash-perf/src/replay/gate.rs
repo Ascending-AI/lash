@@ -776,6 +776,7 @@ mod tests {
                 summary: summarize(&rounds),
                 rounds,
                 compactions: Vec::new(),
+                comparable: None,
             }],
         }
     }

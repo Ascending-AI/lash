@@ -293,6 +293,41 @@ builds remain available.
 | `py-codemode` (W5) | W4 in Python, reading tool replies as dicts |
 | `concurrent-16` (W6) | 16 sessions of W1 on one store, in lockstep rounds |
 | `crash-resume` (W7) | W4's setup, then 10 turns; every third kills every worker while the cell is parked, and it resumes on a fresh worker (three crashes stay under the pool's restart-storm bound) |
+| `ts-codemode-tool-heavy` | a warm-up turn, then 5 turns of one cell making 61 lookups: 1, then 30 sequential awaits in a `for…of`, then 30 in one `Promise.all`; [comparable](#comparable-figures) |
+| `py-codemode-tool-heavy` | the same cell in Python, with `asyncio.gather`; comparable |
+| `ts-codemode-waiting` | a setup turn keeps a 4 KB text, then 3 cells each park on a `fixture_slow` that kills every worker and resume cold on a fresh one; comparable |
+
+### Comparable figures
+
+A workload with `"comparable": true` gets a `comparable` section in its receipt
+and a column in one extra printed table (FIG-7590). These numbers are meant
+for setting against other code-mode engines. They are not gated, have no
+baseline row, and never enter the counted subset. To get them, the run turns
+on three observers for that workload only, and its experiment geometry
+records them: the pool's bounded effect-phase recorder, workers re-executed
+from `lash-perf` with heap-work counting, and a fixture-body hook that reads
+the pool at a kill and at the body after it. Each `median` is taken over the
+steady turns. Only `vm` figures compare with an in-process engine.
+
+| Figure | Side | Instrument |
+|---|---|---|
+| `cell_start_ms` | vm | effect phases: the first frame that hands over the cell (`prepare`, `documents`, `start` or `run`) through the first `parked` or `ended` frame. The workloads' first statement is a tool call |
+| `cell_vm_ms` | vm | effect phases: time the host spends sending to and receiving from workers, from that frame to `ended`, without worker installation |
+| `cell_ms` | vm | effect phases: that first frame to `ended`; it includes the tool bodies and park commits in between |
+| `tool_calls` | vm | the fixture-body hook: tool bodies entered |
+| `parks` | vm | effect phases: `parked` frames received |
+| `sealed_pages_per_park`, `sealed_bytes_per_park` | vm | the worker's heap-work counters `pages_sealed` and `seal_bytes_published` (envelope bytes): the turn's pages, the cell end's carry included, divided by parks |
+| `checkpoint_root_bytes` | vm | pool counters `checkpoint_root_bytes` / `checkpoint_roots`: envelope bytes of the `CheckpointRoot` page each park hands over |
+| `resume_worker_start_ms` | vm | effect phases: the worker the run resumes on after the kill, from its `spawn_to_ready` start through its installation (`pool_started`) |
+| `resume_run_ms` | vm | effect phases: the first frame the run sends that worker, through its first `parked` or `ended` frame (the statement after the park) |
+| `resume_ms` | vm | the sum of the two: worker start to the first statement, without the idle gap before the run checks the worker out |
+| `resume_pages_read` | vm | the worker's `pages_loaded`, from the kill's tool body through the next tool body |
+| `resume_bytes_read` | vm | effect phases: frame bytes sent to that worker over `resume_run_ms` (start, deliveries, page replies) |
+| `turn_wall_ms` | store | the round's `wall_ms`, from send through outcome |
+| `store_bytes_per_park` | store | the round's `store_bytes_written` (FIG-7583, retirement included) divided by parks. This covers every commit in the turn, not only the parks |
+
+The observers add their own small cost to the measured windows. Wall times
+from a shared host are observations, not claims.
 
 ## Reading a receipt
 

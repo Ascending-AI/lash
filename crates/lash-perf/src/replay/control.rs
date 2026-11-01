@@ -173,6 +173,7 @@ fn workload(n: usize, leg: Leg) -> Workload {
         memory_limit_mib: None,
         sessions: 1,
         compact_every: None,
+        comparable: false,
         turns: vec![TurnGroup {
             capability_turn: None,
             repeat: 1,

@@ -1,0 +1,37 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "ts-codemode-waiting",
+  "description": "Comparable figures (FIG-7590): turn 1 keeps a 4 KB text and a list in session globals. Each later cell parks on one fixture_slow call that SIGKILLs every code-mode worker, so the run resumes cold on a fresh worker; its first statement after the park is a lookup. Three crashes stay under the pool's restart-storm bound.",
+  "protocol": "typescript",
+  "comparable": true,
+  "turns": [
+    {
+      "repeat": 1,
+      "setup": true,
+      "user": "Turn {turn}: load the notes and keep them.",
+      "replies": [
+        {
+          "cell": [
+            "const notes = await tools.fixtureLarge({ key: \"notes\", bytes: 4096 });",
+            "const seen = [];",
+            "await control.finish({ loaded: notes.text.length });"
+          ]
+        }
+      ]
+    },
+    {
+      "repeat": 3,
+      "user": "Turn {turn}: wait for item {turn} while the workers crash.",
+      "replies": [
+        {
+          "cell": [
+            "const waited = await tools.fixtureSlow({ key: \"wait-{turn}\", ms: 5, kill_workers: true });",
+            "const record = await tools.fixtureLookup({ key: \"item-{turn}\" });",
+            "seen.push(record.score + waited.waited_ms);",
+            "await control.finish({ turn: {turn}, seen: seen.length, head: notes.text.slice(0, 16) });"
+          ]
+        }
+      ]
+    }
+  ]
+}

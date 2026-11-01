@@ -26,6 +26,10 @@ pub struct PoolCounters {
     pub cell_executions: u64,
     pub process_executions: u64,
     pub receipts_dropped: u64,
+    /// `CheckpointRoot` pages handed over with a park or seal, and their
+    /// envelope bytes; counted only in perf-witness builds.
+    pub checkpoint_roots: u64,
+    pub checkpoint_root_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -109,6 +113,8 @@ pub(crate) fn units() -> BTreeMap<&'static str, &'static str> {
         ("cell_executions", "count"),
         ("process_executions", "count"),
         ("receipts_dropped", "count"),
+        ("checkpoint_roots", "count"),
+        ("checkpoint_root_bytes", "bytes"),
     ]
     .into()
 }

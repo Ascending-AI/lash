@@ -780,8 +780,33 @@ impl Checkout {
             | RunStep::Ended { meters, .. } => self.budget.observe(*meters),
             _ => {}
         }
+        #[cfg(feature = "perf-witness")]
+        self.count_checkpoint_root(&step);
         self.sites.extend(sites);
         Ok(step)
+    }
+
+    /// Counts the `CheckpointRoot` page a park or seal hands over: it
+    /// crosses in the step's seal batch.
+    #[cfg(feature = "perf-witness")]
+    fn count_checkpoint_root(&self, step: &RunStep) {
+        let (RunStep::Parked {
+            seal: Some(seal),
+            candidate: Some(candidate),
+            ..
+        }
+        | RunStep::Sealed {
+            seal: Some(seal),
+            candidate,
+        }) = step
+        else {
+            return;
+        };
+        if let Some(root) = seal.pages.iter().find(|page| page.id() == *candidate) {
+            let mut measurements = lock(&self.pool.measurements);
+            measurements.counters.checkpoint_roots += 1;
+            measurements.counters.checkpoint_root_bytes += root.envelope().len() as u64;
+        }
     }
 
     /// Holds `sealed`, the stage capabilities the page service issued for
