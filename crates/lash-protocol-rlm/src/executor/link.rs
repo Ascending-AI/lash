@@ -301,7 +301,19 @@ pub(super) async fn link_cell(
         environment.requirements.clone(),
         environment.registry,
     );
-    if !ctx.hold_cell_registration(&registration) {
+    // A cell whose journal already admitted effects registered its
+    // execution before its first commit: running it again from its start
+    // registers nothing (FIG-7585), so a pass that fails the same way again
+    // commits no progress it did not make.
+    let journaled = match lash_core::facade_support::execution_actor(ctx).durable_reads() {
+        Ok(reads) => !reads
+            .effect_admissions(snapshots.exec())
+            .await
+            .map_err(|error| host_failure(error.to_string()))?
+            .is_empty(),
+        Err(error) => return Err(host_failure(error.to_string())),
+    };
+    if !journaled && !ctx.hold_cell_registration(&registration) {
         let mut tx = lash_core::facade_support::execution_actor(ctx)
             .begin()
             .await

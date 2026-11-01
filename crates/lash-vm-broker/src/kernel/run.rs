@@ -153,6 +153,21 @@ pub trait KernelEffects: Projections + Send + Sync {
         Ok(Vec::new())
     }
 
+    /// What an in-turn run owes a node that runs it, from the committed
+    /// records it runs under: the callbacks and the providers and codecs of
+    /// its environment and its execution's resolved matches (FIG-7585).
+    fn debts(
+        &self,
+    ) -> (
+        Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
+        lash_vocabulary::claims::ClaimRequirements,
+    ) {
+        (
+            Vec::new(),
+            lash_vocabulary::claims::ClaimRequirements::default(),
+        )
+    }
+
     /// The run starts again from its start on this activation: forget what
     /// the host recorded of its effects, reads and prints, which the run
     /// records again as it follows its journal (FIG-7585).

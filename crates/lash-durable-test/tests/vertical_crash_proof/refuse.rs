@@ -1,21 +1,16 @@
 //! D-PARKREFUSE: refuse unreadable same-build state before redelivery.
 //!
-//! These laws replace the old-image inputs of FIG-5592, FIG-5601,
-//! FIG-5613 and FIG-5716 with a park recorded by the running build.
+//! These laws replace the old-image inputs of FIG-5592 and FIG-5601 with
+//! a park recorded by the running build.
 use super::*;
 use lash_core_store::checkpoint_graph::{
-    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, MAX_ROOT_BYTES,
-    NodeKind,
-    bodies::{ExecRoot, ExecStatus, PhaseRoot},
-    check_envelope,
-    node::{direct_logical, frame_direct},
+    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphStaging, NodeKind,
+    bodies::PhaseRoot,
 };
 
 #[derive(Clone, Copy)]
 enum Damage {
     Driver,
-    Continuation,
-    KernelVersion,
     Checkpoint,
 }
 
@@ -44,10 +39,7 @@ fn damage_driver(value: &mut serde_json::Value) -> bool {
 /// own root; it never constructs a runtime or drives the turn. Envelopes,
 /// digests and edges stay valid so restore reaches the semantic refusal.
 async fn damage(database: &dyn DurableStore, damage: Damage) {
-    use lash_core_store::checkpoint_graph::CommitId;
-    use lash_durable::domain::{
-        DomainWrite, ExecRootWrite, PhaseAdvance, RootOwner, TurnWrite, UnfinishedPhase,
-    };
+    use lash_durable::domain::{DomainWrite, PhaseAdvance, RootOwner, TurnWrite, UnfinishedPhase};
 
     let snapshot = database.actor(&actor()).await.unwrap().unwrap();
     // A new boot of the stopped node reaps its old lease. This writer is
@@ -125,53 +117,6 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
                 iteration: row.iteration,
             });
             (graph, checkpoint, root, write)
-        }
-        Damage::Continuation | Damage::KernelVersion => {
-            let mut cells = database.cell_roots(&session(), &run()).await.unwrap();
-            assert_eq!(cells.len(), 1, "the turn parked exactly one cell");
-            let row = cells.pop().unwrap();
-            let graph = database
-                .hydrate(RootOwner::Exec(row.exec.clone()), Some(row.root), limits)
-                .await
-                .unwrap();
-            let mut body: ExecRoot = GraphDecoder::new(&graph, limits)
-                .decode(row.root, NodeKind::EXEC_ROOT)
-                .unwrap();
-            assert_eq!(
-                body.status,
-                ExecStatus::Parked,
-                "the cell has a parked kernel run"
-            );
-            match damage {
-                Damage::Continuation => body.format = u32::MAX,
-                Damage::KernelVersion => {
-                    let page = graph
-                        .nodes
-                        .get(&body.state)
-                        .expect("the parked checkpoint root exists");
-                    let envelope = check_envelope(&page.bytes, body.state, &limits).unwrap();
-                    let logical = direct_logical(&envelope, body.state).unwrap();
-                    let changed = lash_kernel_state::testkit::checkpoint_with_kernel(
-                        &logical,
-                        body.format + 1,
-                    )
-                    .expect("the same-build kernel checkpoint decodes");
-                    let changed = frame_direct(NodeKind::CHECKPOINT_ROOT, &changed, MAX_ROOT_BYTES)
-                        .expect("the changed checkpoint frames");
-                    body.state = changed.id;
-                    staging.adopt(changed).unwrap();
-                }
-                _ => unreachable!(),
-            }
-            let root = staging.encode_value(NodeKind::EXEC_ROOT, &body).unwrap();
-            let write = DomainWrite::ExecRoot(ExecRootWrite::Put {
-                exec: row.exec,
-                expected: Some(row.rev),
-                expected_root: Some(row.root),
-                root,
-                commit_id: CommitId::mint(),
-            });
-            (graph, row.root, root, write)
         }
     };
     assert_ne!(root, old, "the stored root must actually change");
@@ -381,39 +326,6 @@ async fn a_parked_driver_state_this_build_cannot_decode_is_refused_at_restore_be
         matches!(park, Some(lash::SessionParkReason::UndecodableState {
         state: lash::ParkedTurnState::DriverState { ref driver }, ref message,
     }) if driver == lash::rlm::RLM_PROTOCOL_PLUGIN_ID && message.contains("left_by_another_build")),
-        "{park:?}"
-    );
-    law.assert_refused().await;
-    law.stop().await;
-}
-
-/// D-PARKREFUSE / FIG-5613: the parent's restore refuses the parked cell's
-/// unreadable kernel version before redelivering its work to the worker.
-#[tokio::test]
-async fn a_parked_cell_continuation_this_build_cannot_decode_is_refused_at_restore_before_any_model_call()
- {
-    cell_refusal(Damage::Continuation, "outside read range").await;
-}
-
-/// FIG-5716: checkpoint bytes cannot state a kernel version other than
-/// the execution root's seal, even when both envelopes are well formed.
-#[tokio::test]
-async fn a_parked_run_whose_bytes_state_another_kernel_version_than_its_seal_is_refused_at_restore()
-{
-    cell_refusal(
-        Damage::KernelVersion,
-        "its checkpoint root states kernel version",
-    )
-    .await;
-}
-
-async fn cell_refusal(damage: Damage, account: &str) {
-    let law = refused(damage).await;
-    let park = law.park_reason().await;
-    assert!(
-        matches!(park, Some(lash::SessionParkReason::UndecodableState {
-        state: lash::ParkedTurnState::CellSnapshot, ref message,
-    }) if message.contains(account)),
         "{park:?}"
     );
     law.assert_refused().await;

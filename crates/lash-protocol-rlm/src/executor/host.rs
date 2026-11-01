@@ -982,19 +982,7 @@ impl KernelEffects for CellHost<'_> {
         };
         let host = graph.state.stage(staging, reads).map_err(fault)?;
         graph.staged = Some(staged);
-        let mut links = self.envelope.environment.requirements.clone();
-        if let Some(execution) = self.ctx.linked_execution() {
-            for resolution in execution.resolutions.lock_recover().values() {
-                if let Some(requirements) = resolution.requirements() {
-                    links.extend(requirements);
-                }
-            }
-        }
-        let owed = links
-            .callbacks
-            .iter()
-            .map(|requirement| requirement.callback.clone())
-            .collect();
+        let (owed, links) = KernelEffects::debts(self);
         Ok(HostParts {
             read_calls,
             host: Some(host),
@@ -1044,6 +1032,28 @@ impl KernelEffects for CellHost<'_> {
         }
         graph.staged_reads = Some(nodes);
         Ok(read_calls)
+    }
+
+    fn debts(
+        &self,
+    ) -> (
+        Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
+        lash_vocabulary::claims::ClaimRequirements,
+    ) {
+        let mut links = self.envelope.environment.requirements.clone();
+        if let Some(execution) = self.ctx.linked_execution() {
+            for resolution in execution.resolutions.lock_recover().values() {
+                if let Some(requirements) = resolution.requirements() {
+                    links.extend(requirements);
+                }
+            }
+        }
+        let owed = links
+            .callbacks
+            .iter()
+            .map(|requirement| requirement.callback.clone())
+            .collect();
+        (owed, links)
     }
 
     fn restart(&self) {

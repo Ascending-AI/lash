@@ -1250,6 +1250,19 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
             .as_u64()
             .is_some_and(|used| used < cpu_bound)
     );
+    // The charge meter is deterministic: the run its replay makes again
+    // charges what the first run did. Only wall and CPU time differ.
+    let charges = |result: &serde_json::Value| {
+        result["consumption"]
+            .as_array()
+            .and_then(|entries| entries.iter().find(|entry| entry["resource"] == "charges"))
+            .cloned()
+    };
+    assert_eq!(
+        charges(&encoded),
+        charges(&serde_json::to_value(&again).unwrap()),
+        "a replayed end reports the charge its first run did"
+    );
     // Force a CPU verdict only after the machine has run a charged slice.
     // This does not depend on how quickly this host runs the guest.
     let instruction_limit = 40_000_000;

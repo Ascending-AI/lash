@@ -818,6 +818,10 @@ impl DurableSnapshotStore {
         let requests = Requests::of(admit);
         let mut tx = self.cx.begin().await.map_err(refused)?;
         self.cancel_in(&mut tx, &mut members, &ledger).await?;
+        // Another commit of the turn, a deferred match's resolution, may
+        // have carried the response first: only one the turn still holds
+        // rides this commit.
+        let response = response.filter(|response| response.is_held());
         if let Some(response) = response {
             if response.stops_at(&tx) {
                 return Ok(Journaled::Stopped);
@@ -889,8 +893,24 @@ impl DurableSnapshotStore {
         if tx.domain().is_empty() {
             return Ok(Journaled::Committed(ledger));
         }
+        // What running the cell requires of a node, stated from the records
+        // it runs under: its code's natives and kernel, and its
+        // environment's and resolved matches' providers and codecs. The
+        // commit that consumes its answer ends the execution, and the debt.
+        let (owed, links) = host.debts();
+        let mut requirements = lash_vocabulary::claims::ClaimRequirements {
+            machine: super::loader::requirements(&closure, KERNEL_VERSION, std::iter::empty())
+                .machine,
+            ..lash_vocabulary::claims::ClaimRequirements::default()
+        };
+        requirements.extend(&links);
+        let owing = ExecutionDebts {
+            exec: self.exec.clone(),
+            owed,
+            requirements,
+        };
         let update = members.prepare_update(&tx).await.map_err(refused)?;
-        let committed = match self.cx.commit(tx, label).await {
+        let committed = match self.cx.commit_owing(tx, label, &owing).await {
             Ok(committed) => committed,
             Err(error) => {
                 members.forget();

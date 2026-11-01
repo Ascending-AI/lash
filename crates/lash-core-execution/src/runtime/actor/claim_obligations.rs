@@ -448,8 +448,19 @@ impl RecordedWork {
         let facts = RunFacts::appended(tx.domain(), tx.graph(), epoch);
         self.apply_facts(&facts)?;
         let staged = StagedNodes(tx.graph());
+        // A writer that states what an execution owes without publishing
+        // its root, an in-turn cell's journaled commit (FIG-7585), owes it
+        // until the execution ends.
+        if let Some(owing) = owing.filter(|owing| {
+            !tx.domain().iter().any(|write| {
+                matches!(write, DomainWrite::ExecRoot(ExecRootWrite::Put { exec, .. }) if *exec == owing.exec)
+            })
+        }) {
+            self.owe(&owing.exec, &owing.owed, &owing.requirements);
+        }
         for write in tx.domain() {
             match write {
+                DomainWrite::EndExecution(execution) => self.end_execution(execution),
                 // The writer of a cell's root states what it owes; a root
                 // it does not state is read from the nodes `tx` stages.
                 DomainWrite::ExecRoot(ExecRootWrite::Put { exec, root, .. }) => {
@@ -695,6 +706,20 @@ impl RecordedWork {
             .chain(ObligationToken::for_requirements(requirements))
             .collect();
         self.put(ObligationSite::Execution { exec: exec.clone() }, tokens);
+    }
+
+    /// The execution `ended` ended: an in-turn cell's debts its commits
+    /// stated end with it. Its records' calls end with its root or its turn.
+    fn end_execution(&mut self, ended: &lash_durable::resolutions::ExecutionId) {
+        self.uses.retain(|site, _| match site {
+            ObligationSite::Execution {
+                exec: ExecKey::Cell(session, turn, cell),
+            } => {
+                lash_core_store::resolutions::ExecutionId::cell(session, turn, cell.as_str())
+                    != *ended
+            }
+            _ => true,
+        });
     }
 
     /// `exec` ended: its root and its records owe nothing more.
