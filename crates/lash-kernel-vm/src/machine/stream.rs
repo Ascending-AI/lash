@@ -345,8 +345,15 @@ impl KernelMachine {
                     };
                     return self.source_done(running, source_pc, Ran::Tested(tested));
                 }
-                Op::Return { .. } => {
+                Op::Return { src } => {
                     self.close_region(running.stream);
+                    if self.return_leaves_run(task)? {
+                        // Crossing can charge or raise where this Return is
+                        // caught. Complete it once before the accepted suffix,
+                        // retaining the RHS owner on a publication miss.
+                        let value = self.regs[at(src)];
+                        self.copy_out(&value)?;
+                    }
                     if let Some(completion) = self.publish_source_return(running, source_pc)? {
                         return Ok(Ran::Depart(completion));
                     }
@@ -748,13 +755,9 @@ impl KernelMachine {
             Op::Break => Ran::Depart(Completion::Break),
             Op::Continue => Ran::Depart(Completion::Continue),
             Op::Return { src } => {
-                let value = self.take(at(src));
-                if self.return_leaves_run(task)? {
-                    // The run's result leaves the run (`K-EFF-002`): a value
-                    // that cannot is refused here, where a `catch` sees it.
-                    self.copy_out(&value)?;
-                }
-                Ran::Depart(Completion::Return(Box::new(value)))
+                // The stream already completed this Return's crossing before
+                // attempting its prospective source publication.
+                Ran::Depart(Completion::Return(Box::new(self.take(at(src)))))
             }
             Op::ReturnVia { src } => Ran::Depart(Completion::ReturnVia {
                 value: Box::new(self.take(at(src))),

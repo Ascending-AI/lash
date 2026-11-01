@@ -549,8 +549,12 @@ fn observe_source_or_register(
             "nested call entry must preserve its borrowed source operands and publish its actual occurrence: {call_enters}"
         );
         assert!(
-            precise_returns > 0,
-            "the precise callee return must transfer its actual operand and close the same source Invocation: {precise_returns}"
+            precise_returns[0] > 0,
+            "the precise callee return must transfer its actual operand and close the same source Invocation: {precise_returns:?}"
+        );
+        assert!(
+            precise_returns[1] > 0,
+            "the precise run-root return must publish only after its original copy-out check and charge: {precise_returns:?}"
         );
         assert!(
             members >= 5,

@@ -13,9 +13,9 @@ impl KernelMachine {
         let Op::Return { src } = running.stream.ops[pc as usize] else {
             return Ok(None);
         };
-        if self.task(running.task)?.frames.len() <= 1 {
-            return Ok(None);
-        }
+        #[cfg(any(test, feature = "testing"))]
+        let run_root =
+            running.task == doc::TaskId::MAIN && self.task(running.task)?.frames.len() == 1;
         let (source, link, invocation) = {
             let frame = self.frame(running.task)?;
             let code = running.exe.code(frame.code);
@@ -141,7 +141,7 @@ impl KernelMachine {
         )?;
         #[cfg(any(test, feature = "testing"))]
         if published {
-            crate::machine::islands::witness::precise_return_published();
+            crate::machine::islands::witness::precise_return_published(run_root);
         }
         debug_assert_eq!(published, completion.is_some());
         Ok(completion)

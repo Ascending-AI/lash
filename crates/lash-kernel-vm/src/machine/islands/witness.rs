@@ -98,7 +98,7 @@ thread_local! {
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_ENTER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    static PRECISE_RETURN_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PRECISE_RETURN_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_TRY_SCOPES: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
     static PRECISE_TRY_READS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
     static FIELD_MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -109,7 +109,7 @@ thread_local! {
 
 pub(crate) fn begin() {
     CALL_ENTER_PUBLICATIONS.with(|count| count.set(0));
-    PRECISE_RETURN_PUBLICATIONS.with(|count| count.set(0));
+    PRECISE_RETURN_PUBLICATIONS.with(|count| count.set([0; 2]));
     PRECISE_TRY_SCOPES.with(|counts| counts.set([0; 3]));
     PRECISE_TRY_READS.with(|counts| counts.set([0; 3]));
     PACKET_READ_PUBLICATIONS.with(|count| count.set(0));
@@ -183,11 +183,15 @@ pub(in crate::machine) fn call_enter_published() {
     CALL_ENTER_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 #[cfg(test)]
-pub(crate) fn precise_returns() -> u64 {
-    PRECISE_RETURN_PUBLICATIONS.with(|count| count.replace(0))
+pub(crate) fn precise_returns() -> [u64; 2] {
+    PRECISE_RETURN_PUBLICATIONS.with(|count| count.replace([0; 2]))
 }
-pub(in crate::machine) fn precise_return_published() {
-    PRECISE_RETURN_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+pub(in crate::machine) fn precise_return_published(root: bool) {
+    PRECISE_RETURN_PUBLICATIONS.with(|count| {
+        let mut counts = count.get();
+        counts[usize::from(root)] += 1;
+        count.set(counts);
+    });
 }
 pub(in crate::machine) fn precise_try_finally_read() {
     PRECISE_TRY_READS.with(|counts| {
