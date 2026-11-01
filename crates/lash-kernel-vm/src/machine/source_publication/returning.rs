@@ -19,9 +19,7 @@ impl KernelMachine {
         let (source, link, invocation) = {
             let frame = self.frame(running.task)?;
             let code = running.exe.code(frame.code);
-            if !code.charged
-                || frame.library.is_some()
-                || frame.public_result.is_some()
+            if frame.public_result.is_some()
                 || frame.convention.is_some()
                 || frame.cleaning.is_some()
                 || frame.awaiting.is_some()

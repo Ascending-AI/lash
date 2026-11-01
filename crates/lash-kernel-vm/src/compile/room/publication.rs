@@ -597,6 +597,9 @@ impl EventContext<'_> {
         let mut reads = BTreeSet::new();
         let mut writes = BTreeSet::new();
         if let Some(roles) = &site.restored_roles {
+            if site.uncounted_resumption && occurrence.action.is_some() {
+                return Err(Refused::Source);
+            }
             return self.check_resumption(event, roles, actual);
         }
         if site.borrowed_inputs {

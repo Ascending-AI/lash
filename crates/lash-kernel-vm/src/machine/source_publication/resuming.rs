@@ -41,8 +41,9 @@ impl KernelMachine {
                 .nested
                 .get(act.ix())
                 .ok_or_else(|| fault("call resumption has no nested entry"))?;
-            if !entry.guest
-                || !matches!(entry.kind, NestedKind::Call(_))
+            let counted = entry.guest && matches!(entry.kind, NestedKind::Call(_));
+            let body = matches!(entry.kind, NestedKind::Body(_));
+            if !(counted || body)
                 || pending.phase != PhaseRecord::Called
                 || pending.site != entry.suffix
                 || pending.roles.len() != entry.roles.len()
@@ -53,8 +54,19 @@ impl KernelMachine {
             let Some(loops) = source_loops(frame, exe)? else {
                 return Ok(None);
             };
-            let Some(ordinal) = pending.occurrence else {
-                return Ok(None);
+            let ordinal = if counted {
+                let Some(ordinal) = pending.occurrence else {
+                    return Ok(None);
+                };
+                Some(ordinal)
+            } else {
+                if pending.occurrence.is_some() {
+                    return Err(malformed(
+                        "an uncounted body continuation acquired an action ordinal",
+                    )
+                    .into());
+                }
+                None
             };
             if frame
                 .source_frontier
@@ -67,13 +79,15 @@ impl KernelMachine {
                 task: task_id,
                 invocation: logical.invocation().id(),
                 loops,
-                action: Some((
-                    Point {
-                        site: entry.site.clone(),
-                        phase: Phase::Enter,
-                    },
-                    ordinal,
-                )),
+                action: ordinal.map(|ordinal| {
+                    (
+                        Point {
+                            site: entry.site.clone(),
+                            phase: Phase::Enter,
+                        },
+                        ordinal,
+                    )
+                }),
                 departure: None,
             };
             let mut saved = Vec::new();
@@ -129,11 +143,12 @@ impl KernelMachine {
                 ordinal,
             )
         };
-        if self
-            .task(task_id)?
-            .counters
-            .current(index)
-            .is_none_or(|count| ordinal >= count)
+        if let Some(ordinal) = ordinal
+            && self
+                .task(task_id)?
+                .counters
+                .current(index)
+                .is_none_or(|count| ordinal >= count)
         {
             return Err(malformed("a saved call occurrence was not admitted by its task").into());
         }

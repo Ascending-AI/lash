@@ -3,6 +3,10 @@ use super::*;
 /// K-EVAL-008: a resumed call restores its existing incoming value and saved
 /// source operands, rather than consuming arguments transferred to the callee.
 pub(super) fn calls() {
+    calls_kind(false);
+    calls_kind(true);
+}
+fn calls_kind(body: bool) {
     use crate::admission::{Allowance, SourceResources};
     use crate::compile::room::{self, ExitKind, Phase, Point, publication::*};
     use lash_kernel_doc::{self as doc, TaskId, Value};
@@ -10,7 +14,7 @@ pub(super) fn calls() {
         JournalEvent, Owner as Root, Program, PublicationValue as PV, RootValue, Slot,
     };
     use lash_kernel_value::sites::{Site, Unit};
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::sync::Arc;
 
     struct Facts;
     impl room::Facts for Facts {
@@ -39,7 +43,23 @@ pub(super) fn calls() {
             None
         }
     }
-    let run = Embedder::new("main { let f = fn(x) { return x } return (7, apply f(1)) }");
+    let run = Embedder::new(if body {
+        "main { let f = null return (7, pair.twice(1)) }"
+    } else {
+        "main { let f = fn(x) { return x } return (7, apply f(1)) }"
+    });
+    if body {
+        let function = run.library.ids["pair.twice"];
+        assert!(
+            run.library
+                .registry
+                .get(&function)
+                .unwrap()
+                .definition()
+                .body()
+                .is_some()
+        );
+    }
     let (program, _) = run.program(false);
     let source = Arc::new(room::Source::compile(
         doc::constant_pool::PoolOwner::Document(program.document.identity()),
@@ -47,7 +67,7 @@ pub(super) fn calls() {
         program.document.main.as_ref().unwrap(),
         &[],
         Default::default(),
-        &BTreeMap::new(),
+        run.library.registry.as_ref(),
         &Default::default(),
     ));
     let at = Point {
@@ -110,7 +130,7 @@ pub(super) fn calls() {
             task: TaskId::MAIN,
             invocation: invocation.id(),
             loops: vec![],
-            action: Some((
+            action: (!body).then_some((
                 Point {
                     phase: Phase::Enter,
                     ..at.clone()
@@ -195,6 +215,55 @@ pub(super) fn calls() {
                 .is_ok(),
             valid,
             "only the actual incoming and the exact continuation owners may be restored"
+        );
+    }
+    if body {
+        let mut forged = frontier.position().clone();
+        forged.occurrence.action = Some((
+            Point {
+                phase: Phase::Enter,
+                ..at.clone()
+            },
+            3,
+        ));
+        let forged_next = Position {
+            occurrence: forged.occurrence.clone(),
+            ..next.clone()
+        };
+        let forged = source
+            .frontier(
+                &ledger,
+                heap,
+                &invocation,
+                program.link,
+                doc::KernelVersion::One,
+                forged,
+            )
+            .unwrap();
+        let resources = SourceResources {
+            charged: &mut charged,
+            counters: &mut counters,
+            bound: 10,
+            slice: 10,
+            depth: 0,
+            limit: 10,
+            safe_point: 0,
+        };
+        assert!(
+            forged
+                .evaluate_interval(
+                    Arc::clone(&interval),
+                    &mut Execution,
+                    &ledger,
+                    &arena,
+                    heap,
+                    make(saved, incoming, false),
+                    forged_next,
+                    allowance.clone(),
+                    resources.facts(&allowance).unwrap()
+                )
+                .is_err(),
+            "an uncounted body cannot restore a fabricated action occurrence"
         );
     }
     let resources = SourceResources {

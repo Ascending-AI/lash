@@ -145,6 +145,18 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                         ));
                     }
                 }
+                doc::Node::Expr(doc::Expr::Call { function, .. })
+                    if matches!(calls.get(function), Some(CallSource::Body(_))) =>
+                {
+                    events.push(event(
+                        &site,
+                        Phase::Restore,
+                        vec![Owner::Incoming(site.clone())].into(),
+                        Some(operand(&site)),
+                        Amount::default(),
+                        Amount::default(),
+                    ));
+                }
                 doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
                     catch: Some(catch), ..
                 })) => {

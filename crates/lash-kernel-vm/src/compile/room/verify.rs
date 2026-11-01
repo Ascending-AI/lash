@@ -48,6 +48,11 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     phases.push(Phase::Restore);
                 }
             }
+            doc::Node::Expr(doc::Expr::Call { function, .. })
+                if matches!(source.calls.get(function), Some(CallSource::Body(_))) =>
+            {
+                phases.push(Phase::Restore);
+            }
             doc::Node::Stmt(doc::Stmt::Try(t)) => {
                 if t.catch.is_some() {
                     phases.push(Phase::Catch);
@@ -131,7 +136,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     expected_inputs = Box::new([]);
                 }
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => output = None,
-                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {
+                (doc::Node::Expr(doc::Expr::Act(_) | doc::Expr::Call { .. }), Phase::Restore) => {
                     expected_inputs = vec![Owner::Incoming(site.clone())].into();
                 }
                 (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
@@ -442,7 +447,7 @@ fn obligations(
             peak.push((Measure::Local(operand(site)), 1));
             delta.push((Measure::Local(operand(site)), 1));
         }
-        (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {}
+        (doc::Node::Expr(doc::Expr::Act(_) | doc::Expr::Call { .. }), Phase::Restore) => {}
         (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
             if let Some(c) = &t.catch
                 && source.shared.get(&(child(site, 1), c.binding.clone())) == Some(&true)

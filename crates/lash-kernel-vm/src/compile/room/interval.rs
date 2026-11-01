@@ -43,6 +43,7 @@ impl Linear {
 pub(super) struct PublicationSite {
     pub(super) borrowed_inputs: bool,
     pub(super) restored_roles: Option<Box<[Site]>>,
+    pub(super) uncounted_resumption: bool,
     pub(super) assignment: Option<lash_kernel_value::Name>,
     pub(super) member: bool,
     pub(super) field: Option<Arc<str>>,
@@ -81,9 +82,14 @@ impl Step {
         for index in &event.point.site.path[source.site.path.len()..] {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
-        let restored_roles = if event.point.phase == Phase::Restore
-            && matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(_)))
-        {
+        let restores_call = match node {
+            doc::Node::Expr(doc::Expr::Act(act)) => matches!(act.kind, doc::ActKind::Call(_)),
+            doc::Node::Expr(doc::Expr::Call { function, .. }) => {
+                matches!(source.calls.get(function), Some(CallSource::Body(_)))
+            }
+            _ => false,
+        };
+        let restored_roles = if event.point.phase == Phase::Restore && restores_call {
             let relative = Site::new(
                 event.point.site.unit.clone(),
                 event.point.site.path[source.site.path.len()..].to_vec(),
@@ -103,6 +109,8 @@ impl Step {
             None
         };
         let publication = PublicationSite {
+            uncounted_resumption: event.point.phase == Phase::Restore
+                && matches!(node, doc::Node::Expr(doc::Expr::Call { .. })),
             restored_roles,
             borrowed_inputs: event.point.phase == Phase::Enter
                 && matches!(node, doc::Node::Expr(doc::Expr::Act(_))),

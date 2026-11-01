@@ -320,7 +320,17 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
             other => panic!("the escaped closure's loop was not charged: {other:?}"),
         }
         let entries = crate::machine::islands::witness::prepared_frame_entries();
+        let returns = crate::machine::islands::witness::precise_returns();
+        let resumes = crate::machine::islands::witness::call_resumes();
         if source {
+            assert!(
+                returns[0] > 0,
+                "the uncounted body return must publish its actual Invocation's departure and Leave: {returns:?}"
+            );
+            assert!(
+                resumes[0] > 0,
+                "the uncounted body result must restore its caller with no fabricated action ordinal: {resumes:?}"
+            );
             assert!(
                 entries[1] > 0,
                 "the operation's body must install its captured parameter cell with the accepted frame: {entries:?}"
