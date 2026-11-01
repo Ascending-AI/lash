@@ -1,5 +1,24 @@
 use super::*;
 
+/// PROMPT-CONTENT: a prepared encoding never replaces edited source metadata.
+#[test]
+fn prepared_prompt_nodes_refuse_changed_source_fields() {
+    use crate::checkpoint_graph::{GraphRefusal, NodeId};
+    for field in 0..3 {
+        let mut text = PromptText::fragment("original", vec![NodeId([1; 32])]);
+        match field {
+            0 => text.hash = "00".repeat(32),
+            1 => text.text = "edited".into(),
+            2 => text.children.clear(),
+            _ => unreachable!(),
+        }
+        let expected = NodeId::from_hex(&text.hash).unwrap();
+        assert!(
+            matches!(text.graph_nodes(), Err(GraphRefusal::HashMismatch(id)) if id == expected)
+        );
+    }
+}
+
 fn id(owner: &str, key: &str) -> PromptSectionId {
     PromptSectionId::new(owner, PromptSectionKey::new(key).expect("valid key"))
 }

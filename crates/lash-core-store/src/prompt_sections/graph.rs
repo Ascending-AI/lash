@@ -10,6 +10,39 @@ use crate::checkpoint_graph::{
 use crate::store::BlobRef;
 use lash_kernel_value::tokens::{TokenCodec, TokenReader, TokenWriter};
 
+pub(super) struct PreparedPromptGraph {
+    root: NodeId,
+    text: std::sync::Arc<str>,
+    children: Vec<String>,
+    nodes: BTreeMap<NodeId, EncodedNode>,
+}
+
+fn prepared(
+    stage: GraphStaging,
+    root: NodeId,
+    text: std::sync::Arc<str>,
+    children: Vec<String>,
+) -> PromptText {
+    PromptText {
+        hash: root.to_hex(),
+        prepared: Some(std::sync::Arc::new(PreparedPromptGraph {
+            root,
+            text: text.clone(),
+            children: children.clone(),
+            nodes: stage.into_nodes(),
+        })),
+        text,
+        children,
+    }
+}
+
+pub(super) fn prepared_fragment(text: std::sync::Arc<str>, children: Vec<String>) -> PromptText {
+    let mut stage = staging();
+    let root = fragment(&mut stage, &text, &children)
+        .expect("prepared request fragments have valid children and bounded bodies");
+    prepared(stage, root, text, children)
+}
+
 fn staging() -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
 }
@@ -58,11 +91,10 @@ impl PromptText {
     /// Address an audit text in its graph content domain.
     pub fn audit(text: impl Into<std::sync::Arc<str>>) -> Self {
         let text = text.into();
-        Self {
-            hash: text_reference(&text).0,
-            text,
-            children: Vec::new(),
-        }
+        let mut stage = staging();
+        let root = self::text(&mut stage, &text)
+            .expect("a prompt text can be placed in bounded graph leaves");
+        prepared(stage, root, text, Vec::new())
     }
 
     /// Address an immutable fragment with its declared semantic children.
@@ -74,10 +106,16 @@ impl PromptText {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
+        prepared_fragment(text, children)
+    }
+
+    /// Supply source metadata whose identity and children are checked at installation.
+    pub fn from_parts(hash: String, text: std::sync::Arc<str>, children: Vec<String>) -> Self {
         Self {
-            hash: fragment_reference(&text, &children).0,
+            hash,
             text,
             children,
+            prepared: None,
         }
     }
 
@@ -94,6 +132,13 @@ impl PromptText {
             .any(|child| NodeId::from_hex(child).is_none())
         {
             return Err(GraphRefusal::LengthOverflow);
+        }
+        if let Some(prepared) = &self.prepared
+            && prepared.root == expected
+            && prepared.text == self.text
+            && prepared.children == self.children
+        {
+            return Ok(prepared.nodes.clone());
         }
         let mut stage = staging();
         if self.children.is_empty() && text(&mut stage, &self.text)? == expected {
@@ -139,10 +184,6 @@ impl PromptText {
             }
         }
         input.finish().map_err(fault)?;
-        Ok(Self {
-            hash: id.to_hex(),
-            text,
-            children,
-        })
+        Ok(Self::from_parts(id.to_hex(), text, children))
     }
 }

@@ -279,13 +279,15 @@ pub fn admission_record_retained(
         prompt
             .texts
             .iter()
-            .map(|(hash, text)| PromptText {
-                hash: hash.as_str().to_owned(),
-                children: request_texts
-                    .get(hash.as_str())
-                    .map(|text| text.children.clone())
-                    .unwrap_or_default(),
-                text: text.as_str().into(),
+            .map(|(hash, text)| {
+                PromptText::from_parts(
+                    hash.as_str().to_owned(),
+                    text.as_str().into(),
+                    request_texts
+                        .get(hash.as_str())
+                        .map(|text| text.children.clone())
+                        .unwrap_or_default(),
+                )
             })
             .collect()
     });

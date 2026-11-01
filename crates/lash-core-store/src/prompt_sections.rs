@@ -641,7 +641,7 @@ impl<Text, Slot> RequestFragment<Text, Slot> {
 /// fragment's builder knows its edges, so admission installs it without
 /// decoding it again; the text is shared, so every admission that holds
 /// the fragment hands the same allocation to the store.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct PromptText {
     /// The text's content address.
     pub hash: String,
@@ -649,7 +649,26 @@ pub struct PromptText {
     pub text: std::sync::Arc<str>,
     /// Outgoing index edges; empty for section text and literal leaves.
     pub children: Vec<String>,
+    prepared: Option<std::sync::Arc<graph::PreparedPromptGraph>>,
 }
+
+impl std::fmt::Debug for PromptText {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("PromptText")
+            .field("hash", &self.hash)
+            .field("text", &self.text)
+            .field("children", &self.children)
+            .finish()
+    }
+}
+
+impl PartialEq for PromptText {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash && self.text == other.text && self.children == other.children
+    }
+}
+
+impl Eq for PromptText {}
 
 #[derive(Clone, Debug)]
 struct TextKey(std::sync::Arc<PromptText>);
@@ -831,11 +850,10 @@ fn encode_fragment(
 ) -> Leaf {
     let body = serde_json::to_string(fragment).expect("wire fragments encode");
     let children = fragment.children();
-    let reference = RequestFragment::reference_with_children(&body, &children);
-    let text = PromptText {
-        hash: reference.blob.as_str().to_owned(),
-        text: body.into(),
-        children,
+    let text = graph::prepared_fragment(body.into(), children);
+    let reference = PromptTextRef {
+        blob: BlobRef(text.hash.clone()),
+        bytes: u32::try_from(text.text.len()).unwrap_or(u32::MAX),
     };
     (reference, std::sync::Arc::new(text))
 }
@@ -872,14 +890,7 @@ fn encode_branch_owned(left: &PromptText, right: &PromptText) -> std::sync::Arc<
     let len = writer.position() as usize;
     let body = std::str::from_utf8(&scratch[..len]).expect("JSON encoding is UTF-8");
     let children = vec![left.hash.clone(), right.hash.clone()];
-    let hash = RequestFragment::reference_with_children(body, &children)
-        .blob
-        .0;
-    let body = PromptText {
-        hash,
-        text: body.into(),
-        children,
-    };
+    let body = graph::prepared_fragment(body.into(), children);
     std::sync::Arc::new(body)
 }
 
