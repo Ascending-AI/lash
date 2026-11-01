@@ -79,8 +79,11 @@ impl KernelMachine {
         frame.link.encode(&mut encoding);
         source.site.encode(&mut encoding);
         encoding.unsigned(call.given as u64);
+        // A root entry's refusal is a start question, settled with the
+        // root and scheduler entry paths; until then it stays a miss.
+        let rooted = self.task(task_id)?.frames.is_empty();
         #[cfg(any(test, feature = "testing"))]
-        let has_caller = !self.task(task_id)?.frames.is_empty();
+        let has_caller = !rooted;
         let Some((caller, ordinal)) =
             self.prepare_frame_caller(task_id, exe, &call, &mut encoding)?
         else {
@@ -265,6 +268,20 @@ impl KernelMachine {
                     native_fault(error)
                 }
             })?;
+        let mut memory = MemoryLimit::of(
+            self.bounds.memory_meter,
+            &mut self.bounds.memory,
+            &mut self.limiters,
+        );
+        if rooted && memory.exceeded(prepared.peak()) {
+            return Ok(Some(frame));
+        }
+        let prepared = if memory.exceeded(prepared.peak()) {
+            prepared.collect(&ledger, self.heap.pages())?
+        } else {
+            prepared
+        };
+        let limit = memory.admit(prepared.peak())?;
         let after = prepared.balance()?.total()?;
         let task = self
             .tasks
@@ -299,9 +316,9 @@ impl KernelMachine {
         let facts = resources
             .facts(&allowance)
             .ok_or_else(|| malformed("entry resource facts are absent"))?;
-        let Some(accepted) = prepared.admit(self.bounds.memory) else {
-            return Ok(Some(frame));
-        };
+        let accepted = prepared
+            .admit(limit)
+            .ok_or_else(|| malformed("entry peak passed its granted memory limit"))?;
         let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
             return Ok(Some(frame));
         };
