@@ -151,3 +151,59 @@ async fn page(
         })
         .collect())
 }
+
+/// Every read `execution` saved under the caller `owner`, in admission
+/// order, each with its archival node: what an in-turn run that starts
+/// again is answered instead of reading again (FIG-7585).
+///
+/// # Errors
+///
+/// A store failure, or a saved read whose body does not decode.
+pub async fn execution_reads(
+    reads: &dyn DurableReads,
+    owner: &CallOwner,
+    execution: &lash_durable::domain::OwnerKey,
+) -> Result<
+    Vec<(
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_protocol_types::ReadFact,
+    )>,
+    DurableError,
+> {
+    const PAGE: u32 = 256;
+    let mut out = Vec::new();
+    let mut after = None;
+    loop {
+        let selected = reads
+            .tool_calls(
+                owner,
+                &ToolCallSelection::SavedReads {
+                    after: after.clone(),
+                    limit: PAGE,
+                },
+            )
+            .await?;
+        let Some(last) = selected.rows.last() else {
+            return Ok(out);
+        };
+        after = Some(ToolCallCursor {
+            sequence: last.sequence,
+            call: last.call.clone(),
+        });
+        let mut decoder = GraphDecoder::new(&selected.graph, selected.graph.read_limits);
+        for row in &selected.rows {
+            if &row.execution != execution {
+                continue;
+            }
+            let Some(body) = row.answer.as_ref().and_then(|answer| answer.body) else {
+                return Err(corrupt("a saved Read has no attributed archival body"));
+            };
+            let fact = crate::runtime::actor::round::graph::load_read_fact(&mut decoder, body)
+                .map_err(DurableError::from)?;
+            out.push((body, fact));
+        }
+        if selected.rows.len() < PAGE as usize {
+            return Ok(out);
+        }
+    }
+}

@@ -242,7 +242,14 @@ pub(super) struct CellHost<'run> {
     pub graph: Mutex<HostGraph>,
     /// The cell's execution budget, whose held wall time each park saves.
     pub budget: lash_vm_client::ExecutionBudget,
+    /// The reads the cell's run made, by ordinal: what a run that starts
+    /// again is answered (FIG-7585). Shared with the cell's reads.
+    pub recorded_reads: RecordedReads,
 }
+
+/// A cell's reads by ordinal, as its commits recorded them and its run on
+/// this activation made them.
+pub(super) type RecordedReads = Arc<Mutex<BTreeMap<u64, lash_protocol_types::ReadFact>>>;
 
 /// A cell host's state as the graph its parks install: what an
 /// acknowledged park installed, and what the park in flight staged.
@@ -259,6 +266,9 @@ pub(super) struct HostGraph {
     pub installed: BTreeSet<NodeId>,
     /// What the park in flight staged, until its commit is acknowledged.
     pub staged: Option<BTreeSet<NodeId>>,
+    /// The read facts the commit in flight staged, until it is
+    /// acknowledged.
+    pub staged_reads: Option<Vec<NodeId>>,
 }
 
 /// The exact archival body named by a staged or acknowledged outcome.
@@ -999,6 +1009,51 @@ impl KernelEffects for CellHost<'_> {
         if let Some(staged) = graph.staged.take() {
             graph.installed.extend(staged);
         }
+        if let Some(reads) = graph.staged_reads.take() {
+            for node in reads {
+                graph
+                    .state
+                    .read_facts
+                    .push(super::host_graph::ReadEvent(node));
+            }
+        }
+    }
+
+    fn stage_reads(
+        &self,
+        staging: &mut GraphStaging,
+    ) -> Result<lash_vm_broker::kernel::run::ReadCalls, ParentFault> {
+        let ledgers = self.ledgers.lock_recover();
+        let mut graph = self.graph.lock_recover();
+        let mut nodes = Vec::new();
+        let mut read_calls = Vec::new();
+        for fact in ledgers
+            .read_facts
+            .iter()
+            .skip(graph.state.read_facts.items().len())
+        {
+            let node = lash_vm_broker::round_graph::stage_read_fact(staging, fact)
+                .map_err(|error| ParentFault(error.to_string()))?;
+            read_calls.push((
+                lash_core::durable_port::domain::CallOwner::from_opener(&self.opener),
+                fact.call_id.clone(),
+                fact.ordinal,
+                node,
+            ));
+            nodes.push(node);
+        }
+        graph.staged_reads = Some(nodes);
+        Ok(read_calls)
+    }
+
+    fn restart(&self) {
+        let mut ledgers = self.ledgers.lock_recover();
+        let mut recorded = self.recorded_reads.lock_recover();
+        for fact in ledgers.read_facts.drain(..) {
+            recorded.entry(fact.ordinal).or_insert(fact);
+        }
+        *ledgers = CellHostLedgers::default();
+        self.prints.lock_recover().clear();
     }
 
     fn plans_reads(&self) -> bool {

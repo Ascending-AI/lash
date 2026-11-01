@@ -392,6 +392,13 @@ impl DurableReads for DurableCommitHook {
         self.count("exec_root");
         self.inner.exec_root(exec).await
     }
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<lash_durable::domain::EffectAdmissionRow>, DurableError> {
+        self.count("effect_admissions");
+        self.inner.effect_admissions(exec).await
+    }
 
     async fn cell_roots(
         &self,

@@ -471,6 +471,20 @@ pub struct EffectAdmissionRow {
     /// An Admission node.
     pub admission: NodeId,
     pub written_epoch: Epoch,
+    /// Where the effect's outcome was delivered to the machine, once a
+    /// commit of its execution recorded it.
+    pub delivered: Option<Delivery>,
+}
+
+/// Where an in-turn execution delivered an effect's outcome: the delivery
+/// batch, counted from 0 over the execution's life, and the outcome's place
+/// in it. A batch is what the machine took between two of its slices, so a
+/// replay that delivers each batch whole and in order hands the machine
+/// exactly what the recorded run took.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Delivery {
+    pub batch: u64,
+    pub position: u32,
 }
 
 /// An effect admission write.
@@ -490,6 +504,14 @@ pub enum EffectAdmissionWrite {
         exec: ExecKey,
         effect: EffectKey,
         expected: NodeId,
+    },
+    /// Record where `effect`'s outcome was delivered, in the next commit
+    /// of its execution. Refused with [`GraphRefusal::RevisionConflict`]
+    /// when the effect has no admission or its delivery is recorded.
+    Deliver {
+        exec: ExecKey,
+        effect: EffectKey,
+        delivery: Delivery,
     },
 }
 
@@ -692,6 +714,7 @@ impl DomainWrite {
                 *transcript,
             )),
             Self::Environment(_)
+            | Self::EffectAdmission(EffectAdmissionWrite::Deliver { .. })
             | Self::RunFact(RunFactWrite::Prune { .. })
             | Self::Turn(_)
             | Self::SessionCommit(_)

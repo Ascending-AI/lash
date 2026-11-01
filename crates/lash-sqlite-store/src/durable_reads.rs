@@ -173,6 +173,14 @@ impl DurableReads for SqliteDurableStore {
         self.query(move |tx| snapshots::read(tx, &exec)).await
     }
 
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<lash_durable::domain::EffectAdmissionRow>, DurableError> {
+        let exec = exec.clone();
+        self.query(move |tx| graph::admissions(tx, &exec)).await
+    }
+
     async fn cell_roots(
         &self,
         session: &lash_kernel_value::identity::SessionId,

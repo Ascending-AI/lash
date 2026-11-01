@@ -65,11 +65,20 @@ crate::statements! {
              WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
              RETURNING (SELECT hash FROM blobs WHERE id = admission_ref) AS admission_ref";
 
-        /// Every admission of execution `?1`, by effect identity.
+        /// Every admission of execution `?1`, by effect identity, with
+        /// where its outcome was delivered.
         admissions = "SELECT effect_id, owner_key, run_seq, member_ordinal,
                     (SELECT hash FROM blobs WHERE id = admission_ref) AS admission_ref,
-                    written_epoch
+                    written_epoch, delivered_batch, delivered_position
              FROM effect_admissions WHERE exec_key = ?1 ORDER BY effect_id";
+
+        /// Record that effect `?2` of execution `?1` was delivered at
+        /// position `?4` of batch `?3`. No row when it has no admission or
+        /// its delivery is recorded.
+        admission_deliver = "UPDATE effect_admissions
+             SET delivered_batch = ?3, delivered_position = ?4
+             WHERE exec_key = ?1 AND effect_id = ?2 AND delivered_batch IS NULL
+             RETURNING exec_key";
 
         /// Session `?1`'s revision `?2`'s checkpoint root.
         revision_root = "SELECT (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref FROM session_revisions

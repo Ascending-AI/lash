@@ -44,6 +44,9 @@ pub(super) struct CellReads {
     /// The cell, as its observations name it.
     pub caller: lash_core::ToolReadCaller,
     pub observe: Arc<dyn Fn(lash_core::TurnEvent) + Send + Sync>,
+    /// The reads the cell's run made before, by ordinal: a run that starts
+    /// again is answered each exactly as it first was (FIG-7585).
+    pub recorded: super::host::RecordedReads,
 }
 
 impl CellReads {
@@ -90,6 +93,22 @@ impl EffectReads for CellReads {
         use lash_core::facade_support::{ReadContext, ReadTarget, run_read};
         use lash_protocol_types::ReadFailure;
         let (ordinal, count) = self.count();
+        let recorded = self.recorded.lock_recover().get(&ordinal).cloned();
+        if let Some(fact) = recorded {
+            let answer = lash_protocol_types::ReadFailure::recorded(&fact.outcome);
+            self.ledgers.lock_recover().read_facts.push(fact);
+            let signature = lash_kernel_value::json_schema::tool_signature(
+                &route.definition.contract.input_schema.canonical,
+                &route.definition.contract.output_schema.canonical,
+            );
+            return match lash_vm_broker::kernel::value::read_answer(&signature.result, answer) {
+                Ok(answer) => Ok(answer),
+                Err(panic) => {
+                    self.ledgers.lock_recover().read_panic = Some(panic.clone());
+                    Err(ParentFault(panic.message))
+                }
+            };
+        }
         let input = CellArgs::Direct
             .args(args)
             .map_err(|refusal| ReadFailure::Arguments(refusal.error(effect).message));

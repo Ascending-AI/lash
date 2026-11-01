@@ -351,6 +351,13 @@ impl DurableReads for ObservedStore {
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.observe("exec_root", self.inner.exec_root(exec)).await
     }
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<lash_durable::domain::EffectAdmissionRow>, DurableError> {
+        self.observe("effect_admissions", self.inner.effect_admissions(exec))
+            .await
+    }
 
     async fn cell_roots(
         &self,

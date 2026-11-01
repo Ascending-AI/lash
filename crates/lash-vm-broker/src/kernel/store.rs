@@ -80,7 +80,7 @@ use tokio_util::sync::CancellationToken;
 use super::closure::Closure;
 use super::graph::{
     CellEnd, Disposition, EffectMembership, FrozenAdmission, FrozenRequest, MemberStatus,
-    Projections, ResolvedAdmission, RootParts, stage_exec_root,
+    Projections, ResolvedAdmission, RootParts, RunFingerprint, stage_exec_root,
 };
 use super::ledger::{AdmittedEffect, EffectLedger, PendingEffect, Standing};
 use super::pages::{Resolution, SharedPages};
@@ -93,6 +93,7 @@ use crate::snapshot::{
     BrokerInvariant, DriveRefusal, DurableSnapshotStore, HeldRoot, OperationId, QuietPointRefusal,
     refused,
 };
+use lash_durable::domain::graph::EffectAdmissionWrite;
 
 /// The error kind of an effect that reported a failure of its own; its
 /// `data` is what the effect reported.
@@ -461,6 +462,461 @@ fn ambiguous(error: &DurableError) -> bool {
     matches!(error, DurableError::AckLost { .. })
 }
 
+/// One wait a park requested, sorted for its admission.
+struct Requested {
+    identity: EffectId,
+    wait: WaitId,
+    effect: Option<OperationUse>,
+    standing: Option<Standing>,
+    request: Option<FrozenRequest>,
+}
+
+/// A park's requests: the waits it stands on, the drafts its round
+/// admits, and which waits those drafts are, by index.
+struct Requests {
+    requested: Vec<Requested>,
+    drafts: Vec<lash_core_execution::runtime::actor::round::ExecutionDraft>,
+    executions: Vec<(usize, FrozenRequest)>,
+}
+
+impl Requests {
+    fn of(admit: Vec<EffectAdmission>) -> Self {
+        let mut drafts = Vec::new();
+        let mut executions = Vec::new();
+        let mut requested = Vec::with_capacity(admit.len());
+        for admission in admit {
+            let EffectAdmission {
+                identity,
+                wait,
+                effect,
+                admit,
+            } = admission;
+            let (standing, request) = match admit {
+                AdmitAs::Execution(draft) => {
+                    let MemberDraft { draft, request } = *draft;
+                    executions.push((requested.len(), request));
+                    drafts.push(draft);
+                    (None, None)
+                }
+                AdmitAs::Refused { error, args } => (
+                    Some(Standing::Refused(error.clone())),
+                    Some(FrozenRequest::Refused { error, args }),
+                ),
+            };
+            requested.push(Requested {
+                identity,
+                wait,
+                effect,
+                standing,
+                request,
+            });
+        }
+        Self {
+            requested,
+            drafts,
+            executions,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.requested.is_empty()
+    }
+}
+
+/// What an in-turn run's commits recorded (FIG-7585): every effect it
+/// admitted, and the batches its outcomes were delivered in. A run that
+/// resumes starts again and follows it: each park requests what these
+/// admissions froze, and each wait takes the next batch whole.
+#[derive(Clone, Debug, Default)]
+pub struct CellJournal {
+    /// Every admission, by effect identity.
+    pub admitted: BTreeMap<EffectId, ResolvedAdmission>,
+    /// The delivery batches in order, each its effects in delivery order.
+    pub batches: Vec<Vec<EffectId>>,
+}
+
+/// How an in-turn park's commit ended.
+#[derive(Debug)]
+pub enum Journaled {
+    /// It committed, or had nothing to commit: the ledger as it stands.
+    Committed(EffectLedger),
+    /// The turn accepted an `Immediate` cancel (or its session's close)
+    /// before the commit that carried its held response: nothing it
+    /// admitted starts, and the turn stops on the cell.
+    Stopped,
+}
+
+/// What one in-turn park commits: no state, only the journal's facts.
+pub struct JournaledPark<'a> {
+    pub document: DocumentId,
+    /// The execution closure the run's document links against.
+    pub closure: &'a Closure,
+    /// The ledger before this park's admissions.
+    pub ledger: EffectLedger,
+    /// Every wait requested since the last park.
+    pub admit: Vec<EffectAdmission>,
+    /// The deliveries since the last commit, in order.
+    pub delivered: Vec<(EffectId, lash_durable::domain::Delivery)>,
+    pub with: Vec<DomainWrite>,
+}
+
+impl DurableSnapshotStore {
+    /// Admit `requests` in `tx`: one round of the executions, pinned at the
+    /// ledger's next park, and an admission of every wait, each standing in
+    /// `ledger` as admitted. Answers the calls the host records and the
+    /// round's members.
+    #[expect(clippy::too_many_arguments, reason = "one admission, in its parts")]
+    fn admit_requests(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+        staging: &mut GraphStaging,
+        book: &mut super::graph::AdmissionBook,
+        ledger: &mut EffectLedger,
+        requests: Requests,
+        run: Option<RunFingerprint>,
+    ) -> Result<(Vec<AdmittedCall>, Vec<AdmittedExecution>), QuietPointRefusal> {
+        let Requests {
+            mut requested,
+            drafts,
+            executions,
+        } = requests;
+        if requested.is_empty() {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        let run = run.ok_or_else(|| refused("a run's end admits nothing"))?;
+        let mut calls = Vec::new();
+        let mut admitted: Vec<AdmittedExecution> = Vec::new();
+        if !drafts.is_empty() {
+            let park = ledger.take_park();
+            let pinned = round::pin_round(
+                tx,
+                &waits::wait_scope(&self.cx).map_err(refused)?,
+                RoundDraft {
+                    owner: self.exec.owner(),
+                    run: RunSeq(park),
+                    members: drafts,
+                },
+            )
+            .map_err(refused)?;
+            let mut nodes = Vec::with_capacity(executions.len());
+            for ((ordinal, pin), (index, request)) in pinned.pins().into_iter().zip(executions) {
+                let entry = &mut requested[index];
+                let operation = OperationId {
+                    run: park,
+                    ordinal: ordinal.0,
+                };
+                let call = pin.call.clone();
+                let (node, write) = book
+                    .admit(
+                        staging,
+                        &self.exec,
+                        FrozenAdmission {
+                            run: run.clone(),
+                            effect: entry.identity.clone(),
+                            wait: entry.wait,
+                            effect_name: entry.effect,
+                            request,
+                            execution: Some((operation, pin)),
+                        },
+                    )
+                    .map_err(refused)?;
+                tx.write(write);
+                nodes.push(node);
+                if let Some(operation) = &entry.effect {
+                    calls.push(AdmittedCall {
+                        effect: entry.identity.clone(),
+                        operation: *operation,
+                        call: call.clone(),
+                        admission: node,
+                    });
+                }
+                entry.standing = Some(Standing::Admitted(AdmittedEffect { operation, call }));
+            }
+            admitted = pinned.admit(tx, nodes).map_err(refused)?.members().to_vec();
+        }
+        for entry in requested {
+            let Some(standing) = entry.standing else {
+                return Err(refused("an execution's admission minted no identity"));
+            };
+            if let Some(request) = entry.request {
+                let (_, write) = book
+                    .admit(
+                        staging,
+                        &self.exec,
+                        FrozenAdmission {
+                            run: run.clone(),
+                            effect: entry.identity.clone(),
+                            wait: entry.wait,
+                            effect_name: entry.effect,
+                            request,
+                            execution: None,
+                        },
+                    )
+                    .map_err(refused)?;
+                tx.write(write);
+            }
+            let pending = PendingEffect {
+                wait: entry.wait,
+                effect: entry.effect,
+                standing,
+                cancellation_requested: false,
+            };
+            if !ledger.stand(entry.identity.clone(), pending) {
+                return Err(refused(format!(
+                    "the run already stands on effect {:?}",
+                    entry.identity
+                )));
+            }
+        }
+        Ok((calls, admitted))
+    }
+
+    /// Write in `tx` the cancel decision of every cancelling execution of
+    /// `ledger` whose call has none committed.
+    async fn cancel_in(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+        members: &mut crate::members::Members,
+        ledger: &EffectLedger,
+    ) -> Result<(), QuietPointRefusal> {
+        if !ledger.has_cancellations() {
+            return Ok(());
+        }
+        let folded = members.fold().await.map_err(refused)?;
+        for cancelled in ledger.cancelling() {
+            for view in folded.rounds() {
+                if let Some(member) = view.members().iter().find(|member| {
+                    member.call() == &cancelled.call
+                        && member.outcome().is_none()
+                        && member.cancellation().is_none()
+                        && member.final_payload().is_none()
+                }) {
+                    let _ = round::cancel_call(
+                        tx,
+                        &view.execution(member),
+                        lash_protocol_types::ToolCancellation::runtime(
+                            "the guest task cancelled its call",
+                        )
+                        .with_origin(lash_protocol_types::CancelOrigin::ModelRequested),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The admission of `effect` this activation knows, with its request.
+    #[must_use]
+    pub fn resolved(&self, effect: &EffectId) -> Option<ResolvedAdmission> {
+        self.book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .resolved(effect)
+    }
+
+    /// The journal this in-turn execution's commits recorded: every
+    /// admission, each request read through the projection of
+    /// `projections` it was frozen under, and the delivery batches. The
+    /// activation's admission book holds them from here on.
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`]: a store failure, an admission of another
+    /// execution, or deliveries that do not form whole batches.
+    pub async fn journal(
+        &self,
+        projections: &dyn Projections,
+    ) -> Result<CellJournal, QuietPointRefusal> {
+        let reads = self.cx.durable_reads().map_err(refused)?;
+        let rows = reads.effect_admissions(&self.exec).await.map_err(refused)?;
+        let mut admitted = BTreeMap::new();
+        let mut delivered = BTreeMap::new();
+        for row in rows {
+            let graph = reads
+                .hydrate(
+                    RootOwner::EffectAdmission {
+                        exec: self.exec.clone(),
+                        effect: row.effect.clone(),
+                    },
+                    Some(row.admission),
+                    self.read_limits(),
+                )
+                .await
+                .map_err(refused)?;
+            let mut decoder = GraphDecoder::new(&graph, self.read_limits());
+            let resolved = super::graph::Admission::load(&mut decoder, row.admission, projections)
+                .map_err(refused)?;
+            if resolved.admission.exec != self.exec
+                || super::graph::effect_key(&resolved.admission.effect) != row.effect
+            {
+                return Err(refused("an admission row names another execution's effect"));
+            }
+            if let Some(delivery) = row.delivered {
+                delivered.insert(delivery, resolved.admission.effect.clone());
+            }
+            admitted.insert(resolved.admission.effect.clone(), resolved);
+        }
+        let mut batches: Vec<Vec<EffectId>> = Vec::new();
+        for (delivery, effect) in delivered {
+            let batch = usize::try_from(delivery.batch).unwrap_or(usize::MAX);
+            if batch == batches.len() {
+                batches.push(Vec::new());
+            }
+            let last = batches.len().checked_sub(1);
+            match batches.get_mut(batch) {
+                Some(effects)
+                    if Some(batch) == last
+                        && usize::try_from(delivery.position).ok() == Some(effects.len()) =>
+                {
+                    effects.push(effect);
+                }
+                _ => return Err(refused("the journal's deliveries are not whole batches")),
+            }
+        }
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            super::graph::AdmissionBook::restored(admitted.clone());
+        Ok(CellJournal { admitted, batches })
+    }
+
+    /// Commit `save`, an in-turn park (FIG-7585), with the model response
+    /// its turn holds for the run, when this is its first commit: the
+    /// admission of every wait it requested, the cancel decisions it made,
+    /// the reads and deliveries since its last commit. No state is saved:
+    /// a run that resumes starts again and follows these facts.
+    ///
+    /// # Errors
+    ///
+    /// As [`commit_park`](Self::commit_park).
+    pub async fn commit_journaled(
+        &self,
+        save: JournaledPark<'_>,
+        host: &dyn KernelEffects,
+        response: Option<&lash_core_execution::HeldResponse>,
+    ) -> Result<Journaled, QuietPointRefusal> {
+        let JournaledPark {
+            document,
+            closure,
+            mut ledger,
+            admit,
+            delivered,
+            with,
+        } = save;
+        let mut members = self.members.lock().await;
+        if ledger.has_cancellations() {
+            let folded = members.fold().await.map_err(refused)?;
+            ledger.drop_cancelling(|admitted| {
+                let Some(output) = final_output(&folded, &self.exec, admitted) else {
+                    return false;
+                };
+                let _ = host.outcome(admitted, output);
+                true
+            });
+        }
+        let requests = Requests::of(admit);
+        let mut tx = self.cx.begin().await.map_err(refused)?;
+        self.cancel_in(&mut tx, &mut members, &ledger).await?;
+        if let Some(response) = response {
+            if response.stops_at(&tx) {
+                return Ok(Journaled::Stopped);
+            }
+            let held = response
+                .writes()
+                .ok_or_else(|| refused("a first save carries a response its turn holds"))?;
+            tx.append(held)?;
+        }
+        let mut staging = staging();
+        let mut book = self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let admits = !requests.is_empty();
+        let (_, admitted) = self.admit_requests(
+            &mut tx,
+            &mut staging,
+            &mut book,
+            &mut ledger,
+            requests,
+            Some(RunFingerprint {
+                document,
+                closure: closure.reference(),
+            }),
+        )?;
+        for (effect, delivery) in delivered {
+            tx.write(DomainWrite::EffectAdmission(
+                EffectAdmissionWrite::Deliver {
+                    exec: self.exec.clone(),
+                    effect: super::graph::effect_key(&effect),
+                    delivery,
+                },
+            ));
+        }
+        for write in with {
+            tx.write(write);
+        }
+        for (logical, call, ordinal, body) in host.stage_reads(&mut staging).map_err(refused)? {
+            tx.write(DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Admit {
+                    counted: false,
+                    logical,
+                    execution: self.exec.owner(),
+                    run: RunSeq(0),
+                    member: ordinal,
+                    call: call.clone(),
+                    cancellable: false,
+                },
+            ));
+            tx.write(DomainWrite::ToolCall(
+                lash_durable::domain::ToolCallWrite::Answer {
+                    owner: self.exec.owner(),
+                    call,
+                    answer: lash_durable::domain::ToolCallAnswer {
+                        outcome: lash_durable::domain::tool_calls::ToolCallSettlement::Read,
+                        body: Some(body),
+                    },
+                },
+            ));
+        }
+        tx.stage_all(staging);
+        let label = if response.is_some() {
+            CommitLabel::MODEL_DONE_CELL_ADMIT
+        } else {
+            CommitLabel::CELL_ADMIT
+        };
+        if tx.domain().is_empty() {
+            return Ok(Journaled::Committed(ledger));
+        }
+        let update = members.prepare_update(&tx).await.map_err(refused)?;
+        let committed = match self.cx.commit(tx, label).await {
+            Ok(committed) => committed,
+            Err(error) => {
+                members.forget();
+                return Err(error.into());
+            }
+        };
+        members.apply_update(update).map_err(refused)?;
+        if let Some(response) = response {
+            response.committed(label);
+        }
+        let stopped = response.is_some_and(|response| response.stops_in(&committed));
+        host.host_committed();
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
+        if admits && !admitted.is_empty() && !stopped {
+            members.admitted(&admitted).map_err(refused)?;
+        }
+        if stopped {
+            return Ok(Journaled::Stopped);
+        }
+        Ok(Journaled::Committed(ledger))
+    }
+}
+
 impl DurableSnapshotStore {
     /// Commit `save` in one transaction (see the module docs), with the
     /// host's own state `host` stages.
@@ -556,36 +1012,6 @@ impl DurableSnapshotStore {
         .and_then(saved)
     }
 
-    /// The parked root of a run whose end its consumer commits (FIG-5999):
-    /// `ledger`, as the run left it, stands on nothing, so nothing is left
-    /// to close, and the commit that consumes the run's answer retires
-    /// this root with every record and admission under it. A successor
-    /// that finds the root resumes from it, is answered the same committed
-    /// outcomes and runs the final stretch again.
-    ///
-    /// `None` when the ledger still names a wait or a cancelling execution.
-    /// Closing an execution is a commit of its own, and a successor that
-    /// resumed from the parked root would read the closing's cancel as the
-    /// execution's own outcome; a sleep still pending could be over by
-    /// then and answer a race its call had won. Such a run closes and
-    /// records its end ([`commit_run_end`](Self::commit_run_end)).
-    ///
-    /// # Errors
-    ///
-    /// [`QuietPointRefusal`]: a store failure, or a run with no root.
-    pub async fn held_end(
-        &self,
-        ledger: &EffectLedger,
-    ) -> Result<Option<HeldRoot>, QuietPointRefusal> {
-        if ledger.pending().next().is_some() || ledger.has_cancellations() {
-            return Ok(None);
-        }
-        self.revision()
-            .await?
-            .map(Some)
-            .ok_or_else(|| refused("a run that parked holds its root"))
-    }
-
     /// The root the execution's row holds, if any.
     ///
     /// # Errors
@@ -642,43 +1068,7 @@ impl DurableSnapshotStore {
                 true
             });
         }
-        struct Requested {
-            identity: EffectId,
-            wait: WaitId,
-            effect: Option<OperationUse>,
-            standing: Option<Standing>,
-            request: Option<FrozenRequest>,
-        }
-        let mut drafts = Vec::new();
-        let mut executions = Vec::new();
-        let mut requested = Vec::with_capacity(admit.len());
-        for admission in admit {
-            let EffectAdmission {
-                identity,
-                wait,
-                effect,
-                admit,
-            } = admission;
-            let (standing, request) = match admit {
-                AdmitAs::Execution(draft) => {
-                    let MemberDraft { draft, request } = *draft;
-                    executions.push((requested.len(), request));
-                    drafts.push(draft);
-                    (None, None)
-                }
-                AdmitAs::Refused { error, args } => (
-                    Some(Standing::Refused(error.clone())),
-                    Some(FrozenRequest::Refused { error, args }),
-                ),
-            };
-            requested.push(Requested {
-                identity,
-                wait,
-                effect,
-                standing,
-                request,
-            });
-        }
+        let requests = Requests::of(admit);
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
         if matches!(phase, SavePhase::Ended { .. }) {
@@ -695,28 +1085,7 @@ impl DurableSnapshotStore {
 
         // Guest state and target identities commit together. No cleanup body
         // can be entered until the owner observes these decisions committed.
-        if ledger.has_cancellations() {
-            let folded = members.fold().await.map_err(refused)?;
-            for cancelled in ledger.cancelling() {
-                for view in folded.rounds() {
-                    if let Some(member) = view.members().iter().find(|member| {
-                        member.call() == &cancelled.call
-                            && member.outcome().is_none()
-                            && member.cancellation().is_none()
-                            && member.final_payload().is_none()
-                    }) {
-                        let _ = round::cancel_call(
-                            &mut tx,
-                            &view.execution(member),
-                            lash_protocol_types::ToolCancellation::runtime(
-                                "the guest task cancelled its call",
-                            )
-                            .with_origin(lash_protocol_types::CancelOrigin::ModelRequested),
-                        );
-                    }
-                }
-            }
-        }
+        self.cancel_in(&mut tx, &mut members, &ledger).await?;
         // The response the turn held commits first, as `model.done` would
         // have, in this transaction: unless the turn stops at once.
         if let Some(response) = response {
@@ -738,92 +1107,17 @@ impl DurableSnapshotStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let mut calls = Vec::new();
-        let mut admitted: Vec<AdmittedExecution> = Vec::new();
-        if !drafts.is_empty() {
-            let park = ledger.take_park();
-            let pinned = round::pin_round(
-                &mut tx,
-                &waits::wait_scope(&self.cx).map_err(refused)?,
-                RoundDraft {
-                    owner: self.exec.owner(),
-                    run: RunSeq(park),
-                    members: drafts,
-                },
-            )
-            .map_err(refused)?;
-            let mut nodes = Vec::with_capacity(executions.len());
-            for ((ordinal, pin), (index, request)) in pinned.pins().into_iter().zip(executions) {
-                let entry = &mut requested[index];
-                let operation = OperationId {
-                    run: park,
-                    ordinal: ordinal.0,
-                };
-                let call = pin.call.clone();
-                let (node, write) = book
-                    .admit(
-                        &mut staging,
-                        &self.exec,
-                        FrozenAdmission {
-                            effect: entry.identity.clone(),
-                            wait: entry.wait,
-                            effect_name: entry.effect,
-                            request,
-                            execution: Some((operation, pin)),
-                        },
-                    )
-                    .map_err(refused)?;
-                tx.write(write);
-                nodes.push(node);
-                if let Some(operation) = &entry.effect {
-                    calls.push(AdmittedCall {
-                        effect: entry.identity.clone(),
-                        operation: *operation,
-                        call: call.clone(),
-                        admission: node,
-                    });
-                }
-                entry.standing = Some(Standing::Admitted(AdmittedEffect { operation, call }));
-            }
-            admitted = pinned
-                .admit(&mut tx, nodes)
-                .map_err(refused)?
-                .members()
-                .to_vec();
-        }
-        for entry in requested {
-            let Some(standing) = entry.standing else {
-                return Err(refused("an execution's admission minted no identity"));
-            };
-            if let Some(request) = entry.request {
-                let (_, write) = book
-                    .admit(
-                        &mut staging,
-                        &self.exec,
-                        FrozenAdmission {
-                            effect: entry.identity.clone(),
-                            wait: entry.wait,
-                            effect_name: entry.effect,
-                            request,
-                            execution: None,
-                        },
-                    )
-                    .map_err(refused)?;
-                tx.write(write);
-            }
-            let pending = PendingEffect {
-                wait: entry.wait,
-                effect: entry.effect,
-                standing,
-                cancellation_requested: false,
-            };
-            if !ledger.stand(entry.identity.clone(), pending) {
-                return Err(refused(format!(
-                    "the run already stands on effect {:?}",
-                    entry.identity
-                )));
-            }
-        }
+        let (calls, admitted) = self.admit_requests(
+            &mut tx,
+            &mut staging,
+            &mut book,
+            &mut ledger,
+            requests,
+            own.map(|closure| RunFingerprint {
+                document: *document,
+                closure,
+            }),
+        )?;
         // Records no saved state can reach again go, in the transaction
         // that saves the state that consumed them. What their settled
         // members changed commits with the prune as the turn's run

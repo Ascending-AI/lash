@@ -208,6 +208,34 @@ impl ReadFailure {
         };
         crate::ToolCallOutput::failure(failure)
     }
+
+    /// The answer a read gave, read back from the outcome its fact
+    /// recorded: [`Self::output`] inverted, so a run that follows its
+    /// journal is answered a recorded read exactly as it first was
+    /// (FIG-7585).
+    pub fn recorded(outcome: &crate::ToolCallOutcome) -> Result<serde_json::Value, Self> {
+        Err(match outcome {
+            crate::ToolCallOutcome::Success(value) => return Ok(value.to_json_value()),
+            crate::ToolCallOutcome::Cancelled(_) => Self::Cancelled,
+            crate::ToolCallOutcome::Failure(failure) => {
+                match (failure.code.as_str(), failure.cause.as_deref()) {
+                    (_, Some(crate::ToolFailureCause::ReadPanicked { panic })) => {
+                        Self::Panicked(panic.clone())
+                    }
+                    ("read_arguments", _) => Self::Arguments(failure.message.clone()),
+                    ("read_timed_out", _) => Self::TimedOut,
+                    ("read_failed", _) => Self::Reader {
+                        message: failure.message.clone(),
+                        data: failure
+                            .raw
+                            .as_ref()
+                            .map_or(serde_json::Value::Null, crate::ToolValue::to_json_value),
+                    },
+                    _ => Self::Tool(Box::new(failure.clone())),
+                }
+            }
+        })
+    }
 }
 
 /// A read answer and the fact that its caller must retain at its next save.

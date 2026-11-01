@@ -129,30 +129,6 @@ pub(crate) async fn execute_cell(
         lash_core::facade_support::execution_actor(&ctx),
         exec.clone(),
     ));
-    let opened = match opened {
-        Ok(value) => {
-            match Box::pin(cell_carry::carry(
-                &snapshots,
-                &services.kernel,
-                services,
-                state.documents.as_ref(),
-                &ctx,
-            ))
-            .await
-            {
-                Ok(()) => Ok(value),
-                Err(error) => {
-                    let message = error.to_string();
-                    ctx.record_nested_effect_error(error.into_runtime());
-                    return exec_setup_failure(lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Host,
-                        message,
-                    ));
-                }
-            }
-        }
-        Err(error) => Err(error),
-    };
     let resumed = match &opened {
         Ok(_) => match envelope::resumed_cell(&snapshots, &clean_code).await {
             Ok(resumed) => resumed,
@@ -602,6 +578,42 @@ async fn run_linked_cell(
         .collect();
     let ledgers = Arc::new(Mutex::new(ledgers));
     let plans_reads = !routes.is_empty();
+    // A cell that starts again is answered every read its commits recorded
+    // as it first was, and records none of them again (FIG-7585).
+    let recorded_reads: host::RecordedReads = Arc::default();
+    let mut graph = graph;
+    if plans_reads && !runs_on {
+        let saved = match lash_core::facade_support::execution_actor(&ctx).durable_reads() {
+            Ok(reads) => {
+                lash_core::call_store::execution_reads(
+                    reads,
+                    &lash_core::durable_port::domain::CallOwner::from_opener(identities.opener()),
+                    &snapshots.exec().owner(),
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        match saved {
+            Ok(saved) => {
+                let mut recorded = recorded_reads.lock_recover();
+                for (node, fact) in saved {
+                    graph.state.read_facts.push(host_graph::ReadEvent(node));
+                    recorded.insert(fact.ordinal, fact);
+                }
+            }
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        error.to_string(),
+                    ),
+                );
+            }
+        }
+    }
     let cell_reads = Arc::new(reads::CellReads {
         clock: Arc::clone(lash_core::facade_support::execution_actor(&ctx).clock()),
         routes,
@@ -616,6 +628,7 @@ async fn run_linked_cell(
                 .unwrap_or_else(|| execution.0.clone()),
         },
         observe: ctx.tool_read_observer(),
+        recorded: Arc::clone(&recorded_reads),
     });
     let host = CellHost {
         plans_reads,
@@ -634,6 +647,7 @@ async fn run_linked_cell(
             .execution_budget()
             .cloned()
             .unwrap_or_default(),
+        recorded_reads,
     };
     let printed = Arc::clone(&prints);
     let counts_trace = trace.clone();
@@ -1144,9 +1158,7 @@ async fn run_linked_cell(
     let consumption = response.consumption.clone();
     let ended = match owed {
         Some((ledger, end, pages)) => {
-            end_cell(state, snapshots, &host, document_id, ledger, end, &pages)
-                .await
-                .map(Some)
+            end_cell(state, snapshots, &host, document_id, ledger, end, &pages).await
         }
         None if recorded => snapshots
             .root()
@@ -1234,14 +1246,13 @@ async fn run_linked_cell(
     response
 }
 
-/// Ends a cell that parked. A turn that holds the end
-/// ([`RuntimeExecutionContext::holds_cell_end`]) is left the cell's parked
-/// root, which the commit that consumes the cell's answer retires with the
-/// session's working state as the cell left it (FIG-5999): nothing commits
-/// here, and a successor that finds the root runs the cell on from its last
-/// park, whose final stretch issued no effect (ADR 0132 §8). A cell that
-/// ends with an execution still open, or whose turn runs a callback of its
-/// own before that commit, records its end ([`record_end`]).
+/// Ends a cell that committed a park. A cell that stands on nothing leaves
+/// nothing to retire: an in-turn cell saves no state (FIG-7585), so the
+/// commit that consumes its answer captures the session's working state as
+/// the cell left it, as it does a cell that never parked, and a successor
+/// that loses that commit runs the cell from its start against its journal.
+/// A cell that ends with an execution still open records its end
+/// ([`record_end`]), which closes it.
 async fn end_cell(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
@@ -1250,32 +1261,16 @@ async fn end_cell(
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
-) -> Result<lash_core::EndedCell, KernelFailure> {
-    // Runtime-settled cancellations have no standalone call material.
-    // Record their host ledger before the turn consumes the cell, so its
-    // durable report retains the cancelled losers as well as the winner.
-    let cancelled_call = host.ledgers().tool_call_records().iter().any(|call| {
-        matches!(
-            call.output.outcome,
-            lash_core::ToolCallOutcome::Cancelled(_)
-        )
-    });
-    if host.ctx.holds_cell_end()
-        && !cancelled_call
-        && let Some(held) = snapshots.held_end(&ledger).await?
-    {
-        return Ok(lash_core::EndedCell {
-            exec: snapshots.exec().clone(),
-            root: held.root,
-            held: true,
-        });
+) -> Result<Option<lash_core::EndedCell>, KernelFailure> {
+    if ledger.pending().next().is_none() && !ledger.has_cancellations() {
+        return Ok(None);
     }
     let root = record_end(state, snapshots, host, document, ledger, end, pages).await?;
-    Ok(lash_core::EndedCell {
+    Ok(Some(lash_core::EndedCell {
         exec: snapshots.exec().clone(),
         root,
         held: false,
-    })
+    }))
 }
 
 /// Commits the end of a cell that parked over its root: the run's

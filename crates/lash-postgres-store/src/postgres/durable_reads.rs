@@ -8,8 +8,8 @@ use sqlx::pool::PoolConnection;
 use sqlx::{PgConnection, Postgres};
 
 use super::{
-    PostgresDurableStore, processes, prompts, session_close, session_mail, snapshots, sqlx_failure,
-    turns, waits,
+    PostgresDurableStore, graph, processes, prompts, session_close, session_mail, snapshots,
+    sqlx_failure, turns, waits,
 };
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
@@ -144,6 +144,14 @@ impl DurableReads for PostgresDurableStore {
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.read(|connection| Box::pin(snapshots::read(connection, exec)))
+            .await
+    }
+
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<lash_durable::domain::EffectAdmissionRow>, DurableError> {
+        self.read(|connection| Box::pin(graph::admissions(connection, exec)))
             .await
     }
 

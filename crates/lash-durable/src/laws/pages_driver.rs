@@ -970,6 +970,12 @@ impl DurableReads for Retiring {
     ) -> Result<Option<domain::ExecRootRow>, DurableError> {
         self.inner.exec_root(exec).await
     }
+    async fn effect_admissions(
+        &self,
+        exec: &domain::ExecKey,
+    ) -> Result<Vec<domain::EffectAdmissionRow>, DurableError> {
+        self.inner.effect_admissions(exec).await
+    }
 
     async fn cell_roots(
         &self,

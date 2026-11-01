@@ -737,43 +737,6 @@ async fn a_cell_past_its_lifetime_effects_ends_with_the_recorded_typed_bound() {
     assert_eq!(tools.answered(), vec!["a", "b", "c"]);
 }
 
-/// FIG-6788: the pages a cell seals into its checkpoints count over its
-/// whole life. The save that would pass the pool's bound admits nothing
-/// and ends the cell with the typed bound, recorded over its last root.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cell_past_its_lifetime_checkpoint_bytes_ends_with_the_recorded_typed_bound() {
-    let tools = Arc::new(CellTools::default());
-    let (first, again) = run_and_replay(
-        &lifetime_services(|lifetime| lifetime.checkpoint_bytes = 256 * 1024),
-        &tools,
-        // About 372 KB of text no two chunks of which are alike: identical
-        // pages are sealed once.
-        "const first = await echo.say({ text: \"a\" });\nconst big = Array.from({ length: 6000 }, (_, i) => String(i).repeat(16)).join(\",\");\nconst second = await echo.say({ text: \"b\" });\nawait control.finish(big.length + first.length + second.length);",
-    )
-    .await;
-    let failure = first.error().expect("the cell ends at its lifetime bound");
-    assert!(
-        failure.message.starts_with(crate::CELL_BOUND_EXCEEDED)
-            && failure
-                .message
-                .contains("saved too much state over its life")
-            && failure.message.contains("(limit 262144)"),
-        "{}",
-        failure.message
-    );
-    assert_eq!(
-        tools.answered(),
-        vec!["a"],
-        "the save past the bound admitted nothing"
-    );
-    assert_eq!(
-        again.error(),
-        Some(failure),
-        "the recorded end answers the cell again"
-    );
-    assert_eq!(tools.answered(), vec!["a"]);
-}
-
 /// Runs `code` until the held tool call starts, then kills the node with
 /// the call running and resumes the cell on another node, where the call
 /// may finish.
@@ -1199,7 +1162,7 @@ async fn a_held_response_registers_its_cell_in_the_first_park() {
     );
     assert_eq!(
         held.committed_as(),
-        Some(lash_durable::CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT),
+        Some(lash_durable::CommitLabel::MODEL_DONE_CELL_ADMIT),
         "registration must retain the first-park coalescing boundary"
     );
     assert_eq!(
@@ -1286,11 +1249,6 @@ async fn bound_decisions_retain_consumption_for_the_limit_that_did_not_fire() {
         cpu["observed"]
             .as_u64()
             .is_some_and(|used| used < cpu_bound)
-    );
-    assert_eq!(
-        encoded["consumption"],
-        serde_json::to_value(&again).unwrap()["consumption"],
-        "a recorded end retains its decision meters"
     );
     // Force a CPU verdict only after the machine has run a charged slice.
     // This does not depend on how quickly this host runs the guest.

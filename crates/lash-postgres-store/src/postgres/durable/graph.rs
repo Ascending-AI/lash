@@ -54,10 +54,14 @@ use lash_core_store::checkpoint_graph::StoredNode;
 use lash_core_store::checkpoint_graph::check_envelope;
 use lash_core_store::checkpoint_graph::node::is_semantic;
 use lash_durable::domain::DomainRefusal;
-use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
+use lash_durable::domain::graph::{
+    AdmissionMember, Delivery, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, HydratedGraph,
+    HydratedNode, RootOwner,
+};
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
+use lash_durable::domain::{ExecKey, OwnerKey, RunSeq};
 use lash_durable::{
     CommitCapacity, CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind,
 };
@@ -67,7 +71,7 @@ use lash_store_sql::{Dialect, Rendered};
 use sqlx::PgConnection;
 
 use super::steps::{self, Entry, Shape, Step, Ty, Value};
-use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
+use super::{Committing, PostgresDurableStore, Tx, integer, node_ref, sqlx_failure};
 
 mod reclaim;
 pub(super) use reclaim::peel_set;
@@ -840,6 +844,11 @@ pub(super) static ADMISSION_REMOVE: Entry = Entry::new(
     &[Ty::Text, Ty::Bytes, Ty::Key],
     Shape::Returning,
 );
+pub(super) static ADMISSION_DELIVER: Entry = Entry::new(
+    || &SQL.graph.admission_deliver,
+    &[Ty::Text, Ty::Bytes, Ty::Int, Ty::Int],
+    Shape::Returning,
+);
 
 /// `write`'s step program at `epoch`: an admission's insert, which must be
 /// the effect's first, or its lookup's guarded removal.
@@ -895,6 +904,19 @@ pub(super) fn admission_steps(
             )
             .retiring([expected.to_hex()]),
         ],
+        EffectAdmissionWrite::Deliver {
+            exec,
+            effect,
+            delivery,
+        } => vec![Step::one(
+            &ADMISSION_DELIVER,
+            vec![
+                Value::text(exec.stored()),
+                Value::Bytes(Some(effect.0.to_vec())),
+                Value::Int(Some(integer::<i64>(delivery.batch)?)),
+                Value::int(i64::from(delivery.position)),
+            ],
+        )],
     })
 }
 
@@ -1359,6 +1381,59 @@ impl PostgresDurableStore {
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
+
+/// Every admission of execution `exec`, by effect identity, with where its
+/// outcome was delivered.
+pub(super) async fn admissions(
+    tx: &mut PgConnection,
+    exec: &ExecKey,
+) -> Result<Vec<EffectAdmissionRow>, DurableError> {
+    use sqlx::Row as _;
+    let rows = crate::observed_sql::query(SQL.graph.admissions.sql())
+        .bind(exec.stored())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let effect: Vec<u8> = row.try_get(0).map_err(sqlx_failure)?;
+        let owner: Option<String> = row.try_get(1).map_err(sqlx_failure)?;
+        let run: Option<i64> = row.try_get(2).map_err(sqlx_failure)?;
+        let member: Option<i64> = row.try_get(3).map_err(sqlx_failure)?;
+        let admission: String = crate::keys::get(&row, 4).map_err(sqlx_failure)?;
+        let epoch: i64 = row.try_get(5).map_err(sqlx_failure)?;
+        let batch: Option<i64> = row.try_get(6).map_err(sqlx_failure)?;
+        let position: Option<i64> = row.try_get(7).map_err(sqlx_failure)?;
+        let member = match (owner, run, member) {
+            (owner, Some(run), Some(member)) => Some(AdmissionMember {
+                owner: match owner {
+                    Some(owner) => OwnerKey::parse(&owner).map_err(|error| {
+                        DurableError::from(corrupt("effect admission owner", &error.to_string()))
+                    })?,
+                    None => exec.owner(),
+                },
+                run: RunSeq(integer(run)?),
+                member: integer(member)?,
+            }),
+            _ => None,
+        };
+        out.push(EffectAdmissionRow {
+            exec: exec.clone(),
+            effect: EffectKey(effect.into()),
+            member,
+            admission: node_ref(&admission)?,
+            written_epoch: Epoch(epoch),
+            delivered: match (batch, position) {
+                (Some(batch), Some(position)) => Some(Delivery {
+                    batch: integer(batch)?,
+                    position: integer(position)?,
+                }),
+                _ => None,
+            },
+        });
+    }
+    Ok(out)
+}
 
 #[cfg(test)]
 mod run_fact_tests;

@@ -1306,11 +1306,18 @@ CREATE TABLE IF NOT EXISTS lash_effect_admissions (
     member_ordinal BIGINT,
     admission_ref BIGINT NOT NULL REFERENCES lash_blobs(id) ON DELETE RESTRICT,
     written_epoch BIGINT NOT NULL,
+    -- Where the effect's outcome was delivered to its in-turn machine: the
+    -- execution's journal, which a replay from the cell's start follows.
+    delivered_batch BIGINT CONSTRAINT ck_effect_admissions_batch CHECK (delivered_batch >= 0),
+    delivered_position BIGINT CONSTRAINT ck_effect_admissions_position
+        CHECK (delivered_position >= 0),
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
     CONSTRAINT ck_effect_admissions_member CHECK (
         (owner_key IS NULL AND run_seq IS NULL AND member_ordinal IS NULL) OR
-        (owner_key IS NOT NULL AND run_seq IS NOT NULL AND member_ordinal IS NOT NULL))
+        (owner_key IS NOT NULL AND run_seq IS NOT NULL AND member_ordinal IS NOT NULL)),
+    CONSTRAINT ck_effect_admissions_delivered CHECK (
+        (delivered_batch IS NULL) = (delivered_position IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_effect_admissions_admission_ref
     ON lash_effect_admissions (admission_ref);

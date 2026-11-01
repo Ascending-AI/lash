@@ -54,7 +54,7 @@ pub mod turns;
 pub mod waits;
 
 pub use graph::{
-    AdmissionMember, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, ExecRootRow,
+    AdmissionMember, Delivery, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, ExecRootRow,
     ExecRootWrite, HydratedGraph, HydratedNode, RootChange, RootOwner, RunFactKind, RunFactRow,
     RunFactWrite, RunFacts,
 };
@@ -581,6 +581,14 @@ pub trait DurableReads: Send + Sync {
 
     /// L7: the root of `exec`.
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError>;
+
+    /// Every effect `exec` admitted, by effect identity, with where its
+    /// outcome was delivered once a commit recorded it: the journal an
+    /// in-turn execution replays from its start.
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<EffectAdmissionRow>, DurableError>;
 
     /// FIG-5787: the root of each cell of `session`'s `run`, by execution
     /// key: what an operator's survey reads of a turn stopped in a cell.

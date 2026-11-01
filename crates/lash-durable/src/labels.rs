@@ -126,6 +126,13 @@ impl CommitLabel {
     /// fused (FIG-6000). A cell that reads saves its start first, admitting
     /// nothing (ADR 0144).
     pub const MODEL_DONE_CELL_SNAPSHOT_ADMIT: Self = Self::new("model.done+cell.snapshot+admit");
+    /// `cell.admit`: An in-turn cell's park: the admission of the
+    /// operations it issued, its cancel decisions, and the reads and
+    /// deliveries since its last commit, with no state (FIG-7585).
+    pub const CELL_ADMIT: Self = Self::new("cell.admit");
+    /// `model.done+cell.admit`: A model response and the first park of the
+    /// cell it asked for, fused (FIG-6000, FIG-7585).
+    pub const MODEL_DONE_CELL_ADMIT: Self = Self::new("model.done+cell.admit");
     /// `cell.inject`: An outcome injected into a cell.
     pub const CELL_INJECT: Self = Self::new("cell.inject");
     /// `cell.snapshot`: A quiet-point snapshot that admits nothing, or the
@@ -186,7 +193,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 53] = [
+    pub const ALL: [Self; 55] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -228,6 +235,8 @@ impl CommitLabel {
         Self::CASCADE_BATCH,
         Self::CELL_SNAPSHOT_ADMIT,
         Self::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+        Self::CELL_ADMIT,
+        Self::MODEL_DONE_CELL_ADMIT,
         Self::CELL_INJECT,
         Self::CELL_SNAPSHOT,
         Self::SESSION_CLOSE_BEGIN,

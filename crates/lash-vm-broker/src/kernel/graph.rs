@@ -36,7 +36,7 @@ use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::{AdmissionMember, EffectAdmissionWrite, EffectKey};
 use lash_kernel_doc::{Datum, ErrorDatum};
 
-use lash_kernel_value::names::OperationUse;
+use lash_kernel_value::names::{DocumentId, OperationUse};
 use lash_kernel_value::sites::EffectId;
 use {
     lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
@@ -305,6 +305,10 @@ pub enum Disposition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Admission {
     pub exec: ExecKey,
+    /// What the admitting run executed: its document and the execution
+    /// closure its functions link against. A replay of an in-turn run
+    /// from its start is refused when either differs (FIG-7585).
+    pub run: RunFingerprint,
     pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
     pub wait: lash_kernel_value::sites::WaitId,
@@ -317,8 +321,12 @@ pub struct Admission {
 
 impl TokenCodec for Admission {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(8);
         out.text(&self.exec.stored());
+        self.run.document.encode(out);
+        // The closure's digest, not a reference: an admission does not
+        // keep the closure's node.
+        out.bytes(&self.run.closure.0);
         self.effect.encode(out);
         self.wait.encode(out);
         self.effect_name.encode(out);
@@ -335,8 +343,17 @@ impl TokenCodec for Admission {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
+        input.expect_struct(8)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
+        let run = RunFingerprint {
+            document: DocumentId::decode(input)?,
+            closure: NodeId(
+                input
+                    .bytes()?
+                    .try_into()
+                    .map_err(|_| invalid("a run fingerprint's closure is not a digest"))?,
+            ),
+        };
         let effect = EffectId::decode(input)?;
         let wait = lash_kernel_value::sites::WaitId::decode(input)?;
         let effect_name = Option::decode(input)?;
@@ -362,6 +379,7 @@ impl TokenCodec for Admission {
         };
         Ok(Self {
             exec,
+            run,
             effect,
             wait,
             effect_name,
@@ -369,6 +387,14 @@ impl TokenCodec for Admission {
             disposition,
         })
     }
+}
+
+/// The identity of what a run executes: its document and its execution
+/// closure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunFingerprint {
+    pub document: DocumentId,
+    pub closure: NodeId,
 }
 
 /// An admission read back with its request.
@@ -659,6 +685,7 @@ struct Admitted {
 /// One wait a park admits, frozen before its commit opens.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
+    pub run: RunFingerprint,
     pub effect: EffectId,
     pub wait: lash_kernel_value::sites::WaitId,
     /// The effect performed; none for a sleep.
@@ -688,6 +715,16 @@ impl AdmissionBook {
                 })
                 .collect(),
         }
+    }
+
+    /// The admission of `effect` with its request, as a restore resolves it.
+    #[must_use]
+    pub fn resolved(&self, effect: &EffectId) -> Option<ResolvedAdmission> {
+        self.admitted.get(effect).map(|admitted| ResolvedAdmission {
+            node: admitted.node,
+            admission: admitted.admission.clone(),
+            request: admitted.request.clone(),
+        })
     }
 
     /// The admission node of `effect`.
@@ -772,6 +809,7 @@ impl AdmissionBook {
         };
         let admission = Admission {
             exec: exec.clone(),
+            run: frozen.run,
             effect: frozen.effect.clone(),
             wait: frozen.wait,
             effect_name: frozen.effect_name,

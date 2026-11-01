@@ -1043,6 +1043,12 @@ impl DurableReads for FaultStore {
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
         self.read(self.inner.exec_root(exec)).await
     }
+    async fn effect_admissions(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Vec<lash_durable::domain::EffectAdmissionRow>, DurableError> {
+        self.read(self.inner.effect_admissions(exec)).await
+    }
 
     async fn cell_roots(
         &self,

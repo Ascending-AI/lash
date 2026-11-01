@@ -42,11 +42,17 @@ use lash_core_store::checkpoint_graph::StoredNode;
 use lash_core_store::checkpoint_graph::check_envelope;
 use lash_core_store::checkpoint_graph::node::is_semantic;
 use lash_durable::domain::DomainRefusal;
-use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
+use lash_durable::domain::graph::{
+    AdmissionMember, Delivery, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, HydratedGraph,
+    HydratedNode, RootOwner,
+};
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
-use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
+use lash_durable::domain::{ExecKey, OwnerKey, RunSeq};
+use lash_durable::{
+    CommitLabel, DurableError, DurableInstant, Epoch, StoreFailure, StoreFailureKind,
+};
 use lash_kernel_value::tokens::DecodeDimension;
 use lash_store_sql::durable::graph::GraphStatements;
 use lash_store_sql::durable::run_records::RunRecordStatements;
@@ -54,7 +60,7 @@ use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, Retired, SqliteDurableStore, integer};
+use super::{Answer, Committing, Retired, SqliteDurableStore, integer, node_ref};
 use crate::conn::{FencedTx, TxOutcome, cached_execute};
 
 /// The graph tables and the root catalog, created after every table the
@@ -81,11 +87,18 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
     member_ordinal INTEGER,
     admission_ref INTEGER NOT NULL REFERENCES blobs(id),
     written_epoch INTEGER NOT NULL,
+    -- Where the effect's outcome was delivered to its in-turn machine: the
+    -- execution's journal, which a replay from the cell's start follows.
+    delivered_batch INTEGER CONSTRAINT ck_effect_admissions_batch CHECK (delivered_batch >= 0),
+    delivered_position INTEGER CONSTRAINT ck_effect_admissions_position
+        CHECK (delivered_position >= 0),
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
     CONSTRAINT ck_effect_admissions_member CHECK (
         (owner_key IS NULL AND run_seq IS NULL AND member_ordinal IS NULL) OR
-        (owner_key IS NOT NULL AND run_seq IS NOT NULL AND member_ordinal IS NOT NULL))
+        (owner_key IS NOT NULL AND run_seq IS NOT NULL AND member_ordinal IS NOT NULL)),
+    CONSTRAINT ck_effect_admissions_delivered CHECK (
+        (delivered_batch IS NULL) = (delivered_position IS NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
     ON effect_admissions (admission_ref);
@@ -1151,8 +1164,93 @@ pub(super) fn apply_admission(
             }
             commit.retired.closure(expected);
         }
+        EffectAdmissionWrite::Deliver {
+            exec,
+            effect,
+            delivery,
+        } => {
+            let recorded = tx
+                .prepare_cached(SQL.graph.admission_deliver.sql())?
+                .query_row(
+                    rusqlite::params![
+                        exec.stored(),
+                        &effect.0[..],
+                        integer::<i64>(delivery.batch)?,
+                        i64::from(delivery.position)
+                    ],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if recorded.is_none() {
+                return graph_refused(GraphRefusal::RevisionConflict);
+            }
+        }
     }
     Ok(Ok(()))
+}
+
+/// Every admission of execution `exec`, by effect identity, with where its
+/// outcome was delivered.
+pub(super) fn admissions(tx: &Connection, exec: &ExecKey) -> Answer<Vec<EffectAdmissionRow>> {
+    let rows = tx
+        .prepare_cached(SQL.graph.admissions.sql())?
+        .query_map([exec.stored()], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                crate::codec::hash_column(row, 4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (effect, owner, run, member, admission, epoch, batch, position) in rows {
+        let admission = match node_ref(&admission) {
+            Ok(admission) => admission,
+            Err(error) => return Ok(Err(error)),
+        };
+        let member = match (owner, run, member) {
+            (owner, Some(run), Some(member)) => {
+                let owner = match owner {
+                    Some(owner) => match OwnerKey::parse(&owner) {
+                        Ok(owner) => owner,
+                        Err(error) => {
+                            return Ok(Err(
+                                corrupt("effect admission owner", &error.to_string()).into()
+                            ));
+                        }
+                    },
+                    None => exec.owner(),
+                };
+                Some(AdmissionMember {
+                    owner,
+                    run: RunSeq(integer(run)?),
+                    member: integer(member)?,
+                })
+            }
+            _ => None,
+        };
+        let delivered = match (batch, position) {
+            (Some(batch), Some(position)) => Some(Delivery {
+                batch: integer(batch)?,
+                position: integer(position)?,
+            }),
+            _ => None,
+        };
+        out.push(EffectAdmissionRow {
+            exec: exec.clone(),
+            effect: EffectKey(effect.into()),
+            member,
+            admission,
+            written_epoch: Epoch(epoch),
+            delivered,
+        });
+    }
+    Ok(Ok(out))
 }
 
 /// Drop every admission of the execution stored as `exec_key`, answering
