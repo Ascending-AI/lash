@@ -394,11 +394,21 @@ main {
     );
     // K-CHG-002: a refused statement charge names its unpaid source head,
     // including the first statement in a newly entered nested block.
-    for (body, limit, path, printed) in [
-        ("print 7", 0, vec![0], vec![]),
-        ("if true { print 7 } return 9", 2, vec![0, 1, 0], vec![]),
+    // K-BND-001: a root entry past the memory bound starts, and its first
+    // step ends the run with the memory bound, as a charge bound does.
+    for (body, bound, limit, path, printed) in [
+        ("print 7", Bound::Charge, 0, vec![0], vec![]),
+        ("print 7", Bound::Memory, 0, vec![0], vec![]),
+        (
+            "if true { print 7 } return 9",
+            Bound::Charge,
+            2,
+            vec![0, 1, 0],
+            vec![],
+        ),
         (
             "if true { do null print 8 } return 9",
+            Bound::Charge,
             4,
             vec![0, 1, 1],
             vec![],
@@ -409,12 +419,19 @@ main {
             super::layout::ExecutionMode::Generic,
             super::layout::ExecutionMode::Specialized,
         ] {
+            crate::machine::islands::witness::logical_entry_fallbacks();
             let mut run = Embedder::with(
                 &format!("main {{ {body} }}"),
                 Setup {
-                    bounds: Bounds {
-                        charge_limit: limit,
-                        ..ROOMY
+                    bounds: match bound {
+                        Bound::Memory => Bounds {
+                            memory: limit,
+                            ..ROOMY
+                        },
+                        _ => Bounds {
+                            charge_limit: limit,
+                            ..ROOMY
+                        },
                     },
                     ..Setup::default()
                 },
@@ -424,10 +441,16 @@ main {
                 super::layout::ExecutionMode::Generic => run.machine.force_generic_packets(),
                 super::layout::ExecutionMode::Specialized => {}
             }
+            let end = run.run_to_end(&[]);
             assert_eq!(
-                run.run_to_end(&[]),
+                crate::machine::islands::witness::logical_entry_fallbacks(),
+                0,
+                "the root enters through its accepted source entry: {body}, {bound:?}, {mode:?}"
+            );
+            assert_eq!(
+                end,
                 End::Error(RunError::Bound(BoundExceeded {
-                    bound: Bound::Charge,
+                    bound: bound.clone(),
                     limit,
                     function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
                     site: Some(Box::new(lash_kernel_value::sites::Site::new(
@@ -435,7 +458,7 @@ main {
                         path.clone()
                     ))),
                 })),
-                "refused source head: {body}, {mode:?}"
+                "refused source head: {body}, {bound:?}, {mode:?}"
             );
             assert_eq!(run.world.printed, printed);
         }
