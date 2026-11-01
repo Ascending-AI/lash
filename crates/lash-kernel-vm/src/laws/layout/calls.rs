@@ -242,7 +242,21 @@ fn observe_source_or_register(
     let callee_reads = crate::machine::islands::witness::callee_reads();
     let call_resumes = crate::machine::islands::witness::call_resumes();
     let call_enters = crate::machine::islands::witness::call_enters();
+    let packet_enters = crate::machine::islands::witness::packet_call_enters();
     let precise_returns = crate::machine::islands::witness::precise_returns();
+    if mode != Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SAVED_MEMBER)
+    {
+        assert!(
+            packet_enters > 0,
+            "a packet call must publish its actual borrowed operands and occurrence before entering its callee: {packet_enters}"
+        );
+    }
+
     let try_scopes = crate::machine::islands::witness::precise_try_scopes();
     let try_reads = crate::machine::islands::witness::precise_try_reads();
     let field_members = crate::machine::islands::witness::field_member_publications();

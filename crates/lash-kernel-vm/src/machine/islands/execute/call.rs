@@ -101,10 +101,10 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         let answer =
             (|| {
-                let regs = &mut frame.regs;
-                let callee = inputs
-                    .as_ref()
-                    .map_or_else(|| read.then(|| regs[site.reg as usize]), |values| values.0);
+                let callee = inputs.as_ref().map_or_else(
+                    || read.then(|| frame.regs[site.reg as usize]),
+                    |values| values.0,
+                );
                 if let Some(close) = &site.close
                     && !self.close(close)
                 {
@@ -122,7 +122,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                                 let value = inputs
                                     .as_ref()
                                     .map_or_else(
-                                        || args.get(at).map(|reg| regs[*reg as usize]),
+                                        || args.get(at).map(|reg| frame.regs[*reg as usize]),
                                         |input| input.1.get(at).copied(),
                                     )
                                     .unwrap_or(Value::Absent);
@@ -149,7 +149,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                             island.call_answer(
                                 site,
                                 (args, inputs.as_ref().map(|input| input.1)),
-                                regs,
+                                &mut frame.regs,
                                 before,
                                 root_occurrence,
                             )
@@ -197,8 +197,19 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     return Err(self.at(site.pc));
                 }
+                if let Some((callee, values)) = &inputs {
+                    if let Some(callee) = callee {
+                        frame.regs[site.reg as usize] = *callee;
+                    }
+                    for (reg, value) in args.iter().zip(values.iter()) {
+                        frame.regs[*reg as usize] = *value;
+                    }
+                }
                 let occurrence = if let Some(at) = site.occurrence.or(root_occurrence) {
-                    Some(self.count(at)?)
+                    Some(match self.publish_call_enter(frame, site, args, at)? {
+                        Some(ordinal) => ordinal,
+                        None => self.count(at)?,
+                    })
                 } else {
                     if let Some(watching) = &self.projection() {
                         if let Some(act) = site.act {
@@ -224,14 +235,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     target,
                     Some((frame.state.callee.plan.code, frame.state.statement)),
                 );
-                if let Some((callee, values)) = &inputs {
-                    if let Some(callee) = callee {
-                        regs[site.reg as usize] = *callee;
-                    }
-                    for (reg, value) in args.iter().zip(values.iter()) {
-                        regs[*reg as usize] = *value;
-                    }
-                }
                 frame.state.pending_call = Some((target, site.library.filter(|_| site.checked)));
                 Ok(Next::Call)
             })();

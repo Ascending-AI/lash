@@ -101,6 +101,7 @@ thread_local! {
     static PREPARED_FRAME_ENTRIES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static CALLEE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_RESUME_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static PACKET_CALL_ENTERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_ENTER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_RETURN_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PRECISE_TRY_SCOPES: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
@@ -112,6 +113,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PACKET_CALL_ENTERS.with(|count| count.set(0));
     PREPARED_FRAME_CAPTURES.with(|count| count.set([0; 2]));
     PREPARED_FRAME_ENTRIES.with(|count| count.set([0; 2]));
     CALLEE_READ_PUBLICATIONS.with(|count| count.set(0));
@@ -749,4 +751,13 @@ pub(crate) fn packet_reads() -> u64 {
 
 pub(in crate::machine) fn packet_read_published() {
     PACKET_READ_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+pub(crate) fn packet_call_enters() -> u64 {
+    PACKET_CALL_ENTERS.with(|count| count.replace(0))
+}
+
+pub(in crate::machine) fn packet_call_entered() {
+    PACKET_CALL_ENTERS.with(|count| count.set(count.get() + 1));
 }

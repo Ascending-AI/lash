@@ -1,5 +1,6 @@
 //! Source activations outlive their physical packet windows.
 mod binding;
+mod calling;
 mod closure;
 mod construction;
 mod member;
