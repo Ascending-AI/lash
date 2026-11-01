@@ -696,7 +696,10 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 [x] if self.accounting => compiled::unary(site, *x, self.exe),
                 [x, y] => site
                     .pair(self.exe)
-                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging, self.exe)),
+                    .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging, self.exe))
+                    .or_else(|| {
+                        compiled::text_relation(site, *x, *y, self.exe, self.arena, self.charging)
+                    }),
                 _ => None,
             }
         };

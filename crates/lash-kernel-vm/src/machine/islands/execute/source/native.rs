@@ -11,6 +11,8 @@ use room::{
     publication::{Occurrence, Position as SourcePosition},
 };
 
+use crate::machine::islands::compiled;
+
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(in crate::machine::islands::execute) fn publish_native_value(
         &mut self,
@@ -18,7 +20,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
     ) -> Result<ValuePublication, HeapFault> {
-        self.publish_native_answer(frame, site, args, false)
+        self.publish_native_answer(frame, site, args, false, None)
     }
 
     /// Prepared operators use the same source event and journal as native calls.
@@ -48,7 +50,20 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             reg: site.reg,
             depth: site.depth,
         };
-        self.publish_native_answer(frame, &native, args, true)
+        // A pair kernel answers what the prepared entry answers, at the
+        // price its table certifies: a statement-level operation runs the
+        // kernel nested operators run.
+        let kernel = match args {
+            [x, y] => site
+                .pair(self.exe)
+                .and_then(|pair| compiled::typed(site, &pair, *x, *y, self.charging, self.exe))
+                .or_else(|| {
+                    compiled::text_relation(site, *x, *y, self.exe, self.arena, self.charging)
+                })
+                .and_then(|(value, units)| Some((value, units?))),
+            _ => None,
+        };
+        self.publish_native_answer(frame, &native, args, true, kernel)
     }
 
     fn publish_native_answer(
@@ -57,6 +72,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &NativeSite,
         args: &[Value],
         prepared: bool,
+        kernel: Option<(Value, u64)>,
     ) -> Result<ValuePublication, HeapFault> {
         let function = self.exe.lib(site.lib);
         let text = !prepared && function.header.signature.result == lash_kernel_value::Type::Text;
@@ -114,21 +130,28 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             {
                 return Ok(ValuePublication::Unavailable);
             }
-            let Some(answer) = entry.answer(args, self.charging) else {
-                return Ok(ValuePublication::Unavailable);
-            };
-            if !scalar(&answer.value)
-                || !crate::compile::import_result_fits(
-                    &function.header.signature.result,
-                    answer.value,
-                )
-            {
-                return Ok(ValuePublication::Unavailable);
+            if let Some((value, units)) = kernel {
+                if !crate::compile::import_result_fits(&function.header.signature.result, value) {
+                    return Ok(ValuePublication::Unavailable);
+                }
+                Some((value, units))
+            } else {
+                let Some(answer) = entry.answer(args, self.charging) else {
+                    return Ok(ValuePublication::Unavailable);
+                };
+                if !scalar(&answer.value)
+                    || !crate::compile::import_result_fits(
+                        &function.header.signature.result,
+                        answer.value,
+                    )
+                {
+                    return Ok(ValuePublication::Unavailable);
+                }
+                let Some(answer) = self.answered(function, fast, args, answer) else {
+                    return Ok(ValuePublication::Unavailable);
+                };
+                Some(answer)
             }
-            let Some(answer) = self.answered(function, fast, args, answer) else {
-                return Ok(ValuePublication::Unavailable);
-            };
-            Some(answer)
         } else {
             None
         };
