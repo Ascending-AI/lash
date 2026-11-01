@@ -171,7 +171,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     })
                     .collect(),
                 action: None,
-                departure: None,
             },
         };
         let next = SourcePosition {

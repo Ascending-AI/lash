@@ -132,7 +132,6 @@ pub(super) fn checked_source_publication() {
             invocation: invocation.id(),
             loops: vec![],
             action: None,
-            departure: None,
         },
     };
     let next = Position {
@@ -620,7 +619,6 @@ fn entered_nested_scope_publication() {
             invocation: invocation.id(),
             loops: vec![],
             action: None,
-            departure: None,
         },
     };
     let successor = Point {
@@ -967,7 +965,6 @@ fn persistent_assignment_publication() {
                 invocation: invocation.id(),
                 loops: vec![],
                 action: None,
-                departure: None,
             },
         };
         let next = Position {
@@ -1359,7 +1356,6 @@ fn shared_cell_publication() {
                 invocation: invocation.id(),
                 loops: vec![],
                 action: None,
-                departure: None,
             },
         };
         let next = Position {

@@ -150,7 +150,6 @@ pub(super) fn names() {
             invocation: invocation.id(),
             loops: vec![],
             action: None,
-            departure: None,
         },
     };
     drop(ledger);

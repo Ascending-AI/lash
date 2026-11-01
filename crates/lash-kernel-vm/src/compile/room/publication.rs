@@ -21,7 +21,6 @@ pub(crate) struct Occurrence {
     pub(crate) invocation: u64,
     pub(crate) loops: Vec<(Site, u64)>,
     pub(crate) action: Option<(Point, u64)>,
-    pub(crate) departure: Option<(Point, u64)>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Position {

@@ -248,7 +248,6 @@ impl KernelMachine {
                 invocation,
                 loops,
                 action: None,
-                departure: None,
             },
         };
         let next = Position {

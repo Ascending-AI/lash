@@ -95,7 +95,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         invocation: invocation.id(),
                         loops: vec![],
                         action: None,
-                        departure: None,
                     },
                 },
             )

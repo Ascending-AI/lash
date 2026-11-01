@@ -137,7 +137,6 @@ fn calls_kind(body: bool) {
                 },
                 3,
             )),
-            departure: None,
         },
     };
     drop(ledger);

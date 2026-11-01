@@ -88,7 +88,6 @@ impl KernelMachine {
                         ordinal,
                     )
                 }),
-                departure: None,
             };
             let mut saved = Vec::new();
             saved

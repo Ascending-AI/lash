@@ -224,7 +224,6 @@ impl KernelMachine {
                 invocation: invocation.id(),
                 loops: vec![],
                 action: None,
-                departure: None,
             },
         };
         let frontier = source

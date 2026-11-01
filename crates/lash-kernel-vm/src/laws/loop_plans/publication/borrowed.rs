@@ -93,7 +93,6 @@ pub(super) fn entry() {
             invocation: invocation.id(),
             loops: vec![],
             action: Some((at.clone(), 0)),
-            departure: None,
         },
     };
     drop(ledger);

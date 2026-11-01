@@ -81,7 +81,6 @@ impl KernelMachine {
                 invocation: roots.invocation().id(),
                 loops,
                 action: Some((at.clone(), occurrence)),
-                departure: None,
             },
         };
         let next = Position {

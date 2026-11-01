@@ -574,7 +574,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 invocation: activation.invocation.id(),
                 loops: vec![],
                 action: None,
-                departure: None,
             },
         };
         let next = Position {

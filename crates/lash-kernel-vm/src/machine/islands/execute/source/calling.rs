@@ -131,7 +131,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     })
                     .collect(),
                 action: Some((at.clone(), ordinal)),
-                departure: None,
             },
         };
         let next = SourcePosition {

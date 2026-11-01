@@ -472,6 +472,18 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             );
         }
     }
+    // A call inside a cleanup that holds a pending return publishes its
+    // Enter at its source occurrence, like the call that reached the cleanup.
+    let unwind = "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let saved = n return saved } finally { let kept = [call g(n)] } return 0  }\"\ndefinition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return n  }\"\n main { let r = call f([7]) return r }";
+    crate::machine::islands::witness::begin();
+    let mut embedder = Embedder::with(unwind, setup(ROOMY, u64::MAX));
+    embedder.machine.force_source_execution();
+    assert_eq!(result(embedder.run_to_end(&[])), Datum::List(vec![int(7)]));
+    assert_eq!(
+        crate::machine::islands::witness::call_enters(),
+        2,
+        "both guest calls must publish their Enter"
+    );
     // A declined packet return resumes before the same library completion fee.
     let completed = || {
         let bounds = Bounds {

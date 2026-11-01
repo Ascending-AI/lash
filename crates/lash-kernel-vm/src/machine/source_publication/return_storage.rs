@@ -263,7 +263,6 @@ impl ReturnInput<'_> {
                 invocation: self.invocation.id(),
                 loops: self.loops,
                 action: None,
-                departure: None,
             },
         };
         let next = SourcePosition {

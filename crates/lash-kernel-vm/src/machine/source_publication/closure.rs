@@ -221,7 +221,6 @@ impl KernelMachine {
                 invocation: roots.invocation().id(),
                 loops,
                 action: None,
-                departure: None,
             },
         };
         let next = Position {
