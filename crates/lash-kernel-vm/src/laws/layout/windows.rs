@@ -57,8 +57,14 @@ fn wide_windows_agree() {
             crate::kernel_internals::register_work(&tape).calls,
         )
     };
+    // The bound comes from the logical algebra, where each holding pays
+    // `REFERENCE` (16) plus its immutable payload. Each of the 100 waiting
+    // levels holds 259 evaluated operands of the 14-byte text, 30 bytes
+    // each: 259 × 30 × 100 = 777,000, plus 9,941 bytes of frames, closures
+    // and counters, gives a measured peak of 786,941. 1 MiB sits about
+    // 256 KiB clear of it; the law is about window coordinates, not memory.
     let bounds = Bounds {
-        memory: 256 << 10,
+        memory: 1 << 20,
         ..super::super::embedder::ROOMY
     };
     // K-EVAL-008: small recursive frames retain wide evaluated prefixes.
