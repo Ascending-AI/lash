@@ -110,14 +110,26 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     );
                     events.push(event(&site, Phase::Enter, Box::new([]), None, n.clone(), n));
                 }
-                doc::Node::Expr(doc::Expr::Act(_)) => events.push(event(
-                    &site,
-                    Phase::Enter,
-                    ins.clone(),
-                    None,
-                    Amount::default(),
-                    Amount::default(),
-                )),
+                doc::Node::Expr(doc::Expr::Act(act)) => {
+                    events.push(event(
+                        &site,
+                        Phase::Enter,
+                        ins.clone(),
+                        None,
+                        Amount::default(),
+                        Amount::default(),
+                    ));
+                    if matches!(act.kind, doc::ActKind::Call(_)) {
+                        events.push(event(
+                            &site,
+                            Phase::Restore,
+                            vec![Owner::Incoming(site.clone())].into(),
+                            Some(operand(&site)),
+                            Amount::default(),
+                            Amount::default(),
+                        ));
+                    }
+                }
                 doc::Node::Stmt(doc::Stmt::Try(doc::TryStmt {
                     catch: Some(catch), ..
                 })) => {

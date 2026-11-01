@@ -523,6 +523,61 @@ impl EventContext<'_> {
         }
         Ok(())
     }
+    fn check_resumption(
+        &self,
+        event: &Event,
+        roles: &[Site],
+        actual: &JournalEvent,
+    ) -> Result<(), Refused> {
+        if actual.native.is_some()
+            || !actual.borrowed.is_empty()
+            || actual.member.is_some()
+            || !actual.entities.is_empty()
+            || actual.frame.is_some()
+            || !actual.scratch.is_empty()
+            || actual.inputs.len() != roles.len() + 1
+            || actual.outputs.len() != roles.len() + 1
+        {
+            return Err(Refused::Retained);
+        }
+        let task = self.occurrence.task;
+        let invocation = self.occurrence.invocation;
+        let output = self
+            .slots
+            .root(&Owner::Operand(event.point.site.clone()), task, invocation)
+            .ok_or(Refused::Source)?;
+        let mut transfers = vec![(logical::Owner::Incoming(task), output)];
+        for role in roles {
+            transfers.push((
+                self.slots
+                    .continuation(role, task, invocation)
+                    .ok_or(Refused::Source)?,
+                self.slots
+                    .root(&Owner::Operand(role.clone()), task, invocation)
+                    .ok_or(Refused::Source)?,
+            ));
+        }
+        for (input, output) in transfers {
+            if !actual.inputs.contains(&input) || !actual.outputs.iter().any(|(owner, value)| {
+                *owner == output
+                    && matches!(value, logical::PublicationValue::Existing(from) if *from == input)
+            })
+                || self
+                    .ledger
+                    .holding(input, self.heap.pages())
+                    .map_err(|_| Refused::Facts)?
+                    .is_none()
+                || self
+                    .ledger
+                    .holding(output, self.heap.pages())
+                    .map_err(|_| Refused::Facts)?
+                    .is_some()
+            {
+                return Err(Refused::Retained);
+            }
+        }
+        Ok(())
+    }
     fn check(
         &self,
         event: &Event,
@@ -541,6 +596,9 @@ impl EventContext<'_> {
         let root = |owner: &Owner| slots.root(owner, occurrence.task, occurrence.invocation);
         let mut reads = BTreeSet::new();
         let mut writes = BTreeSet::new();
+        if let Some(roles) = &site.restored_roles {
+            return self.check_resumption(event, roles, actual);
+        }
         if site.borrowed_inputs {
             let expected: BTreeSet<_> = event
                 .inputs

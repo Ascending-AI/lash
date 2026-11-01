@@ -193,6 +193,9 @@ impl OwnerSlots {
         if let Owner::SessionCell { name, .. } = owner {
             return Some(Root::session(name));
         }
+        if matches!(owner, Owner::Incoming(_)) {
+            return self.get(owner).map(|_| Root::Incoming(task));
+        }
         if let Owner::Frame(at) = owner {
             return (at == &self.source).then_some(Root::Frame { task, invocation });
         }

@@ -69,6 +69,8 @@ pub(crate) struct Prefix<'a> {
 /// active and suspended departures outside scopes and operands. Suspend and
 /// Restore transfer the active departure to/from the exact try's pending owner;
 /// Supersede releases only that pending owner. An action preserves both.
+/// Incoming names the task-owned result arriving at an entered call. Restore
+/// transfers it and the call's saved source operands without new holdings.
 /// No selector refers to physical registers.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Owner {
@@ -92,6 +94,7 @@ pub(crate) enum Owner {
     Operands(Site),
     Frame(Site),
     Entity(Site),
+    Incoming(Site),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum CallSource {

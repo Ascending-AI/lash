@@ -34,7 +34,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     phases.push(Phase::Fallthrough);
                 }
             }
-            doc::Node::Action(_) | doc::Node::Expr(doc::Expr::Act(_)) => phases.push(Phase::Enter),
+            doc::Node::Action(_) => phases.push(Phase::Enter),
+            doc::Node::Expr(doc::Expr::Act(act)) => {
+                phases.push(Phase::Enter);
+                if matches!(act.kind, doc::ActKind::Call(_)) {
+                    phases.push(Phase::Restore);
+                }
+            }
             doc::Node::Stmt(doc::Stmt::Try(t)) => {
                 if t.catch.is_some() {
                     phases.push(Phase::Catch);
@@ -115,6 +121,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     output = None;
                 }
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => output = None,
+                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {
+                    expected_inputs = vec![Owner::Incoming(site.clone())].into();
+                }
                 (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
                     let Some(catch) = &t.catch else {
                         return Err(Refused::Source);
@@ -413,6 +422,7 @@ fn obligations(
             delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend | Phase::Restore) => {}
+        (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {}
         (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
             if let Some(c) = &t.catch
                 && source.shared.get(&(child(site, 1), c.binding.clone())) == Some(&true)

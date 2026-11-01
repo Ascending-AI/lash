@@ -42,6 +42,7 @@ impl Linear {
 }
 pub(super) struct PublicationSite {
     pub(super) borrowed_inputs: bool,
+    pub(super) restored_roles: Option<Box<[Site]>>,
     pub(super) assignment: Option<lash_kernel_value::Name>,
     pub(super) member: bool,
     pub(super) field: Option<Arc<str>>,
@@ -80,7 +81,29 @@ impl Step {
         for index in &event.point.site.path[source.site.path.len()..] {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
+        let restored_roles = if event.point.phase == Phase::Restore
+            && matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(_)))
+        {
+            let relative = Site::new(
+                event.point.site.unit.clone(),
+                event.point.site.path[source.site.path.len()..].to_vec(),
+            );
+            Some(
+                doc::live_roles_in(&source.body, &relative)
+                    .map_err(|_| Refused::Source)?
+                    .into_iter()
+                    .map(|role| {
+                        let mut path = source.site.path.clone();
+                        path.extend(role.path);
+                        Site::new(role.unit, path)
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
         let publication = PublicationSite {
+            restored_roles,
             borrowed_inputs: event.point.phase == Phase::Enter
                 && matches!(node, doc::Node::Expr(doc::Expr::Act(_))),
             assignment: match node {
