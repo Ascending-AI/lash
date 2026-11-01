@@ -147,8 +147,19 @@ impl ReturnInput<'_> {
                 });
                 continue;
             }
-            // The target loop takes a break or continue record.
+            // A catch binds the raise it takes; a loop takes a break or
+            // continue record.
             if event.point.phase == SourcePhase::Catch {
+                let outputs = match &event.output {
+                    Some(selector) => {
+                        let binding = root(selector.clone())?;
+                        if ledger.holding(binding, heap.pages())?.is_some() {
+                            return Ok(None);
+                        }
+                        vec![(binding, PV::Existing(departure))]
+                    }
+                    None => vec![],
+                };
                 facts.0.insert(
                     event.point.clone(),
                     LeafFacts {
@@ -164,6 +175,7 @@ impl ReturnInput<'_> {
                 leave = Some(event.point.clone());
                 events.push(JournalEvent {
                     inputs: vec![departure],
+                    outputs,
                     ..Default::default()
                 });
                 continue;

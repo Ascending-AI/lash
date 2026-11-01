@@ -186,6 +186,15 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.catch",
+        register(
+            "deep.catch",
+            "n: Any",
+            String::new(),
+            "try { let saved = n throw saved } catch e { return e } return 0",
+        ),
+    ));
+    probes.push((
         "deep.fault",
         register(
             "deep.fault",
@@ -353,7 +362,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             embedder.machine.force_source_execution();
         }
         // The reference source run takes the ordinary unwind into cleanup.
-        if declined {
+        let caught = matches!(
+            name,
+            "deep.halt" | "deep.pass" | "deep.stop" | "deep.next" | "deep.catch"
+        );
+        if declined && caught {
+            crate::machine::islands::witness::decline_caught_departure();
+        } else if declined {
             crate::machine::islands::witness::decline_suspended_departure();
         }
         let tape = crate::ChargeTape::new();
@@ -392,13 +407,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 "the departure must move into its cleanup's pending departure: {name}"
             );
         }
-        let caught = matches!(name, "deep.halt" | "deep.pass" | "deep.stop" | "deep.next");
-        if caught && source_only {
+        // A raise leaves the packet; the precise machine runs its statement.
+        if caught && (source_only || name == "deep.catch") {
             assert_eq!(
                 crate::machine::islands::witness::precise_caught_departures(),
                 // A decline takes the ordinary unwind once.
                 u64::from(name == "deep.next") + u64::from(!declined),
-                "the departure must move into its loop's Catch: {name}"
+                "the departure must move into the Catch that takes it: {name}"
             );
         }
         if name == "deep.loop" || name == "deep.walk" {
@@ -423,6 +438,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.pass",
         "deep.stop",
         "deep.next",
+        "deep.catch",
         "deep.fault",
         "deep.rethrow",
         "deep.loop",
@@ -445,6 +461,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 | "deep.pass"
                 | "deep.stop"
                 | "deep.next"
+                | "deep.catch"
                 | "deep.fault"
                 | "deep.rethrow"
         ) {

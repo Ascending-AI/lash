@@ -184,8 +184,8 @@ impl Source {
     /// cleanup ends the suffix at its Suspend, which holds the departure.
     /// A Break or Continue departs the same way toward its innermost loop;
     /// a cleanup inside that loop suspends it, otherwise the loop's Catch
-    /// takes it. A Throw publishes only
-    /// when the innermost try it reaches suspends it in cleanup.
+    /// takes it. A Throw departs toward the innermost try it reaches, whose
+    /// catch takes it or whose cleanup suspends it.
     pub(crate) fn compile_departure_suffix(
         &self,
         at: &Point,
@@ -258,16 +258,21 @@ impl Source {
             doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
             _ => return Err(Refused::Path),
         };
-        // A raise publishes only into the cleanup that suspends it; a catch
-        // or the caller takes the others.
-        if departing == ExitKind::Raise
-            && !matches!((&handler, &suspend), (Some((at, false)), Some((try_site, _))) if at == try_site)
-        {
-            return Err(Refused::Path);
+        // A raise publishes into the innermost try it reaches: its catch
+        // takes it, or its cleanup suspends it. The caller takes the others.
+        let mut caught = None;
+        if departing == ExitKind::Raise {
+            match (&handler, &suspend) {
+                (Some((try_site, true)), _) => {
+                    suspend = None;
+                    caught = Some(try_site.clone());
+                }
+                (Some((try_site, false)), Some((cleanup_try, _))) if try_site == cleanup_try => {}
+                _ => return Err(Refused::Path),
+            }
         }
         // A break or continue whose target loop holds no cleanup inside it
         // ends at that loop's Catch, which takes the value-less record.
-        let mut caught = None;
         if matches!(departing, ExitKind::Break | ExitKind::Continue) {
             let target = target.ok_or(Refused::Path)?;
             if suspend
@@ -280,6 +285,9 @@ impl Source {
         }
         let resume = match (&suspend, &caught) {
             (Some((_, cleanup)), _) => Some(self.first_event(cleanup)?),
+            (None, Some(try_site)) if departing == ExitKind::Raise => {
+                Some(self.first_event(&child(try_site, 1))?)
+            }
             (None, Some(target)) if departing == ExitKind::Break => Some(
                 self.room
                     .peak_extra
@@ -770,8 +778,8 @@ impl CompiledInterval {
         self.return_loops.as_deref()
     }
     /// A suspended departure resumes at its cleanup block's first event; a
-    /// caught break at its loop's Commit, a caught while continue at its
-    /// condition. A caught for continue resumes where its cursor goes.
+    /// caught raise at its catch block, a caught break at its loop's Commit,
+    /// a caught while continue at its condition. A caught for continue resumes where its cursor goes.
     pub(crate) fn resume(&self) -> Option<&Point> {
         self.resume.as_ref()
     }

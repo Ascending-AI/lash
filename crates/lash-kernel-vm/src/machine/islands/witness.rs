@@ -843,7 +843,17 @@ pub(in crate::machine) fn precise_suspended_departed() {
 
 #[cfg(test)]
 thread_local! {
+    static DECLINE_CAUGHT_DEPARTURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PRECISE_CAUGHT_DEPARTURES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// The next departure its loop or catch takes takes the ordinary unwind.
+#[cfg(test)]
+pub(crate) fn decline_caught_departure() {
+    DECLINE_CAUGHT_DEPARTURE.set(true);
+}
+#[cfg(test)]
+pub(in crate::machine) fn take_caught_departure_decline() -> bool {
+    DECLINE_CAUGHT_DEPARTURE.replace(false)
 }
 /// Breaks and continues published into their loop's Catch.
 #[cfg(test)]

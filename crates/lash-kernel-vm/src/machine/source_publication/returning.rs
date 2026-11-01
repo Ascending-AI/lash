@@ -1,6 +1,6 @@
 //! A prepared direct return closes its entered Invocation before physical unwind.
 //! A suspended break or continue moves its record into the cleanup it enters;
-//! otherwise its loop's Catch takes the record.
+//! otherwise its loop's Catch takes the record. A caught raise binds in its catch.
 use super::*;
 use crate::machine::{Completion, Control, Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
@@ -88,15 +88,18 @@ impl KernelMachine {
             .last()
             .filter(|event| event.point.phase == room::Phase::Suspend)
             .map(|event| event.point.site.clone());
-        // A break or continue whose loop takes it stays in its invocation.
+        // A raise its catch takes, or a break or continue its loop takes,
+        // stays in its invocation.
         let caught = interval
             .events()
             .last()
             .filter(|event| event.point.phase == room::Phase::Catch)
             .map(|event| event.point.site.clone());
         #[cfg(test)]
-        if (suspend.is_some() || caught.is_some())
-            && crate::machine::islands::witness::take_suspended_departure_decline()
+        if (suspend.is_some()
+            && crate::machine::islands::witness::take_suspended_departure_decline())
+            || (caught.is_some()
+                && crate::machine::islands::witness::take_caught_departure_decline())
         {
             return Ok(None);
         }
@@ -105,7 +108,8 @@ impl KernelMachine {
             let frame = self.frame(running.task)?;
             let cleanup = |control: &Control| match control {
                 Control::Try { stmt, .. } => {
-                    suspend.as_ref() == Some(&running.exe.stmt(*stmt).site)
+                    let site = Some(&running.exe.stmt(*stmt).site);
+                    suspend.as_ref() == site || caught.as_ref() == site
                 }
                 Control::While { stmt, .. } | Control::For { stmt, .. } => {
                     caught.as_ref() == Some(&running.exe.stmt(*stmt).site)
@@ -159,6 +163,13 @@ impl KernelMachine {
                     Some((head, cursor.walked().and_then(|value| value.handle())))
                 }
                 Some(Control::For { .. }) if departing == room::ExitKind::Continue => {
+                    return Ok(None);
+                }
+                // A shared catch binding takes a cell the suffix does not create.
+                Some(Control::Try { stmt, .. })
+                    if matches!(&running.exe.stmt(*stmt).form,
+                        crate::compile::Form::Try { catch: Some((binding, _)), .. } if binding.shared) =>
+                {
                     return Ok(None);
                 }
                 _ => None,

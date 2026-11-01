@@ -342,7 +342,8 @@ impl<E: Events> Run<'_, E> {
                     return Ok(exit);
                 }
                 if exit == ExitKind::Raise && t.catch.is_some() {
-                    self.step(site, Phase::Catch)?;
+                    // A selected Catch ends a suffix carrying its raise.
+                    self.step_departure(site, Phase::Catch, Some(ExitKind::Raise))?;
                     exit = self.child(node, site, 1)?;
                 }
                 if exit == ExitKind::Action {
