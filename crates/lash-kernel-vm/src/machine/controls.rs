@@ -3,6 +3,32 @@
 use super::{Completion, Control, TryPhase};
 use crate::compile::{BlockId, StmtId};
 use lash_kernel_doc::{Value, heap::HeapFault};
+use lash_kernel_state::kernel_internals::logical::SourceValue;
+
+/// What an active or pending departure holds. Return and raise carry their
+/// value; break and continue hold a value-less record.
+#[derive(Clone, Copy)]
+pub(super) enum Departed {
+    Value(Value),
+    Record,
+}
+impl Departed {
+    pub(super) fn of(departure: &Completion) -> Option<Self> {
+        match departure {
+            Completion::Return(value)
+            | Completion::Throw(value)
+            | Completion::ReturnVia { value, .. } => Some(Self::Value(**value)),
+            Completion::Break | Completion::Continue => Some(Self::Record),
+            Completion::Normal => None,
+        }
+    }
+    pub(super) fn source(self) -> SourceValue {
+        match self {
+            Self::Value(value) => SourceValue::Value(value),
+            Self::Record => SourceValue::Departure,
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum Roles {
@@ -14,7 +40,7 @@ pub(super) enum Roles {
     },
     Try {
         stmt: StmtId,
-        pending: Option<Value>,
+        pending: Option<Departed>,
     },
 }
 pub(super) fn roles(control: &Control) -> Option<Roles> {
@@ -34,11 +60,7 @@ pub(super) fn roles(control: &Control) -> Option<Roles> {
         Control::Try { stmt, phase } => Some(Roles::Try {
             stmt: *stmt,
             pending: match phase {
-                TryPhase::Finally(
-                    Completion::Return(value)
-                    | Completion::Throw(value)
-                    | Completion::ReturnVia { value, .. },
-                ) => Some(**value),
+                TryPhase::Finally(departure) => Departed::of(departure),
                 _ => None,
             },
         }),

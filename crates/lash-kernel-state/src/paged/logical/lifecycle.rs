@@ -12,6 +12,8 @@ pub enum SourceValue {
     Page(lash_kernel_doc::heap::PageValue),
     Frozen(crate::paged::FrozenRef),
     Capture(ArenaHandle),
+    /// A break or continue departs with no value.
+    Departure,
 }
 impl SourceValue {
     pub(super) fn root(&self) -> RootValue<'_> {
@@ -20,6 +22,7 @@ impl SourceValue {
             Self::Page(value) => RootValue::Page(value),
             Self::Frozen(value) => RootValue::Frozen(value),
             Self::Capture(handle) => RootValue::Capture(*handle),
+            Self::Departure => RootValue::Departure,
         }
     }
 }

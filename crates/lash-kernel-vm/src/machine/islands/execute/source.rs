@@ -272,15 +272,16 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         for owner in slots.control_roots(self.task, activation.invocation.id()) {
             self.logical.replace(owner, None);
         }
-        let publish = |selector: room::Owner, value: Option<Value>| -> Result<(), HeapFault> {
-            if let Some(value) = value {
-                let owner = slots
-                    .root(&selector, self.task, activation.invocation.id())
-                    .ok_or_else(|| malformed("packet control has no canonical owner"))?;
-                self.logical.replace(owner, Some(SourceValue::Value(value)));
-            }
-            Ok(())
-        };
+        let publish =
+            |selector: room::Owner, value: Option<SourceValue>| -> Result<(), HeapFault> {
+                if let Some(value) = value {
+                    let owner = slots
+                        .root(&selector, self.task, activation.invocation.id())
+                        .ok_or_else(|| malformed("packet control has no canonical owner"))?;
+                    self.logical.replace(owner, Some(value));
+                }
+                Ok(())
+            };
         for position in &frame.state.control {
             let control = position.projected(frame.state.callee.compiled, &frame.pending);
             match crate::machine::controls::roles(&control) {
@@ -291,12 +292,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     initial,
                 }) if !initial => {
                     let site = &self.exe.stmt(stmt).site;
-                    publish(room::Owner::LoopCursor(site.clone()), cursor)?;
-                    publish(room::Owner::LoopHeader(site.clone()), header)?;
+                    publish(
+                        room::Owner::LoopCursor(site.clone()),
+                        cursor.map(SourceValue::Value),
+                    )?;
+                    publish(
+                        room::Owner::LoopHeader(site.clone()),
+                        header.map(SourceValue::Value),
+                    )?;
                 }
                 Some(Roles::Try { stmt, pending }) => publish(
                     room::Owner::PendingDeparture(self.exe.stmt(stmt).site.clone()),
-                    pending,
+                    pending.map(crate::machine::controls::Departed::source),
                 )?,
                 _ => {}
             }
@@ -304,7 +311,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if let Some(cleaning) = activation.cleaning {
             publish(
                 room::Owner::ActiveDeparture(source.site.clone()),
-                Some(cleaning.unwrap_or_else(|value| value)),
+                Some(SourceValue::Value(cleaning.unwrap_or_else(|value| value))),
             )?;
         }
         Ok(())

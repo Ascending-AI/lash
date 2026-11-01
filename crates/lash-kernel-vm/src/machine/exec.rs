@@ -275,15 +275,7 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
-            self.logical_departure(
-                task,
-                match &departure {
-                    Completion::Return(value)
-                    | Completion::ReturnVia { value, .. }
-                    | Completion::Throw(value) => Some(**value),
-                    Completion::Normal | Completion::Break | Completion::Continue => None,
-                },
-            )?;
+            self.logical_departure(task, super::controls::Departed::of(&departure))?;
             match &departure {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it

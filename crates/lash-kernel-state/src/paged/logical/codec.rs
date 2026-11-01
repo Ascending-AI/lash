@@ -284,6 +284,11 @@ pub(super) fn validate_root(record: &RootHolding) -> Result<(), HeapFault> {
             slot: Slot::Scratch(_),
             ..
         } => Ok(()),
+        // A value-less departure record holds nothing; any value is priced.
+        Owner::Value {
+            slot: Slot::Departure(_),
+            ..
+        } if record.value.bytes == 0 && record.value.links.is_empty() => Ok(()),
         _ if record.value.bytes < Cost::REFERENCE => {
             Err(invalid("holding has no occurrence price"))
         }

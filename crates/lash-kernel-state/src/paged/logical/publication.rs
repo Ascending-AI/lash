@@ -269,6 +269,7 @@ fn projection_dependencies(
             RootValue::Capture(handle) => handles.push(*handle),
             RootValue::Existing(_)
             | RootValue::Frame
+            | RootValue::Departure
             | RootValue::Page(_)
             | RootValue::Frozen(_) => {}
         }

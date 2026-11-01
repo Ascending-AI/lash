@@ -16,6 +16,8 @@ pub enum PublicationValue {
     Capture(ArenaHandle),
     Existing(Owner),
     Frame,
+    /// A break or continue departs with no value.
+    Departure,
 }
 impl PublicationValue {
     fn root(&self) -> RootValue<'_> {
@@ -26,6 +28,7 @@ impl PublicationValue {
             Self::Capture(handle) => RootValue::Capture(*handle),
             Self::Existing(owner) => RootValue::Existing(*owner),
             Self::Frame => RootValue::Frame,
+            Self::Departure => RootValue::Departure,
         }
     }
     fn same(&self, other: &Self) -> bool {
@@ -35,7 +38,7 @@ impl PublicationValue {
             (Self::Frozen(a), Self::Frozen(b)) => a.root.id == b.root.id && a.summary == b.summary,
             (Self::Capture(a), Self::Capture(b)) => a == b,
             (Self::Existing(a), Self::Existing(b)) => a == b,
-            (Self::Frame, Self::Frame) => true,
+            (Self::Frame, Self::Frame) | (Self::Departure, Self::Departure) => true,
             _ => false,
         }
     }

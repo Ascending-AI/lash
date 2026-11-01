@@ -48,7 +48,9 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 doc::Stmt::Return { .. }
                 | doc::Stmt::Throw { .. }
                 | doc::Stmt::Finish { .. }
-                | doc::Stmt::Fail { .. },
+                | doc::Stmt::Fail { .. }
+                | doc::Stmt::Break
+                | doc::Stmt::Continue,
             ) => Some(Owner::ActiveDeparture(source.clone())),
             _ => None,
         };
@@ -285,6 +287,18 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     ));
                 }
                 _ => {}
+            }
+            // A loop takes the value-less departure its body broke or
+            // continued with.
+            if let doc::Node::Stmt(doc::Stmt::While { .. } | doc::Stmt::For { .. }) = node {
+                events.push(event(
+                    &site,
+                    Phase::Catch,
+                    vec![Owner::ActiveDeparture(source.clone())].into(),
+                    None,
+                    Amount::default(),
+                    Amount::default(),
+                ));
             }
             if let doc::Node::Stmt(doc::Stmt::Try(t)) = node
                 && t.finally.is_some()

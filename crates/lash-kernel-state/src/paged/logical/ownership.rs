@@ -15,6 +15,8 @@ pub enum RootValue<'a> {
     Existing(Owner),
     Frame,
     Capture(ArenaHandle),
+    /// A value-less departure record: zero bytes in a departure slot.
+    Departure,
 }
 
 impl Ledger {
@@ -309,6 +311,17 @@ impl Ledger {
     ) -> Result<Holding, HeapFault> {
         Ok(match value {
             RootValue::Frame if matches!(owner, Owner::Frame { .. }) => Holding::frame(),
+            RootValue::Departure
+                if matches!(
+                    owner,
+                    Owner::Value {
+                        slot: Slot::Departure(_),
+                        ..
+                    }
+                ) =>
+            {
+                Holding::scalar(0)
+            }
             RootValue::Frozen(value) if matches!(owner, Owner::Incoming(_)) => Holding::scalar(
                 super::super::family_impl::frozen_holding_cost(access, value)?,
             ),

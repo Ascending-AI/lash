@@ -98,6 +98,7 @@ impl Ledger {
                 RootValue::Existing(from) => RootValue::Existing(*from),
                 RootValue::Capture(handle) => RootValue::Capture(*handle),
                 RootValue::Frame => return Err(invalid("binding cannot own a frame header")),
+                RootValue::Departure => return Err(invalid("binding cannot own a departure")),
             };
             outputs.push((invocation.owner(*slot), value));
         }

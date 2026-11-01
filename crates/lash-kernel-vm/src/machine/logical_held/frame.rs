@@ -2,7 +2,7 @@
 //! values; the state ledger owns every price and identity edge.
 use super::*;
 use crate::compile::{CodeId, Executable, room::Source};
-use crate::machine::{Frame, Halt, SlotState};
+use crate::machine::{Frame, Halt, SlotState, controls::Departed};
 use lash_kernel_doc::TaskId;
 use lash_kernel_state::kernel_internals::logical::{
     Invocation, Lifecycle, Owner, Slot, SourceValue,
@@ -103,7 +103,7 @@ impl FrameRoots {
     fn role(
         &self,
         selector: crate::compile::room::Owner,
-        value: Option<Value>,
+        value: Option<SourceValue>,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
         let bank = &self.bank;
@@ -113,9 +113,7 @@ impl FrameRoots {
             .ok_or_else(|| HeapFault::Malformed("source control has no canonical owner".into()))?;
         let mut owned = self.control_owners.borrow_mut();
         if let Some(value) = value {
-            self.bank
-                .lifecycle
-                .replace(owner, Some(SourceValue::Value(value)));
+            self.bank.lifecycle.replace(owner, Some(value));
             owned.insert(owner);
         } else if owned.remove(&owner)
             || self
@@ -132,7 +130,7 @@ impl FrameRoots {
     }
     pub(in crate::machine) fn departure(
         &self,
-        value: Option<Value>,
+        value: Option<Departed>,
         access: &Access<'_>,
     ) -> Result<(), HeapFault> {
         if value.is_none() && !self.active_departure.get() {
@@ -140,7 +138,7 @@ impl FrameRoots {
         }
         self.role(
             crate::compile::room::Owner::ActiveDeparture(self.source.site.clone()),
-            value,
+            value.map(Departed::source),
             access,
         )?;
         self.active_departure.set(value.is_some());
@@ -176,11 +174,11 @@ impl FrameRoots {
                 let site = &exe.stmt(stmt).site;
                 record(
                     Selector::LoopCursor(site.clone()),
-                    if keep { cursor } else { None },
+                    cursor.filter(|_| keep).map(SourceValue::Value),
                 )?;
                 record(
                     Selector::LoopHeader(site.clone()),
-                    if keep { header } else { None },
+                    header.filter(|_| keep).map(SourceValue::Value),
                 )
             }
             Roles::Try { stmt, pending } => {
@@ -193,11 +191,16 @@ impl FrameRoots {
                 {
                     return Ok(());
                 }
-                record(selector, if keep { pending } else { None })
+                record(selector, pending.filter(|_| keep).map(Departed::source))
             }
         })?;
         if let Some(value) = cleaning {
-            self.departure(Some(*value.as_ref().unwrap_or_else(|value| value)), access)?;
+            self.departure(
+                Some(Departed::Value(
+                    *value.as_ref().unwrap_or_else(|value| value),
+                )),
+                access,
+            )?;
         }
         Ok(())
     }
@@ -222,7 +225,7 @@ impl KernelMachine {
     pub(in crate::machine) fn logical_departure(
         &mut self,
         task: TaskId,
-        value: Option<Value>,
+        value: Option<Departed>,
     ) -> Result<(), Halt> {
         let access = self.heap.pages().clone();
         if let Some(frame) = self.task(task)?.frames.last_mut()?

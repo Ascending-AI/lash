@@ -62,9 +62,10 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 }
             }
             doc::Node::Expr(doc::Expr::If { .. } | doc::Expr::Let { .. })
-            | doc::Node::Stmt(
-                doc::Stmt::If { .. } | doc::Stmt::While { .. } | doc::Stmt::For { .. },
-            ) => phases.push(Phase::Test),
+            | doc::Node::Stmt(doc::Stmt::If { .. }) => phases.push(Phase::Test),
+            doc::Node::Stmt(doc::Stmt::While { .. } | doc::Stmt::For { .. }) => {
+                phases.extend([Phase::Test, Phase::Catch]);
+            }
             _ => {}
         }
         if let doc::Node::Stmt(doc::Stmt::For { via: Some(via), .. }) = node {
@@ -115,7 +116,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     doc::Stmt::Return { .. }
                     | doc::Stmt::Throw { .. }
                     | doc::Stmt::Finish { .. }
-                    | doc::Stmt::Fail { .. },
+                    | doc::Stmt::Fail { .. }
+                    | doc::Stmt::Break
+                    | doc::Stmt::Continue,
                 ) => Some(Owner::ActiveDeparture(source.site.clone())),
                 _ => None,
             };
@@ -148,6 +151,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                         declared: child(&site, 1),
                         name: catch.binding.clone(),
                     });
+                }
+                (
+                    doc::Node::Stmt(doc::Stmt::While { .. } | doc::Stmt::For { .. }),
+                    Phase::Catch,
+                ) => {
+                    expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();
+                    output = None;
                 }
                 (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend) => {
                     expected_inputs = vec![Owner::ActiveDeparture(source.site.clone())].into();

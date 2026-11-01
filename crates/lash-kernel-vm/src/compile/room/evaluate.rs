@@ -258,8 +258,12 @@ impl<E: Events> Run<'_, E> {
                         break;
                     }
                     match self.child(node, site, 1)? {
-                        ExitKind::Normal | ExitKind::Continue => {}
+                        ExitKind::Normal => {}
+                        ExitKind::Continue => {
+                            self.step(site, Phase::Catch)?;
+                        }
                         ExitKind::Break => {
+                            self.step(site, Phase::Catch)?;
                             broken = true;
                             break;
                         }
@@ -311,8 +315,12 @@ impl<E: Events> Run<'_, E> {
                     }
                     self.step(site, Phase::Test)?;
                     match self.child(node, site, 1)? {
-                        ExitKind::Normal | ExitKind::Continue => {}
+                        ExitKind::Normal => {}
+                        ExitKind::Continue => {
+                            self.step(site, Phase::Catch)?;
+                        }
                         ExitKind::Break => {
+                            self.step(site, Phase::Catch)?;
                             broken = true;
                             break;
                         }
