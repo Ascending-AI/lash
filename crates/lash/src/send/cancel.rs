@@ -157,7 +157,7 @@ pub(super) async fn apply_call(
     let request_id = request
         .request_id
         .unwrap_or_else(|| format!("cancel:call:{run}:{call}"));
-    let answer = lash_core::runtime::turn_control::request_tool_call_cancel(
+    let answer = lash_core::facade_support::request_tool_call_cancel(
         parts.effect_host.backend(),
         ToolCallCancelRequest {
             session: parts.session_id.clone(),

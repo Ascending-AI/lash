@@ -118,16 +118,24 @@ impl Processes {
         {
             return Ok(Some(record));
         }
-        Ok(self
-            .saved_reads(process_id)
-            .await?
-            .into_iter()
-            .find(|record| record.call_id == *call_id))
+        #[cfg(feature = "codemode")]
+        {
+            Ok(self
+                .saved_reads(process_id)
+                .await?
+                .into_iter()
+                .find(|record| record.call_id == *call_id))
+        }
+        #[cfg(not(feature = "codemode"))]
+        {
+            Ok(None)
+        }
     }
 
     /// Saved reads in caller ordinal order, independent of the bounded live
     /// replay store. Terminal processes retain these records until pruning.
     /// This offline query runs no engine, provider, hook or catalog lookup.
+    #[cfg(feature = "codemode")]
     pub async fn saved_reads(
         &self,
         process_id: &ProcessId,

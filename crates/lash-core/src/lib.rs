@@ -169,6 +169,7 @@ pub mod facade_support {
         start_requirements,
     };
     pub use lash_core_execution::runtime::actor::route_selection::select_routes;
+    pub use lash_core_execution::runtime::turn_control::request_tool_call_cancel;
     pub use lash_core_execution::tool_reads::{ReadContext, ReadTarget, run_read};
 
     pub use lash_core_execution::runtime::process::steps::{
