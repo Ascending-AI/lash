@@ -521,7 +521,7 @@ impl EventContext<'_> {
             .arena
             .facts(handle)
             .map_err(|_| Refused::Facts)?
-            .entity
+            .ledger_entity()
             .ok_or(Refused::Facts)?;
         let holding = self
             .ledger

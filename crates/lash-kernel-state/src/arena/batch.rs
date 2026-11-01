@@ -45,7 +45,7 @@ pub struct PreparedBatch {
     tokens: u64,
     freed: u64,
     allocations: u64,
-    next_ordinal: u64,
+    next_provisional: u64,
     registration_epoch: u64,
     entries: Vec<Entry>,
     dependencies: Vec<ContentVersion>,
@@ -141,25 +141,10 @@ impl<'a> PreparedInstallation<'a> {
         Ok(self.registration.arena().facts(handle)?.page.get().cloned())
     }
 
-    /// Keeps a projection with its detached body for the accepted installation.
-    pub fn keep_page(&mut self, handle: ArenaHandle, page: PageValue) -> Result<(), NativeError> {
-        if let Some(entry) = self
-            .batch
-            .entries
-            .iter()
-            .find(|entry| entry.handle == handle)
-        {
-            let _ = entry.facts.page.set(page);
-            return Ok(());
-        }
-        // A dependency projection may name a rolled-back identity. Do not
-        // cache that descriptor in live storage before acceptance.
-        Ok(())
-    }
-
-    /// A new mutable body must already be bound to its prospective journal id.
-    /// Existing dependency identities are granted under this registration.
-    pub fn identify(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
+    /// A new mutable body must already be bound to its prospective journal
+    /// key. Existing dependencies take their ledger keys under this
+    /// registration.
+    pub fn ledger_key(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
         if let Some(entry) = self
             .batch
             .entries
@@ -168,10 +153,10 @@ impl<'a> PreparedInstallation<'a> {
         {
             return entry
                 .facts
-                .entity
-                .ok_or_else(|| malformed("a prepared body has no journal identity"));
+                .provisional
+                .ok_or_else(|| malformed("a prepared body has no journal key"));
         }
-        self.registration.arena().identify(handle)
+        self.registration.arena().ledger_key(handle)
     }
 
     /// Canonical integer interpretation over detached and existing bodies.
@@ -280,13 +265,13 @@ impl<'a> PreparedInstallation<'a> {
         entity: EntityId,
     ) -> Result<(), NativeError> {
         let arena = self.registration.arena();
-        if entity.family != lash_kernel_doc::heap::FamilyId::PRIMARY
-            || entity.ordinal < self.batch.next_ordinal
+        if entity.family != lash_kernel_doc::heap::FamilyId::PROVISIONAL
+            || entity.ordinal < self.batch.next_provisional
             || self
                 .batch
                 .entries
                 .iter()
-                .any(|entry| entry.handle != handle && entry.facts.entity == Some(entity))
+                .any(|entry| entry.handle != handle && entry.facts.provisional == Some(entity))
         {
             return Err(malformed("a batch identity is not fresh and unique"));
         }
@@ -294,7 +279,7 @@ impl<'a> PreparedInstallation<'a> {
             .batch
             .entries
             .iter()
-            .filter(|entry| entry.facts.entity.is_some())
+            .filter(|entry| entry.facts.provisional.is_some())
             .count()
             + 1;
         let entry = self
@@ -303,12 +288,11 @@ impl<'a> PreparedInstallation<'a> {
             .iter_mut()
             .find(|entry| entry.handle == handle)
             .ok_or_else(|| malformed("an identity target is absent from the batch"))?;
-        if !is_mutable(&entry.body) || entry.facts.entity.is_some_and(|old| old != entity) {
+        if !is_mutable(&entry.body) || entry.facts.provisional.is_some_and(|old| old != entity) {
             return Err(malformed("a batch identity does not name its mutable body"));
         }
         arena.entities.try_reserve(count).map_err(|_| exhausted())?;
-        reserve(&mut arena.dirty, count)?;
-        entry.facts.entity = Some(entity);
+        entry.facts.provisional = Some(entity);
         Ok(())
     }
     pub fn into_parts(self) -> (Registration<'a>, PreparedBatch) {
@@ -560,7 +544,7 @@ impl Arena {
             tokens: arena.tokens,
             freed: arena.freed,
             allocations,
-            next_ordinal: arena.next_ordinal,
+            next_provisional: arena.next_provisional().ordinal,
             registration_epoch: arena.registration_epoch,
             entries,
             dependencies,
@@ -587,26 +571,20 @@ impl PreparedBatch {
             && self.entries.iter().all(|entry| {
                 entry
                     .facts
-                    .entity
-                    .is_none_or(|id| id.ordinal < arena.next_ordinal)
+                    .provisional
+                    .is_none_or(|id| id.ordinal < arena.next_provisional().ordinal)
             })
             && arena.entities.capacity() - arena.entities.len()
                 >= self
                     .entries
                     .iter()
-                    .filter(|entry| entry.facts.entity.is_some())
+                    .filter(|entry| entry.facts.provisional.is_some())
                     .count()
             && self
                 .dependencies
                 .iter()
                 .all(|version| arena.content_is(version))
             && arena.zero.capacity() - arena.zero.len() >= self.entries.len()
-            && arena.dirty.capacity() - arena.dirty.len()
-                >= self
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.facts.entity.is_some())
-                    .count()
             && self
                 .entries
                 .iter()
@@ -621,11 +599,7 @@ impl PreparedBatch {
             arena.resident = arena.resident.saturating_add(body_values(&entry.body));
         }
         let start = arena.zero.len();
-        for mut entry in self.entries {
-            if entry.facts.entity.is_some() {
-                entry.facts.listed = true;
-                arena.dirty.push(entry.handle);
-            }
+        for entry in self.entries {
             arena.objects.install(entry.handle, entry.body);
             arena.place(entry.handle, entry.facts);
         }

@@ -75,7 +75,7 @@ impl EntryParameters<'_> {
                 );
             }
         }
-        let first = arena.next_ordinal();
+        let first = arena.next_provisional().ordinal;
         let (handles, mut installation) = arena
             .prepare_cells(&shared_values)
             .map_err(publication::native_fault)?;
@@ -86,7 +86,7 @@ impl EntryParameters<'_> {
             if param.shared {
                 let (index, (handle, value)) = cells.next().expect("prepared packet parameter");
                 let entity = doc::heap::EntityId {
-                    family: doc::heap::FamilyId::PRIMARY,
+                    family: doc::heap::FamilyId::PROVISIONAL,
                     ordinal: first
                         .checked_add(index as u64)
                         .ok_or_else(|| malformed("packet parameter identity overflow"))?,

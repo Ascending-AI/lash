@@ -82,8 +82,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
         self.logical.flush(self.arena, self.heap)?;
         let entity = site.shared.then(|| doc::heap::EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: self.arena.next_ordinal(),
+            family: doc::heap::FamilyId::PROVISIONAL,
+            ordinal: self.arena.next_provisional().ordinal,
         });
         let store = self.logical.ledger();
         let ledger = store.borrow();

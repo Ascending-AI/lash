@@ -9,7 +9,7 @@ use index::{Index as Tree, visit_tree};
 mod links;
 use lash_kernel_doc::LogicalHeldV1 as Cost;
 use lash_kernel_doc::TaskId;
-use lash_kernel_doc::heap::{EntityId, HeapFault, Identity};
+use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity};
 use links::Links;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
@@ -202,6 +202,46 @@ impl Holding {
             self.add_edge(edge.target, edge.count, access)
         })?;
         Ok(())
+    }
+    /// Whether an edge names a provisional ledger key, which a projection
+    /// rekeys to a durable id.
+    pub fn has_provisional_edges(&self, access: &Access<'_>) -> Result<bool, HeapFault> {
+        let mut found = false;
+        self.each_edge(access, &mut |edge| {
+            found |= provisional(edge.target);
+            Ok(())
+        })?;
+        Ok(found)
+    }
+    /// This holding with each edge `rekeyed` names moved to its durable
+    /// id, or None when no edge moves.
+    fn rekeyed(
+        &self,
+        rekeyed: &std::collections::HashMap<EntityId, EntityId>,
+        access: &Access<'_>,
+    ) -> Result<Option<Self>, HeapFault> {
+        let mut moved = false;
+        let mut batch = links::EdgeBatch::default();
+        self.each_edge(access, &mut |edge| {
+            let target = match edge.target {
+                Identity::Object(entity) => match rekeyed.get(&entity) {
+                    Some(durable) => {
+                        moved = true;
+                        Identity::Object(*durable)
+                    }
+                    None => edge.target,
+                },
+                target => target,
+            };
+            batch.push(target, edge.count)
+        })?;
+        if !moved {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            bytes: self.bytes,
+            links: batch.finish()?,
+        }))
     }
     pub fn visit_edges(
         &self,
@@ -693,6 +733,83 @@ impl Ledger {
         self.revision = revision;
         Ok(())
     }
+    /// Rekeys what the ledger priced under provisional keys to the durable
+    /// ids a projection gave those objects (`rekeyed`, provisional to
+    /// durable). Only rows written since the last seal can name a
+    /// provisional key, so only those are read. Outstanding admissions
+    /// expire: they name the old keys.
+    pub fn rekey(
+        &mut self,
+        rekeyed: &[(EntityId, EntityId)],
+        access: &Access<'_>,
+    ) -> Result<(), HeapFault> {
+        if rekeyed.is_empty() {
+            return Ok(());
+        }
+        self.handoff()?;
+        let durable: std::collections::HashMap<EntityId, EntityId> =
+            rekeyed.iter().copied().collect();
+        let state = &mut self.state;
+        for tree in [&mut state.owners, &mut state.execution, &mut state.ended] {
+            for (key, row) in tree.hot_rows() {
+                if let Some(value) = row.value.rekeyed(&durable, access)? {
+                    tree.write(
+                        key,
+                        RootHolding {
+                            owner: row.owner,
+                            value,
+                        },
+                        access,
+                    )?;
+                }
+            }
+        }
+        let mut moves = Vec::new();
+        for (key, mut row) in state.entities.hot_rows() {
+            let body = row.body.rekeyed(&durable, access)?;
+            let moved = entity_of_key(&key).and_then(|entity| durable.get(&entity).copied());
+            if body.is_none() && moved.is_none() {
+                continue;
+            }
+            if let Some(body) = body {
+                row.body = body;
+            }
+            match moved {
+                Some(entity) => {
+                    state.entities.remove(&key, access)?;
+                    moves.push((entity_key(entity), row));
+                }
+                None => state.entities.write(key, row, access)?,
+            }
+        }
+        for (key, row) in moves {
+            if state.entities.get(&key, access)?.is_some() {
+                return Err(invalid("a durable id is already a ledger key"));
+            }
+            state.entities.write(key.to_vec(), row, access)?;
+        }
+        Ok(())
+    }
+    /// A seal saves durable ids only: a provisional key at a seal is an
+    /// object the ledger priced that no projection identified.
+    fn refuse_provisional(&self, access: &Access<'_>) -> Result<(), HeapFault> {
+        let state = &self.state;
+        let mut found = false;
+        for tree in [&state.owners, &state.execution, &state.ended] {
+            for (_, row) in tree.hot_rows() {
+                found |= row.value.has_provisional_edges(access)?;
+            }
+        }
+        for (key, row) in state.entities.hot_rows() {
+            found |= entity_of_key(&key)
+                .is_some_and(|entity| entity.family == FamilyId::PROVISIONAL)
+                || row.body.has_provisional_edges(access)?;
+        }
+        if found {
+            return Err(invalid("a provisional ledger key reached a seal"));
+        }
+        Ok(())
+    }
     pub fn seal(
         &mut self,
         access: &Access<'_>,
@@ -721,6 +838,7 @@ impl Ledger {
         if self.state.execution.live_members(access)? != 0 {
             return Err(invalid("transient source owners at seal"));
         }
+        self.refuse_provisional(access)?;
         let mut state = self.state.clone();
         if !state.owners.seal(access, work)?
             || !state.execution.seal(access, work)?
@@ -932,6 +1050,16 @@ impl Edit<'_, '_> {
 
 fn invalid(reason: &str) -> HeapFault {
     HeapFault::Malformed(reason.into())
+}
+fn entity_of_key(key: &[u8]) -> Option<EntityId> {
+    let key: &[u8; 16] = key.try_into().ok()?;
+    Some(EntityId {
+        family: FamilyId(u64::from_be_bytes(key[..8].try_into().ok()?)),
+        ordinal: u64::from_be_bytes(key[8..].try_into().ok()?),
+    })
+}
+fn provisional(identity: Identity) -> bool {
+    matches!(identity, Identity::Object(entity) if entity.family == FamilyId::PROVISIONAL)
 }
 fn entity_key(entity: EntityId) -> [u8; 16] {
     let mut key = [0; 16];

@@ -72,7 +72,7 @@ impl Arena {
         if self.watching_members && !self.registering {
             // Even an elided last root must leave an itemized cyclic body.
             // The source event retains its identity until logical normalization.
-            let entity = self.identify(handle)?;
+            let entity = self.ledger_key(handle)?;
             self.member_events.push(MemberEvent {
                 entity,
                 remove,

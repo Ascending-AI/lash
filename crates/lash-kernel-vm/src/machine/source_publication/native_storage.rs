@@ -98,7 +98,7 @@ impl StoragePreparation for NativeStorage<'_> {
             (value, counter.spent(), 0, nursery.into_new())
         };
         let allocated = !new.is_empty();
-        let first = arena.next_ordinal();
+        let first = arena.next_provisional().ordinal;
         let handles: Vec<_> = new
             .iter()
             .filter_map(|(handle, object)| {
@@ -116,7 +116,7 @@ impl StoragePreparation for NativeStorage<'_> {
         let mut identities = Vec::new();
         for (index, handle) in handles.iter().enumerate() {
             let entity = doc::heap::EntityId {
-                family: doc::heap::FamilyId::PRIMARY,
+                family: doc::heap::FamilyId::PROVISIONAL,
                 ordinal: first
                     .checked_add(index as u64)
                     .ok_or_else(|| malformed("native identity overflow"))?,

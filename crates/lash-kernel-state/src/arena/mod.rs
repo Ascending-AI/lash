@@ -117,6 +117,10 @@ pub struct Facts {
     /// A mutable object's durable identity: given by the first projection
     /// that saves it, or the one its page names, and kept from then on.
     pub entity: Option<EntityId>,
+    /// The process-local ledger key of a mutable object the ledger priced
+    /// before any projection gave it [`Self::entity`]
+    /// ([`FamilyId::PROVISIONAL`](lash_kernel_doc::heap::FamilyId::PROVISIONAL)).
+    pub provisional: Option<EntityId>,
     /// The object changed since it was last projected, or was never
     /// projected: the heap does not hold what the arena does.
     pub dirty: bool,
@@ -167,6 +171,14 @@ pub struct Facts {
     /// Invalidates ledger size/value facts even when table positions survive.
     content_revision: u64,
     mark: bool,
+}
+
+impl Facts {
+    /// The key the ledger holds the object under, if it has one: its
+    /// provisional key until the ledger is rekeyed, then its durable id.
+    pub fn ledger_entity(&self) -> Option<EntityId> {
+        self.provisional.or(self.entity)
+    }
 }
 
 /// The page a cold chunk of a mutable object names: none of its own. Its
@@ -266,8 +278,18 @@ pub struct Arena {
     facts: Vec<Facts>,
     /// The shared key layouts of the tables the run built.
     layouts: layouts::Layouts,
-    /// The one handle of each durable object the run has seen.
+    /// The one handle of each durable object the run has seen, and of each
+    /// object holding a provisional ledger key.
     entities: HashMap<EntityId, ArenaHandle>,
+    /// The ordinal the next provisional ledger key takes.
+    next_provisional: u64,
+    /// The objects given a provisional key under the active registration:
+    /// abandoning it takes them back.
+    keyed: Vec<ArenaHandle>,
+    /// Provisional ledger keys a projection replaced by durable ids, in the
+    /// order it gave them, with their objects: what the ledger rekeys next.
+    /// Until it does, the object's ledger key stays provisional.
+    rekeyed: Vec<(EntityId, EntityId, ArenaHandle)>,
     /// The primary ordinal the next object a projection saves takes.
     next_ordinal: u64,
     /// The objects with ids that changed since they were last projected.
@@ -440,6 +462,64 @@ impl Arena {
         self.next_ordinal
     }
 
+    /// The provisional ledger key the next object the ledger prices before
+    /// its projection takes.
+    pub fn next_provisional(&self) -> EntityId {
+        EntityId {
+            family: lash_kernel_doc::heap::FamilyId::PROVISIONAL,
+            ordinal: self.next_provisional,
+        }
+    }
+
+    /// Takes the next provisional ledger key.
+    pub(crate) fn take_provisional(&mut self) -> Result<EntityId, NativeError> {
+        let entity = self.next_provisional();
+        self.next_provisional = self
+            .next_provisional
+            .checked_add(1)
+            .ok_or_else(|| malformed("provisional ordinals overflow"))?;
+        Ok(entity)
+    }
+
+    /// What the ledger keys the mutable object `handle` by: its provisional
+    /// key until the ledger is rekeyed to its durable id, then that id, and
+    /// a provisional key given now if it has neither. Taking a key neither
+    /// identifies the object nor marks it for projection: a garbage object
+    /// never takes a durable id.
+    pub fn ledger_key(&mut self, handle: ArenaHandle) -> Result<EntityId, NativeError> {
+        let facts = self.facts(handle)?;
+        if let Some(entity) = facts.provisional.or(facts.entity) {
+            return Ok(entity);
+        }
+        if !is_mutable(self.body(handle)?) {
+            return Err(malformed("an immutable has no ledger key"));
+        }
+        let entity = self.take_provisional()?;
+        self.entities.insert(entity, handle);
+        self.facts[handle.index() as usize].provisional = Some(entity);
+        if self.registering {
+            self.keyed.push(handle);
+        }
+        Ok(entity)
+    }
+
+    /// The provisional ledger keys projections replaced by durable ids
+    /// since the last call, in the order the ids were given. The caller
+    /// rekeys the ledger: from now on the objects' ledger keys are their ids.
+    pub fn take_rekeyed(&mut self) -> Vec<(EntityId, EntityId)> {
+        let rekeyed = std::mem::take(&mut self.rekeyed);
+        for (provisional, _, handle) in &rekeyed {
+            if self.entities.get(provisional) == Some(handle) {
+                self.entities.remove(provisional);
+                self.facts[handle.index() as usize].provisional = None;
+            }
+        }
+        rekeyed
+            .into_iter()
+            .map(|(provisional, durable, _)| (provisional, durable))
+            .collect()
+    }
+
     /// How many mutable objects the run has created.
     pub fn allocations(&self) -> u64 {
         self.allocations
@@ -475,7 +555,7 @@ impl Arena {
         if index >= self.facts.len() {
             self.facts.resize_with(index + 1, Facts::default);
         }
-        if let Some(entity) = facts.entity {
+        if let Some(entity) = facts.entity.or(facts.provisional) {
             self.entities.insert(entity, handle);
         }
         self.tokens += 1;
@@ -1119,6 +1199,10 @@ impl Arena {
         self.entities.insert(entity, handle);
         let facts = &mut self.facts[handle.index() as usize];
         facts.entity = Some(entity);
+        if let Some(provisional) = facts.provisional {
+            self.rekeyed.push((provisional, entity, handle));
+        }
+        let facts = &mut self.facts[handle.index() as usize];
         facts.dirty = true;
         facts.listed = true;
         self.dirty.push(handle);
@@ -1309,6 +1393,9 @@ impl Arena {
         let index = handle.index() as usize;
         let facts = std::mem::take(&mut self.facts[index]);
         if let Some(entity) = facts.entity {
+            self.entities.remove(&entity);
+        }
+        if let Some(entity) = facts.provisional {
             self.entities.remove(&entity);
         }
         if let Some(body) = self.objects.get(handle) {

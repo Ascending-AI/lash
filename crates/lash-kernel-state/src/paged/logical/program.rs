@@ -341,7 +341,7 @@ pub struct Program {
 pub struct EvaluatedProgram {
     program: Program,
     dependencies: Dependencies,
-    next_ordinal: u64,
+    next_provisional: EntityId,
 }
 pub struct PreparedProgram<'a> {
     publication: PreparedPublication<'a>,
@@ -392,7 +392,7 @@ impl Program {
         }
         Some(EvaluatedProgram {
             dependencies: Dependencies::capture(ledger, arena, &handles)?,
-            next_ordinal: arena.next_ordinal(),
+            next_provisional: arena.next_provisional(),
             program: self,
         })
     }
@@ -411,7 +411,8 @@ impl EvaluatedProgram {
     }
 
     pub fn is_current(&self, ledger: &Ledger, arena: &Arena) -> bool {
-        self.dependencies.is_current(ledger, arena) && self.next_ordinal == arena.next_ordinal()
+        self.dependencies.is_current(ledger, arena)
+            && self.next_provisional == arena.next_provisional()
     }
     pub fn events(&self) -> &[JournalEvent] {
         &self.program.events
@@ -746,7 +747,7 @@ impl PublicationValue {
                 arena.logical_local(value)?,
                 value
                     .handle()
-                    .and_then(|handle| arena.facts(handle).ok()?.entity),
+                    .and_then(|handle| arena.facts(handle).ok()?.ledger_entity()),
                 matches!(
                     value,
                     Value::List(_)

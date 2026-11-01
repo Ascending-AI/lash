@@ -798,7 +798,8 @@ impl KernelMachine {
             .collect();
         walked
             .and_then(|()| arena.walk(&transient))
-            .map_err(|error| fault(&error.to_string()))
+            .map_err(|error| fault(&error.to_string()))?;
+        Ok(self.logical.rekey(&mut arena, &self.heap)?)
     }
 
     /// Gives what `values` reach their durable ids, as a projection point
@@ -809,7 +810,8 @@ impl KernelMachine {
         arena
             .walk(&roots)
             .and_then(|()| arena.walk_dirty())
-            .map_err(|error| fault(&error.to_string()))
+            .map_err(|error| fault(&error.to_string()))?;
+        Ok(self.logical.rekey(&mut arena, &self.heap)?)
     }
 
     /// Writes every object the arena changed to the heap: what a
@@ -852,7 +854,10 @@ impl KernelMachine {
 
     /// The page form of `value`: an object without an id takes one now.
     pub(super) fn page_form(&self, value: &Value) -> Result<PageValue, Halt> {
-        project::project(&mut self.arena.borrow_mut(), self.heap.pages(), value).map_err(Halt::from)
+        let mut arena = self.arena.borrow_mut();
+        let page = project::project(&mut arena, self.heap.pages(), value)?;
+        self.logical.rekey(&mut arena, &self.heap)?;
+        Ok(page)
     }
 
     /// Decodes what a read of chunk `chunk` of the cold object `handle`

@@ -61,10 +61,12 @@ impl Arena {
             .ok_or_else(|| malformed("identity registrations overflow"))?;
         self.registering = true;
         let next = self.next_ordinal;
+        let provisional = self.next_provisional;
         let dirty = self.dirty.len();
         Ok(Registration {
             arena: self,
             next,
+            provisional,
             dirty,
             committed: false,
             batch: Batch::Native(Vec::new()),
@@ -79,6 +81,7 @@ impl Arena {
 pub struct Registration<'a> {
     arena: &'a mut Arena,
     next: u64,
+    provisional: u64,
     dirty: usize,
     committed: bool,
     batch: Batch,
@@ -172,17 +175,10 @@ impl Registration<'_> {
         }
     }
 
+    /// The provisional ledger key of the next body the journal creates: a
+    /// projection gives it its durable id if anything saves it.
     pub fn reserve_entity(&mut self) -> Result<EntityId, NativeError> {
-        let entity = EntityId {
-            family: lash_kernel_doc::heap::FamilyId::PRIMARY,
-            ordinal: self.arena.next_ordinal,
-        };
-        self.arena.next_ordinal = self
-            .arena
-            .next_ordinal
-            .checked_add(1)
-            .ok_or_else(|| malformed("identity ordinals overflow"))?;
-        Ok(entity)
+        self.arena.take_provisional()
     }
     pub(super) fn read_arena(&self) -> &Arena {
         self.arena
@@ -220,7 +216,20 @@ impl Drop for Registration<'_> {
             }
             self.arena.dirty.truncate(kept);
             self.arena.next_ordinal = self.next;
+            for handle in std::mem::take(&mut self.arena.keyed) {
+                let Some(facts) = self.arena.facts.get_mut(handle.index() as usize) else {
+                    continue;
+                };
+                if let Some(entity) = facts.provisional
+                    && entity.ordinal >= self.provisional
+                {
+                    facts.provisional = None;
+                    self.arena.entities.remove(&entity);
+                }
+            }
+            self.arena.next_provisional = self.provisional;
         }
+        self.arena.keyed.clear();
         self.arena.registering = false;
     }
 }

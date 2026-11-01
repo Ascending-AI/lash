@@ -935,10 +935,11 @@ impl KernelMachine {
         if roots.is_empty() {
             return Ok(());
         }
-        self.arena
-            .borrow_mut()
+        let mut arena = self.arena.borrow_mut();
+        arena
             .walk(&roots)
-            .map_err(|error| fault(&error.to_string()))
+            .map_err(|error| fault(&error.to_string()))?;
+        Ok(self.logical.rekey(&mut arena, &self.heap)?)
     }
 
     /// Gives the session bindings written since the last projection point

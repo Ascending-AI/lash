@@ -51,7 +51,7 @@ impl StoragePreparation for ClosureConstruction {
                 .all(|(handle, entity)| {
                     arena
                         .facts(*handle)
-                        .is_ok_and(|facts| facts.entity == Some(*entity))
+                        .is_ok_and(|facts| facts.ledger_entity() == Some(*entity))
                 })
         {
             return Ok(None);
@@ -162,7 +162,7 @@ impl KernelMachine {
                 .borrow()
                 .facts(*handle)
                 .ok()
-                .and_then(|facts| facts.entity)
+                .and_then(|facts| facts.ledger_entity())
             else {
                 return Ok(false);
             };
@@ -180,8 +180,8 @@ impl KernelMachine {
         let kernel = doc::KernelVersion::of(document.kernel())
             .ok_or_else(|| malformed("source kernel is unsupported"))?;
         let entity = EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: self.arena.borrow().next_ordinal(),
+            family: doc::heap::FamilyId::PROVISIONAL,
+            ordinal: self.arena.borrow().next_provisional().ordinal,
         };
         let holding =
             Holding::from_page(self.heap.pages(), &doc::heap::PageValue::Closure(entity))?;

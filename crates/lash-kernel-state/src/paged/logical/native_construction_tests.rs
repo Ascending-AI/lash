@@ -29,7 +29,8 @@ pub(super) fn check() {
         .unwrap_or_else(|_| panic!("the initial computed scalar fits"))
         .publish(&mut ledger, |_, _| {})
         .unwrap();
-    let entity = id(0);
+    // A journal names the body it creates by the next provisional key.
+    let entity = arena.next_provisional();
     let contract = Contract {
         exit: Exit::Returned,
         events: vec![Event::Entity {
@@ -77,8 +78,8 @@ pub(super) fn check() {
         "final balance alone cannot admit a native construction"
     );
     assert_eq!(
-        arena.next_ordinal(),
-        0,
+        arena.next_provisional(),
+        entity,
         "declined exact admission returns the entity grant"
     );
     assert_eq!(ledger.balance().unwrap().total().unwrap(), 17);

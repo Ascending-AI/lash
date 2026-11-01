@@ -67,7 +67,14 @@ impl Lifecycle {
         }
         Ok(())
     }
+    /// Rekeys the ledger to the durable ids the projections since the last
+    /// call gave objects it priced under provisional keys.
+    pub fn rekey(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
+        let rekeyed = arena.take_rekeyed();
+        self.ledger.borrow_mut().rekey(&rekeyed, heap.pages())
+    }
     pub fn flush(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
+        self.rekey(arena, heap)?;
         let mut pending = self.pending.borrow_mut();
         let events = arena.take_member_events();
         if pending.is_empty() && events.is_empty() {

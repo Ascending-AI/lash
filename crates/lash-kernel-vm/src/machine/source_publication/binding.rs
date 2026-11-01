@@ -291,8 +291,8 @@ impl KernelMachine {
             ..start.clone()
         };
         let entity = shared.then(|| doc::heap::EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: arena.next_ordinal(),
+            family: doc::heap::FamilyId::PROVISIONAL,
+            ordinal: arena.next_provisional().ordinal,
         });
         let safe_point = self.charged;
         let published = Context {

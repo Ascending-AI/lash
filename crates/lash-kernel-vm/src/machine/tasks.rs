@@ -940,10 +940,12 @@ impl super::KernelMachine {
         let pages = self.heap.pages().clone();
         let result = {
             let mut arena = self.arena.borrow_mut();
-            match &outcome {
+            let result = match &outcome {
                 Ok(value) => Ok(project::project(&mut arena, &pages, value)?),
                 Err(value) => Err(project::project(&mut arena, &pages, value)?),
-            }
+            };
+            self.logical.rekey(&mut arena, &self.heap)?;
+            result
         };
         self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;

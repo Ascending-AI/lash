@@ -21,7 +21,7 @@ impl Ledger {
         let entity = arena
             .facts(handle)
             .map_err(|error| invalid(&error.to_string()))?
-            .entity
+            .ledger_entity()
             .ok_or_else(|| invalid("warming has no source identity"))?;
         if self.entity_holding(entity, access)?.is_none() {
             return Err(invalid("warming has no existing logical fact"));
@@ -50,7 +50,7 @@ impl WarmFact {
             || arena
                 .facts(self.handle)
                 .map_err(|error| invalid(&error.to_string()))?
-                .entity
+                .ledger_entity()
                 != Some(self.entity)
             || ledger.balance()? != self.balance
         {

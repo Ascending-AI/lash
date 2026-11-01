@@ -93,7 +93,7 @@ impl Ledger {
         member: Member,
         next: Option<Value>,
     ) -> Result<(Change, Vec<EntityId>, Vec<ArenaHandle>), MemberFault> {
-        let entity = arena.identify(handle)?;
+        let entity = arena.ledger_key(handle)?;
         if self.entity_holding(entity, access)?.is_none() {
             return Err(invalid("member owner is absent").into());
         }

@@ -397,6 +397,20 @@ impl<T: Cell> Index<T> {
         })?;
         Ok(removed)
     }
+    /// The rows written since the last seal, which only the in-memory
+    /// overlay holds, ascending by key.
+    pub(super) fn hot_rows(&self) -> Vec<(Vec<u8>, T)> {
+        let mut rows = Vec::new();
+        if let Some(root) = &self.hot {
+            walk(root, &mut |key, value| {
+                if let Some(value) = value {
+                    rows.push((key.to_vec(), value.clone()));
+                }
+                true
+            });
+        }
+        rows
+    }
     pub fn len(&self) -> u64 {
         self.totals.len
     }

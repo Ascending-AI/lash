@@ -143,7 +143,7 @@ impl KernelMachine {
         let ledger = store.borrow();
         let invocation = ledger.prospective_invocation(task_id);
         let mut arena = self.arena.borrow_mut();
-        let first = arena.next_ordinal();
+        let first = arena.next_provisional().ordinal;
         let (handles, mut installation) =
             arena.prepare_cells(&shared_values).map_err(native_fault)?;
         let mut entities = buffer(handles.len())?;
@@ -153,7 +153,7 @@ impl KernelMachine {
             if param.shared {
                 let (index, (handle, value)) = cells.next().expect("prepared shared parameter");
                 let entity = EntityId {
-                    family: FamilyId::PRIMARY,
+                    family: FamilyId::PROVISIONAL,
                     ordinal: first
                         .checked_add(index as u64)
                         .ok_or_else(|| malformed("parameter identity overflow"))?,

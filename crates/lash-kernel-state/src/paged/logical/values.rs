@@ -81,7 +81,7 @@ impl Holding {
             | Value::Record(handle)
             | Value::Closure(handle)
             | Value::ObjectRef(handle) => {
-                let entity = arena.identify(*handle).map_err(arena_fault)?;
+                let entity = arena.ledger_key(*handle).map_err(arena_fault)?;
                 holding.add_edge(Identity::Object(entity), 1, access)?;
                 return Ok(holding);
             }
@@ -97,8 +97,11 @@ impl Holding {
             batch.push(target, count)
         })?;
         holding.links = batch.finish()?;
+        // A provisional edge is rekeyed at projection: only a holding of
+        // durable ids stays true for the cache's lifetime.
         if let Some(handle) = cache
             && !arena.registration_active()
+            && !holding.has_provisional_edges(access)?
         {
             let _ = arena
                 .facts(handle)
@@ -119,7 +122,7 @@ impl Holding {
         if !matches!(arena.body(handle).map_err(arena_fault)?, Body::Cell(_)) {
             return Err(invalid("a captured owner must borrow a variable cell"));
         }
-        let entity = arena.identify(handle).map_err(arena_fault)?;
+        let entity = arena.ledger_key(handle).map_err(arena_fault)?;
         Self::with_edges(0, [Identity::Object(entity)], access)
     }
 
@@ -130,7 +133,7 @@ impl Holding {
         access: &Access<'_>,
         handle: ArenaHandle,
     ) -> Result<Self, HeapFault> {
-        let entity = arena.identify(handle).map_err(arena_fault)?;
+        let entity = arena.ledger_key(handle).map_err(arena_fault)?;
         if !arena.holds_resident(entity) {
             return Err(invalid("logical body is not completely resident"));
         }
@@ -169,7 +172,7 @@ fn stream_native_edges(
         | Value::Record(handle)
         | Value::Closure(handle)
         | Value::ObjectRef(handle) => {
-            let entity = arena.identify(*handle).map_err(arena_fault)?;
+            let entity = arena.ledger_key(*handle).map_err(arena_fault)?;
             visit(Identity::Object(entity), 1)?;
             return Ok(());
         }
@@ -189,7 +192,7 @@ fn stream_native_edges(
             | Value::Record(handle)
             | Value::Closure(handle)
             | Value::ObjectRef(handle) => {
-                let entity = arena.identify(handle).map_err(arena_fault)?;
+                let entity = arena.ledger_key(handle).map_err(arena_fault)?;
                 visit(Identity::Object(entity), 1)?;
             }
             Value::Task(task) | Value::TaskRef(task) => {

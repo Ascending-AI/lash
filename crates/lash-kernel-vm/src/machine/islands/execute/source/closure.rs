@@ -92,7 +92,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .arena
                 .facts(*handle)
                 .ok()
-                .and_then(|facts| facts.entity)
+                .and_then(|facts| facts.ledger_entity())
             else {
                 return Ok(ValuePublication::Unavailable);
             };
@@ -114,8 +114,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             )
             .ok_or_else(|| malformed("closure result has no canonical source owner"))?;
         let entity = doc::heap::EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: self.arena.next_ordinal(),
+            family: doc::heap::FamilyId::PROVISIONAL,
+            ordinal: self.arena.next_provisional().ordinal,
         };
         let event = JournalEvent {
             outputs: vec![(output, PV::Page(doc::heap::PageValue::Closure(entity)))],

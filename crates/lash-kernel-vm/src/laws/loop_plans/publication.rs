@@ -1344,7 +1344,7 @@ fn shared_cell_publication() {
             .unwrap();
         let before = baseline + 294 + extra;
         assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
-        let first_id = arena.identify(first).unwrap();
+        let first_id = arena.ledger_key(first).unwrap();
         drop(ledger);
         let ledger = ledger_store.borrow();
         let start = Position {

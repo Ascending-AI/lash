@@ -63,7 +63,9 @@ impl StoragePreparation for Construction<'_> {
         let tuple = if let doc::NewObject::Tuple(values) = &self.object {
             let values = values
                 .iter()
-                .map(|value| crate::machine::project::project(arena, self.heap.pages(), value))
+                .map(|value| {
+                    crate::machine::project::project_ledger(arena, self.heap.pages(), value)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let tuple = lash_kernel_state::kernel_internals::stored_pages::tuple(
                 self.heap.pages(),
@@ -77,8 +79,8 @@ impl StoragePreparation for Construction<'_> {
             None
         };
         let entity = tuple.is_none().then(|| doc::heap::EntityId {
-            family: doc::heap::FamilyId::PRIMARY,
-            ordinal: arena.next_ordinal(),
+            family: doc::heap::FamilyId::PROVISIONAL,
+            ordinal: arena.next_provisional().ordinal,
         });
         let (value, mut installation) = if matches!(&self.object, doc::NewObject::Tuple(values) if values.is_empty())
         {

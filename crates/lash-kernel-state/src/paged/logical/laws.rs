@@ -59,19 +59,31 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
     let access = heap.pages().clone();
     let mut ledger = Ledger::fresh();
     let mut arena = crate::arena::Arena::new();
-    // A failed prefix cannot reserve an identity or cache an edge to the
-    // identity subsequently assigned to another source allocation.
+    // A failed prefix cannot reserve a ledger key or cache an edge to the
+    // identity subsequently assigned to another source allocation. Pricing
+    // takes a provisional key, never a durable id: only a projection does.
     let discarded = arena.create_list(&[]);
     let tuple = arena.tuple(vec![discarded], 256).unwrap();
+    let provisional = |ordinal| EntityId {
+        family: FamilyId::PROVISIONAL,
+        ordinal,
+    };
     {
         let mut registration = arena.registration().unwrap();
         Holding::from_native(registration.arena(), &access, &tuple).unwrap();
-        assert_eq!(registration.arena().next_ordinal(), 1);
+        assert_eq!(registration.arena().next_provisional(), provisional(1));
+        assert_eq!(registration.arena().next_ordinal(), 0);
     }
-    assert_eq!(arena.next_ordinal(), 0);
+    assert_eq!(arena.next_provisional(), provisional(0));
     let child = arena.create_list(&[lash_kernel_doc::Value::Int(7)]);
     let child_handle = child.handle().unwrap();
     assert_eq!(arena.identify(child_handle).unwrap(), id(0));
+    // Another object takes the key the failed prefix gave back.
+    let other = arena.create_list(&[]);
+    assert_eq!(
+        arena.ledger_key(other.handle().unwrap()).unwrap(),
+        provisional(0)
+    );
     {
         let mut registration = arena.registration().unwrap();
         let holding = Holding::from_native(registration.arena(), &access, &tuple).unwrap();
@@ -84,7 +96,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
             .unwrap();
         assert_eq!(
             edges,
-            [Identity::Object(id(1))],
+            [Identity::Object(provisional(1))],
             "discarded tuple caches cannot alias a later allocation"
         );
     }
@@ -533,6 +545,10 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         .publish(&mut frames, |_, edit| assert!(edit.is_empty()))
         .unwrap();
     assert_eq!(frames.balance().unwrap().total().unwrap(), 99);
+    // A seal saves durable ids: the projection before it identifies what
+    // the ledger priced under provisional keys, and the ledger is rekeyed.
+    arena.walk(&[constructed.handle().unwrap()]).unwrap();
+    frames.rekey(&arena.take_rekeyed(), &access).unwrap();
     let sealed = frames.seal(&access, budget()).unwrap().unwrap();
     let mut frames = Ledger::open(sealed).unwrap();
     let (second, attempt) = enter(&frames, &mut arena, &access, &constructed);
@@ -1116,8 +1132,8 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
     };
     drop(attempt);
     assert_eq!(
-        arena.next_ordinal(),
-        1,
+        (arena.next_ordinal(), arena.next_provisional().ordinal),
+        (1, 0),
         "abandoned publication returns identity grants"
     );
     let attempt = ledger
@@ -1141,8 +1157,8 @@ fn failed_or_stale_source_admission_never_publishes_a_holding() {
         "stale publication cannot edit semantic storage"
     );
     assert_eq!(
-        arena.next_ordinal(),
-        1,
+        (arena.next_ordinal(), arena.next_provisional().ordinal),
+        (1, 0),
         "stale publication returns identity grants"
     );
     assert!(ledger.holding(owner(2), &access).unwrap().is_none());
@@ -1160,30 +1176,27 @@ fn checked_program_and_warm_balance() {
         let first = nursery.allocate(NewObject::List(vec![Value::Int(7)]));
         nursery.allocate(NewObject::Map(vec![(Value::Absent, first)]));
         let new = nursery.into_new();
-        let before = (arena.held(), arena.allocations(), arena.next_ordinal());
+        let before = (arena.held(), arena.allocations(), arena.next_provisional());
         assert!(arena.install(new).is_err());
         assert!(
             arena.body(first.handle().unwrap()).is_err(),
             "a rejected batch installed its first body"
         );
         assert_eq!(
-            (arena.held(), arena.allocations(), arena.next_ordinal()),
+            (arena.held(), arena.allocations(), arena.next_provisional()),
             before
         );
         let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
         let retry = nursery.allocate(NewObject::List(vec![]));
         assert!(retry.same(&first), "rejection returns the reserved slots");
+        let identity = arena.next_provisional();
         let mut staged = arena.prepare_install(nursery.into_new()).unwrap();
-        let identity = EntityId {
-            family: FamilyId::PRIMARY,
-            ordinal: 0,
-        };
         staged
             .bind_entity(retry.handle().unwrap(), identity)
             .unwrap();
         drop(staged);
         assert_eq!(
-            (arena.held(), arena.allocations(), arena.next_ordinal()),
+            (arena.held(), arena.allocations(), arena.next_provisional()),
             before
         );
         let mut nursery = Nursery::new(arena.objects(), LogicalBytes(u64::MAX));
@@ -1276,10 +1289,7 @@ fn checked_program_and_warm_balance() {
     let (heap, _) = fresh();
     let mut arena = crate::arena::Arena::new();
     let mut ledger = Ledger::fresh();
-    let id = EntityId {
-        family: FamilyId::PRIMARY,
-        ordinal: 0,
-    };
+    let id = arena.next_provisional();
     let make = || {
         Program::new(vec![
             JournalEvent {
@@ -1346,10 +1356,7 @@ fn checked_program_and_warm_balance() {
             )
             .is_err()
     );
-    let entity = EntityId {
-        family: FamilyId::PRIMARY,
-        ordinal: arena.next_ordinal(),
-    };
+    let entity = arena.next_provisional();
     let make = || {
         Program::new(vec![JournalEvent {
             entities: vec![VirtualEntity {
@@ -1383,7 +1390,7 @@ fn checked_program_and_warm_balance() {
         "65 entity bytes after all containing obligations cannot fit 66"
     );
     assert_eq!(
-        arena.next_ordinal(),
+        arena.next_provisional().ordinal,
         entity.ordinal,
         "a declined prefix consumes no identity"
     );
@@ -1439,10 +1446,7 @@ fn checked_program_and_warm_balance() {
     let (heap, _) = fresh();
     let mut arena = crate::arena::Arena::new();
     let mut ledger = Ledger::fresh();
-    let entity = EntityId {
-        family: FamilyId::PRIMARY,
-        ordinal: arena.next_ordinal(),
-    };
+    let entity = arena.next_provisional();
     let make = || {
         Program::new(vec![JournalEvent {
             entities: vec![VirtualEntity {
@@ -1467,7 +1471,7 @@ fn checked_program_and_warm_balance() {
     assert_eq!(prepared.peak(), 66);
     assert!(prepared.admit(65).is_none());
     assert!(arena.body(refused).is_err());
-    assert_eq!(arena.next_ordinal(), entity.ordinal);
+    assert_eq!(arena.next_provisional().ordinal, entity.ordinal);
     assert_eq!(arena.allocations(), 0);
     let expected = make().evaluate(&ledger, &arena).unwrap();
     let (cell, mut storage) = arena.prepare_cell(Value::Int(256)).unwrap();
@@ -1493,10 +1497,7 @@ fn checked_program_and_warm_balance() {
 
     // A closure captures a cell edge, not another guest value occurrence.
     // The existing cell remains shared by its binding and the new closure.
-    let closure = EntityId {
-        family: FamilyId::PRIMARY,
-        ordinal: arena.next_ordinal(),
-    };
+    let closure = arena.next_provisional();
     let make = || {
         Program::new(vec![JournalEvent {
             entities: vec![VirtualEntity {
