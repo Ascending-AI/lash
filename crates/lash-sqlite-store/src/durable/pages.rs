@@ -60,9 +60,12 @@ lash_store_sql::statements! {
         /// Mixed closure and node-only holds from one owner commit. A retained
         /// call keeps its roots until logical expiry, which queues them after
         /// deleting the row. SQLite's single writer makes that check atomic.
-        hold_set = "WITH retired AS (
-             SELECT unhex(value) AS hash, 1 AS closure FROM json_each(?1)
-             UNION ALL SELECT unhex(value), 0 FROM json_each(?2))
+        hold_set = "WITH RECURSIVE input AS MATERIALIZED (SELECT ?1 AS closures, ?2 AS nodes),
+             offsets AS (SELECT 1 AS pos UNION ALL SELECT pos + 32 FROM offsets, input
+                 WHERE pos + 32 <= max(length(closures), length(nodes))),
+             retired AS (
+                 SELECT substr(closures, pos, 32) AS hash, 1 AS closure FROM input, offsets WHERE pos <= length(closures)
+                 UNION ALL SELECT substr(nodes, pos, 32), 0 FROM input, offsets WHERE pos <= length(nodes))
              INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
              SELECT blobs.hash, retired.closure, ?3 FROM retired
              JOIN blobs ON blobs.hash = retired.hash
@@ -199,6 +202,21 @@ pub(super) fn hold(
     Ok(held)
 }
 
+/// Fixed-width native digests keep the bounded hold batch out of JSON/hex.
+fn packed_roots(roots: &[String]) -> rusqlite::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(roots.len() * 32);
+    for root in roots {
+        let node = NodeId::from_hex(root).ok_or_else(|| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(super::corrupt(
+                "retirement root",
+                root,
+            )))
+        })?;
+        bytes.extend_from_slice(&node.0);
+    }
+    Ok(bytes)
+}
+
 pub(super) fn hold_retired(
     tx: &Connection,
     retired: super::Retired,
@@ -219,11 +237,7 @@ pub(super) fn hold_retired(
         cached_execute(
             tx,
             SQL.sqlite.hold_set.sql(),
-            rusqlite::params![
-                graph::json_array(&closures),
-                graph::json_array(&phases),
-                now.0
-            ],
+            rusqlite::params![packed_roots(&closures)?, packed_roots(&phases)?, now.0],
         )?;
     }
 }
