@@ -5,6 +5,7 @@
 //! retained (FIG-6889).
 pub const TABLE: &str = "model_call_records";
 crate::statements! {
+    lazy
     pub struct ModelCallStatements @ "durable_model_call" {
         reserve = "INSERT INTO model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call)
             VALUES (?1, ?2, ?3, ?4, ?5, FALSE, ?6, ?7, ?8)

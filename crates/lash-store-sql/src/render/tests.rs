@@ -619,3 +619,14 @@ fn is_distinct_from_is_a_comparison_operator_not_a_relation_list() {
         })
     );
 }
+
+/// SQL-COMPACT: layout whitespace is dispensable, quoted text and the end
+/// of a line comment retain their exact SQL meaning.
+#[test]
+fn compact_statements_preserve_literal_whitespace_and_line_comment_boundaries() {
+    let sql = "  SELECT 'a  b', \"quoted  name\" -- leave ?1 alone\n    FROM processes\n    WHERE process_id = ?1  ";
+    assert_eq!(
+        render_compact(sql, Dialect::postgres(), &["processes"]).unwrap(),
+        "SELECT 'a  b', \"quoted  name\" -- leave ?1 alone\nFROM lash_processes WHERE process_id = $1"
+    );
+}

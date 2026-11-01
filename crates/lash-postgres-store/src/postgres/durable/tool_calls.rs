@@ -18,6 +18,7 @@ use super::{Committing, corrupt, sqlx_failure};
 pub(super) static SQL: LazyLock<ToolCallStatements> =
     LazyLock::new(|| ToolCallStatements::render(Dialect::postgres()));
 lash_store_sql::statements! {
+    lazy
     struct ToolCallPostgresStatements @ "durable_tool_call_postgres" {
         selected = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id = ANY(?2)";

@@ -316,6 +316,45 @@ impl Rendered {
     }
 }
 
+/// A statement rendered once on its first use. Cold directory operations do
+/// not retain a rendered SQL string alongside the writer's hot statements.
+#[derive(Clone, Debug)]
+pub struct LazyStatement {
+    statement: Statement,
+    dialect: Dialect,
+    rendered: std::sync::OnceLock<Rendered>,
+}
+
+impl std::ops::Deref for LazyStatement {
+    type Target = Rendered;
+
+    fn deref(&self) -> &Rendered {
+        self.rendered.get_or_init(|| {
+            match render::render_compact(self.statement.neutral, self.dialect, TABLES) {
+                Ok(sql) => Rendered {
+                    name: self.statement.name,
+                    sql: sql.into_boxed_str(),
+                },
+                Err(error) => panic!(
+                    "neutral statement `{}` does not render: {error}",
+                    self.statement.name
+                ),
+            }
+        })
+    }
+}
+
+impl Statement {
+    /// Defer this statement's rendered allocation until an operation uses it.
+    pub const fn deferred(self, dialect: Dialect) -> LazyStatement {
+        LazyStatement {
+            statement: self,
+            dialect,
+            rendered: std::sync::OnceLock::new(),
+        }
+    }
+}
+
 /// Every statement is a string literal or compile-time expansion in neutral
 /// form, so the set remains readable as SQL. The generated type has
 /// one [`Rendered`] field per statement, a `NEUTRAL` inventory, and a `render`
@@ -334,7 +373,10 @@ impl Rendered {
 /// ```
 #[macro_export]
 macro_rules! statements {
-    (
+    (lazy $($set:tt)*) => {
+        $crate::statements!(@define $crate::LazyStatement, deferred; $($set)*);
+    };
+    (@define $field_type:ty, $factory:ident;
         $(#[$set_meta:meta])*
         $vis:vis struct $set:ident @ $family:literal {
             $(
@@ -348,7 +390,7 @@ macro_rules! statements {
         $vis struct $set {
             $(
                 $(#[$statement_meta])*
-                pub $field: $crate::Rendered,
+                pub $field: $field_type,
             )*
         }
 
@@ -377,10 +419,14 @@ macro_rules! statements {
                             ::core::concat!($family, ".", ::core::stringify!($field)),
                             $sql,
                         )
-                        .render_or_panic(dialect),
+                        .$factory(dialect),
                     )*
                 }
             }
         }
     };
+    ($($set:tt)*) => {
+        $crate::statements!(@define $crate::Rendered, render_or_panic; $($set)*);
+    };
+
 }

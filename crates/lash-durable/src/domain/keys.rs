@@ -89,11 +89,24 @@ pub struct StoredKeyError(pub String);
 
 /// Parts are joined by `/`; a part's own `%` and `/` are escaped as `%25`
 /// and `%2F`, so any id round-trips.
-fn stored(prefix: &str, parts: &[&str]) -> String {
-    let mut key = String::from(prefix);
+pub(super) fn stored(prefix: &str, parts: &[&str]) -> String {
+    let capacity = parts
+        .iter()
+        .try_fold(prefix.len(), |size, part| {
+            size.checked_add(1)?.checked_add(part.len())
+        })
+        .unwrap_or(prefix.len());
+    let mut key = String::with_capacity(capacity);
+    key.push_str(prefix);
     for part in parts {
         key.push('/');
-        key.push_str(&part.replace('%', "%25").replace('/', "%2F"));
+        for character in part.chars() {
+            match character {
+                '%' => key.push_str("%25"),
+                '/' => key.push_str("%2F"),
+                other => key.push(other),
+            }
+        }
     }
     key
 }

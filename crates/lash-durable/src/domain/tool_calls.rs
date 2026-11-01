@@ -18,12 +18,10 @@ pub enum CallOwner {
 impl CallOwner {
     pub fn stored(&self) -> String {
         match self {
-            Self::Turn(session, run) => {
-                super::ScopeKey::Turn(session.clone(), run.clone()).stored()
-            }
-            Self::Process(process) => super::ScopeKey::Process(process.clone()).stored(),
+            Self::Turn(session, run) => super::keys::stored("t", &[session.as_str(), run.as_str()]),
+            Self::Process(process) => super::keys::stored("p", &[process.as_str()]),
             Self::Operation(session, operation) => {
-                super::ScopeKey::Operation(session.clone(), operation.clone()).stored()
+                super::keys::stored("o", &[session.as_str(), operation])
             }
         }
     }

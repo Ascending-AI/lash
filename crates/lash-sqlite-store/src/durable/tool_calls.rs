@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     PRIMARY KEY (owner_key, call_id),
     CHECK ((decision IS NULL) = (decision_ref IS NULL)),
     CHECK (body_ref IS NULL OR answer_outcome IS NOT NULL)
-) WITHOUT ROWID;
+);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tool_calls_execution ON tool_calls(execution_owner, call_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_order ON tool_calls(owner_key, admission_seq, call_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_turn_order ON tool_calls(session_id, turn_id, admission_seq DESC) WHERE turn_id IS NOT NULL;
@@ -44,6 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_tool_calls_decision ON tool_calls(decision_ref) W
 pub(super) static SQL: LazyLock<ToolCallStatements> =
     LazyLock::new(|| ToolCallStatements::render(crate::schema_layout::MAIN));
 lash_store_sql::statements! {
+    lazy
     struct ToolCallSqliteStatements @ "durable_tool_call_sqlite" {
         selected = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))";

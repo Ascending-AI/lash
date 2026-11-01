@@ -423,6 +423,23 @@ impl std::error::Error for RenderError {}
 ///
 /// See [`RenderError`].
 pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String, RenderError> {
+    render_with_spacing(neutral, dialect, tables, false)
+}
+
+pub(crate) fn render_compact(
+    neutral: &str,
+    dialect: Dialect,
+    tables: &[&str],
+) -> Result<String, RenderError> {
+    render_with_spacing(neutral, dialect, tables, true)
+}
+
+fn render_with_spacing(
+    neutral: &str,
+    dialect: Dialect,
+    tables: &[&str],
+    compact: bool,
+) -> Result<String, RenderError> {
     let bytes = neutral.as_bytes();
     let mut out = String::with_capacity(neutral.len() + 16);
     let mut index = 0usize;
@@ -474,6 +491,10 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                     .map_or(bytes.len(), |offset| index + offset);
                 out.push_str(&neutral[index..end]);
                 index = end;
+                if compact && index < bytes.len() {
+                    out.push('\n');
+                    index += 1;
+                }
             }
             b'/' if bytes.get(index + 1) == Some(&b'*') => {
                 let Some(offset) = neutral[index + 2..].find("*/") else {
@@ -557,6 +578,14 @@ pub fn render(neutral: &str, dialect: Dialect, tables: &[&str]) -> Result<String
                 expect_table = table_position(word, previous_word);
                 previous_word = Some(word);
                 index = end;
+            }
+            byte if compact && byte.is_ascii_whitespace() => {
+                while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                    index += 1;
+                }
+                if !out.is_empty() && index < bytes.len() && !out.ends_with('\n') {
+                    out.push(' ');
+                }
             }
             _ => {
                 let Some(character) = neutral[index..].chars().next() else {

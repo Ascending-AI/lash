@@ -32,6 +32,7 @@ pub(super) static SQL: LazyLock<ModelCallStatements> =
     LazyLock::new(|| ModelCallStatements::render(crate::schema_layout::MAIN));
 
 lash_store_sql::statements! {
+    lazy
     struct ModelCallSqliteStatements @ "durable_model_call_sqlite" {
         selected = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
             WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
