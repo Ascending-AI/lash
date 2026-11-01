@@ -89,8 +89,14 @@ impl KernelMachine {
                     )
                     .into());
                 }
+                // A library body's call counts no occurrence: its capture
+                // is checked against the same source continuation and
+                // carries no action ordinal.
                 if !entry.guest && call.capture.is_some() {
-                    return Ok(None);
+                    if !captured(&exe.code(caller.code).source_room, entry, stmt)? {
+                        return Ok(None);
+                    }
+                    result.capture = Some((act, entry));
                 }
                 let pending = if call.capture.is_none() {
                     let pending = caller
@@ -170,32 +176,8 @@ impl KernelMachine {
                     expected.sort_unstable();
                     result.expected = Some(expected);
                     if call.capture.is_some() {
-                        let Ok(restore) = source.compile_event(
-                            &Point {
-                                site: entry.site.clone(),
-                                phase: Phase::Restore,
-                            },
-                            room::ExitKind::Normal,
-                        ) else {
+                        if !captured(source, entry, stmt)? {
                             return Ok(None);
-                        };
-                        let roles = restore
-                            .restored_roles()
-                            .ok_or_else(|| malformed("entry capture source roles are absent"))?;
-                        if !roles.iter().eq(entry.roles.iter().map(|role| &role.site))
-                            || !entry.site.path.starts_with(&stmt.site.path)
-                            || entry.suffix.as_ref() != &entry.site.path[stmt.site.path.len()..]
-                            || entry.roles.iter().any(|role| {
-                                role.site.unit != stmt.site.unit
-                                    || !role.site.path.starts_with(&stmt.site.path)
-                                    || role.suffix.as_ref()
-                                        != &role.site.path[stmt.site.path.len()..]
-                            })
-                        {
-                            return Err(malformed(
-                                "entry capture differs from its source continuation",
-                            )
-                            .into());
                         }
                         result.capture = Some((act, entry));
                     }
@@ -224,4 +206,41 @@ impl KernelMachine {
         }
         Ok(Some((result, ordinal)))
     }
+}
+
+/// Whether a call's capture names exactly its statement's source
+/// continuation: the Restore event's roles, under the statement's site. A
+/// source without that Restore event misses; another continuation is
+/// malformed.
+fn captured(
+    source: &room::Source,
+    entry: &Nested,
+    stmt: &crate::compile::Stmt,
+) -> Result<bool, HeapFault> {
+    let Ok(restore) = source.compile_event(
+        &Point {
+            site: entry.site.clone(),
+            phase: Phase::Restore,
+        },
+        room::ExitKind::Normal,
+    ) else {
+        return Ok(false);
+    };
+    let roles = restore
+        .restored_roles()
+        .ok_or_else(|| malformed("entry capture source roles are absent"))?;
+    if !roles.iter().eq(entry.roles.iter().map(|role| &role.site))
+        || !entry.site.path.starts_with(&stmt.site.path)
+        || entry.suffix.as_ref() != &entry.site.path[stmt.site.path.len()..]
+        || entry.roles.iter().any(|role| {
+            role.site.unit != stmt.site.unit
+                || !role.site.path.starts_with(&stmt.site.path)
+                || role.suffix.as_ref() != &role.site.path[stmt.site.path.len()..]
+        })
+    {
+        return Err(malformed(
+            "entry capture differs from its source continuation",
+        ));
+    }
+    Ok(true)
 }
