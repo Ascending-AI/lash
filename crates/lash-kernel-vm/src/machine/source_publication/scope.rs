@@ -4,7 +4,7 @@ use crate::compile::{
     Executable,
     room::{ExitKind, Measure, Owner as Selector, Phase, Point, publication::Occurrence},
 };
-use crate::machine::{Control, Halt, KernelMachine, fault};
+use crate::machine::{Control, Halt, KernelMachine, TryPhase, fault};
 use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use std::collections::BTreeSet;
@@ -16,7 +16,7 @@ impl KernelMachine {
         exe: &Executable,
     ) -> Result<bool, Halt> {
         let arena = std::rc::Rc::clone(&self.arena);
-        let (source, link, loops, block, invocation, unpaid, loop_body, dependency) = {
+        let (source, link, loops, block, invocation, unpaid, loop_body, dependency, try_scope) = {
             let frame = self.frame(task_id)?;
             let Some(roots) = &frame.logical else {
                 return Ok(false);
@@ -38,6 +38,17 @@ impl KernelMachine {
             if exe.block(*block).site == source.site {
                 return Ok(false);
             }
+            let try_scope = match frame.control.iter().rev().nth(1) {
+                Some(Control::Try {
+                    phase: TryPhase::Body,
+                    ..
+                }) => Some(false),
+                Some(Control::Try {
+                    phase: TryPhase::Catch,
+                    ..
+                }) => Some(true),
+                _ => None,
+            };
             let (unpaid, loop_body, dependency) = match frame.control.iter().rev().nth(1) {
                 Some(Control::Block {
                     block: parent,
@@ -109,6 +120,33 @@ impl KernelMachine {
                         cursor.walked().and_then(|value| value.handle()),
                     )
                 }
+                Some(Control::Try {
+                    stmt,
+                    phase: TryPhase::Body | TryPhase::Catch,
+                }) => {
+                    let crate::compile::Form::Try { body, catch, .. } = &exe.stmt(*stmt).form
+                    else {
+                        return Err(malformed("scope parent has another try form").into());
+                    };
+                    let caught =
+                        try_scope.ok_or_else(|| malformed("scope has no normal try phase"))?;
+                    let expected = if caught {
+                        catch
+                            .as_ref()
+                            .map(|(_, block)| block)
+                            .ok_or_else(|| malformed("catch scope has no source catch"))?
+                    } else {
+                        body
+                    };
+                    if expected != block {
+                        return Err(malformed("scope is not the entered try body or catch").into());
+                    }
+                    let Ok(unpaid) = source.next_after_try_scope(&exe.stmt(*stmt).site, caught)
+                    else {
+                        return Ok(false);
+                    };
+                    (unpaid, None, None)
+                }
                 _ => return Ok(false),
             };
             (
@@ -120,8 +158,10 @@ impl KernelMachine {
                 unpaid,
                 loop_body,
                 dependency,
+                try_scope,
             )
         };
+        debug_assert!(try_scope.is_none() || loop_body.is_none());
         debug_assert!(loop_body.is_none() || !loops.is_empty());
         debug_assert!(!matches!(loop_body, Some(ScopeLoop::For { .. })) || dependency.is_some());
         let at = Point {
@@ -280,6 +320,10 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_scope_published();
+            if let Some(caught) = try_scope {
+                crate::machine::islands::witness::precise_try_scope(caught);
+            }
+
             match loop_body {
                 Some(ScopeLoop::While) => {
                     crate::machine::islands::witness::while_scope_published(true)

@@ -918,6 +918,35 @@ impl Source {
             .ok_or(Refused::Path)
     }
 
+    /// A normally completed try body or catch reaches its actual cleanup or
+    /// the try Commit. An exceptional departure has a different source recipe.
+    pub(crate) fn next_after_try_scope(&self, at: &Site, caught: bool) -> Result<Point, Refused> {
+        self.verify()?;
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        let doc::Node::Stmt(doc::Stmt::Try(statement)) = node else {
+            return Err(Refused::Path);
+        };
+        if caught && statement.catch.is_none() {
+            return Err(Refused::Path);
+        }
+        if statement.finally.is_some() {
+            self.first_event(&at.child(if statement.catch.is_some() { 2 } else { 1 }))
+        } else {
+            let next = point(at, Phase::Commit);
+            self.room
+                .peak_extra
+                .contains_key(&next)
+                .then_some(next)
+                .ok_or(Refused::Path)
+        }
+    }
+
     /// The first unpaid event after an expression, binding or assignment Commit.
     /// Source syntax and the canonical walker determine the successor. A
     /// required future branch/cursor decision declines instead of inventing it.
