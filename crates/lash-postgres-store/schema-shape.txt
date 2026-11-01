@@ -153,6 +153,7 @@ table lash_deleted_sessions
   primary-key (session_id)
 table lash_effect_admissions
   column admission_ref bigint not-null
+  column covered boolean not-null default
   column delivered_batch bigint nullable
   column delivered_position bigint nullable
   column effect_id bytea not-null

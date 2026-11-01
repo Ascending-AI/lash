@@ -243,6 +243,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &graph::ADMISSION_PUT,
         &graph::ADMISSION_REMOVE,
         &graph::ADMISSION_DELIVER,
+        &graph::ADMISSIONS_COVER,
         &run_records::DELETE_OWNER,
         &graph::CLEAR_ADMISSIONS,
         &park::SET_PARK,

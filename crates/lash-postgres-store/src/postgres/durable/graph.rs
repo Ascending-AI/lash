@@ -844,6 +844,8 @@ pub(super) static ADMISSION_REMOVE: Entry = Entry::new(
     &[Ty::Text, Ty::Bytes, Ty::Key],
     Shape::Returning,
 );
+pub(super) static ADMISSIONS_COVER: Entry =
+    Entry::new(|| &SQL.graph.admissions_cover, &[Ty::Text], Shape::Exec);
 pub(super) static ADMISSION_DELIVER: Entry = Entry::new(
     || &SQL.graph.admission_deliver,
     &[Ty::Text, Ty::Bytes, Ty::Int, Ty::Int],
@@ -916,6 +918,10 @@ pub(super) fn admission_steps(
                 Value::Int(Some(integer::<i64>(delivery.batch)?)),
                 Value::int(i64::from(delivery.position)),
             ],
+        )],
+        EffectAdmissionWrite::Cover { exec } => vec![Step::any(
+            &ADMISSIONS_COVER,
+            vec![Value::text(exec.stored())],
         )],
     })
 }
@@ -1404,6 +1410,7 @@ pub(super) async fn admissions(
         let epoch: i64 = row.try_get(5).map_err(sqlx_failure)?;
         let batch: Option<i64> = row.try_get(6).map_err(sqlx_failure)?;
         let position: Option<i64> = row.try_get(7).map_err(sqlx_failure)?;
+        let covered: i32 = row.try_get(8).map_err(sqlx_failure)?;
         let member = match (owner, run, member) {
             (owner, Some(run), Some(member)) => Some(AdmissionMember {
                 owner: match owner {
@@ -1430,6 +1437,7 @@ pub(super) async fn admissions(
                 }),
                 _ => None,
             },
+            covered: covered != 0,
         });
     }
     Ok(out)

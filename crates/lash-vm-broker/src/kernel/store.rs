@@ -707,6 +707,7 @@ impl DurableSnapshotStore {
         let reads = self.cx.durable_reads().map_err(refused)?;
         let rows = reads.effect_admissions(&self.exec).await.map_err(refused)?;
         let mut admitted = BTreeMap::new();
+        let mut book = BTreeMap::new();
         let mut delivered = BTreeMap::new();
         for row in rows {
             let graph = reads
@@ -728,10 +729,15 @@ impl DurableSnapshotStore {
             {
                 return Err(refused("an admission row names another execution's effect"));
             }
-            if let Some(delivery) = row.delivered {
-                delivered.insert(delivery, resolved.admission.effect.clone());
+            // A covered admission is the last checkpoint's: the book
+            // resolves it, the journal since that checkpoint does not hold it.
+            if !row.covered {
+                if let Some(delivery) = row.delivered {
+                    delivered.insert(delivery, resolved.admission.effect.clone());
+                }
+                admitted.insert(resolved.admission.effect.clone(), resolved.clone());
             }
-            admitted.insert(resolved.admission.effect.clone(), resolved);
+            book.insert(resolved.admission.effect.clone(), resolved);
         }
         let mut batches: Vec<Vec<EffectId>> = Vec::new();
         for (delivery, effect) in delivered {
@@ -754,7 +760,7 @@ impl DurableSnapshotStore {
             .book
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            super::graph::AdmissionBook::restored(admitted.clone());
+            super::graph::AdmissionBook::restored(book);
         Ok(CellJournal { admitted, batches })
     }
 
@@ -1132,8 +1138,12 @@ impl DurableSnapshotStore {
                         .machine;
                 requirements.extend(&parts.links);
                 let membership = book.membership(&ledger).map_err(refused)?;
-                for write in book.retire_unnamed(&self.exec, &membership) {
-                    tx.write(write);
+                // A cell's admissions stay until its turn ends: the commit
+                // that consumes its answer reports its calls from them.
+                if !matches!(self.exec, ExecKey::Cell(..)) {
+                    for write in book.retire_unnamed(&self.exec, &membership) {
+                        tx.write(write);
+                    }
                 }
                 // `sealed` checked the root names this closure.
                 closure.stage(&mut tx, expected.is_none());

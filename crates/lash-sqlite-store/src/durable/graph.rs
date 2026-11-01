@@ -92,6 +92,10 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
     delivered_batch INTEGER CONSTRAINT ck_effect_admissions_batch CHECK (delivered_batch >= 0),
     delivered_position INTEGER CONSTRAINT ck_effect_admissions_position
         CHECK (delivered_position >= 0),
+    -- A checkpoint of the execution covers the admission: its journal no
+    -- longer holds it, and a resume starts from that checkpoint.
+    covered INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_effect_admissions_covered
+        CHECK (covered IN (0, 1)),
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
     CONSTRAINT ck_effect_admissions_member CHECK (
@@ -1185,6 +1189,10 @@ pub(super) fn apply_admission(
                 return graph_refused(GraphRefusal::RevisionConflict);
             }
         }
+        EffectAdmissionWrite::Cover { exec } => {
+            tx.prepare_cached(SQL.graph.admissions_cover.sql())?
+                .execute([exec.stored()])?;
+        }
     }
     Ok(Ok(()))
 }
@@ -1204,11 +1212,12 @@ pub(super) fn admissions(tx: &Connection, exec: &ExecKey) -> Answer<Vec<EffectAd
                 row.get::<_, i64>(5)?,
                 row.get::<_, Option<i64>>(6)?,
                 row.get::<_, Option<i64>>(7)?,
+                row.get::<_, i64>(8)? != 0,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut out = Vec::with_capacity(rows.len());
-    for (effect, owner, run, member, admission, epoch, batch, position) in rows {
+    for (effect, owner, run, member, admission, epoch, batch, position, covered) in rows {
         let admission = match node_ref(&admission) {
             Ok(admission) => admission,
             Err(error) => return Ok(Err(error)),
@@ -1248,6 +1257,7 @@ pub(super) fn admissions(tx: &Connection, exec: &ExecKey) -> Answer<Vec<EffectAd
             admission,
             written_epoch: Epoch(epoch),
             delivered,
+            covered,
         });
     }
     Ok(Ok(out))

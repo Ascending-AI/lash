@@ -1311,6 +1311,9 @@ CREATE TABLE IF NOT EXISTS lash_effect_admissions (
     delivered_batch BIGINT CONSTRAINT ck_effect_admissions_batch CHECK (delivered_batch >= 0),
     delivered_position BIGINT CONSTRAINT ck_effect_admissions_position
         CHECK (delivered_position >= 0),
+    -- A checkpoint of the execution covers the admission: its journal no
+    -- longer holds it, and a resume starts from that checkpoint.
+    covered BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
     CONSTRAINT ck_effect_admissions_member CHECK (

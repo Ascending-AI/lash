@@ -474,6 +474,9 @@ pub struct EffectAdmissionRow {
     /// Where the effect's outcome was delivered to the machine, once a
     /// commit of its execution recorded it.
     pub delivered: Option<Delivery>,
+    /// A checkpoint of its execution covers it: the journal a resume
+    /// follows from that checkpoint does not hold it.
+    pub covered: bool,
 }
 
 /// Where an in-turn execution delivered an effect's outcome: the delivery
@@ -513,6 +516,10 @@ pub enum EffectAdmissionWrite {
         effect: EffectKey,
         delivery: Delivery,
     },
+    /// A checkpoint of `exec` covers every admission it holds, in the
+    /// commit that publishes the checkpoint, after that commit's own
+    /// admissions: the execution's journal starts again empty.
+    Cover { exec: ExecKey },
 }
 
 fn change(owner: RootOwner, expected: Option<NodeId>, next: Option<NodeId>) -> Option<RootChange> {
@@ -714,7 +721,9 @@ impl DomainWrite {
                 *transcript,
             )),
             Self::Environment(_)
-            | Self::EffectAdmission(EffectAdmissionWrite::Deliver { .. })
+            | Self::EffectAdmission(
+                EffectAdmissionWrite::Deliver { .. } | EffectAdmissionWrite::Cover { .. },
+            )
             | Self::RunFact(RunFactWrite::Prune { .. })
             | Self::Turn(_)
             | Self::SessionCommit(_)

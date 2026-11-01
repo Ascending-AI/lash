@@ -66,10 +66,11 @@ crate::statements! {
              RETURNING (SELECT hash FROM blobs WHERE id = admission_ref) AS admission_ref";
 
         /// Every admission of execution `?1`, by effect identity, with
-        /// where its outcome was delivered.
+        /// where its outcome was delivered and whether a checkpoint covers it.
         admissions = "SELECT effect_id, owner_key, run_seq, member_ordinal,
                     (SELECT hash FROM blobs WHERE id = admission_ref) AS admission_ref,
-                    written_epoch, delivered_batch, delivered_position
+                    written_epoch, delivered_batch, delivered_position,
+                    CASE WHEN covered THEN 1 ELSE 0 END AS covered
              FROM effect_admissions WHERE exec_key = ?1 ORDER BY effect_id";
 
         /// Record that effect `?2` of execution `?1` was delivered at
@@ -79,6 +80,12 @@ crate::statements! {
              SET delivered_batch = ?3, delivered_position = ?4
              WHERE exec_key = ?1 AND effect_id = ?2 AND delivered_batch IS NULL
              RETURNING exec_key";
+
+        /// A checkpoint of execution `?1` covers every admission it holds:
+        /// its journal starts again empty.
+        admissions_cover = "UPDATE effect_admissions
+             SET covered = TRUE, delivered_batch = NULL, delivered_position = NULL
+             WHERE exec_key = ?1 AND NOT covered";
 
         /// Session `?1`'s revision `?2`'s checkpoint root.
         revision_root = "SELECT (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref FROM session_revisions

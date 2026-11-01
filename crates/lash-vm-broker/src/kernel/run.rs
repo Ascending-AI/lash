@@ -58,7 +58,7 @@ use crate::identity::CodeCallIdentities;
 use crate::members::Driven;
 use crate::snapshot::{BrokerInvariant, DriveRefusal, DurableSnapshotStore, QuietPointRefusal};
 use lash_core_store::tool_run::SettledOutput;
-use lash_durable::domain::ExecKey;
+use lash_durable::domain::{DomainWrite, EffectAdmissionWrite};
 use lash_kernel_value::sites::EffectId;
 
 /// The declared reads a commit records: each read's caller-owned call, its
@@ -168,17 +168,16 @@ pub trait KernelEffects: Projections + Send + Sync {
         )
     }
 
-    /// The run starts again from its start on this activation: forget what
-    /// the host recorded of its effects, reads and prints, which the run
-    /// records again as it follows its journal (FIG-7585).
+    /// The run starts again from its last checkpoint on this activation:
+    /// the host's record of its effects, reads and prints goes back to what
+    /// it held at that checkpoint ([`mark`](Self::mark)), and the run
+    /// records the rest again as it follows its journal (FIG-7585).
     fn restart(&self) {}
 
-    /// Whether a fresh run performs some effect as a read (ADR 0144): it
-    /// then saves its start before any statement runs, so no read is made
-    /// before the run's providers are owed.
-    fn plans_reads(&self) -> bool {
-        false
-    }
+    /// The run's state at this point is its checkpoint: what the host
+    /// holds of its effects, reads and prints is what a
+    /// [`restart`](Self::restart) goes back to (FIG-7585).
+    fn mark(&self) {}
 
     /// The model response that asked for this run, while its turn holds it
     /// uncommitted for the run's first save (FIG-6000): that save commits it
@@ -570,13 +569,6 @@ impl KernelBroker<'_> {
         let document = machines.document();
         let binding = super::graph::owner_binding_node(self.store.exec())
             .map_err(|refusal| KernelFailure::State(refusal.into()))?;
-        // A run with a checkpoint commits its end over it; one that never
-        // parked commits nothing, and runs again from its start.
-        let mut saved = false;
-        // The saved state the machine stands at exactly, while it does: a
-        // machine that only waits gives its worker back and is reopened
-        // from this.
-        let mut resting: Option<ParkedState> = None;
         let checkpoint = self.store.checkpoint(&document, self.effects).await?;
         // A held response rides only a fresh run's first save, within its
         // first slice: a run that saved already commits it on its own.
@@ -584,65 +576,10 @@ impl KernelBroker<'_> {
         if checkpoint.is_some() {
             self.commit_response_alone(&mut held).await?;
         }
-        // An in-turn run saves no state (FIG-7585): it starts from its
-        // start every time and follows the journal its commits recorded.
-        if matches!(self.store.exec(), ExecKey::Cell(..)) {
-            if let Some(Checkpoint::Ended { end, .. }) = checkpoint {
-                return Ok(KernelEnd::Ended {
-                    end,
-                    owed: None,
-                    pages: None,
-                });
-            }
-            if checkpoint.is_some() {
-                return Err(KernelFailure::EmptyCheckpoint);
-            }
-            let journal = self.store.journal(self.effects).await?;
-            // The host knows every call the journal admitted before any
-            // drive folds them: one that started and never settled runs
-            // again (or is interrupted) as its own call, not as a stranger.
-            let admitted: Vec<(AdmittedEffect, FrozenRequest)> = journal
-                .admitted
-                .values()
-                .filter_map(|resolved| match &resolved.admission.disposition {
-                    super::graph::Disposition::Execution { operation, pin } => Some((
-                        AdmittedEffect {
-                            operation: *operation,
-                            call: pin.call.clone(),
-                        },
-                        resolved.request.clone(),
-                    )),
-                    super::graph::Disposition::Refused => None,
-                })
-                .collect();
-            self.effects.resumed(&admitted)?;
-            let activation = self.activation(None, binding, machines).await?;
-            let machine = machines.start(binding, activation.pages.clone()).await?;
-            let mut owner = CellKernelOwner {
-                broker: self,
-                machines,
-                cancel,
-                activation,
-                machine: Some(machine),
-                ledger: EffectLedger::new(),
-                resting: None,
-                binding,
-                document,
-                saved: !journal.admitted.is_empty(),
-                held,
-                journal: Some(Journal::following(journal)),
-            };
-            return match lash_core_execution::kernel_runner::run(&mut owner).await? {
-                CellStop::Ended(end) => Ok(self
-                    .ended(owner.ledger, end, owner.saved, owner.activation)
-                    .await),
-                CellStop::Suspended => {
-                    self.end_activation(owner.activation).await;
-                    Ok(KernelEnd::Suspended)
-                }
-            };
-        }
-        let (activation, machine, mut ledger) = match checkpoint {
+        // A run saves its state only at a checkpoint (FIG-7585): it starts
+        // from its last one, or from its start, and follows the journal its
+        // commits recorded since.
+        let base = match checkpoint {
             Some(Checkpoint::Ended { end, .. }) => {
                 return Ok(KernelEnd::Ended {
                     end,
@@ -650,77 +587,61 @@ impl KernelBroker<'_> {
                     pages: None,
                 });
             }
-            Some(Checkpoint::Parked { state, ledger, .. }) => {
-                saved = true;
-                self.effects.resumed(&self.store.open_requests(&ledger))?;
-                let activation = self.activation(Some(&state), binding, machines).await?;
+            Some(Checkpoint::Parked { state, ledger, .. }) => Some((state, ledger)),
+            None => None,
+        };
+        let journal = self.store.journal(self.effects).await?;
+        // The host knows every call the checkpoint stands on and the journal
+        // admitted before any drive folds them: one that started and never
+        // settled runs again (or is interrupted) as its own call, not as a
+        // stranger.
+        let mut admitted: Vec<(AdmittedEffect, FrozenRequest)> = base
+            .as_ref()
+            .map(|(_, ledger)| self.store.open_requests(ledger))
+            .unwrap_or_default();
+        admitted.extend(journal.admitted.values().filter_map(|resolved| {
+            match &resolved.admission.disposition {
+                super::graph::Disposition::Execution { operation, pin } => Some((
+                    AdmittedEffect {
+                        operation: *operation,
+                        call: pin.call.clone(),
+                    },
+                    resolved.request.clone(),
+                )),
+                super::graph::Disposition::Refused => None,
+            }
+        }));
+        self.effects.resumed(&admitted)?;
+        self.effects.mark();
+        let (activation, machine) = match &base {
+            Some((state, _)) => {
+                let activation = self.activation(Some(state), binding, machines).await?;
                 let machine = machines
-                    .resume(&state, binding, activation.pages.clone())
+                    .resume(state, binding, activation.pages.clone())
                     .await?;
-                (activation, machine, ledger)
+                (activation, machine)
             }
             None => {
                 let activation = self.activation(None, binding, machines).await?;
                 let machine = machines.start(binding, activation.pages.clone()).await?;
-                (activation, machine, EffectLedger::new())
+                (activation, machine)
             }
         };
-        let mut machine = Some(machine);
-        // A fresh run that reads saves its start first, before any slice
-        // runs, with the response the turn holds: that save owes the
-        // providers it reads through before any read is made, and a crash
-        // after it runs the cell again from its start.
-        if !saved
-            && self.effects.plans_reads()
-            && let Some(running) = machine.as_mut()
-        {
-            let state = self
-                .sealed(
-                    running,
-                    &activation,
-                    binding,
-                    &document,
-                    machines.closure()?.reference(),
-                )
-                .await?;
-            match self.grown(&ledger, &activation, 0).await {
-                Ok(growth) => ledger.grown(growth),
-                Err(exceeded) => {
-                    if let Some(refused) = machine.take() {
-                        refused.release().await?;
-                    }
-                    let end = End::Error(RunError::Bound(exceeded));
-                    return Ok(self.ended(ledger, end, saved, activation).await);
-                }
-            }
-            let save = ParkSave {
-                document,
-                state: state.clone(),
-                pages: &activation.pages,
-                closure: machines.closure()?,
-                carried: machines.carried(),
-                ledger,
-                admit: Vec::new(),
-                with: Vec::new(),
-            };
-            let committed = self.store.commit_park(save, self.effects).await?;
-            saved = true;
-            ledger = committed.ledger;
-            resting = Some(self.resting(committed.root, state, &ledger)?);
-        }
         let mut owner = CellKernelOwner {
             broker: self,
             machines,
             cancel,
             activation,
-            machine,
-            ledger,
-            resting,
+            machine: Some(machine),
+            ledger: base
+                .as_ref()
+                .map(|(_, ledger)| ledger.clone())
+                .unwrap_or_default(),
             binding,
             document,
-            saved,
+            saved: base.is_some() || !journal.admitted.is_empty(),
             held,
-            journal: None,
+            journal: Journal::following(journal, base),
         };
         match lash_core_execution::kernel_runner::run(&mut owner).await? {
             CellStop::Ended(end) => Ok(self
@@ -833,19 +754,6 @@ impl KernelBroker<'_> {
         sealed(running, &activation.pages, binding, document, closure).await
     }
 
-    /// The growth the run's next save leaves it with, appending `effects`
-    /// admissions and the pages the activation sealed since its last save,
-    /// or the lifetime bound that save passes.
-    async fn grown(
-        &self,
-        ledger: &EffectLedger,
-        activation: &PageActivation,
-        effects: u64,
-    ) -> Result<Growth, BoundExceeded> {
-        let sealed = activation.pages.lock().await.take_sealed_bytes();
-        self.ceilings.grow(ledger.growth(), effects, sealed)
-    }
-
     /// The state a committed park rests at: its root, under the execution
     /// root `published`, and the admissions of every wait it stands on.
     fn resting(
@@ -952,21 +860,38 @@ struct CellKernelOwner<'a, 'b, S: Machines> {
     activation: PageActivation,
     machine: Option<S::Machine>,
     ledger: EffectLedger,
-    resting: Option<ParkedState>,
     binding: NodeId,
     document: DocumentId,
+    /// A run that admitted an effect or checkpointed commits its end over
+    /// what it committed; one that did neither commits nothing, and runs
+    /// again from its start.
     saved: bool,
     held: Option<&'a lash_core_execution::HeldResponse>,
-    /// An in-turn run's journal and how far the machine follows it; none
-    /// for a run that saves its state at each park.
-    journal: Option<Journal>,
+    /// The run's last checkpoint and its journal since, and how far the
+    /// machine follows it.
+    journal: Journal,
 }
 
-/// An in-turn run's journal as one activation follows and extends it
-/// (FIG-7585): the committed facts first, then what this activation added,
-/// so a machine that gave its worker back starts again and follows all of
-/// it.
+/// The delivery batches a run's journal holds since its last checkpoint
+/// before its next park takes a checkpoint (FIG-7585). A machine that gave
+/// its worker back runs again from its last checkpoint, re-running every
+/// park since: with a checkpoint every `B` batches a run whose worker is
+/// released at every park re-runs `B / 2` parks per park on average, at
+/// ~13.2M instructions each (a 200-call TypeScript cell released at every
+/// park, 2026-11-01), against a checkpoint's ~36M over a journaled park
+/// (the parent's sealed park, 46.6M, less the journaled park's base,
+/// 10.6M). `36M / B + 13.2M * B / 2` is least at `B = sqrt(2 * 36 / 13.2)`
+/// ~= 2.3; 3 costs 3% more there and checkpoints a third less often.
+const CHECKPOINT_BATCHES: usize = 3;
+
+/// A run's journal as one activation follows and extends it (FIG-7585):
+/// its last checkpoint, the committed facts since, then what this
+/// activation added, so a machine that gave its worker back starts again
+/// from that checkpoint and follows all of it.
 struct Journal {
+    /// The run's last checkpoint: the state the machine resumes from, and
+    /// the ledger it stood on there. None before the run's first.
+    base: Option<(ParkedState, EffectLedger)>,
     journal: CellJournal,
     /// The batches the machine took so far.
     batch: usize,
@@ -977,8 +902,9 @@ struct Journal {
 }
 
 impl Journal {
-    fn following(journal: CellJournal) -> Self {
+    fn following(journal: CellJournal, base: Option<(ParkedState, EffectLedger)>) -> Self {
         Self {
+            base,
             journal,
             batch: 0,
             matched: 0,
@@ -991,10 +917,21 @@ impl Journal {
         self.batch >= self.journal.batches.len()
     }
 
-    /// The machine starts again from its start.
+    /// The machine starts again from the last checkpoint.
     fn restart(&mut self) {
         self.batch = 0;
         self.matched = 0;
+    }
+
+    /// Whether the run's next commit takes a checkpoint.
+    fn due(&self) -> bool {
+        self.journal.batches.len() >= CHECKPOINT_BATCHES
+    }
+
+    /// A checkpoint committed at `state` over `ledger`: the journal starts
+    /// again empty.
+    fn checkpointed(&mut self, state: ParkedState, ledger: EffectLedger) {
+        *self = Self::following(CellJournal::default(), Some((state, ledger)));
     }
 }
 
@@ -1021,42 +958,27 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
         if self.ledger.has_cancellations() {
             self.broker.store.apply_cancellations().await?;
         }
-        if self.machine.is_none()
-            && let Some(journal) = self.journal.as_mut()
-        {
-            // An in-turn machine that gave its worker back starts again and
-            // follows everything this activation knows of its run.
-            journal.restart();
-            self.ledger = EffectLedger::new();
-            self.broker.effects.restart();
-            let previous = std::mem::replace(
-                &mut self.activation,
-                self.broker
-                    .activation(None, self.binding, self.machines)
-                    .await?,
-            );
-            self.broker.end_activation(previous).await;
-            self.machine = Some(
-                self.machines
-                    .start(self.binding, self.activation.pages.clone())
-                    .await?,
-            );
-        }
         if self.machine.is_none() {
-            let state = self.resting.take().ok_or(KernelFailure::EmptyCheckpoint)?;
+            // A machine that gave its worker back starts again from the
+            // run's last checkpoint and follows everything this activation
+            // knows of its run since.
+            self.journal.restart();
+            self.broker.effects.restart();
+            let base = self.journal.base.as_ref();
+            self.ledger = base.map(|(_, ledger)| ledger.clone()).unwrap_or_default();
+            let state = base.map(|(state, _)| state);
             let previous = std::mem::replace(
                 &mut self.activation,
                 self.broker
-                    .activation(Some(&state), self.binding, self.machines)
+                    .activation(state, self.binding, self.machines)
                     .await?,
             );
             self.broker.end_activation(previous).await;
-            self.machine = Some(
-                self.machines
-                    .resume(&state, self.binding, self.activation.pages.clone())
-                    .await?,
-            );
-            self.resting = Some(state);
+            let pages = self.activation.pages.clone();
+            self.machine = Some(match state {
+                Some(state) => self.machines.resume(state, self.binding, pages).await?,
+                None => self.machines.start(self.binding, pages).await?,
+            });
         }
         let running = self
             .machine
@@ -1082,131 +1004,7 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
     }
 
     async fn park(&mut self, park: MachinePark) -> Result<Option<CellStop>, KernelFailure> {
-        if self.journal.is_some() {
-            return self.park_journaled(park).await;
-        }
-        let machines = self.machines;
-        let cancel = self.cancel;
-        let cancels = !park.cancel_requests.is_empty();
-        let requests = park.requests;
-        let outstanding = park.outstanding;
-        let live = park.live;
-        if !requests.is_empty() || cancels {
-            let running = self
-                .machine
-                .as_mut()
-                .ok_or(KernelFailure::EmptyCheckpoint)?;
-            // The save appends the park's requests and the pages the
-            // run sealed since the last one: past a lifetime bound it
-            // admits nothing, and the run ends there.
-            let state = self
-                .broker
-                .sealed(
-                    running,
-                    &self.activation,
-                    self.binding,
-                    &self.document,
-                    machines.closure()?.reference(),
-                )
-                .await?;
-            match self
-                .broker
-                .grown(&self.ledger, &self.activation, requests.len() as u64)
-                .await
-            {
-                Ok(growth) => self.ledger.grown(growth),
-                Err(exceeded) => {
-                    if let Some(refused) = self.machine.take() {
-                        refused.release().await?;
-                    }
-                    let end = End::Error(RunError::Bound(exceeded));
-                    return self.end(end).await.map(Some);
-                }
-            }
-            let admit = self
-                .broker
-                .admissions(&self.ledger, requests, outstanding, live)
-                .await?;
-            let save = ParkSave {
-                document: self.document,
-                state: state.clone(),
-                pages: &self.activation.pages,
-                closure: machines.closure()?,
-                carried: machines.carried(),
-                ledger: std::mem::replace(&mut self.ledger, EffectLedger::new()),
-                admit,
-                with: Vec::new(),
-            };
-            let committed = self
-                .broker
-                .store
-                .commit_park(save, self.broker.effects)
-                .await?;
-            self.saved = true;
-            self.ledger = committed.ledger;
-            self.resting = Some(self.broker.resting(committed.root, state, &self.ledger)?);
-        }
-        if cancels {
-            self.broker.store.apply_cancellations().await?;
-            self.resting = None;
-            return Ok(None);
-        }
-        if self.ledger.pending().next().is_none() {
-            return Err(KernelFailure::Stalled);
-        }
-        // The run waits on its effects: nothing is held across a wait.
-        self.broker.commit_response_alone(&mut self.held).await?;
-        // Once the run waits only on parked rows, with its state saved
-        // as it stands, its worker is another run's to use: a process
-        // this run awaits may need it (FIG-4275).
-        let quiet = tokio::sync::Notify::new();
-        let driven = {
-            let outcome = |effect: &AdmittedEffect, output: &SettledOutput| {
-                self.broker.effects.outcome(effect, output)
-            };
-            let drive =
-                self.broker
-                    .store
-                    .drive_effects_as(&self.ledger, cancel, &outcome, Some(&quiet));
-            tokio::pin!(drive);
-            loop {
-                tokio::select! {
-                    driven = &mut drive => break driven?,
-                    () = quiet.notified(), if self.machine.is_some() && self.resting.is_some() => {
-                        if let Some(waiting) = self.machine.take() {
-                            waiting.release().await?;
-                        }
-                    }
-                    () = renew_when_due(&self.activation.pages), if self.machine.is_some() => {}
-                }
-            }
-        };
-        let settled = match driven {
-            Driven::Answered(settled) => settled,
-            Driven::Suspended => {
-                if let Some(parked) = self.machine.take() {
-                    parked.release().await?;
-                }
-                return Ok(Some(CellStop::Suspended));
-            }
-        };
-        if self.broker.effects.stop_requested() {
-            if let Some(stopped) = self.machine.take() {
-                stopped.release().await?;
-            }
-            return self.end(End::Cancelled).await.map(Some);
-        }
-        // A machine that gave its worker back is reopened from its
-        // saved root, and reads these outcomes again once it has parked.
-        let Some(running) = self.machine.as_mut() else {
-            return Ok(None);
-        };
-        self.resting = None;
-        for outcome in settled {
-            running.deliver(outcome.wait, outcome.outcome).await?;
-            self.ledger.consume(&outcome.identity);
-        }
-        Ok(None)
+        self.park_journaled(park).await
     }
 }
 
@@ -1222,10 +1020,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         let cancels = !park.cancel_requests.is_empty();
         let requests = park.requests;
         let (outstanding, live) = (park.outstanding, park.live);
-        let journal = self
-            .journal
-            .as_ref()
-            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        let journal = &self.journal;
         let recorded = requests
             .iter()
             .filter(|Request::Effect(request)| {
@@ -1249,7 +1044,12 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                     journal.journal.admitted.len()
                 )));
             }
-            if let Some(stop) = self.commit_journaled(requests, outstanding, live).await? {
+            let stop = if !requests.is_empty() && self.journal.due() {
+                self.checkpoint(requests, outstanding, live).await?
+            } else {
+                self.commit_journaled(requests, outstanding, live).await?
+            };
+            if let Some(stop) = stop {
                 return Ok(Some(stop));
             }
         }
@@ -1263,10 +1063,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
             return Err(KernelFailure::Stalled);
         }
         self.broker.commit_response_alone(&mut self.held).await?;
-        let journal = self
-            .journal
-            .as_mut()
-            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        let journal = &mut self.journal;
         if !journal.delivered_all() {
             // The machine takes the batch its run took here, whole and in
             // its order: every outcome in it committed before it was
@@ -1341,10 +1138,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                 .await
                 .map(Some);
         }
-        let journal = self
-            .journal
-            .as_mut()
-            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        let journal = &mut self.journal;
         let batch = u64::try_from(journal.journal.batches.len()).unwrap_or(u64::MAX);
         let mut effects = Vec::with_capacity(settled.len());
         for (position, settled) in settled.iter().enumerate() {
@@ -1396,10 +1190,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         let mut executions = 0_u64;
         let count = requests.len();
         for Request::Effect(request) in requests {
-            let journal = self
-                .journal
-                .as_ref()
-                .ok_or(KernelFailure::EmptyCheckpoint)?;
+            let journal = &self.journal;
             let recorded = journal
                 .journal
                 .admitted
@@ -1482,10 +1273,86 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         if executions > 0 {
             self.ledger.take_park();
         }
-        if let Some(journal) = self.journal.as_mut() {
+        {
+            let journal = &mut self.journal;
             journal.matched += count;
         }
         Ok(())
+    }
+
+    /// Commit a park as the run's checkpoint (FIG-7585): its sealed
+    /// state, the admission of `requests` and the cancel decisions the
+    /// ledger holds, and every admission its journal held covered. The
+    /// journal starts again empty, and a machine that gives its worker back
+    /// from here resumes from this state.
+    async fn checkpoint(
+        &mut self,
+        requests: Vec<Request>,
+        outstanding: u64,
+        live: u64,
+    ) -> Result<Option<CellStop>, KernelFailure> {
+        // The run's first batch committed the response its turn held.
+        self.broker.commit_response_alone(&mut self.held).await?;
+        let running = self
+            .machine
+            .as_mut()
+            .ok_or(KernelFailure::EmptyCheckpoint)?;
+        let state = self
+            .broker
+            .sealed(
+                running,
+                &self.activation,
+                self.binding,
+                &self.document,
+                self.machines.closure()?.reference(),
+            )
+            .await?;
+        // A checkpoint appends the pages the activation sealed since the
+        // last one to the run's lifetime growth.
+        let sealed = self.activation.pages.lock().await.take_sealed_bytes();
+        match self
+            .broker
+            .ceilings
+            .grow(self.ledger.growth(), requests.len() as u64, sealed)
+        {
+            Ok(growth) => self.ledger.grown(growth),
+            Err(exceeded) => {
+                if let Some(refused) = self.machine.take() {
+                    refused.release().await?;
+                }
+                let end = End::Error(RunError::Bound(exceeded));
+                return lash_core_execution::kernel_runner::KernelOwner::end(self, end)
+                    .await
+                    .map(Some);
+            }
+        }
+        let admit = self
+            .broker
+            .admissions(&self.ledger, requests, outstanding, live)
+            .await?;
+        let save = ParkSave {
+            document: self.document,
+            state: state.clone(),
+            pages: &self.activation.pages,
+            closure: self.machines.closure()?,
+            carried: self.machines.carried(),
+            ledger: std::mem::replace(&mut self.ledger, EffectLedger::new()),
+            admit,
+            with: vec![DomainWrite::EffectAdmission(EffectAdmissionWrite::Cover {
+                exec: self.broker.store.exec().clone(),
+            })],
+        };
+        let committed = self
+            .broker
+            .store
+            .commit_park(save, self.broker.effects)
+            .await?;
+        self.saved = true;
+        self.ledger = committed.ledger;
+        let resting = self.broker.resting(committed.root, state, &self.ledger)?;
+        self.journal.checkpointed(resting, self.ledger.clone());
+        self.broker.effects.mark();
+        Ok(None)
     }
 
     /// Commit an in-turn park: the admission of `requests`, the cancel
@@ -1519,11 +1386,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
             .admissions(&self.ledger, requests, outstanding, live)
             .await?;
         let identities: Vec<EffectId> = admit.iter().map(|admit| admit.identity.clone()).collect();
-        let delivered = self
-            .journal
-            .as_ref()
-            .map(|journal| journal.pending.clone())
-            .unwrap_or_default();
+        let delivered = self.journal.pending.clone();
         let save = super::store::JournaledPark {
             document: self.document,
             closure: self.machines.closure()?,
@@ -1542,7 +1405,8 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
             super::store::Journaled::Committed(ledger) => {
                 self.ledger = ledger;
                 self.saved |= !identities.is_empty();
-                if let Some(journal) = self.journal.as_mut() {
+                {
+                    let journal = &mut self.journal;
                     journal.pending.clear();
                     for identity in identities {
                         let resolved = self.broker.store.resolved(&identity).ok_or_else(|| {

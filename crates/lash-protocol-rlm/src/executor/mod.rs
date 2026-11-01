@@ -631,7 +631,6 @@ async fn run_linked_cell(
         recorded: Arc::clone(&recorded_reads),
     });
     let host = CellHost {
-        plans_reads,
         trace: trace.clone(),
         sites: Mutex::new(open_sites),
         ctx: ctx.clone(),
@@ -648,6 +647,7 @@ async fn run_linked_cell(
             .cloned()
             .unwrap_or_default(),
         recorded_reads,
+        marked: Mutex::new(Default::default()),
     };
     let printed = Arc::clone(&prints);
     let counts_trace = trace.clone();

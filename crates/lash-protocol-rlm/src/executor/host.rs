@@ -218,8 +218,6 @@ impl CellHostLedgers {
 }
 
 pub(super) struct CellHost<'run> {
-    /// Whether the exact invocation plan binds any unrecorded reads.
-    pub plans_reads: bool,
     pub ctx: RuntimeExecutionContext<'run>,
     /// The effects the cell was lowered against.
     pub execution: lash_core_store::resolutions::ExecutionId,
@@ -245,6 +243,9 @@ pub(super) struct CellHost<'run> {
     /// The reads the cell's run made, by ordinal: what a run that starts
     /// again is answered (FIG-7585). Shared with the cell's reads.
     pub recorded_reads: RecordedReads,
+    /// The ledgers and prints the run's last checkpoint held: what a run
+    /// that starts again from it goes back to (FIG-7585).
+    pub marked: Mutex<(CellHostLedgers, Vec<Datum>)>,
 }
 
 /// A cell's reads by ordinal, as its commits recorded them and its run on
@@ -1062,12 +1063,15 @@ impl KernelEffects for CellHost<'_> {
         for fact in ledgers.read_facts.drain(..) {
             recorded.entry(fact.ordinal).or_insert(fact);
         }
-        *ledgers = CellHostLedgers::default();
-        self.prints.lock_recover().clear();
+        let marked = self.marked.lock_recover();
+        *ledgers = marked.0.clone();
+        *self.prints.lock_recover() = marked.1.clone();
     }
 
-    fn plans_reads(&self) -> bool {
-        self.plans_reads
+    fn mark(&self) {
+        let ledgers = self.ledgers.lock_recover().clone();
+        let prints = self.prints.lock_recover().clone();
+        *self.marked.lock_recover() = (ledgers, prints);
     }
 
     fn held_response(&self) -> Option<&lash_core::HeldResponse> {
