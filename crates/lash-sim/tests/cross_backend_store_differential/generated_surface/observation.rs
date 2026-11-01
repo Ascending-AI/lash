@@ -100,12 +100,15 @@ pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
     );
     let events = sqlite_simple_json_rows(
         &process,
-        "SELECT process_id, event_json FROM process_events ORDER BY process_id, sequence",
+        "SELECT process_id, header_json, payload_json, replay_digest FROM process_events ORDER BY process_id, sequence",
         |row| {
-            let event: String = row.get(1)?;
+            let header: String = row.get(1)?;
+            let payload: Option<String> = row.get(2)?;
             Ok(normalized_json(serde_json::json!({
                 "process_id": row.get::<_, String>(0)?,
-                "event": serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+                "header": serde_json::from_str::<serde_json::Value>(&header).unwrap(),
+                "payload": payload.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
+                "replay_digest": row.get::<_, String>(3)?,
             })))
         },
     );
@@ -176,13 +179,18 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             .await
             .unwrap();
     let records = record_rows.into_iter().map(|(record, change_seq)| normalized_json(serde_json::json!({"change_seq": change_seq, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))).collect();
-    let event_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT process_id, event_json FROM lash_process_events ORDER BY process_id, sequence",
+    let event_rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT process_id, header_json, payload_json, replay_digest FROM lash_process_events ORDER BY process_id, sequence",
     )
     .fetch_all(pool)
     .await
     .unwrap();
-    let events = event_rows.into_iter().map(|(process_id, event)| normalized_json(serde_json::json!({"process_id": process_id, "event": serde_json::from_str::<serde_json::Value>(&event).unwrap()}))).collect();
+    let events = event_rows.into_iter().map(|(process_id, header, payload, digest)| normalized_json(serde_json::json!({
+        "process_id": process_id,
+        "header": serde_json::from_str::<serde_json::Value>(&header).unwrap(),
+        "payload": payload.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
+        "replay_digest": digest,
+    }))).collect();
     let observers = sqlx::query_as(
         "SELECT session_id, process_id FROM lash_process_observers ORDER BY session_id, process_id",
     )

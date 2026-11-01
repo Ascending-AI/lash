@@ -1060,79 +1060,9 @@ pub struct ProcessEventRelease {
     pub released_events: u64,
 }
 
-/// The digest a released event keeps in place of its payload: the SHA-256 of
-/// the identity leaf of what a replay matches on
-/// ([`ProcessLifecycleFact::replay_identity`]), so a re-presented append under
-/// the event's replay key is matched on the same bytes a retained event's
-/// replay match compares.
-fn released_payload_digest(fact: &ProcessLifecycleFact) -> String {
-    crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(&fact.replay_identity()))
-}
-
-/// The digest a store keeps in place of `event`'s payload when it releases
-/// the event (FIG-3482). Sequence, kind, replay identity and the rest of the
-/// row stay, so sequence allocation and the replay-key fence are exactly
-/// what they were.
-///
-/// `None` leaves the event as it is: a cancel request matches its replays on
-/// its cancellation rather than on payload bytes, and is one row per process.
-pub fn release_process_event_payload(event: &ProcessEvent) -> Option<String> {
-    if event.kind() == ProcessEventKind::CancelRequested {
-        return None;
-    }
-    Some(released_payload_digest(&event.fact))
-}
-
-/// A released event's row without its payload: what a store keeps of it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReleasedProcessEvent {
-    pub process_id: ProcessId,
-    pub sequence: u64,
-    pub event_type: String,
-    pub invocation: crate::RuntimeInvocation,
-    pub occurred_at: u64,
-}
-
-impl ReleasedProcessEvent {
-    /// The row `event` keeps once its payload is released.
-    pub fn of(event: &ProcessEvent) -> Self {
-        Self {
-            process_id: event.process_id.clone(),
-            sequence: event.sequence,
-            event_type: event.fact.event_type().to_string(),
-            invocation: event.invocation.clone(),
-            occurred_at: event.occurred_at,
-        }
-    }
-}
-
-/// Rebuild a released event found under a re-presented replay key for the
-/// append's replay match: a request whose canonical fact has the released
-/// event's kind and digest gets its fact back on the row, so the replay answers the
-/// recorded event; any other request is the same durable-identity conflict a
-/// retained event refuses.
-pub fn restore_released_process_event(
-    released: ReleasedProcessEvent,
-    released_digest: &str,
-    requested: &super::validation::CanonicalProcessEventAppend,
-) -> Result<ProcessEvent, crate::PluginError> {
-    let fact = requested.fact();
-    if released.event_type == fact.event_type() && released_payload_digest(fact) == released_digest
-    {
-        return Ok(ProcessEvent {
-            process_id: released.process_id,
-            sequence: released.sequence,
-            fact: fact.clone(),
-            invocation: released.invocation,
-            occurred_at: released.occurred_at,
-        });
-    }
-    Err(crate::durable_identity_conflict(format!(
-        "process `{}` event replay key conflicts with released event {}",
-        released.process_id, released.sequence
-    )))
-}
+#[path = "events/header.rs"]
+mod header;
+pub use header::ProcessEventHeader;
 
 /// Result of reading a process-event history without collapsing retention into
 /// an empty page.

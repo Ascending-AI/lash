@@ -689,8 +689,9 @@ CREATE TABLE IF NOT EXISTS lash_process_events (
     sequence BIGINT NOT NULL,
     event_type TEXT NOT NULL,
     idempotency_key TEXT,
-    event_json TEXT NOT NULL,
-    released_payload_digest TEXT,
+    header_json TEXT NOT NULL,
+    payload_json TEXT,
+    replay_digest TEXT NOT NULL,
     PRIMARY KEY (process_id, sequence),
     FOREIGN KEY (process_id) REFERENCES lash_processes(process_id) ON DELETE CASCADE
 );

@@ -36,21 +36,19 @@ impl SqliteProcessRegistry {
                     tx,
                     &process_id,
                     through,
-                    tx.fleet(),
                 )))
             })
             .await
             .map_err(process_sqlite_error)?
     }
 
-    /// Rewrite the events after the current horizon and at or below
-    /// `through`, clamped to the last event, into their released form, and
+    /// Release payloads after the current horizon and at or below
+    /// `through`, clamped to the last event, in bounded SQL batches, and
     /// raise the horizon, in the caller's transaction.
     fn release_process_events_conn(
         conn: &crate::conn::FencedTx<'_>,
         process_id: &ProcessId,
         through: u64,
-        fleet_format: lash_core_store::store::FleetFormat,
     ) -> Result<
         lash_execution_contracts::process::ProcessEventRelease,
         lash_execution_contracts::plugin_error::PluginError,
@@ -68,11 +66,10 @@ impl SqliteProcessRegistry {
         let mut after = previous;
         let mut released_events = 0_u64;
         loop {
-            let rows = {
-                let mut stmt = conn
-                    .prepare_cached(process_sql().event.page_release.sql())
-                    .map_err(process_sqlite_error)?;
-                stmt.query_map(
+            let (end, count): (Option<i64>, i64) = conn
+                .prepare_cached(process_sql().event.page_release.sql())
+                .map_err(process_sqlite_error)?
+                .query_row(
                     params![
                         process_id.as_str(),
                         crate::clamp_sequence_bound(after),
@@ -80,42 +77,23 @@ impl SqliteProcessRegistry {
                         i64::try_from(conn.operational.process_event_release_page.get())
                             .unwrap_or(i64::MAX)
                     ],
-                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .map_err(process_sqlite_error)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(process_sqlite_error)?
-            };
-            if rows.is_empty() {
-                break;
-            }
-            for (sequence, json) in rows {
-                let event = ProcessEvent::decode(&json, fleet_format)?;
-                if let Some(digest) =
-                    lash_execution_contracts::process::release_process_event_payload(&event)
-                {
-                    let released = lash_execution_contracts::process::ReleasedProcessEvent {
-                        process_id: event.process_id.clone(),
-                        sequence: event.sequence,
-                        event_type: event.fact.event_type().to_owned(),
-                        invocation: event.invocation,
-                        occurred_at: event.occurred_at,
-                    };
-                    crate::conn::cached_execute(
-                        conn,
-                        process_sql().event.release.sql(),
-                        params![
-                            process_id.as_str(),
-                            sequence,
-                            process_encode_json(&released)?,
-                            digest
-                        ],
-                    )
-                    .map_err(process_sqlite_error)?;
-                }
-                released_events += 1;
-                after = plugin_u64_from_sql("ProcessEvent", "sequence", sequence)?;
-            }
+                .map_err(process_sqlite_error)?;
+            let Some(end) = end else { break };
+            crate::conn::cached_execute(
+                conn,
+                process_sql().event.release.sql(),
+                params![
+                    process_id.as_str(),
+                    crate::clamp_sequence_bound(after),
+                    end,
+                    lash_execution_contracts::process::ProcessEventKind::CancelRequested.as_str(),
+                ],
+            )
+            .map_err(process_sqlite_error)?;
+            released_events += plugin_u64_from_sql("ProcessEvent", "count", count)?;
+            after = plugin_u64_from_sql("ProcessEvent", "sequence", end)?;
         }
         crate::conn::cached_execute(
             conn,

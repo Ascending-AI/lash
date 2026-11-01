@@ -286,19 +286,23 @@ pub(super) async fn compare_bounded_process_event_pages(
         let mut insert = transaction
             .prepare(
                 "INSERT INTO process_events
-                 (process_id, sequence, event_type, idempotency_key, event_json)
-                 VALUES (?1, ?2, ?3, NULL, ?4)",
+                 (process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest)
+                 VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
             )
             .expect("prepare SQLite page seed");
         for sequence in seeded_from..=EVENT_COUNT {
             let mut event = first.clone();
             event.sequence = sequence;
+            let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
             insert
                 .execute(rusqlite::params![
                     process_id.as_str(),
                     sequence as i64,
                     "process.waiting",
-                    serde_json::to_string(&event).expect("encode SQLite seed event"),
+                    serde_json::to_string(&header).expect("encode SQLite event header"),
+                    serde_json::to_string(&event.fact.payload())
+                        .expect("encode SQLite event payload"),
+                    header.replay_digest(&event.fact),
                 ])
                 .expect("insert SQLite seed event");
         }
@@ -307,16 +311,19 @@ pub(super) async fn compare_bounded_process_event_pages(
     }
     sqlx::query(
         "INSERT INTO lash_process_events
-         (process_id, sequence, event_type, idempotency_key, event_json)
+         (process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest)
          SELECT $1, sequence, $2, NULL,
-                jsonb_set($3::jsonb, '{sequence}', to_jsonb(sequence))::text
+                jsonb_set($3::jsonb, '{sequence}', to_jsonb(sequence))::text, $6, $7
            FROM generate_series($5, $4) AS sequence",
     )
     .bind(process_id.as_str())
     .bind("process.waiting")
-    .bind(serde_json::to_string(&first).expect("encode PostgreSQL seed event"))
+    .bind(serde_json::to_string(&lash_execution_contracts::process::ProcessEventHeader::of(&first))
+        .expect("encode PostgreSQL event header"))
     .bind(EVENT_COUNT as i64)
     .bind(seeded_from as i64)
+    .bind(serde_json::to_string(&first.fact.payload()).expect("encode PostgreSQL event payload"))
+    .bind(lash_execution_contracts::process::ProcessEventHeader::of(&first).replay_digest(&first.fact))
     .execute(postgres.pool())
     .await
     .expect("seed PostgreSQL process events");

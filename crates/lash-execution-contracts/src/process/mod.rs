@@ -52,12 +52,11 @@ pub use engine_state::{
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
-    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
-    ProcessEventKind, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
-    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-    ProcessLifecycleFact, ProcessOutcomeNotRetained, ProcessResumeRefusal, ProcessTerminal,
-    ReleasedProcessEvent, release_process_event_payload, restore_released_process_event,
-    terminal_append_request,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHeader,
+    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
+    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
+    ProcessEventRelease, ProcessLifecycleFact, ProcessOutcomeNotRetained, ProcessResumeRefusal,
+    ProcessTerminal, terminal_append_request,
 };
 pub use lash_kernel_value::identity::SessionId;
 pub use lash_vocabulary::identity::ProcessId;

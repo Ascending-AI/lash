@@ -49,10 +49,12 @@ duration or payload bytes. Hosts can select smaller incremental horizons.
 event whose special payload stays. It does not count reclaimed bytes.
 
 Each row keeps its sequence, typed lifecycle kind, key, invocation
-and timestamp. SHA-256 over the existing canonical JSON identity leaf replaces
-the payload. An equal-key retry supplies and verifies that payload and gets
-the recorded metadata with it. Changed type or payload conflicts. Cancellation
-compares cancellation identity rather than payload bytes, so its payload stays.
+and timestamp in an immutable header. A canonical SHA-256 replay digest is
+written with the header at append time. Release clears only the separate
+payload column in bounded SQL batches. An equal-key retry verifies its digest
+and gets the recorded metadata with its matching payload. Changed type or
+payload conflicts. Cancellation uses its existing clock-independent identity
+and keeps its original payload.
 There is no second history ledger or process lifecycle.
 
 Full and Lite pages starting strictly below the horizon return
@@ -65,13 +67,14 @@ resume at the reported horizon. Required event awaits refuse typed
 stored current wait, then searches the retained suffix, with its existing
 diagnostic timestamp fallback. Call identity stays unchanged.
 
-The schema adds `process_events.released_payload_digest` and
+The event row stores `header_json`, nullable `payload_json` and immutable
+`replay_digest`. The prefix lives in
 `process_event_horizons(process_id, released_through)`, with PostgreSQL's
 `lash_` prefixes. The positive horizon is process-owned. Both backends cascade
-its deletion at process pruning. Versions stay frozen and fixtures change in
-place.
+its deletion at process pruning. Stored layouts change in place; protected landing updates the format
+witnesses.
 
-Evidence: [release types and digest](../../crates/lash-execution-contracts/src/process/events.rs),
+Evidence: [event header and digest](../../crates/lash-execution-contracts/src/process/events/header.rs),
 [SQLite release](../../crates/lash-sqlite-store/src/process_registry/event_release.rs),
 [PostgreSQL release](../../crates/lash-postgres-store/src/postgres/process_registry/event_release.rs),
 [host API](../../crates/lash/src/process_admin.rs),

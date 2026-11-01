@@ -615,6 +615,7 @@ pub async fn lo_process_retains_candidate_pages(backend: &Backend) -> LawOutcome
 
 /// LO-POSTIMAGE: the commit returns the exact realized record, guarded driver
 /// and root postimage, including external changes after the owner's open.
+/// Terminal receipts and cold rows retain only the last committed engine status.
 ///
 /// # Errors
 /// The first rule broken.
@@ -679,12 +680,18 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
             && frontier.last_event_sequence > 0,
         "scalar frontier omitted external registry changes"
     );
-    let driver = super::super::process::driver::Driver::default();
+    let status = json!(lash_execution_contracts::process::EngineStatus {
+        format: LawEngine::new(0).state_format(),
+        status: json!({"phase": "last_committed"}),
+    });
+    let mut driver = serde_json::to_value(super::super::process::driver::Driver::default())
+        .map_err(|error| LawBroken(error.to_string()))?;
+    driver["status"] = status.clone();
     tx.write(DomainWrite::Process(
         lash_durable::domain::ProcessWrite::Advance {
             process: process.clone(),
             expected_rev: 0,
-            driver_json: driver.encode(),
+            driver_json: driver.to_string(),
         },
     ));
     let engine = LawEngine::new(0);
@@ -726,6 +733,15 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
     super::super::process::record_terminal(&mut next, &process, &output)?;
     let receipt = store.commit(next, CommitLabel::PROCESS_TERMINAL).await?;
     let (_, actual) = store.open_process(&key, claim.epoch, u64::MAX).await?;
+    let inspection = json!({"status": status}).to_string();
+    ensure!(
+        actual
+            .row
+            .as_ref()
+            .and_then(|row| row.driver_json.as_deref())
+            == Some(inspection.as_str()),
+        "terminal driver did not retain exactly the last committed status"
+    );
     ensure!(
         receipt.process_views == vec![actual],
         "terminal receipt differs from stored postimage"

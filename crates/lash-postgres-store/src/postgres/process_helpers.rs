@@ -106,6 +106,20 @@ pub(crate) async fn save_process_tx(
     record: &ProcessRecord,
     execution_changed: bool,
 ) -> Result<(), PluginError> {
+    let terminal_driver = if record.is_terminal() {
+        let stored = crate::observed_sql::query_scalar::<_, Option<String>>(
+            process_sql().process.select_driver_json_by_id.sql(),
+        )
+        .bind(record.id.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(plugin_sqlx_error)?
+        .flatten();
+        lash_durable::domain::processes::terminal_driver_json(stored.as_deref())
+            .map_err(process_decode_error)?
+    } else {
+        None
+    };
     let statements = &process_sql().process_postgres;
     let sql = if execution_changed {
         statements.update_execution_columns_staged.sql()
@@ -123,15 +137,15 @@ pub(crate) async fn save_process_tx(
         query
     };
     query
+        .bind(terminal_driver)
         .execute(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 
-/// The event `append`'s replay key already recorded, if any. A released
-/// event comes back with `append`'s fact when it carries the released
-/// digest, and refuses as a conflict when it does not.
+/// Read the immutable header and match its digest before restoring the
+/// retained payload or the matching append's released fact.
 pub(crate) async fn load_event_by_key_tx(
     tx: &mut sqlx::PgConnection,
     process_id: &ProcessId,
@@ -148,15 +162,11 @@ pub(crate) async fn load_event_by_key_tx(
         return Ok(None);
     };
     let json: String = row.get(0);
-    let released_digest: Option<String> = row.get(1);
-    let event = match released_digest {
-        Some(digest) => lash_execution_contracts::process::restore_released_process_event(
-            serde_json::from_str(&json).map_err(process_decode_error)?,
-            &digest,
-            append,
-        )?,
-        None => ProcessEvent::decode(&json, fleet_format)?,
-    };
+    let payload: Option<String> = row.get(1);
+    let digest: String = row.get(2);
+    let header: lash_execution_contracts::process::ProcessEventHeader =
+        serde_json::from_str(&json).map_err(process_decode_error)?;
+    let event = header.replay(payload.as_deref(), &digest, append, fleet_format)?;
     Ok(Some(event))
 }
 
@@ -334,12 +344,15 @@ async fn stage_process_event_append_tx(
             event,
             projected_record,
         } => {
+            let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
             crate::observed_sql::query(process_sql().event.insert.sql())
                 .bind(process_id.as_str())
                 .bind(sequence as i64)
                 .bind(event.fact.event_type())
                 .bind(event.invocation.effect_replay_key())
-                .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
+                .bind(serde_json::to_string(&header).map_err(process_decode_error)?)
+                .bind(serde_json::to_string(&event.fact.payload()).map_err(process_decode_error)?)
+                .bind(header.replay_digest(&event.fact))
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(plugin_sqlx_error)?;

@@ -82,6 +82,7 @@ lash_store_sql::statements! {
         /// (`process_change_clock.sequence_committed`, FIG-5276).
         update_mutable_columns_staged = "UPDATE processes
              SET updated_at_ms = ?2, lifecycle_json = ?3,
+                 driver_json = COALESCE(?4, driver_json),
                  unsequenced_saves = CASE WHEN change_seq IS NULL
                      THEN unsequenced_saves + 1 ELSE 1 END,
                  change_seq = NULL, staged_seq = DEFAULT
@@ -90,6 +91,7 @@ lash_store_sql::statements! {
         /// The successor pair and lifecycle publish as one staged save.
         update_execution_columns_staged = "UPDATE processes
              SET updated_at_ms = ?2, lifecycle_json = ?3, execution_json = ?4,
+                 driver_json = COALESCE(?5, driver_json),
                  unsequenced_saves = CASE WHEN change_seq IS NULL
                      THEN unsequenced_saves + 1 ELSE 1 END,
                  change_seq = NULL, staged_seq = DEFAULT

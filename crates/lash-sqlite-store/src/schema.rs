@@ -673,8 +673,9 @@ CREATE TABLE IF NOT EXISTS process_events (
     sequence          INTEGER NOT NULL,
     event_type        TEXT NOT NULL,
     idempotency_key   TEXT,
-    event_json        TEXT NOT NULL,
-    released_payload_digest TEXT,
+    header_json       TEXT NOT NULL,
+    payload_json      TEXT,
+    replay_digest     TEXT NOT NULL,
     PRIMARY KEY (process_id, sequence),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );

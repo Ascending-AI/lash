@@ -40,6 +40,9 @@ crate::statements! {
         /// Inclusive bound for a fleet scan; process ids are not time ordered.
         select_max_process_id = "SELECT MAX(process_id) FROM processes";
 
+        /// The last committed driver, projected separately at terminal save.
+        select_driver_json_by_id = "SELECT driver_json FROM processes WHERE process_id = ?1";
+
         /// The stored record for `?1`.
         select_record_json_by_id = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes WHERE process_id = ?1";
 
@@ -71,12 +74,14 @@ crate::statements! {
 
         /// The identity columns are absent because none of them is mutable.
         update_mutable_columns = "UPDATE processes
-             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4
+             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4,
+                 driver_json = COALESCE(?5, driver_json)
              WHERE process_id = ?1";
 
         /// A successor replaces its execution pair with the same one batch save.
         update_execution_columns = "UPDATE processes
-             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4, execution_json = ?5
+             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4, execution_json = ?5,
+                 driver_json = COALESCE(?6, driver_json)
              WHERE process_id = ?1";
 
     }

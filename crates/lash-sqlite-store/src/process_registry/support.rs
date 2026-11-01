@@ -330,6 +330,21 @@ impl SqliteProcessRegistry {
         record: &ProcessRecord,
         execution_changed: bool,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+        let terminal_driver = if record.is_terminal() {
+            let stored: Option<String> = conn
+                .query_row(
+                    process_sql().process.select_driver_json_by_id.sql(),
+                    params![record.id.as_str()],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(process_sqlite_error)?
+                .flatten();
+            lash_durable::domain::processes::terminal_driver_json(stored.as_deref())
+                .map_err(process_decode_error)?
+        } else {
+            None
+        };
         let change_seq = Self::next_change_seq_conn(conn)?;
         let lifecycle = process_encode_json(&record.lifecycle_storage())?;
         if execution_changed {
@@ -341,7 +356,8 @@ impl SqliteProcessRegistry {
                     record.updated_at_ms as i64,
                     change_seq as i64,
                     lifecycle,
-                    process_encode_json(&record.execution_storage())?
+                    process_encode_json(&record.execution_storage())?,
+                    terminal_driver
                 ],
             )
         } else {
@@ -352,7 +368,8 @@ impl SqliteProcessRegistry {
                     record.id.as_str(),
                     record.updated_at_ms as i64,
                     change_seq as i64,
-                    lifecycle
+                    lifecycle,
+                    terminal_driver
                 ],
             )
         }
@@ -371,34 +388,28 @@ impl SqliteProcessRegistry {
         .map_err(process_sqlite_error)
     }
 
-    /// The event `append`'s replay key already recorded, if any. A released
-    /// event comes back with `append`'s fact when it carries the released
-    /// digest, and refuses as a conflict when it does not.
+    /// Read the immutable header and match its digest before restoring the
+    /// retained payload or the matching append's released fact.
     pub(crate) fn load_event_by_key_conn(
         conn: &Connection,
         process_id: &ProcessId,
         append: &lash_execution_contracts::process::CanonicalProcessEventAppend,
         fleet_format: lash_core_store::store::FleetFormat,
     ) -> Result<Option<ProcessEvent>, lash_execution_contracts::plugin_error::PluginError> {
-        let row: Option<(String, Option<String>)> = conn
+        let row: Option<(String, Option<String>, String)> = conn
             .query_row(
                 process_sql().event.select_by_replay_key.sql(),
                 params![process_id.as_str(), append.replay_key()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        let Some((json, released_digest)) = row else {
+        let Some((json, payload, digest)) = row else {
             return Ok(None);
         };
-        let event = match released_digest {
-            Some(digest) => lash_execution_contracts::process::restore_released_process_event(
-                serde_json::from_str(&json).map_err(process_decode_error)?,
-                &digest,
-                append,
-            )?,
-            None => ProcessEvent::decode(&json, fleet_format)?,
-        };
+        let header: lash_execution_contracts::process::ProcessEventHeader =
+            serde_json::from_str(&json).map_err(process_decode_error)?;
+        let event = header.replay(payload.as_deref(), &digest, append, fleet_format)?;
         Ok(Some(event))
     }
 
@@ -493,6 +504,7 @@ impl SqliteProcessRegistry {
                 event,
                 projected_record,
             } => {
+                let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
                 crate::conn::cached_execute(
                     conn,
                     process_sql().event.insert.sql(),
@@ -501,7 +513,9 @@ impl SqliteProcessRegistry {
                         sequence as i64,
                         event.fact.event_type(),
                         event.invocation.effect_replay_key(),
-                        process_encode_json(&event)?,
+                        process_encode_json(&header)?,
+                        process_encode_json(&event.fact.payload())?,
+                        header.replay_digest(&event.fact),
                     ],
                 )
                 .map_err(process_sqlite_error)?;

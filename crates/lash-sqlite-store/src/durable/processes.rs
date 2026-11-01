@@ -430,7 +430,12 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                         &record,
                     )
                     .map_err(|error| registry_failure(&error))?;
-                commit.process_views.registry(process, json);
+                commit
+                    .process_views
+                    .registry(process, json, record.is_terminal())
+                    .map_err(|error| {
+                        super::corrupt("process registry postimage", &error.to_string())
+                    })?;
                 Ok(())
             }))
         }
@@ -461,8 +466,21 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
                     Ok(json) => json,
                     Err(error) => return Ok(Err(registry_failure(&error))),
                 };
-            commit.process_views.registry(process, json);
-            commit.process_views.terminal(process, ended, commit.epoch);
+            if let Err(error) = commit
+                .process_views
+                .registry(process, json, record.is_terminal())
+            {
+                return Ok(Err(super::corrupt(
+                    "process registry postimage",
+                    &error.to_string(),
+                )));
+            }
+            if let Err(error) = commit.process_views.terminal(process, ended, commit.epoch) {
+                return Ok(Err(super::corrupt(
+                    "terminal process driver",
+                    &error.to_string(),
+                )));
+            }
             crate::obligation_ledger::end_execution_tx(
                 tx,
                 &lash_protocol_types::ExecutionScope::process(process.clone()),

@@ -1,35 +1,31 @@
 //! `process_events`: the append-only event log of one process.
 //!
-//! Full page reads select `event_json`. Lite page reads select only the indexed
-//! ordering position and event type, so payload bytes never cross the database
-//! boundary when a host asks for metadata.
-//!
-//! A host release (FIG-3482) rewrites the rows of a prefix in place: the event
-//! keeps everything but its payload, and `released_payload_digest` holds the
-//! payload's digest so the replay-key fence still matches a re-presented
-//! append. The prefix's horizon lives in `process_event_horizons`; reads never
-//! serve a row at or below it.
+//! Headers and canonical replay digests are immutable. A release clears only
+//! payload columns in bounded batches, preserving cancellation requests.
+//! The atomic prefix horizon lives in `process_event_horizons`; reads never
+//! serve an event at or below it. Lite pages select no JSON columns.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_events";
 
 /// Every column, in insert order.
-pub const INSERT_COLUMNS: &str = "process_id, sequence, event_type, idempotency_key, event_json";
+pub const INSERT_COLUMNS: &str =
+    "process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest";
 
 crate::statements! {
     /// `process_events` statements both backends issue verbatim.
     pub struct EventStatements @ "process_event" {
         /// The event process `?1` already recorded under replay key `?2`, if
-        /// any, and its payload digest when a release stripped its payload:
+        /// any, with its optional payload and immutable replay digest:
         /// the idempotency half of an append.
-        select_by_replay_key = "SELECT event_json, released_payload_digest
+        select_by_replay_key = "SELECT header_json, payload_json, replay_digest
                  FROM process_events
                  WHERE process_id = ?1 AND idempotency_key = ?2";
 
         /// One indexed event under process `?1` and replay key `?2`, bounded
         /// by the snapshot sequence `?3`. The caller checks its sequence
         /// against the release horizon before decoding the payload.
-        read_by_replay_key = "SELECT sequence, event_json FROM process_events
+        read_by_replay_key = "SELECT sequence, (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
                  WHERE process_id = ?1 AND idempotency_key = ?2 AND sequence <= ?3";
 
         /// The highest sequence process `?1` has recorded, or `NULL` when it
@@ -37,11 +33,11 @@ crate::statements! {
         select_max_sequence = "SELECT MAX(sequence) FROM process_events WHERE process_id = ?1";
 
         /// At most `?3` full rows process `?1` recorded after `?2`.
-        page_full = "SELECT event_json FROM process_events
+        page_full = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3";
 
-        /// The same bounded read without selecting `event_json`.
+        /// The same bounded read without selecting any JSON.
         page_lite = "SELECT sequence, event_type FROM process_events
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3";
@@ -49,7 +45,7 @@ crate::statements! {
         /// The last `?2` retained events of process `?1`, newest first: a
         /// released row is never part of the tail. The caller reverses them;
         /// the descending order is what lets the primary key serve the limit.
-        list_recent = "SELECT event_json FROM process_events
+        list_recent = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_events
                          WHERE process_id = ?1
                            AND sequence > COALESCE(
                                (SELECT released_through FROM process_event_horizons
@@ -57,25 +53,24 @@ crate::statements! {
                                0)
                          ORDER BY sequence DESC LIMIT ?2";
 
-        /// At most `?4` rows of process `?1` after `?2` and at or below `?3`,
-        /// in order: the next page of a prefix release.
-        page_release = "SELECT sequence, event_json FROM process_events
+        /// Bounds and size of the next release page, without loading payloads.
+        page_release = "SELECT MAX(sequence), COUNT(*) FROM (
+                 SELECT sequence FROM process_events
                  WHERE process_id = ?1 AND sequence > ?2 AND sequence <= ?3
-                 ORDER BY sequence ASC LIMIT ?4";
+                 ORDER BY sequence ASC LIMIT ?4
+             ) AS release_page";
 
-        /// Release event `?2` of process `?1`: `?3` is the event without its
-        /// payload and `?4` the payload's digest, `NULL` for an event whose
-        /// payload a release keeps.
-        release = "UPDATE process_events
-                 SET event_json = ?3, released_payload_digest = ?4
-                 WHERE process_id = ?1 AND sequence = ?2";
+        /// Release one bounded interval, preserving the cancellation kind `?4`.
+        release = "UPDATE process_events SET payload_json = NULL
+                 WHERE process_id = ?1 AND sequence > ?2 AND sequence <= ?3
+                   AND event_type != ?4";
 
         /// Record one event: `?1` process, `?2` sequence, `?3` type, `?4`
-        /// replay key, `?5` event.
+        /// replay key, `?5` header, `?6` payload and `?7` replay digest.
         insert = "INSERT INTO process_events (
-                        process_id, sequence, event_type, idempotency_key, event_json
+                        process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest
                      )
-                     VALUES (?1, ?2, ?3, ?4, ?5)";
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
     }
 }
 
@@ -91,7 +86,7 @@ mod tests {
         let sqlite = EventStatements::render(Dialect::sqlite(MAIN));
         assert_eq!(
             sqlite.page_full.sql(),
-            "SELECT event_json FROM main.process_events
+            "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM main.process_events
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3"
         );
@@ -105,7 +100,7 @@ mod tests {
         let postgres = EventStatements::render(Dialect::postgres());
         assert_eq!(
             postgres.page_full.sql(),
-            "SELECT event_json FROM lash_process_events
+            "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM lash_process_events
                  WHERE process_id = $1 AND sequence > $2
                  ORDER BY sequence ASC LIMIT $3"
         );
@@ -115,6 +110,6 @@ mod tests {
                  WHERE process_id = $1 AND sequence > $2
                  ORDER BY sequence ASC LIMIT $3"
         );
-        assert!(!postgres.page_lite.sql().contains("event_json"));
+        assert!(!postgres.page_lite.sql().contains("payload_json"));
     }
 }

@@ -326,7 +326,10 @@ pub(super) async fn apply(
                 &record,
             )
             .map_err(|error| corrupt("process postimage", &error.to_string()))?;
-            commit.process_views.registry(process, json);
+            commit
+                .process_views
+                .registry(process, json, record.is_terminal())
+                .map_err(|error| corrupt("process registry postimage", &error.to_string()))?;
             Ok(())
         }
         ProcessWrite::Terminal {
@@ -350,8 +353,14 @@ pub(super) async fn apply(
                 &record,
             )
             .map_err(|error| corrupt("process postimage", &error.to_string()))?;
-            commit.process_views.registry(process, json);
-            commit.process_views.terminal(process, ended, commit.epoch);
+            commit
+                .process_views
+                .registry(process, json, record.is_terminal())
+                .map_err(|error| corrupt("process registry postimage", &error.to_string()))?;
+            commit
+                .process_views
+                .terminal(process, ended, commit.epoch)
+                .map_err(|error| corrupt("terminal process driver", &error.to_string()))?;
             crate::obligation_ledger::end_execution_tx(
                 tx,
                 &lash_protocol_types::ExecutionScope::process(process.clone()),

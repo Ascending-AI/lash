@@ -14,6 +14,25 @@ use lash_vocabulary::identity::ProcessId;
 
 use super::keys::ScopeKey;
 
+/// The terminal inspection fields retained from the last committed driver.
+/// Live driver members are deliberately ignored during this projection.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct TerminalDriver {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<serde_json::Value>,
+}
+
+/// Compact a saved driver without decoding its live execution state. An absent
+/// driver remains absent; child-turn drivers retain no engine status.
+pub fn terminal_driver_json(stored: Option<&str>) -> Result<Option<String>, serde_json::Error> {
+    stored
+        .map(|stored| {
+            let inspection: TerminalDriver = serde_json::from_str(stored)?;
+            serde_json::to_string(&inspection)
+        })
+        .transpose()
+}
+
 /// One process actor's row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessActorRow {
@@ -23,7 +42,8 @@ pub struct ProcessActorRow {
     /// transition. Zero before the first.
     pub state_rev: u64,
     /// The process driver's state, encoded by its owner: what the last
-    /// committed transition left in flight. `None` before the first.
+    /// committed transition left in flight. Terminal rows retain only its
+    /// inspection status. `None` before the first.
     pub driver_json: Option<String>,
     /// When its cancel was first requested.
     pub cancel_requested_at: Option<DurableInstant>,
@@ -281,21 +301,37 @@ impl ProcessPostimages {
         Self(std::sync::Mutex::new(view))
     }
 
-    pub fn registry(&self, process: &ProcessId, record: String) {
+    pub fn registry(
+        &self,
+        process: &ProcessId,
+        record: String,
+        terminal: bool,
+    ) -> Result<(), serde_json::Error> {
         let mut held = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(view) = held.as_mut()
-            && view.row.as_ref().is_some_and(|row| row.process == process)
+            && let Some(row) = view.row.as_mut()
+            && row.process == process
         {
+            if terminal {
+                row.driver_json = terminal_driver_json(row.driver_json.as_deref())?;
+            }
+            row.terminal = terminal;
             view.registry = ProcessRegistryRow::Retained(record);
         }
+        Ok(())
     }
 
-    pub fn terminal(&self, process: &ProcessId, ended: bool, epoch: Epoch) {
+    pub fn terminal(
+        &self,
+        process: &ProcessId,
+        ended: bool,
+        epoch: Epoch,
+    ) -> Result<(), serde_json::Error> {
         if !ended {
-            return;
+            return Ok(());
         }
         let mut held = self
             .0
@@ -304,10 +340,12 @@ impl ProcessPostimages {
         if let Some(row) = held.as_mut().and_then(|view| view.row.as_mut())
             && row.process == process
         {
+            row.driver_json = terminal_driver_json(row.driver_json.as_deref())?;
             row.terminal = true;
             row.cascade_cursor = Some(String::new());
             row.written_epoch = Some(epoch);
         }
+        Ok(())
     }
 
     /// Called only after the backend has applied the matching guarded write.

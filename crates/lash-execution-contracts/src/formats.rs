@@ -31,6 +31,8 @@ use crate::EngineStateFormat;
 ///         cover(TurnTranscript, TranscriptEntry),
 ///         path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs",
 ///         cover(Driver, InFlight, Pinned, Blocked, Immediate),
+///         path = "crates/lash-durable/src/domain/processes.rs",
+///         cover(TerminalDriver),
 ///     ),
 ///     items(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", StoredWaitId),
 ///     impls(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", "Serialize for StoredWaitId", "Deserialize for StoredWaitId"),

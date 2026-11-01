@@ -46,44 +46,30 @@ pub(super) async fn release_process_events(
     let mut after = previous;
     let mut released_events = 0_u64;
     loop {
-        let rows = crate::observed_sql::query(process_sql().event.page_release.sql())
+        let row = crate::observed_sql::query(process_sql().event.page_release.sql())
             .bind(process_id.as_str())
             .bind(clamp_sequence_bound(after))
             .bind(target_bound)
             .bind(i64::from(
                 registry.pools.maintenance.process_event_release_page_rows,
             ))
-            .fetch_all(crate::observed_sql::executor(&mut **tx))
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(plugin_sqlx_error)?;
-        if rows.is_empty() {
+        let Some(end) = row.get::<Option<i64>, _>(0) else {
             break;
-        }
-        for row in rows {
-            let sequence: i64 = row.get(0);
-            let event = ProcessEvent::decode(&row.get::<String, _>(1), registry.fence.fleet())?;
-            if let Some(digest) =
-                lash_execution_contracts::process::release_process_event_payload(&event)
-            {
-                let released = lash_execution_contracts::process::ReleasedProcessEvent {
-                    process_id: event.process_id.clone(),
-                    sequence: event.sequence,
-                    event_type: event.fact.event_type().to_owned(),
-                    invocation: event.invocation,
-                    occurred_at: event.occurred_at,
-                };
-                crate::observed_sql::query(process_sql().event.release.sql())
-                    .bind(process_id.as_str())
-                    .bind(sequence)
-                    .bind(serde_json::to_string(&released).map_err(process_decode_error)?)
-                    .bind(digest)
-                    .execute(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(plugin_sqlx_error)?;
-            }
-            released_events += 1;
-            after = plugin_u64_from_sql("ProcessEvent", "sequence", sequence)?;
-        }
+        };
+        let count: i64 = row.get(1);
+        crate::observed_sql::query(process_sql().event.release.sql())
+            .bind(process_id.as_str())
+            .bind(clamp_sequence_bound(after))
+            .bind(end)
+            .bind(lash_execution_contracts::process::ProcessEventKind::CancelRequested.as_str())
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
+        released_events += plugin_u64_from_sql("ProcessEvent", "count", count)?;
+        after = plugin_u64_from_sql("ProcessEvent", "sequence", end)?;
     }
     crate::observed_sql::query(process_sql().event_horizon.upsert.sql())
         .bind(process_id.as_str())
