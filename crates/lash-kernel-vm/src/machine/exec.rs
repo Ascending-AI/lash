@@ -79,6 +79,7 @@ impl<'a> Invocation<'a> {
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
+    pub(super) capture: Option<lash_kernel_exec::ActIx>,
     pub(super) code: CodeId,
     pub(super) link: Option<lash_kernel_value::content_ids::LinkId>,
     /// The register the call's arguments start at.
@@ -97,8 +98,13 @@ pub(super) struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
+    pub(super) fn capturing(mut self, act: lash_kernel_exec::ActIx) -> Self {
+        self.capture = Some(act);
+        self
+    }
     pub(super) fn new(code: CodeId, args: Reg, count: usize) -> Self {
         Self {
+            capture: None,
             code,
             link: None,
             args,
@@ -909,6 +915,7 @@ impl KernelMachine {
         self.logical
             .handoff(&mut self.arena.borrow_mut(), &self.heap)?;
         let Call {
+            capture,
             library,
             link,
             code: code_id,
@@ -993,12 +1000,28 @@ impl KernelMachine {
                     owners,
                     given,
                     awaited_by,
+                    capture,
                 },
                 frame,
             )? {
                 None => return Ok(()),
                 Some(frame) => frame,
             };
+        }
+        if let Some(act) = capture {
+            let statement =
+                awaited_by.ok_or_else(|| fault("prepared capture has no caller statement"))?;
+            let (stream, _, _) = exe.statement(statement);
+            let entry = stream
+                .nested
+                .get(act.ix())
+                .ok_or_else(|| fault("prepared capture has no source entry"))?;
+            self.capture(
+                task,
+                entry,
+                act,
+                lash_kernel_state::paged::PhaseRecord::Called,
+            )?;
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);

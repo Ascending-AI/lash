@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let frame_captures = crate::machine::islands::witness::prepared_frame_captures();
     let frame_entries = crate::machine::islands::witness::prepared_frame_entries();
     let callee_reads = crate::machine::islands::witness::callee_reads();
     let call_resumes = crate::machine::islands::witness::call_resumes();
@@ -551,6 +552,18 @@ fn observe_source_or_register(
         assert!(
             call_resumes[1] > 0,
             "a restored caller must retain its original action occurrence and adopt the accepted result bank: {call_resumes:?}"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
+        && slice == u64::MAX
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SAVED_MEMBER)
+    {
+        assert!(
+            frame_captures[0] > 0 && frame_captures[1] >= 2,
+            "frame entry must prepare and commit its live callee/argument roles and pending caller together: {frame_captures:?}"
         );
     }
     if mode == Mode::Source

@@ -97,6 +97,7 @@ thread_local! {
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PREPARED_FRAME_CAPTURES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PREPARED_FRAME_ENTRIES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static CALLEE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_RESUME_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
@@ -111,6 +112,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PREPARED_FRAME_CAPTURES.with(|count| count.set([0; 2]));
     PREPARED_FRAME_ENTRIES.with(|count| count.set([0; 2]));
     CALLEE_READ_PUBLICATIONS.with(|count| count.set(0));
     CALL_RESUME_PUBLICATIONS.with(|count| count.set([0; 2]));
@@ -180,6 +182,18 @@ pub(crate) fn scope_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn scope_published() {
     SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+#[cfg(test)]
+pub(crate) fn prepared_frame_captures() -> [u64; 2] {
+    PREPARED_FRAME_CAPTURES.with(|count| count.replace([0; 2]))
+}
+pub(in crate::machine) fn prepared_frame_captured(roles: usize) {
+    PREPARED_FRAME_CAPTURES.with(|count| {
+        let mut values = count.get();
+        values[0] += 1;
+        values[1] += roles as u64;
+        count.set(values);
+    });
 }
 #[cfg(test)]
 pub(crate) fn prepared_frame_entries() -> [u64; 2] {

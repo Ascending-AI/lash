@@ -370,8 +370,23 @@ impl KernelMachine {
                         }
                     }
                     target @ (Target::Code(..) | Target::Export(..)) => {
-                        self.capture(task, entry, act, PhaseRecord::Called)?;
-                        let flow = self.call(task, exe, stmt, target, at, count)?;
+                        let flow = match target {
+                            Target::Code(code, captures, link) => {
+                                let call = crate::machine::exec::Call::new(code, at, count)
+                                    .in_link(link)
+                                    .sharing(&captures)
+                                    .awaited_by(Some(stmt))
+                                    .capturing(act);
+                                let pushed = self.push_frame(task, exe, call);
+                                self.spent_captures(captures);
+                                pushed?;
+                                Flow::Step
+                            }
+                            target => {
+                                self.capture(task, entry, act, PhaseRecord::Called)?;
+                                self.call(task, exe, stmt, target, at, count)?
+                            }
+                        };
                         if flow == Flow::Done {
                             // Imported code may answer natively without pushing a
                             // frame. Its caller continues in the same statement.

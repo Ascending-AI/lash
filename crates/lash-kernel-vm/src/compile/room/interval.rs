@@ -600,6 +600,12 @@ impl CompiledInterval {
     pub(crate) fn start(&self) -> &Site {
         &self.at
     }
+    pub(crate) fn restored_roles(&self) -> Option<&[Site]> {
+        let [step] = self.steps.as_ref() else {
+            return None;
+        };
+        step.publication.restored_roles.as_deref()
+    }
     pub(crate) fn events(&self) -> impl ExactSizeIterator<Item = &Event> {
         self.steps.iter().map(|step| &step.event)
     }

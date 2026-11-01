@@ -1,4 +1,5 @@
 //! Canonical frame entry is an accepted prefix before any body suffix.
+mod caller;
 use super::*;
 use crate::compile::room::{Phase, Point, publication::Occurrence};
 use crate::compile::{CodeId, Executable, NestedCallee, NestedKind, StmtId};
@@ -18,6 +19,7 @@ pub(in crate::machine) struct EntryCall {
     pub(in crate::machine) owners: ArgumentOwners,
     pub(in crate::machine) given: usize,
     pub(in crate::machine) awaited_by: Option<StmtId>,
+    pub(in crate::machine) capture: Option<lash_kernel_exec::ActIx>,
 }
 fn buffer<T>(count: usize) -> Result<Vec<T>, HeapFault> {
     let mut values = Vec::new();
@@ -77,76 +79,14 @@ impl KernelMachine {
         frame.link.encode(&mut encoding);
         source.site.encode(&mut encoding);
         encoding.unsigned(call.given as u64);
-        // The caller's real admitted action and saved continuation survive the
-        // handoff. Uncounted body/control and external entries have no ordinal.
-        let mut callee = None;
-        let mut issued = None;
         #[cfg(any(test, feature = "testing"))]
         let has_caller = !self.task(task_id)?.frames.is_empty();
-        if let Some(statement) = call.awaited_by {
-            let caller = self.frame(task_id)?;
-            encoding.unsigned(caller.invocation);
-            if let Some(act) = caller.nested {
-                let (stream, _, _) = exe.statement(statement);
-                let entry = stream
-                    .nested
-                    .get(act.ix())
-                    .ok_or_else(|| fault("entry caller has no nested source"))?;
-                let pending = caller
-                    .pending
-                    .peek()
-                    .ok_or_else(|| fault("entry caller has no continuation"))?;
-                if pending.site != entry.suffix {
-                    return Err(malformed("entry caller names another source continuation").into());
-                }
-                if entry.guest && matches!(entry.kind, NestedKind::Call(_)) {
-                    let Some(ordinal) = pending.occurrence else {
-                        return Ok(Some(frame));
-                    };
-                    let Some(frontier) = &caller.source_frontier else {
-                        return Ok(Some(frame));
-                    };
-                    let at = &frontier.position().at;
-                    if at.site != entry.site || at.phase != Phase::Enter {
-                        // A reconstructed packet call has not yet published its
-                        // caller Enter through this precise consumer.
-                        return Ok(Some(frame));
-                    }
-                    if frontier.position().occurrence.invocation != caller.invocation
-                        || frontier.position().occurrence.action.as_ref()
-                            != Some(&(at.clone(), ordinal))
-                        || pending.phase != lash_kernel_state::paged::PhaseRecord::Called
-                    {
-                        return Err(
-                            malformed("entry caller lost its accepted source action").into()
-                        );
-                    }
-                    if matches!(entry.kind, NestedKind::Call(NestedCallee::Read)) {
-                        callee = Some(entry.dst);
-                    }
-                    issued = Some((entry.occurrence, ordinal));
-                    encoding.seq(2);
-                    entry.site.encode(&mut encoding);
-                    encoding.unsigned(ordinal);
-                } else {
-                    encoding.seq(0);
-                }
-            } else {
-                encoding.seq(0);
-            }
-        } else {
-            encoding.unsigned(0);
-            encoding.seq(0);
-        }
-        if let Some((index, ordinal)) = issued
-            && self
-                .task(task_id)?
-                .counters
-                .current(index)
-                .is_none_or(|count| ordinal >= count)
-        {
-            return Err(malformed("frame entry action was not admitted by its task").into());
-        }
+        let Some((caller, ordinal)) =
+            self.prepare_frame_caller(task_id, exe, &call, &mut encoding)?
+        else {
+            return Ok(Some(frame));
+        };
+        let callee = caller.callee;
         let document = exe
             .instances
             .get(&frame.link)
@@ -172,13 +112,18 @@ impl KernelMachine {
             call.given,
             callee,
             matches!(call.owners, ArgumentOwners::Control),
+            caller.roles(),
         )?
         else {
             return Ok(Some(frame));
         };
+        caller.authenticate(&bank)?;
+        let capture = caller.pending(&bank, ordinal)?;
+        #[cfg(any(test, feature = "testing"))]
+        let captured_roles = capture.as_ref().map(|(_, pending)| pending.roles.len());
         let mut arguments = buffer(call.given)?;
         arguments.extend(bank.arguments());
-        let mut inputs = buffer(call.given + usize::from(callee.is_some()))?;
+        let mut inputs = buffer(call.given + usize::from(callee.is_some()) + caller.roles().len())?;
         inputs.extend(bank.owners());
         let mut shared_values = buffer(code.params.len())?;
         for (index, param) in code.params.iter().enumerate() {
@@ -223,7 +168,7 @@ impl KernelMachine {
                 frame.set_slot(param.at, SlotState::Cell(*handle));
             }
         }
-        let mut outputs = buffer(code.slots_by_at.len())?;
+        let mut outputs = buffer(code.slots_by_at.len() + caller.roles().len())?;
         for (index, state) in frame.slot_states().iter().enumerate() {
             if matches!(state, SlotState::Empty) {
                 continue;
@@ -256,6 +201,12 @@ impl KernelMachine {
                 }
             };
             outputs.push((owner, value));
+        }
+        for (_, _, _, input, output) in bank.saved() {
+            if ledger.holding(output, self.heap.pages())?.is_some() {
+                return Err(malformed("entry capture would overwrite a continuation owner").into());
+            }
+            outputs.push((output, PV::Existing(input)));
         }
         let roots = crate::machine::logical_held::FrameRoots::prepared(
             self.logical.clone(),
@@ -297,9 +248,15 @@ impl KernelMachine {
             ..Default::default()
         }]);
         let (mut registration, batch) = installation.into_parts();
+        let mut dependencies =
+            buffer(call.given + usize::from(callee.is_some()) + caller.roles().len())?;
+        dependencies.extend(bank.dependencies());
         let evaluated = program
             .clone()
             .evaluate(&ledger, registration.arena())
+            .and_then(|evaluated| {
+                evaluated.bind_dependencies(&ledger, registration.arena(), &dependencies)
+            })
             .ok_or_else(|| malformed("entry source dependencies are unavailable"))?;
         let prepared = evaluated
             .prepare(&ledger, registration, &self.heap, program)
@@ -316,7 +273,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("no task"))?;
         let depth =
             (task.frames.len() + usize::from(task_id != TaskId::MAIN || !self.session_cell)) as u64;
-        let push = task.frames.prepare_push(call.awaited_by)?;
+        let push = task.frames.prepare_push(call.awaited_by, capture)?;
         let safe_point = self.charged;
         let allowance = Allowance {
             occurrences: vec![],
@@ -370,6 +327,10 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if has_caller {
             crate::machine::islands::witness::prepared_frame_entered(shared);
+        }
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(roles) = captured_roles {
+            crate::machine::islands::witness::prepared_frame_captured(roles);
         }
         self.grown();
         self.observe(crate::observe::Event::Push {

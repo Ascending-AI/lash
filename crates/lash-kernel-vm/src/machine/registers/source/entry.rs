@@ -4,12 +4,19 @@ use super::*;
 pub(in crate::machine::registers) struct EntryInputs {
     values: Vec<Input>,
     arguments: usize,
+    call_len: usize,
 }
 struct Input {
     reg: Reg,
     owner: Option<Owner>,
     value: Value,
     kind: Kind,
+    saved: Option<SavedInput>,
+}
+struct SavedInput {
+    site: crate::compile::Suffix,
+    holding: lash_kernel_state::kernel_internals::logical::Holding,
+    destination: Owner,
 }
 enum Kind {
     Operand,
@@ -28,6 +35,33 @@ impl EntryInputs {
     pub(in crate::machine::registers) fn owners(&self) -> impl Iterator<Item = Owner> + '_ {
         self.values.iter().filter_map(|input| input.owner)
     }
+    pub(in crate::machine::registers) fn call_owners(&self) -> impl Iterator<Item = Owner> + '_ {
+        self.values[..self.call_len]
+            .iter()
+            .filter_map(|input| input.owner)
+    }
+    pub(in crate::machine::registers) fn saved(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &crate::compile::Suffix,
+            Value,
+            &lash_kernel_state::kernel_internals::logical::Holding,
+            Owner,
+            Owner,
+        ),
+    > + '_ {
+        self.values.iter().filter_map(|input| {
+            let saved = input.saved.as_ref()?;
+            Some((
+                &saved.site,
+                input.value,
+                &saved.holding,
+                input.owner?,
+                saved.destination,
+            ))
+        })
+    }
     pub(in crate::machine::registers) fn snapshots(
         &self,
     ) -> impl Iterator<Item = (Reg, Value)> + '_ {
@@ -42,10 +76,11 @@ impl Operands {
         callee: Option<Reg>,
         control: bool,
         registers: &[Value],
+        roles: &[crate::compile::NestedRole],
     ) -> Result<Option<EntryInputs>, HeapFault> {
         let mut values = Vec::new();
         values
-            .try_reserve(count + usize::from(callee.is_some()))
+            .try_reserve(count + usize::from(callee.is_some()) + roles.len())
             .map_err(|_| HeapFault::Exhausted {
                 resource: lash_kernel_doc::heap::HostResource::StagingBytes,
             })?;
@@ -87,6 +122,43 @@ impl Operands {
                 owner,
                 value,
                 kind,
+                saved: None,
+            });
+        }
+        let call_len = values.len();
+        for role in roles {
+            if values.iter().any(|input| input.reg == role.reg) {
+                return Err(invalid("entry role overlaps another source input"));
+            }
+            let Some(input) = self.prepare_transfer(role.reg)? else {
+                return Ok(None);
+            };
+            let at = self.positions[role.reg.ix()];
+            let operand = &self.values[at];
+            if operand.site.as_ref() != &role.site
+                || !registers
+                    .get(role.reg.ix())
+                    .is_some_and(|value| value.same(&input.value()))
+            {
+                return Err(invalid(
+                    "entry role differs from its evaluated source operand",
+                ));
+            }
+            let destination = self
+                .roots
+                .as_ref()
+                .ok_or_else(|| invalid("entry role has no source roots"))?
+                .continuation(&role.site)?;
+            values.push(Input {
+                reg: role.reg,
+                owner: Some(input.owner()),
+                value: input.value(),
+                kind: Kind::Operand,
+                saved: Some(SavedInput {
+                    site: Arc::clone(&role.suffix),
+                    holding: operand.held.holding.clone(),
+                    destination,
+                }),
             });
         }
         self.transferred
@@ -102,6 +174,7 @@ impl Operands {
         Ok(Some(EntryInputs {
             values,
             arguments: count,
+            call_len,
         }))
     }
     pub(in crate::machine::registers) fn publish_entry(&mut self, inputs: EntryInputs) {

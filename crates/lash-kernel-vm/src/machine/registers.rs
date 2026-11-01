@@ -2,6 +2,7 @@
 use std::ops::Index;
 use std::slice::SliceIndex;
 mod entry;
+pub(super) use entry::PreparedEntryBank;
 mod resume;
 mod source;
 pub(super) use resume::{ResumeAt, ResumeValue};

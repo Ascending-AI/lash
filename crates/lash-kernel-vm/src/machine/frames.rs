@@ -911,6 +911,7 @@ pub(super) struct PreparedFramePush<'a> {
     frames: &'a mut Frames,
     parent: Option<usize>,
     awaiting: Option<crate::compile::StmtId>,
+    capture: Option<(ActIx, Pending)>,
 }
 impl PreparedFramePush<'_> {
     pub(super) fn publish(self, arena: &mut lash_kernel_state::arena::Arena, frame: Box<Frame>) {
@@ -918,6 +919,11 @@ impl PreparedFramePush<'_> {
             self.frames.cache[self.parent.expect("prepared caller")]
                 .1
                 .awaiting = Some(awaiting);
+        }
+        if let Some((act, pending)) = self.capture {
+            let caller = &mut self.frames.cache[self.parent.expect("prepared caller")].1;
+            caller.stand_at(act, pending);
+            caller.source_action = None;
         }
         assert!(self.frames.cache.len() < self.frames.cache.capacity());
         arena.grow_control(resident::frame_bytes(&frame));
@@ -931,6 +937,7 @@ impl Frames {
     pub(super) fn prepare_push(
         &mut self,
         awaiting: Option<crate::compile::StmtId>,
+        capture: Option<(ActIx, Pending)>,
     ) -> Result<PreparedFramePush<'_>, HeapFault> {
         self.len
             .checked_add(1)
@@ -952,6 +959,7 @@ impl Frames {
             frames: self,
             parent,
             awaiting,
+            capture,
         })
     }
     pub(super) fn logical_context(
