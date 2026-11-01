@@ -313,7 +313,7 @@ struct Lane {
 /// background sweep fires on wall-clock time, so whichever round it lands
 /// in would carry another round's deletes. Retirement is maintenance, like
 /// artifact cleanup, and settles between rounds the same way (FIG-6321).
-fn replay_settings() -> lash_durable::DurableSettings {
+fn replay_settings(counted: bool) -> lash_durable::DurableSettings {
     let mut settings = lash_durable::DurableSettings::standard();
     let day = Duration::from_secs(24 * 60 * 60);
     settings.retirement.every = day;
@@ -324,8 +324,14 @@ fn replay_settings() -> lash_durable::DurableSettings {
     settings.lease.self_stop_after = day * 2;
     settings.lease.ttl = day * 3;
     settings.lease.reap_every = day;
-    settings.lease.claim_poll = day;
-    settings.lease.claim_backoff = day;
+    // A pass that fails commits nothing, so no hint follows it: its owner
+    // runs the next pass after one claim poll. A worker lost under a cell
+    // (crash-resume) fails its pass that way, so only the counted gate,
+    // whose workloads fail no pass, freezes the poll (FIG-7588).
+    if counted {
+        settings.lease.claim_poll = day;
+        settings.lease.claim_backoff = day;
+    }
     settings
 }
 
@@ -506,7 +512,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     }
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
-        .config(replay_settings())
+        .config(replay_settings(matches!(
+            options.store,
+            StoreChoice::CountedSqliteFile(_)
+        )))
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))?;
     let mut book = ScriptBook::new();
