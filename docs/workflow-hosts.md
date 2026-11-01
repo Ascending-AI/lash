@@ -357,9 +357,10 @@ pub async fn start(
         EngineLaunch::new(env, Some(settings)),
         ProcessOriginator::host(),
         Lifetime::Detached,
-    )
-    ;
-    core.processes().start(lash::OperationId::new(key), request).await
+    );
+    core.processes()
+        .start(lash::OperationId::new(key), request)
+        .await
 }
 ```
 
