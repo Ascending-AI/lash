@@ -198,8 +198,9 @@ pub(super) struct Frame<'e> {
 }
 
 impl<'e> Frame<'e> {
-    pub(super) fn returned_explicitly(&self) -> bool {
-        self.statement.is_some()
+    /// The `return` statement the island left its body by, if any.
+    pub(super) fn returned_at(&self) -> Option<StmtId> {
+        self.statement
     }
 
     fn new(callee: Callee<'e>, ranges: storage::Ranges, window: Window) -> Self {

@@ -352,7 +352,7 @@ impl KernelMachine {
                         // caught. Complete it once before the accepted suffix,
                         // retaining the RHS owner on a publication miss.
                         let value = self.regs[at(src)];
-                        self.copy_out(&value)?;
+                        self.copy_out_returned(&value, &running.stmt.site)?;
                     }
                     if let Some(completion) = self.publish_source_departure(running, source_pc)? {
                         return Ok(Ran::Depart(completion));

@@ -1113,7 +1113,7 @@ impl KernelMachine {
             executor.project_return(&mut active, frame);
         }
         let handoff = executor.project_handoff(&mut active, frame, &mut self.regs);
-        let returned_explicitly = active.returned_explicitly();
+        let returned_at = active.returned_at();
         self.charged = executor.charged;
         drop(watching);
         let ran = if handoff.is_some() {
@@ -1134,8 +1134,10 @@ impl KernelMachine {
         }
         match ran {
             Some(Ran::Returned(value)) => {
-                if returned_explicitly && self.return_leaves_run(task)? {
-                    self.copy_out(&value)?;
+                if let Some(stmt) = returned_at
+                    && self.return_leaves_run(task)?
+                {
+                    self.copy_out_returned(&value, &exe.stmt(stmt).site)?;
                 }
                 // The register loop carried the return through every
                 // enclosing `try` and ran each `finally` once. The source

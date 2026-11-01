@@ -1171,6 +1171,27 @@ impl KernelMachine {
         Ok(self.copy_datum(value)?)
     }
 
+    /// Copies out what a `return` at `site` gives the run's caller: a
+    /// bound its charge passes stands at that return, whatever the frame's
+    /// blocks last recorded.
+    pub(super) fn copy_out_returned(
+        &mut self,
+        value: &Value,
+        site: &lash_kernel_value::sites::Site,
+    ) -> Eval<lash_kernel_doc::Datum> {
+        if self.charging {
+            let size = self.deep_size(value)?;
+            self.charge(size).map_err(|halt| match halt {
+                Halt::Bound(mut exceeded) if exceeded.site.is_none() => {
+                    exceeded.site = Some(Box::new(site.clone()));
+                    Halt::Bound(exceeded)
+                }
+                halt => halt,
+            })?;
+        }
+        Ok(self.copy_datum(value)?)
+    }
+
     /// A value's deep charge size (`K-CHG-005`), its graph decoded first.
     pub(super) fn deep_size(&mut self, value: &Value) -> Result<u64, Halt> {
         self.warm_measured(value)?;
@@ -1519,7 +1540,7 @@ impl KernelMachine {
             && matches!(exe.stmt(id).form, Form::ReturnVia { .. })
         {
             if self.return_leaves_run(task)? {
-                self.copy_out(&value)?;
+                self.copy_out_returned(&value, &exe.stmt(id).site)?;
             }
             return Ok((id, Ran::Depart(Completion::Return(Box::new(value)))));
         }
