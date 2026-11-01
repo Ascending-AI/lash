@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES", "/schema.sql", "/schema-shape.txt", "/teardown.sql", "/postgres-host-config-v1.schema.json"]
 autobins = false
 name = "lash-internal-postgres-store"
 autotests = false

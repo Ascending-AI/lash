@@ -103992,7 +103992,6 @@
         "utf16"
       ],
       "dependencies": [
-        "hashbrown",
         "memchr"
       ],
       "doc": "//crates/lash-regress:lash-regress__doc",

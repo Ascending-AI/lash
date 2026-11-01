@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+exclude = ["/BUCK", "/clippy.toml"]
 name = "lash-kernel-releases"
 version.workspace = true
 edition.workspace = true

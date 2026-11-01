@@ -1,4 +1,4 @@
-// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation.
+// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation and alloc-only parser maps.
 //! Parser from regex patterns to IR
 
 use crate::{
@@ -15,18 +15,16 @@ use crate::{
     unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
 };
+#[cfg(not(feature = "std"))]
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap as GroupMap,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::{fmt, iter::Peekable};
 #[cfg(feature = "std")]
-use std::collections::HashMap;
-#[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        boxed::Box,
-        string::{String, ToString},
-        vec::Vec,
-    },
-    hashbrown::HashMap,
-};
+use std::collections::HashMap as GroupMap;
 
 /// The text contains a human-readable error message.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -463,7 +461,7 @@ where
     /// A map each from capture group name to corresponding group indices in order.
     /// Note duplicate names may appear in distinct alternations, per the TC39 proposal.
     /// See <https://github.com/tc39/proposal-duplicate-named-capturing-groups>
-    named_group_indices: HashMap<CaptureGroupName, Vec<u32>>,
+    named_group_indices: GroupMap<CaptureGroupName, Vec<u32>>,
 
     has_lookbehind: bool,
 }
@@ -2003,12 +2001,12 @@ where
     /// Pass 1: Collect all named capture groups and record which alternative path each appears in.
     fn collect_named_group_locations(
         &mut self,
-    ) -> Result<HashMap<String, Vec<AlternativePath>>, Error> {
+    ) -> Result<GroupMap<String, Vec<AlternativePath>>, Error> {
         let mut paren_depth: usize = 0;
-        let mut alt_indices: HashMap<usize, usize> = HashMap::new();
+        let mut alt_indices: GroupMap<usize, usize> = GroupMap::new();
         alt_indices.insert(0, 0);
 
-        let mut named_group_locations: HashMap<String, Vec<AlternativePath>> = HashMap::new();
+        let mut named_group_locations: GroupMap<String, Vec<AlternativePath>> = GroupMap::new();
 
         loop {
             match self.next().map(to_char_sat) {
@@ -2093,7 +2091,7 @@ where
     /// but `/(?<a>x)(?<a>y)/` is invalid (same alternative).
     fn check_duplicate_conflicts(
         &self,
-        named_group_locations: &HashMap<String, Vec<AlternativePath>>,
+        named_group_locations: &GroupMap<String, Vec<AlternativePath>>,
     ) -> Result<(), Error> {
         for paths in named_group_locations.values() {
             for i in 0..paths.len() {
@@ -2170,7 +2168,7 @@ where
         flags,
         loop_count: 0,
         group_count: 0,
-        named_group_indices: HashMap::new(),
+        named_group_indices: GroupMap::new(),
         group_count_max: 0,
         has_lookbehind: false,
     };

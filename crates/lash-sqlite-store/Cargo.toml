@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 autobins = false
 name = "lash-internal-sqlite-store"
 autotests = false

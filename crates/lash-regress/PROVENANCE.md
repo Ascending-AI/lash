@@ -14,3 +14,6 @@ Upstream copyright and modification notices remain in the carried source and
 test files. The package and Rust crate were renamed from `regress` to
 `lash-regress` and `lash_regress`, respectively, so downstream Lash consumers
 resolve the maintained fork without a Cargo patch.
+
+The no-std parser uses `alloc::collections::BTreeMap` for capture-group and
+alternation bookkeeping. The std parser retains `std::collections::HashMap`.

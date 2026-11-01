@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-internal-llm-transport"
 version.workspace = true
 edition.workspace = true
@@ -34,7 +36,7 @@ lash-core = { workspace = true }
 lash-http-transport = { workspace = true }
 lash-protocol-types = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "sync", "test-util", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 bytes = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }

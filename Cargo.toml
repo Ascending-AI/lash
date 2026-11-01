@@ -150,6 +150,7 @@ resolver = "3"
 # ephemeral tag checkout at packaging time (scripts/release_version.py stamp).
 version = "0.0.0-dev"
 license = "MIT"
+license-file = "LICENSE"
 edition = "2024"
 authors = ["Samuel Galanakis"]
 repository = "https://github.com/Ascending-AI/lash"
@@ -282,7 +283,7 @@ async-trait = "0.1"
 base64 = "0.23"
 blake3 = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "now", "serde"] }
 chrono-tz = "0.10"
 clap = "4"
 croner = "3"

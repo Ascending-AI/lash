@@ -29,7 +29,6 @@ skip = [
     { crate = "getrandom@0.3.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on getrandom 0.4" },
     { crate = "hashbrown@0.14.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "hashbrown@0.15.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
-    { crate = "hashbrown@0.16.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
     { crate = "md-5@0.10.6", reason = "sqlx-postgres 0.8.6 still requires md-5 0.10; remove when upstream dependency graph converges on md-5 0.11" },
     { crate = "phf@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf 0.12" },
     { crate = "phf_shared@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf_shared 0.12" },

@@ -1,5 +1,7 @@
 # Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation, Lash package manifest, and package lint policy.
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES", "/PROVENANCE.md"]
 name = "lash-regress"
 autotests = false
 version.workspace = true
@@ -37,7 +39,6 @@ prohibit-unsafe = []
 utf16 = []
 
 [dependencies]
-hashbrown = "0.16.0"
 memchr = { version = "2.4.0", default-features = false, features = ["alloc"] }
 
 [[test]]

@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES", "/host-schemas/**", "/postgres-*-replay-schema.sql", "/postgres-*-replay-schema-shape.txt"]
 # Crate name on crates.io. The library is still imported as `lash`
 # (see lib section below) so `use lash::...` keeps working everywhere.
 name = "lash-runtime"

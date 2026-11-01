@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-internal-protocol-types"
 version.workspace = true
 edition.workspace = true
@@ -34,7 +36,6 @@ synthetic-next = []
 lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
-jsonschema = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true }
@@ -42,6 +43,7 @@ schemars = { workspace = true }
 serde-transcode = "=1.1.1"
 
 [dev-dependencies]
+jsonschema = { workspace = true, default-features = false }
 lash-vocabulary = { workspace = true, features = ["testing"] }
 proptest = "1"
 rmp-serde = { workspace = true }

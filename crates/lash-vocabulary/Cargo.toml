@@ -1,4 +1,6 @@
 [package]
+license-file.workspace = true
+include = ["/src/**", "/build.rs", "/README.md", "/LICENSE*", "/THIRD-PARTY-NOTICES"]
 name = "lash-internal-vocabulary"
 version.workspace = true
 edition.workspace = true
@@ -24,8 +26,8 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
-jsonschema = { workspace = true, default-features = false }
 [dev-dependencies]
+jsonschema = { workspace = true, default-features = false }
 proptest = "1"
 serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 
