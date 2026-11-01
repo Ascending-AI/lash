@@ -168,6 +168,49 @@ async fn actor_begin_reads_one_snapshot_of_cancellation() {
     );
 }
 
+/// ACTOR-OPEN-PREPARE: rebinding a bounded mailbox page must reuse its
+/// cached program, including when the pending page is empty.
+#[tokio::test]
+async fn cached_owner_mail_pages_do_not_recompile_on_rebind() {
+    let world = admitted().await;
+    let actor = world.actor.clone();
+    let epoch = world.epoch;
+    let reparses = world
+        .store
+        .query(move |connection| {
+            let mut reparses = Vec::new();
+            for sql in [
+                super::SQL.sqlite.open.sql(),
+                super::SQL.sqlite.open_retained.sql(),
+            ] {
+                for _ in 0..3 {
+                    let mut statement = connection.prepare_cached(sql)?;
+                    let authority = statement
+                        .query_map(
+                            rusqlite::params![
+                                actor.as_str(),
+                                SESSION,
+                                i64::MAX,
+                                lash_durable::OpenedActor::MAIL_PAGE_ROWS,
+                                SESSION_CLOSE_MAIL
+                            ],
+                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                        )?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    assert_eq!(authority, [(epoch.0, "owned".to_owned())]);
+                    reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
+                }
+            }
+            Ok(Ok(reparses))
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        reparses, [0; 6],
+        "a cached mailbox read must reuse its program"
+    );
+}
+
 /// A cancel accepted between two opens reaches the second, whether
 /// after-step or escalated to immediate; the first keeps what it read.
 #[tokio::test]

@@ -11,9 +11,9 @@ macro_rules! mailbox_query {
                 SELECT seq, kind, appended_at_ms, octet_length(body) AS body_bytes
                 FROM actor_mail WHERE actor_key = ?1
                   AND seq > (SELECT acked_seq FROM actors WHERE actor_key = ?1)
-                ORDER BY seq LIMIT ",
+                ORDER BY seq LIMIT CAST(",
             $rows,
-            "
+            " AS BIGINT)
              ), mail_prefix AS (
                 SELECT *, SUM(body_bytes) OVER (ORDER BY seq ROWS UNBOUNDED PRECEDING) AS bytes
                 FROM mail_candidates
