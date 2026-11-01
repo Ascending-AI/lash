@@ -22,6 +22,13 @@ pub(crate) type Selection = interval::Selection;
 mod verify;
 
 #[derive(Clone, Copy)]
+pub(crate) enum TryScope {
+    Body,
+    Catch,
+    Finally,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) enum TransferTarget {
     Binding,
     RootReturn,
@@ -918,9 +925,13 @@ impl Source {
             .ok_or(Refused::Path)
     }
 
-    /// A normally completed try body or catch reaches its actual cleanup or
-    /// the try Commit. An exceptional departure has a different source recipe.
-    pub(crate) fn next_after_try_scope(&self, at: &Site, caught: bool) -> Result<Point, Refused> {
+    /// A normally completed try block reaches its actual cleanup or Try Commit.
+    /// An exceptional departure has a different source recipe.
+    pub(crate) fn next_after_try_scope(
+        &self,
+        at: &Site,
+        scope: TryScope,
+    ) -> Result<Point, Refused> {
         self.verify()?;
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return Err(Refused::Path);
@@ -932,10 +943,13 @@ impl Source {
         let doc::Node::Stmt(doc::Stmt::Try(statement)) = node else {
             return Err(Refused::Path);
         };
-        if caught && statement.catch.is_none() {
+        if matches!(scope, TryScope::Catch) && statement.catch.is_none() {
             return Err(Refused::Path);
         }
-        if statement.finally.is_some() {
+        if matches!(scope, TryScope::Finally) && statement.finally.is_none() {
+            return Err(Refused::Path);
+        }
+        if !matches!(scope, TryScope::Finally) && statement.finally.is_some() {
             self.first_event(&at.child(if statement.catch.is_some() { 2 } else { 1 }))
         } else {
             let next = point(at, Phase::Commit);

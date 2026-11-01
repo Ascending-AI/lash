@@ -199,6 +199,9 @@ impl KernelMachine {
                     crate::machine::TryPhase::Catch => {
                         crate::machine::islands::witness::precise_try_read(true)
                     }
+                    crate::machine::TryPhase::Finally(crate::machine::Completion::Normal) => {
+                        crate::machine::islands::witness::precise_try_finally_read()
+                    }
                     crate::machine::TryPhase::Finally(_) => {}
                 }
             }

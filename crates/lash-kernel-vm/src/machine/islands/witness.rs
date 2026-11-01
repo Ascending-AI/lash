@@ -97,8 +97,8 @@ thread_local! {
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    static PRECISE_TRY_SCOPES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
-    static PRECISE_TRY_READS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static PRECISE_TRY_SCOPES: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
+    static PRECISE_TRY_READS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
     static FIELD_MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static TABLE_MEMBER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static LIST_REMOVAL_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -106,8 +106,8 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
-    PRECISE_TRY_SCOPES.with(|counts| counts.set([0; 2]));
-    PRECISE_TRY_READS.with(|counts| counts.set([0; 2]));
+    PRECISE_TRY_SCOPES.with(|counts| counts.set([0; 3]));
+    PRECISE_TRY_READS.with(|counts| counts.set([0; 3]));
     PACKET_READ_PUBLICATIONS.with(|count| count.set(0));
     PRECISE_BRANCHES.with(|counts| counts.set([[0; 2]; 2]));
     PRECISE_ENDS.with(|counts| counts.set([0; 2]));
@@ -171,9 +171,23 @@ pub(crate) fn scope_publications() -> u64 {
 pub(in crate::machine::islands) fn scope_published() {
     SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
+pub(in crate::machine) fn precise_try_finally_read() {
+    PRECISE_TRY_READS.with(|counts| {
+        let mut next = counts.get();
+        next[2] += 1;
+        counts.set(next);
+    });
+}
+pub(in crate::machine) fn precise_try_finally_scope() {
+    PRECISE_TRY_SCOPES.with(|counts| {
+        let mut next = counts.get();
+        next[2] += 1;
+        counts.set(next);
+    });
+}
 #[cfg(test)]
-pub(crate) fn precise_try_scopes() -> [u64; 2] {
-    PRECISE_TRY_SCOPES.with(|counts| counts.replace([0; 2]))
+pub(crate) fn precise_try_scopes() -> [u64; 3] {
+    PRECISE_TRY_SCOPES.with(|counts| counts.replace([0; 3]))
 }
 pub(in crate::machine) fn precise_try_scope(caught: bool) {
     PRECISE_TRY_SCOPES.with(|counts| {
@@ -183,8 +197,8 @@ pub(in crate::machine) fn precise_try_scope(caught: bool) {
     });
 }
 #[cfg(test)]
-pub(crate) fn precise_try_reads() -> [u64; 2] {
-    PRECISE_TRY_READS.with(|counts| counts.replace([0; 2]))
+pub(crate) fn precise_try_reads() -> [u64; 3] {
+    PRECISE_TRY_READS.with(|counts| counts.replace([0; 3]))
 }
 pub(in crate::machine) fn precise_try_read(caught: bool) {
     PRECISE_TRY_READS.with(|counts| {

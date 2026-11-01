@@ -2,9 +2,9 @@
 use super::*;
 use crate::compile::{
     Executable,
-    room::{ExitKind, Measure, Owner as Selector, Phase, Point, publication::Occurrence},
+    room::{ExitKind, Measure, Owner as Selector, Phase, Point, TryScope, publication::Occurrence},
 };
-use crate::machine::{Control, Halt, KernelMachine, TryPhase, fault};
+use crate::machine::{Completion, Control, Halt, KernelMachine, TryPhase, fault};
 use lash_kernel_state::kernel_internals::logical::JournalEvent;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use std::collections::BTreeSet;
@@ -42,11 +42,15 @@ impl KernelMachine {
                 Some(Control::Try {
                     phase: TryPhase::Body,
                     ..
-                }) => Some(false),
+                }) => Some(TryScope::Body),
                 Some(Control::Try {
                     phase: TryPhase::Catch,
                     ..
-                }) => Some(true),
+                }) => Some(TryScope::Catch),
+                Some(Control::Try {
+                    phase: TryPhase::Finally(Completion::Normal),
+                    ..
+                }) => Some(TryScope::Finally),
                 _ => None,
             };
             let (unpaid, loop_body, dependency) = match frame.control.iter().rev().nth(1) {
@@ -122,26 +126,33 @@ impl KernelMachine {
                 }
                 Some(Control::Try {
                     stmt,
-                    phase: TryPhase::Body | TryPhase::Catch,
+                    phase: TryPhase::Body | TryPhase::Catch | TryPhase::Finally(Completion::Normal),
                 }) => {
-                    let crate::compile::Form::Try { body, catch, .. } = &exe.stmt(*stmt).form
+                    let crate::compile::Form::Try {
+                        body,
+                        catch,
+                        finally,
+                        ..
+                    } = &exe.stmt(*stmt).form
                     else {
                         return Err(malformed("scope parent has another try form").into());
                     };
-                    let caught =
+                    let scope =
                         try_scope.ok_or_else(|| malformed("scope has no normal try phase"))?;
-                    let expected = if caught {
-                        catch
+                    let expected = match scope {
+                        TryScope::Body => body,
+                        TryScope::Catch => catch
                             .as_ref()
                             .map(|(_, block)| block)
-                            .ok_or_else(|| malformed("catch scope has no source catch"))?
-                    } else {
-                        body
+                            .ok_or_else(|| malformed("catch scope has no source catch"))?,
+                        TryScope::Finally => finally
+                            .as_ref()
+                            .ok_or_else(|| malformed("finally scope has no source cleanup"))?,
                     };
                     if expected != block {
-                        return Err(malformed("scope is not the entered try body or catch").into());
+                        return Err(malformed("scope is not the entered try block").into());
                     }
-                    let Ok(unpaid) = source.next_after_try_scope(&exe.stmt(*stmt).site, caught)
+                    let Ok(unpaid) = source.next_after_try_scope(&exe.stmt(*stmt).site, scope)
                     else {
                         return Ok(false);
                     };
@@ -320,8 +331,13 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_scope_published();
-            if let Some(caught) = try_scope {
-                crate::machine::islands::witness::precise_try_scope(caught);
+            match try_scope {
+                Some(TryScope::Body) => crate::machine::islands::witness::precise_try_scope(false),
+                Some(TryScope::Catch) => crate::machine::islands::witness::precise_try_scope(true),
+                Some(TryScope::Finally) => {
+                    crate::machine::islands::witness::precise_try_finally_scope()
+                }
+                None => {}
             }
 
             match loop_body {
