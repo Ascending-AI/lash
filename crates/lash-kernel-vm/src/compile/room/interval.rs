@@ -182,7 +182,9 @@ impl Source {
     /// cursor/header prefix has completed. A try is left by its entered body
     /// or catch block; an entered catch follows a raised body. The innermost
     /// cleanup ends the suffix at its Suspend, which holds the departure.
-    pub(crate) fn compile_return_suffix(
+    /// A Break or Continue departs the same way toward its innermost loop;
+    /// only a cleanup inside that loop suspends it.
+    pub(crate) fn compile_departure_suffix(
         &self,
         at: &Point,
     ) -> Result<Arc<CompiledInterval>, Refused> {
@@ -201,7 +203,8 @@ impl Source {
         let mut return_loops = Vec::new();
         let mut for_sites = std::collections::BTreeSet::new();
         let mut raised = std::collections::BTreeSet::new();
-        let mut suspend = None;
+        let mut suspend: Option<(Site, Site)> = None;
+        let mut target: Option<Site> = None;
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
@@ -211,11 +214,13 @@ impl Source {
                 doc::Node::Stmt(doc::Stmt::While { .. }) if *index == 1 => {
                     choices.insert(path.clone(), true);
                     return_loops.push(path.clone());
+                    target = Some(path.clone());
                 }
                 doc::Node::Stmt(doc::Stmt::For { .. }) if *index == 1 => {
                     choices.insert(path.clone(), true);
                     return_loops.push(path.clone());
                     for_sites.insert(path.clone());
+                    target = Some(path.clone());
                 }
                 doc::Node::Stmt(doc::Stmt::Try(t))
                     if *index == 0 || (t.catch.is_some() && *index == 1) =>
@@ -234,8 +239,22 @@ impl Source {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
             path = path.child(*index);
         }
-        if !matches!(node, doc::Node::Stmt(doc::Stmt::Return { .. })) {
-            return Err(Refused::Path);
+        let departing = match node {
+            doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
+            doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
+            doc::Node::Stmt(doc::Stmt::Continue) => ExitKind::Continue,
+            _ => return Err(Refused::Path),
+        };
+        if departing != ExitKind::Return {
+            // A cleanup outside the target loop does not take its departure;
+            // the loop's own Catch is the unsuspended suffix.
+            let suspended = match (&suspend, &target) {
+                (Some((try_site, _)), Some(target)) => try_site.path.len() > target.path.len(),
+                _ => false,
+            };
+            if !suspended {
+                return Err(Refused::Path);
+            }
         }
         let resume = match &suspend {
             Some((_, cleanup)) => Some(self.first_event(cleanup)?),
@@ -254,7 +273,7 @@ impl Source {
         };
         let route: Box<[_]> = std::iter::once(Selection::Event {
             at: at.clone(),
-            exit: ExitKind::Return,
+            exit: departing,
         })
         .chain(
             blocks
@@ -359,7 +378,7 @@ impl Source {
             &mut suffix,
             route.len() + blocks.len() + choices.len() + 4 * for_sites.len() + raised.len(),
         )?;
-        if exit != ExitKind::Return || suffix.cursor != route.len() {
+        if exit != departing || suffix.cursor != route.len() {
             return Err(Refused::Path);
         }
         let mut variables = 0;

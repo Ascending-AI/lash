@@ -354,7 +354,16 @@ impl KernelMachine {
                         let value = self.regs[at(src)];
                         self.copy_out(&value)?;
                     }
-                    if let Some(completion) = self.publish_source_return(running, source_pc)? {
+                    if let Some(completion) = self.publish_source_departure(running, source_pc)? {
+                        return Ok(Ran::Depart(completion));
+                    }
+                    if let Some(ran) = self.run_rare(host, running, op)? {
+                        return self.source_done(running, source_pc, ran);
+                    }
+                }
+                Op::Break | Op::Continue => {
+                    self.close_region(running.stream);
+                    if let Some(completion) = self.publish_source_departure(running, source_pc)? {
                         return Ok(Ran::Depart(completion));
                     }
                     if let Some(ran) = self.run_rare(host, running, op)? {

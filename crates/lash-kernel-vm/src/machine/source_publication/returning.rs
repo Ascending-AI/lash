@@ -1,17 +1,20 @@
 //! A prepared direct return closes its entered Invocation before physical unwind.
+//! A suspended break or continue moves its record into the cleanup it enters.
 use super::*;
 use crate::machine::{Completion, Control, Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use return_storage::{ReturnInput, ReturnRecipe};
+use return_storage::{Carried, ReturnInput, ReturnRecipe};
 
 impl KernelMachine {
-    pub(in crate::machine) fn publish_source_return(
+    pub(in crate::machine) fn publish_source_departure(
         &mut self,
         running: &Running<'_>,
         pc: u32,
     ) -> Result<Option<Completion>, Halt> {
-        let Op::Return { src } = running.stream.ops[pc as usize] else {
-            return Ok(None);
+        let src = match running.stream.ops[pc as usize] {
+            Op::Return { src } => Some(src),
+            Op::Break | Op::Continue => None,
+            _ => return Ok(None),
         };
         #[cfg(any(test, feature = "testing"))]
         let run_root =
@@ -71,12 +74,13 @@ impl KernelMachine {
                     .ok_or_else(|| malformed("return has no actual loop occurrence"))?,
             )
         };
-        let Ok(interval) = source.compile_return_suffix(&room::Point {
+        let Ok(interval) = source.compile_departure_suffix(&room::Point {
             site: running.stmt.site.clone(),
             phase: room::Phase::Commit,
         }) else {
             return Ok(None);
         };
+        let departing = interval.exit();
         // A suspending suffix leaves the blocks inside its innermost cleanup.
         let suspend = interval
             .events()
@@ -84,7 +88,8 @@ impl KernelMachine {
             .filter(|event| event.point.phase == room::Phase::Suspend)
             .map(|event| event.point.site.clone());
         #[cfg(test)]
-        if suspend.is_some() && crate::machine::islands::witness::take_suspended_return_decline() {
+        if suspend.is_some() && crate::machine::islands::witness::take_suspended_departure_decline()
+        {
             return Ok(None);
         }
         {
@@ -118,11 +123,21 @@ impl KernelMachine {
                 );
             }
         }
-        let Some(roles) = running.stmt.source_roles_at(running.stream, pc) else {
-            return Ok(None);
+        let roles = match src {
+            Some(_) => match running.stmt.source_roles_at(running.stream, pc) {
+                Some(roles) => Some(roles),
+                None => return Ok(None),
+            },
+            None => None,
         };
-        let Some((_, rhs)) = roles.iter().find(|(reg, _)| *reg == src) else {
-            return Ok(None);
+        let rhs = match (src, &roles) {
+            (Some(src), Some(roles)) => {
+                let Some((_, rhs)) = roles.iter().find(|(reg, _)| *reg == src) else {
+                    return Ok(None);
+                };
+                Some((src, rhs))
+            }
+            _ => None,
         };
         // A library body's formula bills its charged caller. The accepted
         // return pays it, so a refused fee leaves the invocation entered.
@@ -139,6 +154,7 @@ impl KernelMachine {
             Some((lib, args)) => {
                 // A failing formula leaves its refusal to the ordinary leave.
                 let plan = &running.exe.lib(lib).charge;
+                let (src, _) = rhs.ok_or_else(|| malformed("a returning fee has no operand"))?;
                 let value = self.regs[src.0 as usize];
                 let Ok(units) = self
                     .warm_values(plan, &args, Some(&value))
@@ -152,11 +168,21 @@ impl KernelMachine {
         };
         self.logical_flush_controls(running.task, running.exe)?;
         self.logical_flush()?;
-        let Some(bank) = self.regs.prepare_source_return(src, rhs)? else {
-            return Ok(None);
+        let bank = match rhs {
+            Some((src, rhs)) => {
+                let Some(bank) = self.regs.prepare_source_return(src, rhs)? else {
+                    return Ok(None);
+                };
+                Some((bank, rhs))
+            }
+            None => None,
         };
-        let value = bank.value();
-        let result = Box::new(value);
+        let departure = match (&bank, departing) {
+            (Some((bank, _)), room::ExitKind::Return) => Completion::Return(Box::new(bank.value())),
+            (None, room::ExitKind::Break) => Completion::Break,
+            (None, room::ExitKind::Continue) => Completion::Continue,
+            _ => return Err(malformed("source departure differs from its statement").into()),
+        };
         let store = self.logical.ledger();
         let ledger = store.borrow();
         let mut arena = self.arena.borrow_mut();
@@ -170,9 +196,11 @@ impl KernelMachine {
             invocation: &invocation,
             task: running.task,
             at: &running.stmt.site,
-            rhs,
-            input: bank.owner(),
-            value,
+            carried: bank.as_ref().map(|(bank, rhs)| Carried {
+                rhs,
+                input: bank.owner(),
+                value: bank.value(),
+            }),
             safe_point: self.charged,
             loops,
         })
@@ -236,10 +264,12 @@ impl KernelMachine {
             &mut frame.source_frontier,
             prefix,
             || program.clone(),
-            Reserve(move |_: &mut Arena| Ok(Some((bank, result)))),
-            |_, _, edits, (bank, result)| {
+            Reserve(move |_: &mut Arena| Ok(Some((bank, departure)))),
+            |_, _, edits, (bank, departure)| {
                 debug_assert!(edits.is_empty());
-                bank.publish();
+                if let Some((bank, _)) = bank {
+                    bank.publish();
+                }
                 // The ordinary unwind then takes the physical blocks and
                 // records the same pending holding the journal transferred.
                 if suspend.is_none() {
@@ -248,7 +278,7 @@ impl KernelMachine {
                 if fee.is_some() {
                     *library = None;
                 }
-                completion = Some(Completion::Return(result));
+                completion = Some(departure);
             },
         )?;
         drop(arena);
@@ -258,7 +288,7 @@ impl KernelMachine {
         }
         #[cfg(test)]
         if published && suspend.is_some() {
-            crate::machine::islands::witness::precise_suspended_returned();
+            crate::machine::islands::witness::precise_suspended_departed();
         }
         #[cfg(any(test, feature = "testing"))]
         if published && suspend.is_none() {

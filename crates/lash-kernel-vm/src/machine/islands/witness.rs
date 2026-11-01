@@ -120,7 +120,7 @@ pub(crate) fn begin() {
     #[cfg(test)]
     PRECISE_SCOPED_RETURNS.set(0);
     #[cfg(test)]
-    PRECISE_SUSPENDED_RETURNS.set(0);
+    PRECISE_SUSPENDED_DEPARTURES.set(0);
     #[cfg(test)]
     LOOP_RETURNS.set([0; 2]);
     PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
@@ -818,25 +818,25 @@ pub(crate) fn take_body_return_decline() -> bool {
 
 #[cfg(test)]
 thread_local! {
-    static DECLINE_SUSPENDED_RETURN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static PRECISE_SUSPENDED_RETURNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static DECLINE_SUSPENDED_DEPARTURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PRECISE_SUSPENDED_DEPARTURES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-/// The next return into a cleanup takes the ordinary unwind.
+/// The next departure into a cleanup takes the ordinary unwind.
 #[cfg(test)]
-pub(crate) fn decline_suspended_return() {
-    DECLINE_SUSPENDED_RETURN.set(true);
-}
-#[cfg(test)]
-pub(in crate::machine) fn take_suspended_return_decline() -> bool {
-    DECLINE_SUSPENDED_RETURN.replace(false)
+pub(crate) fn decline_suspended_departure() {
+    DECLINE_SUSPENDED_DEPARTURE.set(true);
 }
 #[cfg(test)]
-pub(crate) fn precise_suspended_returns() -> u64 {
-    PRECISE_SUSPENDED_RETURNS.replace(0)
+pub(in crate::machine) fn take_suspended_departure_decline() -> bool {
+    DECLINE_SUSPENDED_DEPARTURE.replace(false)
 }
 #[cfg(test)]
-pub(in crate::machine) fn precise_suspended_returned() {
-    PRECISE_SUSPENDED_RETURNS.set(PRECISE_SUSPENDED_RETURNS.get() + 1);
+pub(crate) fn precise_suspended_departures() -> u64 {
+    PRECISE_SUSPENDED_DEPARTURES.replace(0)
+}
+#[cfg(test)]
+pub(in crate::machine) fn precise_suspended_departed() {
+    PRECISE_SUSPENDED_DEPARTURES.set(PRECISE_SUSPENDED_DEPARTURES.get() + 1);
 }
 
 #[cfg(test)]

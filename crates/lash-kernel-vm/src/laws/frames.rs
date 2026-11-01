@@ -132,6 +132,24 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.brake",
+        register(
+            "deep.brake",
+            "n: Any",
+            String::new(),
+            "while true { try { let saved = n break } finally { let kept = n } } return n",
+        ),
+    ));
+    probes.push((
+        "deep.skip",
+        register(
+            "deep.skip",
+            "n: Any",
+            String::new(),
+            "let first = true while first { try { set first = false let saved = n continue } finally { let kept = n } } return n",
+        ),
+    ));
+    probes.push((
         "deep.branch",
         register(
             "deep.branch",
@@ -263,13 +281,16 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
-        let suspended = matches!(name, "deep.cleanup" | "deep.recover" | "deep.supersede");
+        let suspended = matches!(
+            name,
+            "deep.cleanup" | "deep.recover" | "deep.supersede" | "deep.brake" | "deep.skip"
+        );
         if source_only {
             embedder.machine.force_source_execution();
         }
         // The reference source run takes the ordinary unwind into cleanup.
         if declined {
-            crate::machine::islands::witness::decline_suspended_return();
+            crate::machine::islands::witness::decline_suspended_departure();
         }
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
@@ -298,9 +319,9 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
 
         if suspended {
             assert_eq!(
-                crate::machine::islands::witness::precise_suspended_returns(),
+                crate::machine::islands::witness::precise_suspended_departures(),
                 u64::from((source_only || name == "deep.recover") && !declined),
-                "the return must move into its cleanup's pending departure: {name}"
+                "the departure must move into its cleanup's pending departure: {name}"
             );
         }
         if name == "deep.loop" || name == "deep.walk" {
@@ -319,6 +340,8 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.cleanup",
         "deep.recover",
         "deep.supersede",
+        "deep.brake",
+        "deep.skip",
         "deep.loop",
         "deep.walk",
     ] {
@@ -328,11 +351,14 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             scoped_observation(name, true, false),
             "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
         );
-        if matches!(name, "deep.cleanup" | "deep.recover" | "deep.supersede") {
+        if matches!(
+            name,
+            "deep.cleanup" | "deep.recover" | "deep.supersede" | "deep.brake" | "deep.skip"
+        ) {
             assert_eq!(
                 observation,
                 scoped_observation(name, true, true),
-                "the suspended return must leave the ordinary unwind's observation: {name}"
+                "the suspended departure must leave the ordinary unwind's observation: {name}"
             );
         }
     }

@@ -33,7 +33,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             site: statement.site.clone(),
             phase: SourcePhase::Commit,
         };
-        let Ok(interval) = source.compile_return_suffix(&at) else {
+        let Ok(interval) = source.compile_departure_suffix(&at) else {
             return Ok(ValuePublication::Unavailable);
         };
         if !interval
@@ -102,9 +102,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             invocation: &activation.invocation,
             task: self.task,
             at: &statement.site,
-            rhs,
-            input,
-            value,
+            carried: Some(
+                crate::machine::source_publication::return_storage::Carried { rhs, input, value },
+            ),
             safe_point: self.charged,
             loops,
         })

@@ -17,11 +17,15 @@ pub(in crate::machine) struct ReturnInput<'a> {
     pub(in crate::machine) invocation: &'a Invocation,
     pub(in crate::machine) task: doc::TaskId,
     pub(in crate::machine) at: &'a Site,
+    /// A return carries its RHS operand; a break or continue carries none.
+    pub(in crate::machine) carried: Option<Carried<'a>>,
+    pub(in crate::machine) safe_point: u64,
+    pub(in crate::machine) loops: Vec<(Site, u64)>,
+}
+pub(in crate::machine) struct Carried<'a> {
     pub(in crate::machine) rhs: &'a Site,
     pub(in crate::machine) input: Owner,
     pub(in crate::machine) value: doc::Value,
-    pub(in crate::machine) safe_point: u64,
-    pub(in crate::machine) loops: Vec<(Site, u64)>,
 }
 pub(in crate::machine) struct ReturnRecipe {
     pub(in crate::machine) prefix: Prefix,
@@ -35,12 +39,11 @@ impl ReturnInput<'_> {
         heap: &PagedHeap,
     ) -> Result<Option<ReturnRecipe>, HeapFault> {
         let source = self.source;
-        let value = self.value;
         let at = Point {
             site: self.at.clone(),
             phase: SourcePhase::Commit,
         };
-        let Ok(interval) = source.compile_return_suffix(&at) else {
+        let Ok(interval) = source.compile_departure_suffix(&at) else {
             return Ok(None);
         };
         if !interval
@@ -61,57 +64,66 @@ impl ReturnInput<'_> {
                 .root(&selector, self.task, self.invocation.id())
                 .ok_or_else(|| malformed("return has no canonical source owner"))
         };
-        let input_selector = room::Owner::Operand(self.rhs.clone());
         let departure_selector = room::Owner::ActiveDeparture(source.site.clone());
-        let input = root(input_selector.clone())?;
-        if input != self.input {
-            return Err(malformed("return has another source operand"));
-        }
         let departure = root(departure_selector.clone())?;
         let incoming = Owner::Incoming(self.task);
-        if ledger.holding(input, heap.pages())?.is_none() {
-            return Ok(None);
-        }
         if ledger.holding(departure, heap.pages())?.is_some()
             || ledger.holding(incoming, heap.pages())?.is_some()
         {
             return Ok(None);
         }
-        let bytes = ledger
-            .holding(input, heap.pages())?
-            .ok_or_else(|| malformed("return input disappeared"))?
-            .bytes();
-        let released = ledger.release_cost_preserving(
-            arena,
-            heap,
-            &[input],
-            &[(departure, RootValue::Existing(input))],
-        )?;
-        let returning = JournalEvent {
-            inputs: vec![input],
-            outputs: vec![(departure, PV::Existing(input))],
-            ..Default::default()
-        };
-        let mut events = vec![returning];
-        let mut retired = std::collections::BTreeSet::from([input]);
-        let mut facts = LeafExecution(
-            [(
-                at.clone(),
-                LeafFacts {
-                    dependencies: value.handle().into_iter().collect(),
-                    values: [
-                        (Measure::Local(departure_selector), i128::from(bytes)),
-                        (
-                            Measure::Release(vec![input_selector].into()),
-                            i128::from(released),
-                        ),
-                    ]
-                    .into(),
+        let mut retired = std::collections::BTreeSet::new();
+        let (departing, commit) = match &self.carried {
+            Some(carried) => {
+                let input_selector = room::Owner::Operand(carried.rhs.clone());
+                let input = root(input_selector.clone())?;
+                if input != carried.input {
+                    return Err(malformed("return has another source operand"));
+                }
+                let Some(holding) = ledger.holding(input, heap.pages())? else {
+                    return Ok(None);
+                };
+                let released = ledger.release_cost_preserving(
+                    arena,
+                    heap,
+                    &[input],
+                    &[(departure, RootValue::Existing(input))],
+                )?;
+                retired.insert(input);
+                (
+                    JournalEvent {
+                        inputs: vec![input],
+                        outputs: vec![(departure, PV::Existing(input))],
+                        ..Default::default()
+                    },
+                    LeafFacts {
+                        dependencies: carried.value.handle().into_iter().collect(),
+                        values: [
+                            (
+                                Measure::Local(departure_selector),
+                                i128::from(holding.bytes()),
+                            ),
+                            (
+                                Measure::Release(vec![input_selector].into()),
+                                i128::from(released),
+                            ),
+                        ]
+                        .into(),
+                        ..Default::default()
+                    },
+                )
+            }
+            // The value-less record holds nothing.
+            None => (
+                JournalEvent {
+                    outputs: vec![(departure, PV::Departure)],
                     ..Default::default()
                 },
-            )]
-            .into(),
-        );
+                LeafFacts::default(),
+            ),
+        };
+        let mut events = vec![departing];
+        let mut facts = LeafExecution([(at.clone(), commit)].into());
         let mut leave = None;
         for event in interval.events().skip(1) {
             if leave.is_some() {
@@ -193,9 +205,18 @@ impl ReturnInput<'_> {
         let leave = leave.ok_or_else(|| malformed("return suffix has no defining Leave"))?;
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
-        encoding.text("lash.source.return-leave");
-        at.site.encode(&mut encoding);
-        input.encode(&mut encoding);
+        match &self.carried {
+            Some(carried) => {
+                encoding.text("lash.source.return-leave");
+                at.site.encode(&mut encoding);
+                carried.input.encode(&mut encoding);
+            }
+            None => {
+                encoding.text("lash.source.departure-leave");
+                at.site.encode(&mut encoding);
+                departure.encode(&mut encoding);
+            }
+        }
         departure.encode(&mut encoding);
         let start = SourcePosition {
             at: at.clone(),

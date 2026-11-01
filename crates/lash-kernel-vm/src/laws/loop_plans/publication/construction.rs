@@ -111,7 +111,7 @@ pub(super) fn successors() {
         site: Site::new(Unit::Main, vec![2]),
         phase: Phase::Commit,
     };
-    let suffix = source.compile_return_suffix(&returning).unwrap();
+    let suffix = source.compile_departure_suffix(&returning).unwrap();
     assert_eq!(
         suffix
             .events()
@@ -128,7 +128,7 @@ pub(super) fn successors() {
     assert_eq!(suffix.exit(), room::ExitKind::Return);
     assert!(
         source
-            .compile_return_suffix(&Point {
+            .compile_departure_suffix(&Point {
                 site: Site::new(Unit::Main, vec![0]),
                 phase: Phase::Commit
             })
