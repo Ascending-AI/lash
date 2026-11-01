@@ -1,4 +1,4 @@
-// Derived from v7.schema.json by scripts/generate-workflow-schemas.py.
+// Derived from v8.schema.json by scripts/generate-workflow-schemas.py.
 // JSON Schema remains authoritative for value constraints and validation.
 
 /**
