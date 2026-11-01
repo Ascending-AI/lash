@@ -48,7 +48,11 @@ pub(super) enum SurfaceMethod {
     DurableRead(durable_read_coverage::DurableReadMethod),
     PrepareModelCalls,
     ModelCalls,
+    ModelCallsById,
+    ModelCallIds,
     ModelCallPins,
+    ModelCallPinsById,
+    ModelCallPin,
     ClaimFacts,
     /// [`DurableStore::readiness`](lash_core::durable_port::DurableStore::readiness):
     /// whether a claim could find work, and whether a due time is ahead.
@@ -214,7 +218,11 @@ impl SurfaceMethod {
             Self::DurableRead(method) => method.name(),
             Self::PrepareModelCalls => "surface:prepare_model_calls",
             Self::ModelCalls => "surface:model_calls",
+            Self::ModelCallsById => "surface:model_calls_by_id",
+            Self::ModelCallIds => "surface:model_call_ids",
             Self::ModelCallPins => "surface:model_call_pins",
+            Self::ModelCallPinsById => "surface:model_call_pins_by_id",
+            Self::ModelCallPin => "surface:model_call_pin",
             Self::BeginRetained => "surface:begin_retained",
             Self::BeginProcessRetained => "surface:begin_process_retained",
             Self::ClaimFacts => "surface:claim_facts",
@@ -470,10 +478,17 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 durable_read_coverage::DurableReadMethod::PromptTexts,
             )),
             surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::ToolCalls,
+            )),
+            surface(SurfaceMethod::DurableRead(
                 durable_read_coverage::DurableReadMethod::Hydrate,
             )),
             surface(SurfaceMethod::ModelCalls),
+            surface(SurfaceMethod::ModelCallsById),
+            surface(SurfaceMethod::ModelCallIds),
             surface(SurfaceMethod::ModelCallPins),
+            surface(SurfaceMethod::ModelCallPinsById),
+            surface(SurfaceMethod::ModelCallPin),
             surface(SurfaceMethod::BeginRetained),
             surface(SurfaceMethod::BeginProcessRetained),
             surface(SurfaceMethod::ClaimFacts),
@@ -1209,7 +1224,11 @@ impl BackendRunner {
             }
             SurfaceMethod::PrepareModelCalls
             | SurfaceMethod::ModelCalls
-            | SurfaceMethod::ModelCallPins => {
+            | SurfaceMethod::ModelCallsById
+            | SurfaceMethod::ModelCallIds
+            | SurfaceMethod::ModelCallPins
+            | SurfaceMethod::ModelCallPinsById
+            | SurfaceMethod::ModelCallPin => {
                 self.surface
                     .model_ledger
                     .drive(

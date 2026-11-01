@@ -108,6 +108,81 @@ impl ModelLedger {
                 self.visited.insert("model_call_pins");
                 format!("{rows:?}")
             }
+            SurfaceMethod::ModelCallsById => {
+                // Select only the second call: the keyed read returns exactly it.
+                let rows = store
+                    .model_calls_by_id(
+                        session,
+                        &ModelCallId::turn_owner(&SURFACE_RUN_ID.into()),
+                        &[LlmCallId("coverage-call-2".to_owned())],
+                    )
+                    .await
+                    .expect("read one sealed call by id");
+                assert_eq!(rows.len(), 1, "a keyed read returns only the named call");
+                let expected = &self.expected[1];
+                assert_eq!(
+                    (
+                        &rows[0].call,
+                        &rows[0].call_id,
+                        &rows[0].end,
+                        &rows[0].record
+                    ),
+                    (
+                        &expected.call,
+                        &expected.call_id,
+                        &expected.end,
+                        &expected.record
+                    )
+                );
+                self.visited.insert("model_calls_by_id");
+                serde_json::to_string(&rows).expect("project the keyed call")
+            }
+            SurfaceMethod::ModelCallIds => {
+                let ids = store
+                    .model_call_ids(session, &ModelCallId::turn_owner(&SURFACE_RUN_ID.into()))
+                    .await
+                    .expect("read sealed call ids");
+                assert_eq!(
+                    ids,
+                    vec![
+                        LlmCallId("coverage-call-1".to_owned()),
+                        LlmCallId("coverage-call-2".to_owned())
+                    ]
+                );
+                self.visited.insert("model_call_ids");
+                format!("{ids:?}")
+            }
+            SurfaceMethod::ModelCallPinsById => {
+                let rows = store
+                    .model_call_pins_by_id(
+                        session,
+                        &ModelCallId::turn_owner(&SURFACE_RUN_ID.into()),
+                        &[
+                            LlmCallId("coverage-call-1".to_owned()),
+                            LlmCallId("coverage-call-2".to_owned()),
+                        ],
+                    )
+                    .await
+                    .expect("read named reservations after terminal");
+                assert!(rows.is_empty(), "terminal recovery seals every reservation");
+                self.visited.insert("model_call_pins_by_id");
+                format!("{rows:?}")
+            }
+            SurfaceMethod::ModelCallPin => {
+                let pin = store
+                    .model_call_pin(&PromptCallKey {
+                        session: session.clone(),
+                        call: ModelCallId::Turn {
+                            run: SURFACE_RUN_ID.into(),
+                            ordinal: 1,
+                        },
+                    })
+                    .await
+                    .expect("read one reservation after terminal");
+                assert!(pin.is_none(), "terminal recovery seals every reservation");
+                self.visited.insert("model_call_pin");
+                format!("{pin:?}")
+            }
             _ => unreachable!("only model ledger operations use this driver"),
         }
     }
@@ -246,7 +321,11 @@ pub(super) async fn reached_model_methods() -> std::collections::BTreeSet<&'stat
                 method,
                 SurfaceMethod::PrepareModelCalls
                     | SurfaceMethod::ModelCalls
+                    | SurfaceMethod::ModelCallsById
+                    | SurfaceMethod::ModelCallIds
                     | SurfaceMethod::ModelCallPins
+                    | SurfaceMethod::ModelCallPinsById
+                    | SurfaceMethod::ModelCallPin
                     | SurfaceMethod::DurableRead(_)
             )
         {

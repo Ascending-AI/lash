@@ -131,27 +131,57 @@ async fn a_tool_sleep_race_restores_its_winner_and_records_the_loser_cancelled()
             .durable()
             .await
             .expect("the race's durable session");
-        let calls = durable
-            .read_turn_tool_calls(&run)
+        // The loser settles with a body-free cancelled terminal, so it is read
+        // by its call identity: turn listing returns only materialized records.
+        let ids: Vec<_> = decisions.keys().cloned().collect();
+        let reads = durable
+            .read_tool_calls(
+                &ids.iter()
+                    .map(|call_id| lash::TurnToolCallRef {
+                        turn_id: run.clone(),
+                        call_id: call_id.clone(),
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .await
             .expect("the race's committed calls");
-        let loser = calls
+        let settled: Vec<_> = reads
             .iter()
-            .find(|call| call.tool == "typescript.sleep")
-            .unwrap_or_else(|| panic!("the losing sleep is recorded: {calls:?}"));
-        let lash::tools::ToolCallOutcome::Cancelled(cancelled) = &loser.output.outcome else {
-            panic!("the race loser is cancelled: {loser:?}");
+            .filter_map(|read| match read {
+                lash::ToolCallRead::Settled { record } => match &record.output.outcome {
+                    lash::tools::ToolCallOutcome::Cancelled(cancelled) => {
+                        Some((record.call_id.clone(), cancelled.clone()))
+                    }
+                    _ => panic!("the race loser is cancelled: {record:?}"),
+                },
+                lash::ToolCallRead::SettledWithoutRecord { call_id, outcome } => {
+                    match outcome.as_ref() {
+                        lash::turn::RecordedCallOutcome::Cancelled { cancellation, .. } => {
+                            Some((call_id.clone(), cancellation.clone()))
+                        }
+                        other => panic!("the race loser is cancelled: {other:?}"),
+                    }
+                }
+                lash::ToolCallRead::NotFound { .. } => None,
+                lash::ToolCallRead::NotYetSettled { call_id } => {
+                    panic!("the restored race leaves {call_id:?} unsettled")
+                }
+            })
+            .collect();
+        let [(loser, cancelled)] = settled.as_slice() else {
+            panic!("the losing sleep is recorded once: {reads:?}");
         };
         assert_eq!(
             cancelled.origin,
             Some(lash_core::CancelOrigin::ModelRequested)
         );
-        if let Some(decision) = decisions.remove(&loser.call_id) {
-            assert_eq!(
-                *cancelled, decision,
-                "recovery must retain the first decision"
-            );
-        }
+        let decision = decisions
+            .remove(loser)
+            .expect("the loser carries a cut's cancellation decision");
+        assert_eq!(
+            *cancelled, decision,
+            "recovery must retain the first decision"
+        );
         let transcript = durable.transcript().await.expect("the race's transcript");
         let cell = transcript
             .visible()

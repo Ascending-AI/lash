@@ -30,6 +30,7 @@ pub(super) enum DurableReadMethod {
     SessionMailbox,
     PromptSnapshot,
     PromptTexts,
+    ToolCalls,
     Hydrate,
 }
 
@@ -56,6 +57,7 @@ impl DurableReadMethod {
             Self::SessionMailbox => "session_mailbox",
             Self::PromptSnapshot => "prompt_snapshot",
             Self::PromptTexts => "prompt_texts",
+            Self::ToolCalls => "tool_calls",
             Self::Hydrate => "hydrate",
         }
     }
@@ -223,6 +225,19 @@ pub(super) async fn drive(
                 .await
                 .expect("execute prompt_texts")
         ),
+        DurableReadMethod::ToolCalls => {
+            let calls = store
+                .tool_calls(
+                    &lash_durable::domain::CallOwner::Turn(session.clone(), run.clone()),
+                    &lash_durable::domain::ToolCallSelection::Calls(vec![
+                        lash_protocol_types::ToolCallId::fixture("coverage-absent-call"),
+                    ]),
+                )
+                .await
+                .expect("execute tool_calls");
+            assert!(calls.rows.is_empty(), "an absent owner has no calls");
+            format!("{:?}", calls.rows)
+        }
         DurableReadMethod::Hydrate => {
             let error = store
                 .hydrate(
