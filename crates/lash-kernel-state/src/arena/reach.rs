@@ -5,9 +5,9 @@
 //! reads a resident one back from here ([`Arena::holds_resident`],
 //! [`Arena::reach_entity`]). It assigns no id and writes nothing back.
 //!
-//! It also gives the capacity what a region's statement would install
+//! It also gives the growth estimate what a region's statement would install
 //! before it installs it ([`Arena::install_bound`],
-//! [`Arena::construction_floor`]), in the meter's bytes (FIG-6791).
+//! [`Arena::construction_floor`]), in the estimate's bytes.
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};

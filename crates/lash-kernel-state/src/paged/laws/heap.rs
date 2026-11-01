@@ -1098,100 +1098,68 @@ fn a_cold_text_length_observation_reads_no_payload_leaf() {
     );
 }
 
-/// K-MACH-008 (FIG-6791): every seal saves the capacity the meter counted
-/// in the certificate, and a cold reopen restores the same certificate.
+/// The persistent ledger adds owner, ended and entity roots beside the
+/// directory. Header work includes every child reference in its budget.
 #[test]
-fn every_seal_saves_the_counted_capacity_and_reopens_it() {
-    use crate::paged::tree::Tree;
-    use {
-        lash_kernel_value::names::Name, lash_kernel_value::sites::Site,
-        lash_kernel_value::sites::Unit,
-    };
+fn a_header_seal_budgets_every_child_reference() {
+    use crate::paged::logical::{Lifecycle, Owner, SourceValue};
+    use lash_kernel_value::names::Name;
+    use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
     let (mut heap, pages) = fresh();
-    for round in 1..=3_u64 {
-        heap.record_capacity(round * 96);
-        let mut bindings = Tree::new(false);
-        let value = PageValue::Float(lash_kernel_doc::Float::new(1.5));
-        bindings
-            .write(
-                b"live".to_vec(),
-                BindingRecord {
-                    name: NameRef::new(&Name::new("live"), heap.pages()).unwrap(),
-                    declared: SiteRef::new(&Site::new(Unit::Main, vec![0]), heap.pages()).unwrap(),
-                    value: BoundRecord::Value(value),
-                },
-                heap.pages(),
-            )
-            .unwrap();
-        heap.set_session_root(bindings).unwrap();
-        seal(&mut heap);
-        let sealed = heap.certificate();
-        assert_eq!(sealed.capacity, round * 96);
-        let cold = reopen(&mut heap, &pages);
-        assert_eq!(cold.certificate(), sealed);
-        assert_eq!(heap.certificate(), sealed);
-    }
-    // The persistent ledger adds owner, ended and entity roots beside the
-    // directory. Header work includes every child reference in its budget.
-    {
-        use crate::paged::logical::{Lifecycle, Owner, SourceValue};
-        use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
-        let (mut heap, pages) = fresh();
-        let list = heap
-            .allocate_object(ObjectInit::List(vec![int(7)]))
-            .unwrap();
-        let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
-        let lifecycle = Lifecycle::new(heap.logical_ledger());
-        lifecycle.replace(
-            Owner::session(&Name::new("live")),
-            Some(SourceValue::Page(PageValue::List(list))),
-        );
-        lifecycle.replace(
-            Owner::Ended(lash_kernel_doc::TaskId(1)),
-            Some(SourceValue::Page(PageValue::List(list))),
-        );
-        lifecycle.flush(&mut arena, &heap).unwrap();
-        let mut root = heap
-            .seal(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .unwrap()
-            .unwrap()
-            .root;
-        let children = [
-            root.directory.page(),
-            root.families.page(),
-            root.logical.owners.page(),
-            root.logical.execution.page(),
-            root.logical.ended.page(),
-            root.logical.entities.page(),
-        ]
-        .into_iter()
-        .flatten()
-        .count();
-        assert_eq!(
-            children, 4,
-            "the fixture exercises more than the old header's three-reference allowance"
-        );
-        heap.record_capacity(1);
-        root.accounting.capacity = 1;
-        let mut tokens = TokenWriter::new();
-        tokens.sum(0, 1);
-        root.encode(&mut tokens);
-        let bytes = tokens.into_bytes().len() as u64 + children as u64 * 32 + 32;
-        let sealed = pages.borrow().seals;
-        assert!(
-            heap.seal(SealBudget {
-                pages: 1,
-                bytes: bytes - 1
-            })
-            .unwrap()
-            .is_none(),
-            "an undersized header budget yields before publishing"
-        );
-        assert_eq!(pages.borrow().seals, sealed);
-        assert!(heap.seal(SealBudget { pages: 1, bytes }).unwrap().is_some());
-        assert_eq!(pages.borrow().seals, sealed + 1);
-    }
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![int(7)]))
+        .unwrap();
+    let mut arena = crate::arena::Arena::from_ordinal(heap.next_ordinal());
+    let lifecycle = Lifecycle::new(heap.logical_ledger());
+    lifecycle.replace(
+        Owner::session(&Name::new("live")),
+        Some(SourceValue::Page(PageValue::List(list))),
+    );
+    lifecycle.replace(
+        Owner::Ended(lash_kernel_doc::TaskId(1)),
+        Some(SourceValue::Page(PageValue::List(list))),
+    );
+    lifecycle.flush(&mut arena, &heap).unwrap();
+    let mut root = heap
+        .seal(SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        })
+        .unwrap()
+        .unwrap()
+        .root;
+    let children = [
+        root.directory.page(),
+        root.families.page(),
+        root.logical.owners.page(),
+        root.logical.execution.page(),
+        root.logical.ended.page(),
+        root.logical.entities.page(),
+    ]
+    .into_iter()
+    .flatten()
+    .count();
+    assert_eq!(
+        children, 4,
+        "the fixture exercises more than the old header's three-reference allowance"
+    );
+    heap.next_family().unwrap();
+    root.next_family += 1;
+    let mut tokens = TokenWriter::new();
+    tokens.sum(0, 1);
+    root.encode(&mut tokens);
+    let bytes = tokens.into_bytes().len() as u64 + children as u64 * 32 + 32;
+    let sealed = pages.borrow().seals;
+    assert!(
+        heap.seal(SealBudget {
+            pages: 1,
+            bytes: bytes - 1
+        })
+        .unwrap()
+        .is_none(),
+        "an undersized header budget yields before publishing"
+    );
+    assert_eq!(pages.borrow().seals, sealed);
+    assert!(heap.seal(SealBudget { pages: 1, bytes }).unwrap().is_some());
+    assert_eq!(pages.borrow().seals, sealed + 1);
 }

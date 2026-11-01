@@ -73,7 +73,7 @@ use loops::Cursor;
 use project::SharedArena;
 use session::{keyed, open_tree};
 
-/// The bytes the capacity meter counts for a frame before its slots.
+/// The room an island reserves for a frame before its slots.
 const FRAME_BYTES: u64 = 64;
 /// What ends a run from inside a statement.
 /// Rare payloads are boxed so successful frame lookups carry a small result.
@@ -382,10 +382,6 @@ pub struct KernelMachine {
     document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
-    /// What the run's heap was sealed holding, as its certificate records
-    /// it: the capacity meter counts the run holding at least this until
-    /// its first sweep recounts (FIG-6791).
-    capacity_floor: u64,
     heap: PagedHeap,
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,

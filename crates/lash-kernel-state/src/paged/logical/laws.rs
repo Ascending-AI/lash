@@ -1255,7 +1255,6 @@ fn checked_program_and_warm_balance() {
         balance,
         "warming authenticates an existing fact without minting a physical claim"
     );
-    heap.record_capacity(1 << 20);
     let sealed = heap.seal(budget()).unwrap().unwrap();
     assert_eq!(
         sealed.root.logical.balance().unwrap(),
@@ -1271,9 +1270,8 @@ fn checked_program_and_warm_balance() {
     assert_eq!(
         opened.logical_balance().unwrap(),
         balance,
-        "open restores ledger summaries rather than physical capacity"
+        "open restores ledger summaries"
     );
-    assert_eq!(opened.certificate().capacity, 1 << 20);
 
     let (heap, _) = fresh();
     let mut arena = crate::arena::Arena::new();

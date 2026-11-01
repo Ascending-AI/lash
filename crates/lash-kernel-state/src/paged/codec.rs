@@ -81,11 +81,10 @@ tree_root!(KeyedRoot);
 tree_root!(SequenceRoot);
 record!(AccountingCertificate {
     metric: AccountingMetric,
-    capacity: u64,
     entities: u64,
     refinements: u64
 });
-units!(AccountingMetric { Capacity = 0, Unmetered = 1 });
+units!(AccountingMetric { Logical = 0, Unmetered = 1 });
 record!(HeapRoot {
     logical: super::logical::LedgerRoot,
     directory: KeyedRoot,

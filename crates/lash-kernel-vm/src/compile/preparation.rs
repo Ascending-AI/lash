@@ -459,13 +459,6 @@ impl Admission {
         let library = code.library.as_ref().unwrap_or(library);
         let origins = code.origins(document, library, documents, instances, &self.selection);
         Ok(Arc::new(Executable {
-            origin_cache_bytes: (std::mem::size_of_val(code.helper_reach.as_ref()) as u64)
-                .saturating_add(
-                    code.helper_reach
-                        .iter()
-                        .map(|(_, ids)| std::mem::size_of_val(ids.as_ref()) as u64)
-                        .sum::<u64>(),
-                ),
             origins,
             code_base: library.0.tables.codes.len(),
             block_base: library.0.tables.blocks.len(),

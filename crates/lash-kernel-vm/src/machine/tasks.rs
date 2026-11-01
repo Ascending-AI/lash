@@ -653,7 +653,6 @@ impl Tasks {
         let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
-        task.frames.release_control();
         put(&mut self.rows, index, &mut task, &self.access, true)?;
         if !task.counters.dirty.is_empty() {
             self.unprojected.insert(index, task.counters);
@@ -762,15 +761,6 @@ impl Tasks {
         Ok(bytes)
     }
 
-    /// The bytes the capacity meter counts for the cached tasks' resident
-    /// frames (FIG-6791).
-    pub(super) fn control_bytes(&self) -> u64 {
-        self.cache
-            .iter()
-            .flatten()
-            .map(|(_, task)| task.frames.control_bytes())
-            .fold(0, u64::saturating_add)
-    }
     /// The result `task` retains, if it ended and retains one.
     pub(super) fn ended_result(&self, task: TaskId) -> Result<Option<PageValue>, HeapFault> {
         let row;

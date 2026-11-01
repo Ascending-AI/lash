@@ -4,7 +4,7 @@
 //! chunk it reaches, which the machine decodes before it asks again, so a
 //! point read or write of a large list or table decodes one chunk. An edit
 //! marks its object dirty, with the card it changed; what it grew by is in
-//! the resident count the capacity meter reads (FIG-6791).
+//! the resident count the growth estimate reads.
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence};
 use lash_kernel_doc::{NativeError, Retry, Value};

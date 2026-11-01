@@ -191,18 +191,6 @@ impl PagedHeap {
         self.census = Some(census);
         Ok(())
     }
-    /// Records the capacity the run holds in the certificate the next seal
-    /// writes (FIG-6791).
-    pub fn record_capacity(&mut self, capacity: u64) {
-        let Some(census) = self.census.as_mut() else {
-            return;
-        };
-        if self.accounting.capacity != capacity {
-            census.record_capacity(capacity);
-            self.accounting = census.certificate();
-            self.header = None;
-        }
-    }
     /// The page port the machine's own record trees read and edit through:
     /// names, sites, task identities, frames and waits. The heap's
     /// directory, families and installed roots are not reachable through

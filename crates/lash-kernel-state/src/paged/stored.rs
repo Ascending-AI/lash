@@ -7,9 +7,9 @@
 //! already holds by its dirty cards with [`PagedHeap::store_cards`], so a
 //! point write re-encodes one leaf and its index path.
 //!
-//! A store prices nothing: the machine's capacity meter counted the
-//! arena's growth when it was made (FIG-6791). A store counts a fresh
-//! entity into the census.
+//! A store prices nothing: the logical ledger priced the value when the
+//! run published it (FIG-7513). A store counts a fresh entity into the
+//! census.
 
 use super::directory::{Body, Entry, ObjectHead, Ordinal, ordinal_key};
 use super::heap_impl::{PagedHeap, census_fault, normal_bytes};

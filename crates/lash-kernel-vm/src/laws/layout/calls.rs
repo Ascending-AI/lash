@@ -1108,7 +1108,11 @@ fn direct_call_entry_agrees() {
         .contains(&body)
         {
             let mut refused = false;
-            for memory in [512, 1024, 2048, 4096, 8192] {
+            // Each body must refuse under at least one bound. The smallest
+            // sits below the least logical peak a body reaches: the
+            // read/add/write body holds at most 389 bytes at its verdict
+            // points under logical prices, so 256 refuses it.
+            for memory in [256, 512, 1024, 2048, 4096, 8192] {
                 let limits = Bounds {
                     memory,
                     ..super::super::embedder::ROOMY

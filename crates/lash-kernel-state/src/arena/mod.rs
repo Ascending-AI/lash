@@ -286,16 +286,10 @@ pub struct Arena {
     /// still names what it named while this has not moved.
     freed: u64,
     /// Values held by resident bodies, each body one more, long text and
-    /// bytes one a [`VALUE_BYTES`]: what triggers a collection, and what
-    /// the capacity meter counts (FIG-6791).
+    /// bytes one a [`VALUE_BYTES`]: what triggers a collection, and the
+    /// physical growth an island's envelope paces by. It is no memory
+    /// authority: the logical ledger is (FIG-7513).
     resident: u64,
-    /// The control state's bytes the capacity meter counts beside the
-    /// resident values: frames and their slots, as the machine grew them
-    /// since its last sweep recounted them.
-    control: u64,
-    /// The held bytes ([`Arena::held`]) at which the capacity meter's
-    /// slow path runs next: [`u64::MAX`] when nothing meters.
-    capacity_mark: u64,
     /// Objects with a cold chunk, at most: none means nothing needs decoding.
     colds: u64,
     collect_at: u64,
@@ -319,8 +313,8 @@ pub struct Arena {
 /// What a collection's roots are visited with: each value they hold.
 pub type Visit<'a> = dyn FnMut(&Value) + 'a;
 
-/// The bytes the capacity meter counts for one resident value slot: the
-/// size of a [`Value`]. Long text and bytes count one slot a 16 bytes.
+/// The bytes the arena's growth estimate counts for one resident value
+/// slot: the size of a [`Value`]. Long text and bytes count one slot a 16 bytes.
 pub const VALUE_BYTES: u64 = std::mem::size_of::<Value>() as u64;
 
 /// The body slot and its ephemeral size facts, rounded to meter slots.
@@ -346,7 +340,6 @@ impl Arena {
             release_at: FIRST_RELEASE,
             evict_at: chunks::EVICT_AT,
             boundary_at: chunks::EVICT_AT,
-            capacity_mark: u64::MAX,
             ..Self::default()
         }
     }
@@ -360,58 +353,20 @@ impl Arena {
         }
     }
 
-    /// The bytes the capacity meter counts the arena holding: its resident
-    /// value slots at [`VALUE_BYTES`] each, the control state the machine
-    /// counted (FIG-6791), and its tables' shared layouts.
+    /// The arena's physical growth estimate: its resident value slots at
+    /// [`VALUE_BYTES`] each and its tables' shared layouts. An island's
+    /// envelope and a native's nursery pace their growth by it and decline
+    /// past it; what the run holds is the logical ledger's balance
+    /// (FIG-7513).
     #[inline(always)]
     pub fn held(&self) -> u64 {
         self.resident
             .saturating_mul(VALUE_BYTES)
-            .saturating_add(self.control)
             .saturating_add(self.layouts.held())
     }
 
-    /// The capacity meter's resident slots, control state and shared layouts.
-    #[cfg(any(test, feature = "perf-witness"))]
-    pub fn capacity_parts(&self) -> [u64; 3] {
-        [
-            self.resident.saturating_mul(VALUE_BYTES),
-            self.control,
-            self.layouts.held(),
-        ]
-    }
-
-    /// Whether what the arena holds reached the capacity mark: the meter's
-    /// one compare where storage or control grows.
-    #[inline(always)]
-    pub fn capacity_due(&self) -> bool {
-        self.held() >= self.capacity_mark
-    }
-
-    /// Where the capacity meter's slow path runs next.
-    pub fn set_capacity_mark(&mut self, mark: u64) {
-        self.capacity_mark = mark;
-    }
-
-    /// Counts `bytes` more of control state: frames and their slots.
-    #[inline(always)]
-    pub fn grow_control(&mut self, bytes: u64) {
-        self.control = self.control.saturating_add(bytes);
-    }
-
-    /// Control state the run let go of: a frame it popped or dropped from
-    /// memory.
-    pub fn shrink_control(&mut self, bytes: u64) {
-        self.control = self.control.saturating_sub(bytes);
-    }
-
-    /// The control state as a sweep recounted it.
-    pub fn recount_control(&mut self, bytes: u64) {
-        self.control = bytes;
-    }
-
     /// Recounts the values its live bodies hold, as a sweep does after it
-    /// freed what nothing reaches: the meter counts exactly what is left.
+    /// freed what nothing reaches: the estimate counts exactly what is left.
     pub fn recount_resident(&mut self) {
         let objects = &self.objects;
         self.resident = (0..objects.capacity() as u32)
@@ -1554,8 +1509,8 @@ mod tests {
     use super::*;
     use lash_kernel_doc::heap::FamilyId;
 
-    /// FIG-6791: a decoded body takes its placeholder's place in what the
-    /// capacity meter counts, so the run holds what a recount finds.
+    /// A decoded body takes its placeholder's place in the growth estimate,
+    /// so the arena holds what a recount finds.
     #[test]
     fn a_decoded_body_replaces_its_placeholder_in_the_count() {
         let mut arena = Arena::new();

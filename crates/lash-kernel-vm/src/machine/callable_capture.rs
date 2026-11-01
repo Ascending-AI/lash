@@ -75,7 +75,6 @@ impl KernelMachine {
                         },
                     )
                     .map_err(|error| fault(&error.to_string()))?;
-                self.grown();
                 Value::Closure(closure)
             } else {
                 if !function.captures.is_empty() {

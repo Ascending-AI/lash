@@ -374,9 +374,6 @@ impl KernelMachine {
         )?;
         drop(arena);
         if published {
-            if !removing {
-                self.grown();
-            }
             #[cfg(any(test, feature = "testing"))]
             if matches!(edit.member, Member::Field(_)) {
                 crate::machine::islands::witness::field_member_published();

@@ -23,7 +23,7 @@
 //! What they hold is metered: each layout's bytes, and its index's when a
 //! table first takes it, are counted before they are allocated, and
 //! counted no more once no table holds it or a layout after it, so the
-//! capacity meter counts the layouts the run's live tables need, with the
+//! growth estimate counts the layouts the run's live tables need, with the
 //! room a layout keeps for the layouts after it while it lives. The empty layout every run has is
 //! not data and is not counted itself. The transitions are bounded
 //! ([`MAX_KEYS`], [`MAX_LAYOUTS`]): diverse data falls back to tables' own
@@ -410,7 +410,7 @@ mod tests {
     }
 
     /// FIG-6805: tables built with the same keys in the same order share
-    /// one layout, whose bytes the capacity meter counts once, before they
+    /// one layout, whose bytes the growth estimate counts once, before they
     /// are allocated, and no more once no table holds it. Diverse shapes
     /// stop at the layouts' bound and key their own indexes instead.
     #[test]

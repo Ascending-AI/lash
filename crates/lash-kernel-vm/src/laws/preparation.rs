@@ -165,10 +165,7 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         .unwrap_or_else(|_| panic!("same validated origin"));
     assert!(again.admits_callable(&callable));
     let edges = BuildHelpers::take_admission_edge_visits();
-    println!(
-        "ADMIT-ONCE warmed_edges={edges} cache_bytes={}",
-        again.admission_bytes()
-    );
+    println!("ADMIT-ONCE warmed_edges={edges}");
     assert_eq!(
         edges, 0,
         "ADMIT-ONCE: repeated origin queries rewalked {edges} edges"
@@ -192,7 +189,6 @@ fn helper_admission_work_is_bounded_by_distinct_origins() {
         ..callable
     }));
     assert!(!relinked.admits_callable(&callable));
-    assert_eq!(relinked.admission_bytes(), again.admission_bytes());
     // A second, empty manifest cannot inherit the first origin's permission.
     let empty = Arc::new(Document::new(NumberPolicy::BySpelling, vec![]));
     let other = super::embedder::program(Arc::clone(&empty), library.clone());

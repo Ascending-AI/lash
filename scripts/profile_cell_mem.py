@@ -72,10 +72,7 @@ def describe(profile, records):
     for row in sorted(profile["sites"], key=lambda row: row["stats"]["count"], reverse=True)[:10]:
         print(f"{row['stats']['count']}\t{row['guest_operations']}\t"
               f"{row['allocations_per_guest_operation']}\t{row['guest']}")
-    print("\nGuest charged capacity by kind\tpeak verdict\tend")
-    for name, peak, end in zip(("resident values", "control", "shared layouts", "sealed floor excess"),
-                               profile["guest_peak_ledger"], profile["end_ledger"]):
-        print(f"{name}\t{peak}\t{end}")
+    print(f"\nGuest logical balance\tpeak verdict={profile['guest_peak_ledger']}\tend={profile['end_ledger']}")
     print(f"Window heap peak={profile['peak_live']} end={profile['end_live']} bytes")
     print("Cell-window RSS high-water reset: " + str(profile.get("rss_peak_reset", False)))
     if not profile.get("rss_peak_reset"):

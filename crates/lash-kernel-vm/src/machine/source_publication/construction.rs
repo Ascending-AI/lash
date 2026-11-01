@@ -280,7 +280,6 @@ impl KernelMachine {
         )?;
         drop(arena);
         if published {
-            self.grown();
             #[cfg(any(test, feature = "testing"))]
             if matches!(op, Op::MakeTuple { items } if items.len == 0) {
                 crate::machine::islands::witness::empty_tuple_constructed(true);

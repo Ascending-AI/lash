@@ -254,16 +254,6 @@ impl KernelMachine {
         self.memory_pressure(bytes)
     }
 
-    /// The capacity meter's check where the arena's storage or the run's
-    /// control state grew: one compare, the crossing it makes decided at
-    /// the run's next verdict point (FIG-6791).
-    #[inline(always)]
-    pub(super) fn grown(&mut self) {
-        if self.arena.borrow().capacity_due() {
-            self.capacity_crossed();
-        }
-    }
-
     /// Installs what `new` built. Its mutable objects take durable ids
     /// when a projection saves them.
     fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<(), Halt> {
@@ -288,14 +278,12 @@ impl KernelMachine {
             (value, nursery.into_new())
         };
         self.install(new)?;
-        self.grown();
         Ok(value)
     }
 
     /// A fresh shared variable holding `value`, counted.
     pub(super) fn new_cell(&mut self, value: Value) -> ArenaHandle {
         let cell = self.arena.borrow_mut().new_cell(value);
-        self.grown();
         cell
     }
 
@@ -441,7 +429,6 @@ impl KernelMachine {
         let name = self.field_name(field);
         self.resolve(record, &name)?;
         self.in_arena(|arena| arena.table_write(record, name, value))?;
-        self.grown();
         Ok(())
     }
 
@@ -501,7 +488,6 @@ impl KernelMachine {
                 );
             }
         }
-        self.grown();
         Ok(())
     }
 
@@ -993,12 +979,20 @@ impl KernelMachine {
                             if wanted.0 <= granted {
                                 return Err(fault("a native asked again for room it holds").into());
                             }
-                            self.reserve(wanted.0 - granted)?;
+                            if let Err(halt) = self.reserve(wanted.0 - granted) {
+                                return Err(self
+                                    .refused_at_commit(exe, lib, function, args, halt)
+                                    .into());
+                            }
                             granted = wanted.0;
                         }
                         answer => {
                             if let Some((held, new)) = built {
-                                self.reserve(held.saturating_sub(granted))?;
+                                if let Err(halt) = self.reserve(held.saturating_sub(granted)) {
+                                    return Err(self
+                                        .refused_at_commit(exe, lib, function, args, halt)
+                                        .into());
+                                }
                                 self.install(new)?;
                             }
                             break answer;
@@ -1020,9 +1014,13 @@ impl KernelMachine {
                         } else {
                             // What the call built is counted before its
                             // value is published: pinned, it is a root, and
-                            // the meter decides here, in the call.
+                            // the meter decides at the call's Commit.
                             self.pin_value(&value)?;
-                            self.capacity_check()?;
+                            if let Err(halt) = self.capacity_check() {
+                                return Err(self
+                                    .refused_at_commit(exe, lib, function, args, halt)
+                                    .into());
+                            }
                             Ok(value)
                         }
                     }
@@ -1079,6 +1077,43 @@ impl KernelMachine {
                 Ok(Answer::Done)
             }
             Err(value) => Err(Interrupt::raised(value)),
+        }
+    }
+}
+
+impl KernelMachine {
+    /// Exact source admission is the only memory authority: a native whose
+    /// build overflows the memory bound is refused at its own Commit, after
+    /// its formula is paid, as its source publication refuses it. A charge
+    /// refusal while paying the formula comes first.
+    #[cold]
+    #[inline(never)]
+    fn refused_at_commit(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        function: &Lib,
+        args: Reg,
+        halt: Halt,
+    ) -> Halt {
+        if !self.charging
+            || !matches!(&halt, Halt::Bound(exceeded) if exceeded.bound == Bound::Memory)
+        {
+            return halt;
+        }
+        let end = args + function.arity;
+        if let Err(charge) = self.warm_formula(&function.charge, args, None) {
+            return charge;
+        }
+        let units = match self.in_formula(lib, true, |machine| {
+            machine.call_units(exe, lib, &machine.regs[args..end], None)
+        }) {
+            Ok(units) => units,
+            Err(charge) => return charge,
+        };
+        match self.charge_call(exe, lib, units) {
+            Ok(()) => halt,
+            Err(charge) => charge,
         }
     }
 }

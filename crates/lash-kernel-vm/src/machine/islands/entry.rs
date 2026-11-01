@@ -869,7 +869,6 @@ impl KernelMachine {
         self.logical_flush_continuation(task, exe)?;
         self.logical_reconstruct_controls(task, exe)?;
         self.logical_flush()?;
-        self.grown();
         Ok(top)
     }
 
@@ -1124,7 +1123,6 @@ impl KernelMachine {
         };
         drop(arena);
         if let Some(top) = handoff {
-            self.grown();
             if defer {
                 self.islands.scheduled = Some((task, top));
             } else if let RunsOn::Scheduling(stmt, pc, regs) = top {

@@ -403,11 +403,9 @@ impl KernelMachine {
                     slot.publish(state);
                 }
             },
-        )?;
+        )
+        .map_err(|halt| native_commit_refusal(running, pc, src, halt))?;
         drop(arena);
-        if published && (shared || member.is_some()) {
-            self.grown();
-        }
         #[cfg(any(test, feature = "testing"))]
         if published && shared {
             crate::machine::islands::witness::cell_constructed();
@@ -433,4 +431,34 @@ impl KernelMachine {
         }
         Ok(published)
     }
+}
+
+/// Exact source admission is the only memory authority. A native's result
+/// is priced when the binding at the call's own Commit takes it, so a result
+/// past the memory bound is refused there, after the native's formula was
+/// paid, and the refusal names the native whose result it is.
+pub(super) fn native_commit_refusal(
+    running: &Running<'_>,
+    pc: u32,
+    src: lash_kernel_exec::Reg,
+    halt: crate::machine::Halt,
+) -> crate::machine::Halt {
+    use crate::machine::Halt;
+    let Halt::Bound(mut exceeded) = halt else {
+        return halt;
+    };
+    if exceeded.bound == crate::interface::Bound::Memory
+        && exceeded.function.is_none()
+        && let Some(Op::Call { lib, .. } | Op::Operator { lib, .. }) = running.stream.ops
+            [..pc as usize]
+            .iter()
+            .rev()
+            .find(|op| op.writes() == Some(src))
+            .copied()
+        && let function = running.exe.lib(crate::compile::LibId(lib.0))
+        && matches!(function.run, crate::compile::LibRun::Native { .. })
+    {
+        exceeded.function = Some(function.header.name.clone());
+    }
+    Halt::Bound(exceeded)
 }

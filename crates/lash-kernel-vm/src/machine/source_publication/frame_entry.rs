@@ -350,7 +350,6 @@ impl KernelMachine {
         if let Some(roles) = captured_roles {
             crate::machine::islands::witness::prepared_frame_captured(roles);
         }
-        self.grown();
         self.observe(crate::observe::Event::Push {
             task: task_id,
             code: call.code,

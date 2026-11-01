@@ -450,7 +450,6 @@ pub(crate) struct Executable {
     own: Arc<DocumentCode>,
     admission: Arc<preparation::Admission>,
     origins: Arc<preparation::Origins>,
-    origin_cache_bytes: u64,
 }
 
 /// Immutable document tables, independent of any run or owning document.
@@ -700,21 +699,6 @@ impl Executable {
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
         self.origins.library.binary_search(function).is_ok()
-    }
-
-    /// Admission metadata for this executable's Links and functions. Sharing
-    /// immutable preparation does not change its per-execution accounting.
-    pub(crate) fn admission_bytes(&self) -> u64 {
-        self.origin_cache_bytes
-            .saturating_add(std::mem::size_of_val(self.origins.library.as_ref()) as u64)
-            .saturating_add(std::mem::size_of_val(self.origins.helpers.as_ref()) as u64)
-            .saturating_add(
-                self.origins
-                    .helpers
-                    .iter()
-                    .map(|(_, reached)| std::mem::size_of_val(reached.as_ref()) as u64)
-                    .sum::<u64>(),
-            )
     }
 
     /// The tables that hold `unit`'s code: the library's for a function

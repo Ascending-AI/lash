@@ -1030,7 +1030,6 @@ impl KernelMachine {
             self.frame(task)?.awaiting = Some(stmt);
         }
         self.task(task)?.frames.push(frame);
-        self.grown();
         self.observe(Event::Push {
             task,
             code: code_id,

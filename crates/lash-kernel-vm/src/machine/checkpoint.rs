@@ -355,17 +355,9 @@ impl KernelMachine {
         heap.restore_execution_roots(root);
         let access = heap.pages().clone();
         let census_refinements = heap.certificate().refinements;
-        // What the run held when it was sealed, as the capacity meter
-        // counted it: the run holds at least that until it sweeps.
-        let capacity_floor = if bounds.memory_meter == crate::MemoryMeter::Off {
-            0
-        } else {
-            heap.certificate().capacity
-        };
         let arena: super::SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
-        arena.borrow_mut().grow_control(exe.admission_bytes());
         arena.borrow_mut().watch_logical_members();
         let logical =
             lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
@@ -380,7 +372,6 @@ impl KernelMachine {
             program,
             exe: Arc::clone(&exe),
             bounds,
-            capacity_floor,
             limits,
             tasks: tasks::Tasks::open(
                 logical.clone(),
@@ -433,7 +424,6 @@ impl KernelMachine {
             limiters: Limiters::default(),
         };
         machine.publish_logical_meter().map_err(OpenError::Heap)?;
-        machine.capacity_counted();
         Ok(machine)
     }
 }
@@ -511,13 +501,6 @@ impl KernelMachine {
         // Reserve the maximum bounded root before giving the rest to the heap.
         if !work.take(4096 + 128) {
             return Ok(None);
-        }
-        // The certificate records what the capacity meter counts the run
-        // holding, which a run opened from this seal holds until it sweeps
-        // (FIG-6791). Sealing changes nothing the running meter counts.
-        if self.bounds.memory_meter != crate::MemoryMeter::Off {
-            let held = self.capacity_held();
-            self.heap.record_capacity(held);
         }
         if self
             .heap

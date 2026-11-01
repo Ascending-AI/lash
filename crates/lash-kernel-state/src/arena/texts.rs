@@ -6,7 +6,7 @@
 //! its whole prefix at every step.
 //!
 //! Every concatenation still makes its own immutable text. The one that
-//! gave its storage keeps its summary, so what the capacity meter counts
+//! gave its storage keeps its summary, so what the growth estimate counts
 //! and what a formula measures of it are what they were, and it is freed
 //! as any garbage is; its contents are gone, and a read of them is
 //! refused as malformed. A projection reads only the new text's bytes,

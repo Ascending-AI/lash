@@ -7,8 +7,8 @@
 //! summaries (never payload bytes), and removes what it did not reach.
 //!
 //! A sweep also records logical cost components for its reached bodies and
-//! supplied root owners. Guest admission currently uses the machine's capacity
-//! meter (FIG-6791). Its sweep generation is what the machine reloads its
+//! supplied root owners. Guest admission uses the logical ledger's published
+//! balance (FIG-7513). Its sweep generation is what the machine reloads its
 //! swept task roots on.
 //!
 //! No collection runs to park, resume or release a worker; no in-progress
@@ -17,14 +17,14 @@
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{EntityId, HeapFault, Identity, PageValue};
 
-/// What a certificate's capacity counts. Changing what the meter counts is
-/// a new metric, never a silent reinterpretation.
+/// What a heap's census meters. Changing what the meter counts is a new
+/// metric, never a silent reinterpretation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AccountingMetric {
-    /// The 1.0 capacity meter (FIG-6791): resident arena value slots at 16
-    /// bytes each, with long text and bytes at 16 bytes a slot, and the
-    /// control state's frames and their slots.
-    Capacity,
+    /// The logical memory ledger (FIG-7513): what the run holds is its
+    /// owners' published logical balance, and exact source admission is
+    /// the only memory authority.
+    Logical,
     /// The heap was written without a memory meter: no census holds its
     /// entities.
     Unmetered,
@@ -34,10 +34,6 @@ pub enum AccountingMetric {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AccountingCertificate {
     pub metric: AccountingMetric,
-    /// The bytes the capacity meter counted the run holding when it was
-    /// last sealed: what a run opened from this heap holds until its first
-    /// sweep recounts.
-    pub capacity: u64,
     /// How many entities the census holds.
     pub entities: u64,
     /// The number of sweeps this heap has completed: the generation a
@@ -49,8 +45,7 @@ pub struct AccountingCertificate {
 impl AccountingCertificate {
     /// A fresh heap's accounting: nothing allocated, nothing swept.
     pub const FRESH: Self = Self {
-        metric: AccountingMetric::Capacity,
-        capacity: 0,
+        metric: AccountingMetric::Logical,
         entities: 0,
         refinements: 0,
     };
@@ -169,7 +164,7 @@ pub trait CensusGraph {
     ) -> Result<Vec<TaskId>, HeapFault>;
     /// Whether a sweep of this graph retires the results of the ended
     /// tasks nothing reaches. A graph that does not keeps every retained
-    /// result, and what it names, as a root: a sweep the run's capacity
+    /// result, and what it names, as a root: a sweep the run's memory pressure
     /// set off, at no point the run's images fix, changes nothing they
     /// show (K-MACH-008, FIG-6791).
     fn retires_results(&self) -> bool {
@@ -202,8 +197,6 @@ pub trait AllocationCensus {
     /// Records newly allocated census entities in one checked operation.
     /// Lazy families pass their occurrence count.
     fn added(&mut self, entities: u64) -> Result<(), CensusFault>;
-    /// Records the capacity the run holds as a seal writes it.
-    fn record_capacity(&mut self, capacity: u64);
     /// A sweep: freezes mutation, traces from `graph`'s persistent roots
     /// and `transient`, removes the unreached, recounts the entities and
     /// advances the sweep generation. It charges no guest work, decides

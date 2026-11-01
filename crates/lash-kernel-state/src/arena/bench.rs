@@ -36,7 +36,7 @@ pub struct Usage {
     pub reservations: Vec<Reservation>,
     /// What the call held when it returned.
     pub held: LogicalBytes,
-    /// The bytes the capacity meter counts for what it built
+    /// The bytes the growth estimate counts for what it built
     /// ([`Arena::install_bound`]).
     pub grown: u64,
     /// How many mutable objects it built.

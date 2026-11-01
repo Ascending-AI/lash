@@ -80,11 +80,6 @@ impl AllocationCensus for Census {
         Ok(())
     }
 
-    fn record_capacity(&mut self, capacity: u64) {
-        self.certificate.metric = AccountingMetric::Capacity;
-        self.certificate.capacity = capacity;
-    }
-
     fn refine(
         &mut self,
         graph: &mut dyn CensusGraph,
@@ -116,7 +111,7 @@ impl AllocationCensus for Census {
                 .trace_budget_peak_bytes
                 .max(self.last_trace.budget_peak as u64);
         });
-        self.certificate.metric = AccountingMetric::Capacity;
+        self.certificate.metric = AccountingMetric::Logical;
         self.certificate.entities = entities;
         self.certificate.refinements = refinements;
         Ok(())

@@ -926,7 +926,6 @@ impl PreparedFramePush<'_> {
             caller.source_action = None;
         }
         assert!(self.frames.cache.len() < self.frames.cache.capacity());
-        arena.grow_control(resident::frame_bytes(&frame));
         self.frames.cache.push((self.frames.len, frame));
         self.frames.active = Some(self.frames.cache.len() - 1);
         self.frames.len += 1;
@@ -1049,9 +1048,6 @@ impl Frames {
                 )?);
                 frame.control.activate();
             }
-            self.arena
-                .borrow_mut()
-                .grow_control(resident::frame_bytes(&frame));
             self.cache.push((index, frame));
         }
         // The top is projected at every projection point.
@@ -1062,11 +1058,6 @@ impl Frames {
     }
     pub(super) fn push(&mut self, frame: Box<Frame>) {
         self.invalidate_active();
-        // The capacity meter counts the frame while it is resident: its
-        // caller checks the mark (FIG-6791).
-        self.arena
-            .borrow_mut()
-            .grow_control(resident::frame_bytes(&frame));
         // The live cache owns the new call; its row is written at the next
         // projection point, and never if it returns before one.
         self.cache.push((self.len, frame));
@@ -1083,11 +1074,6 @@ impl Frames {
         self.last_mut()?;
         self.invalidate_active();
         let frame = self.cache.pop().map(|(_, frame)| frame);
-        if let Some(frame) = &frame {
-            self.arena
-                .borrow_mut()
-                .shrink_control(resident::frame_bytes(frame));
-        }
         self.len -= 1;
         let top = self.len.saturating_sub(1);
         self.held = self.held.min(top);
@@ -1097,7 +1083,6 @@ impl Frames {
     }
     pub(super) fn clear(&mut self) {
         self.invalidate_active();
-        self.release_control();
         self.rows = Tree::new(true);
         self.len = 0;
         self.cache.clear();

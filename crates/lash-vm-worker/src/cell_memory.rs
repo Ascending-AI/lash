@@ -84,7 +84,7 @@ struct Capture {
     live: HashMap<usize, (usize, usize)>,
     total_live: u64,
     peak_live: u64,
-    guest_peak: [u64; 4],
+    guest_peak: u64,
     peak_process: Value,
     baseline: Value,
     rss_peak_reset: bool,
@@ -192,7 +192,7 @@ pub fn begin() {
             live: HashMap::new(),
             total_live: 0,
             peak_live: 0,
-            guest_peak: [0; 4],
+            guest_peak: 0,
             peak_process: Value::Null,
             baseline,
             rss_peak_reset,
@@ -214,13 +214,13 @@ pub fn attach(machine: &mut lash_kernel_vm::KernelMachine) {
         }
     });
 }
-fn memory(ledger: [u64; 4]) {
+fn memory(ledger: u64) {
     let Some(_guard) = Guard::enter() else {
         return;
     };
     CAPTURE.with(|capture| {
         if let Some(capture) = capture.borrow_mut().as_mut()
-            && ledger.iter().sum::<u64>() > capture.guest_peak.iter().sum::<u64>()
+            && ledger > capture.guest_peak
         {
             capture.guest_peak = ledger;
             for (_, site) in &mut capture.sites {

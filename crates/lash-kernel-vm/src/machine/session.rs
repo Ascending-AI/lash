@@ -72,7 +72,6 @@ pub(crate) fn start(
     let arena: SharedArena = std::rc::Rc::new(std::cell::RefCell::new(
         lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
     ));
-    arena.borrow_mut().grow_control(exe.admission_bytes());
     arena.borrow_mut().watch_logical_members();
     let logical =
         lash_kernel_state::kernel_internals::logical::Lifecycle::new(heap.logical_ledger());
@@ -90,7 +89,6 @@ pub(crate) fn start(
         document: None,
         exe: Arc::clone(&exe),
         bounds,
-        capacity_floor: 0,
         heap,
         arena: std::rc::Rc::clone(&arena),
         limits,
@@ -141,7 +139,6 @@ pub(crate) fn start(
         #[cfg(test)]
         boundaries: 0,
     };
-    machine.capacity_counted();
     machine.bind_modes(start.modes)?;
     machine.tasks.push(Task::fresh(
         lash_kernel_state::paged::TaskIdentityRef::MAIN,

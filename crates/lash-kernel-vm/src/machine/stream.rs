@@ -963,7 +963,6 @@ impl KernelMachine {
                 },
             )
             .map_err(|error| fault(&error.to_string()))?;
-        self.grown();
         Ok(closure)
     }
 
@@ -1011,7 +1010,6 @@ impl KernelMachine {
             SlotState::Cell(cell) => {
                 let cell = *cell;
                 self.in_arena(|arena| arena.cell_set(cell, value))?;
-                self.grown();
             }
             SlotState::Empty => return unbound(&exe.code(code).slots[local.slot as usize].name),
         }

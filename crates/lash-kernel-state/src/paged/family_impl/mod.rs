@@ -569,9 +569,6 @@ impl HeapLifecycle for PagedHeap {
             self.collect()?;
         }
         self.carried_collection_estimate();
-        // A carried session holds nothing in a run's memory: the next cell
-        // counts what it reads (FIG-6791).
-        self.record_capacity(0);
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
         Ok(SessionRoot {

@@ -402,9 +402,6 @@ impl crate::paged::AllocationCensus for LawCensus {
             .expect("test entity count");
         Ok(())
     }
-    fn record_capacity(&mut self, capacity: u64) {
-        self.0.capacity = capacity;
-    }
     fn refine(
         &mut self,
         _: &mut dyn crate::paged::CensusGraph,

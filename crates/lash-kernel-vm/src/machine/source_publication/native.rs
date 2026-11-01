@@ -116,9 +116,9 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
+        self.logical_flush()?;
         let physical_room =
             (self.bounds.memory_meter != crate::MemoryMeter::Off).then(|| self.capacity_headroom());
-        self.logical_flush()?;
         let Some(bank) = self.regs.prepare_source_output(running.stream, pc)? else {
             return Ok(false);
         };
@@ -372,7 +372,20 @@ impl KernelMachine {
                 prepared.storage.publish(arena);
                 prepared.bank.publish(value, prepared.holding);
             },
-        )?;
+        )
+        // Exact source admission is the only memory authority: a native
+        // whose result overflows the bound is refused at its own Commit,
+        // after its formula is paid, and the refusal names the native.
+        .map_err(|halt| match halt {
+            Halt::Bound(mut exceeded)
+                if exceeded.bound == crate::interface::Bound::Memory
+                    && exceeded.function.is_none() =>
+            {
+                exceeded.function = Some(function.header.name.clone());
+                Halt::Bound(exceeded)
+            }
+            halt => halt,
+        })?;
         drop(arena);
         if published {
             let (units, work, known, allocated) =

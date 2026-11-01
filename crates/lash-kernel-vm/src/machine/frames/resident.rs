@@ -109,28 +109,4 @@ impl Frames {
         }
         Ok(bytes)
     }
-
-    /// The bytes the capacity meter counts for the resident frames
-    /// (FIG-6791): what each added as it came into memory.
-    pub(in crate::machine) fn control_bytes(&self) -> u64 {
-        self.cache
-            .iter()
-            .map(|(_, frame)| frame_bytes(frame))
-            .fold(0, u64::saturating_add)
-    }
-
-    /// Gives back what the resident frames count, as the task they belong
-    /// to leaves memory.
-    pub(in crate::machine) fn release_control(&mut self) {
-        let bytes = self.control_bytes();
-        self.arena.borrow_mut().shrink_control(bytes);
-    }
-}
-
-/// The bytes the capacity meter counts for `frame` while it is resident:
-/// its [`FRAME_BYTES`](crate::machine::FRAME_BYTES) and its slots.
-pub(super) fn frame_bytes(frame: &super::Frame) -> u64 {
-    (frame.slots.values.len() as u64)
-        .saturating_mul(VALUE_BYTES)
-        .saturating_add(crate::machine::FRAME_BYTES)
 }
