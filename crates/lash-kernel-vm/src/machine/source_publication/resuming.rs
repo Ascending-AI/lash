@@ -278,7 +278,11 @@ impl KernelMachine {
         let pending = &mut frame.pending;
         let safe_point = self.charged;
         let published = Context {
-            admission: Admission::Exact,
+            admission: Admission::Exact(MemoryLimit::of(
+                self.bounds.memory_meter,
+                &mut self.bounds.memory,
+                &mut self.limiters,
+            )),
             source: &source,
             link,
             kernel,
@@ -299,7 +303,6 @@ impl KernelMachine {
                 limit: u64::from(self.bounds.call_depth),
                 safe_point,
             },
-            memory_bound: self.bounds.memory,
             logical_memory: &self.logical_memory,
         }
         .publish(

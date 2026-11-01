@@ -72,6 +72,15 @@ pub(crate) struct PreparedExactPrefix<'a> {
     journal: PreparedProgram<'a>,
 }
 impl<'a> PreparedExactPrefix<'a> {
+    /// The exact journal's peak: the run's logical holdings at its verdict point.
+    pub(crate) fn peak(&self) -> u64 {
+        self.journal.peak()
+    }
+    /// The peak without what the ledger already held unreachable.
+    pub(crate) fn collect(mut self, ledger: &Ledger, heap: &PagedHeap) -> Result<Self, HeapFault> {
+        self.journal = self.journal.collect(ledger, heap.pages())?;
+        Ok(self)
+    }
     pub(crate) fn admit_exact<'r>(
         mut self,
         frontier: &Frontier,

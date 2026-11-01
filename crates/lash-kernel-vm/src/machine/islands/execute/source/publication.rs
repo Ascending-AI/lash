@@ -47,7 +47,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .ok_or_else(|| malformed("source kernel is unsupported"))?;
         let safe_point = self.charged;
         Context {
-            admission: Admission::Envelope,
+            admission: Admission::Envelope(self.memory_bound),
             source,
             link: callee.link,
             kernel,
@@ -66,7 +66,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 limit: self.call_depth,
                 safe_point,
             },
-            memory_bound: self.memory_bound,
             logical_memory: self.logical_memory,
         }
         .publish(
@@ -77,5 +76,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             prepare,
             semantic,
         )
+        .map_err(|halt| match halt {
+            crate::machine::Halt::Heap(error) => *error,
+            _ => malformed("an envelope publication ended the run"),
+        })
     }
 }

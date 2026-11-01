@@ -158,6 +158,15 @@ impl<'a> PreparedPublication<'a> {
         self.prepared = self.prepared.require_source_room(extra)?;
         Some(self)
     }
+    /// See [`Prepared::collect`].
+    pub fn collect(mut self, before: &Ledger, access: &Access<'_>) -> Result<Self, HeapFault> {
+        self.prepared = self.prepared.collect(
+            before,
+            access,
+            crate::paged::census_impl::TraceLimits::default(),
+        )?;
+        Ok(self)
+    }
     /// Each appended event contributes its own peak. A single member event
     /// consumes its operands through prepare_member_publication instead.
     pub fn then_ownership(

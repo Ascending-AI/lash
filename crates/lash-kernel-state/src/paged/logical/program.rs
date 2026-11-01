@@ -685,6 +685,11 @@ impl<'a> PreparedProgram<'a> {
         self.publication = self.publication.require_source_room(extra)?;
         Some(self)
     }
+    /// Collect garbage the ledger held before this prefix (see `Prepared::collect`).
+    pub fn collect(mut self, before: &Ledger, access: &Access<'_>) -> Result<Self, HeapFault> {
+        self.publication = self.publication.collect(before, access)?;
+        Ok(self)
+    }
     pub fn admit(self, bound: u64) -> Option<AcceptedProgram<'a>> {
         Some(AcceptedProgram {
             publication: self.publication.admit(bound).ok()?,

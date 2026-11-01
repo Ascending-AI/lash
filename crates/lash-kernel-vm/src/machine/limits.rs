@@ -37,6 +37,21 @@ fn decide(
 }
 
 impl Limiters {
+    /// The run's logical holdings would pass `limit` at `used`.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn memory_reached(&mut self, used: u64, limit: &mut u64) -> Result<(), Halt> {
+        let Some(limiter) = self.memory.as_deref_mut() else {
+            return Err(bound(Bound::Memory, *limit));
+        };
+        decide(
+            |used, limit| limiter.limit_reached(used, limit),
+            used,
+            limit,
+            Bound::Memory,
+        )
+    }
+
     /// The charge passed `limit` at `used`.
     #[cold]
     #[inline(never)]
@@ -198,15 +213,7 @@ impl KernelMachine {
     #[cold]
     #[inline(never)]
     fn memory_reached(&mut self, used: u64) -> Result<(), Halt> {
-        let Some(limiter) = self.limiters.memory.as_deref_mut() else {
-            return Err(bound(Bound::Memory, self.bounds.memory));
-        };
-        decide(
-            |used, limit| limiter.limit_reached(used, limit),
-            used,
-            &mut self.bounds.memory,
-            Bound::Memory,
-        )
+        self.limiters.memory_reached(used, &mut self.bounds.memory)
     }
 }
 

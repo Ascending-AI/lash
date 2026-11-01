@@ -397,6 +397,38 @@ impl Prepared {
     pub fn peak(&self) -> u64 {
         self.peak
     }
+    /// Collect what `before` already held unreachable, then normalize the
+    /// draft. No event of the journal reaches that garbage, so it stays
+    /// unreachable through every step: the live peak is exactly the
+    /// journal's peak less its cost.
+    pub fn collect(
+        self,
+        before: &Ledger,
+        access: &Access<'_>,
+        limits: crate::paged::census_impl::TraceLimits,
+    ) -> Result<Self, HeapFault> {
+        let mut swept = Ledger {
+            state: before.state.clone(),
+            identity: Rc::new(()),
+            revision: before.revision,
+        };
+        swept.normalize(access, limits)?;
+        let garbage = before
+            .balance()?
+            .total()?
+            .checked_sub(swept.balance()?.total()?)
+            .ok_or_else(|| invalid("normalization grew the ledger"))?;
+        let mut collected = self.normalize(access, limits)?;
+        collected.peak = collected
+            .peak
+            .checked_sub(garbage)
+            .ok_or_else(|| invalid("garbage exceeds the journal peak"))?;
+        collected.before = collected
+            .before
+            .checked_sub(garbage)
+            .ok_or_else(|| invalid("garbage exceeds the prior balance"))?;
+        Ok(collected)
+    }
     pub fn balance(&self) -> Result<Balance, HeapFault> {
         self.next.balance()
     }

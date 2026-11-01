@@ -24,7 +24,7 @@ use occurrence::source_loops;
 mod scope;
 mod session;
 mod test;
-use super::session::Session;
+use super::{Halt, limits::Limiters, session::Session};
 use crate::admission::{Allowance, SourceResources};
 use crate::compile::room::{
     self,
@@ -177,12 +177,45 @@ pub(in crate::machine) struct Prefix {
     pub(in crate::machine) allowance: Allowance,
 }
 
-pub(in crate::machine) enum Admission {
-    Envelope,
-    Exact,
+/// An envelope miss leaves its island at the instruction for exact source.
+/// Exact source is the run's verdict point.
+pub(in crate::machine) enum Admission<'a> {
+    Envelope(u64),
+    Exact(MemoryLimit<'a>),
+}
+/// A metered run's memory bound and the limiter that may grow it.
+pub(in crate::machine) struct MemoryLimit<'a> {
+    limit: Option<&'a mut u64>,
+    limiters: &'a mut Limiters,
+}
+impl<'a> MemoryLimit<'a> {
+    pub(in crate::machine) fn of(
+        meter: crate::MemoryMeter,
+        limit: &'a mut u64,
+        limiters: &'a mut Limiters,
+    ) -> Self {
+        Self {
+            limit: (meter != crate::MemoryMeter::Off).then_some(limit),
+            limiters,
+        }
+    }
+    /// The live peak past the limit asks the memory limiter, which grows
+    /// the limit or ends the run. An unmetered run has no bound.
+    fn admit(&mut self, peak: u64) -> Result<u64, Halt> {
+        let Some(limit) = self.limit.as_deref_mut() else {
+            return Ok(u64::MAX);
+        };
+        if peak > *limit {
+            self.limiters.memory_reached(peak, limit)?;
+        }
+        Ok(*limit)
+    }
+    fn exceeded(&self, peak: u64) -> bool {
+        self.limit.as_deref().is_some_and(|limit| peak > *limit)
+    }
 }
 pub(in crate::machine) struct Context<'a> {
-    pub(in crate::machine) admission: Admission,
+    pub(in crate::machine) admission: Admission<'a>,
     pub(in crate::machine) source: &'a Arc<room::Source>,
     pub(in crate::machine) link: lash_kernel_value::content_ids::LinkId,
     pub(in crate::machine) kernel: doc::KernelVersion,
@@ -191,7 +224,6 @@ pub(in crate::machine) struct Context<'a> {
     pub(in crate::machine) arena: &'a mut Arena,
     pub(in crate::machine) session: &'a mut Session,
     pub(in crate::machine) resources: SourceResources<'a>,
-    pub(in crate::machine) memory_bound: u64,
     pub(in crate::machine) logical_memory: &'a Cell<u64>,
 }
 impl Context<'_> {
@@ -203,7 +235,7 @@ impl Context<'_> {
         make: impl Fn() -> Program,
         prepare: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
-    ) -> Result<bool, HeapFault> {
+    ) -> Result<bool, Halt> {
         let store = self.logical.ledger();
         if let Some(frontier) = frontier.as_mut()
             && frontier.position() != &prefix.start
@@ -258,14 +290,14 @@ impl Context<'_> {
             return Ok(false);
         };
         let prepared = match self.admission {
-            Admission::Envelope => {
+            Admission::Envelope(memory_bound) => {
                 let Some(accepted) = evaluated.admit_interval(
                     frontier,
                     &ledger,
                     registration.arena(),
                     resources,
                     &prefix.allowance,
-                    self.memory_bound,
+                    memory_bound,
                 )?
                 else {
                     return Ok(false);
@@ -280,7 +312,7 @@ impl Context<'_> {
                     &prefix.next,
                 )
             }
-            Admission::Exact => match evaluated.prepare_exact(
+            Admission::Exact(mut memory) => match evaluated.prepare_exact(
                 frontier,
                 &ledger,
                 registration,
@@ -289,22 +321,22 @@ impl Context<'_> {
                 prefix.interval.exit(),
                 &prefix.next,
             ) {
-                Ok(exact) => exact
-                    .admit_exact(
-                        frontier,
-                        &ledger,
-                        resources,
-                        &prefix.allowance,
-                        self.memory_bound,
-                    )?
-                    .ok_or(PublicationError::Miss("exact source admission declined")),
+                Ok(mut exact) => {
+                    if memory.exceeded(exact.peak()) {
+                        exact = exact.collect(&ledger, self.heap)?;
+                    }
+                    let limit = memory.admit(exact.peak())?;
+                    exact
+                        .admit_exact(frontier, &ledger, resources, &prefix.allowance, limit)?
+                        .ok_or(PublicationError::Miss("exact source admission declined"))
+                }
                 Err(error) => Err(error),
             },
         };
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(PublicationError::Miss(_)) => return Ok(false),
-            Err(PublicationError::Heap(error)) => return Err(error),
+            Err(PublicationError::Heap(error)) => return Err(error.into()),
         };
         drop(ledger);
         let committed = if S::MATERIALIZES {
