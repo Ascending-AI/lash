@@ -374,9 +374,13 @@ impl Source {
         self.compile_event_input(at, selected, None)
     }
 
-    /// A callee load shares its call's source site, but has no leaf Commit.
-    /// Only the source tree can classify an ordinary value occurrence here.
-    pub(crate) fn compile_leaf(&self, at: &Site) -> Result<Arc<CompiledInterval>, Refused> {
+    /// The source tree authenticates both the read event and its next unpaid
+    /// point. A value callee is held before arguments, at Open, rather than at
+    /// the action's later result Commit.
+    pub(crate) fn compile_leaf(
+        &self,
+        at: &Site,
+    ) -> Result<(Point, Point, Arc<CompiledInterval>), Refused> {
         self.verify()?;
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return Err(Refused::Path);
@@ -385,13 +389,28 @@ impl Source {
         for index in &at.path[self.site.path.len()..] {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
-        if !matches!(
-            node,
-            doc::Node::Expr(doc::Expr::Literal(_) | doc::Expr::Variable(_))
-        ) {
-            return Err(Refused::Path);
-        }
-        self.compile_event(&point(at, Phase::Commit), ExitKind::Normal)
+        let (event, unpaid) = match node {
+            doc::Node::Expr(doc::Expr::Literal(_) | doc::Expr::Variable(_)) => {
+                (point(at, Phase::Commit), self.next_after_commit(at)?)
+            }
+            doc::Node::Expr(doc::Expr::Act(act))
+                if matches!(
+                    act.kind,
+                    doc::ActKind::Call(doc::Callee::Value(_))
+                        | doc::ActKind::Spawn(doc::Callee::Value(_))
+                ) =>
+            {
+                let unpaid = if act.args.is_empty() {
+                    point(at, Phase::Enter)
+                } else {
+                    self.first_event(&child(at, 0))?
+                };
+                (point(at, Phase::Open), unpaid)
+            }
+            _ => return Err(Refused::Path),
+        };
+        let interval = self.compile_event(&event, ExitKind::Normal)?;
+        Ok((event, unpaid, interval))
     }
 
     /// Exact execution supplies the selected child's authenticated operand.

@@ -9,7 +9,7 @@ use lash_kernel_state::kernel_internals::logical::{
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
-    Measure, Phase as SourcePhase, Point,
+    Measure, Point,
     publication::{Occurrence, Position as SourcePosition},
 };
 
@@ -187,14 +187,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(false);
         };
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let Ok(unpaid) = source.next_after_commit(site) else {
-            return Ok(false);
-        };
-        let at = Point {
-            site: (**site).clone(),
-            phase: SourcePhase::Commit,
-        };
-        let Ok(interval) = source.compile_leaf(site) else {
+        let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
             return Ok(false);
         };
         let cell = match stream.ops[read.pc() as usize] {
@@ -282,6 +275,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             depth: 0,
             safe_point: self.charged,
         };
+        #[cfg(any(test, feature = "testing"))]
+        let callee_read = at.phase == room::Phase::Open;
         let physical_room = self
             .ceiling
             .saturating_sub(self.register_bytes)
@@ -341,7 +336,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Err(self.at(read.unpaid()));
         }
         #[cfg(any(test, feature = "testing"))]
-        crate::machine::islands::witness::packet_read_published();
+        {
+            crate::machine::islands::witness::packet_read_published();
+            if callee_read {
+                crate::machine::islands::witness::callee_read_published();
+            }
+        }
         Ok(true)
     }
 

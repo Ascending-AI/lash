@@ -111,6 +111,21 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     events.push(event(&site, Phase::Enter, Box::new([]), None, n.clone(), n));
                 }
                 doc::Node::Expr(doc::Expr::Act(act)) => {
+                    if matches!(
+                        act.kind,
+                        doc::ActKind::Call(doc::Callee::Value(_))
+                            | doc::ActKind::Spawn(doc::Callee::Value(_))
+                    ) {
+                        let held = Amount::default().term(Measure::Local(operand(&site)), 1);
+                        events.push(event(
+                            &site,
+                            Phase::Open,
+                            Box::new([]),
+                            Some(operand(&site)),
+                            held.clone(),
+                            held,
+                        ));
+                    }
                     events.push(event(
                         &site,
                         Phase::Enter,

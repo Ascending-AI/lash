@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let callee_reads = crate::machine::islands::witness::callee_reads();
     let call_resumes = crate::machine::islands::witness::call_resumes();
     let call_enters = crate::machine::islands::witness::call_enters();
     let precise_returns = crate::machine::islands::witness::precise_returns();
@@ -558,6 +559,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
+        assert!(
+            callee_reads > 0,
+            "the value callee must acquire its source holding before the argument expressions: {callee_reads}"
+        );
         assert!(
             call_resumes[0] > 0,
             "the returned call must restore its actual Incoming and continuation owners through prospective acceptance: {call_resumes:?}"

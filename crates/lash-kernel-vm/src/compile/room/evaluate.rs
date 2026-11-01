@@ -218,6 +218,10 @@ impl<E: Events> Run<'_, E> {
             self.step_departure(site, Phase::Leave, Some(exit))?;
             return Ok(exit);
         }
+        if matches!(node, doc::Node::Expr(doc::Expr::Act(act)) if matches!(act.kind, doc::ActKind::Call(doc::Callee::Value(_)) | doc::ActKind::Spawn(doc::Callee::Value(_))))
+        {
+            self.step(site, Phase::Open)?;
+        }
         match node {
             doc::Node::Expr(doc::Expr::If { .. }) | doc::Node::Stmt(doc::Stmt::If { .. }) => {
                 let exit = self.child(node, site, 0)?;

@@ -97,6 +97,7 @@ thread_local! {
     static IMMUTABLE_NATIVE_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static NATIVE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CONSTRUCTION_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static CALLEE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_RESUME_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static CALL_ENTER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PRECISE_RETURN_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
@@ -109,6 +110,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    CALLEE_READ_PUBLICATIONS.with(|count| count.set(0));
     CALL_RESUME_PUBLICATIONS.with(|count| count.set([0; 2]));
     CALL_ENTER_PUBLICATIONS.with(|count| count.set(0));
     PRECISE_RETURN_PUBLICATIONS.with(|count| count.set([0; 2]));
@@ -176,6 +178,13 @@ pub(crate) fn scope_publications() -> u64 {
 }
 pub(in crate::machine::islands) fn scope_published() {
     SCOPE_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+}
+#[cfg(test)]
+pub(crate) fn callee_reads() -> u64 {
+    CALLEE_READ_PUBLICATIONS.with(|count| count.replace(0))
+}
+pub(in crate::machine) fn callee_read_published() {
+    CALLEE_READ_PUBLICATIONS.with(|count| count.set(count.get() + 1));
 }
 #[cfg(test)]
 pub(crate) fn call_resumes() -> [u64; 2] {

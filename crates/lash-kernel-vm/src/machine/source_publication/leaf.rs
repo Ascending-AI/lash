@@ -1,7 +1,7 @@
 //! Pure source reads install their bank occurrence in the accepted journal.
 use super::*;
 use crate::compile::room::publication::Occurrence;
-use crate::compile::room::{Measure, Owner as Selector, Phase, Point};
+use crate::compile::room::{Measure, Owner as Selector};
 use crate::machine::{Halt, KernelMachine, SlotState, fault};
 use crate::machine::{logical_held::Projection, stream::Running};
 use lash_kernel_exec::Op;
@@ -43,14 +43,7 @@ impl KernelMachine {
                 loops,
             )
         };
-        let Ok(unpaid) = source.next_after_commit(site) else {
-            return Ok(false);
-        };
-        let at = Point {
-            site: (**site).clone(),
-            phase: Phase::Commit,
-        };
-        let Ok(interval) = source.compile_leaf(site) else {
+        let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
             return Ok(false);
         };
         self.logical_flush()?;
@@ -147,7 +140,7 @@ impl KernelMachine {
                         LeafFacts {
                             dependencies: value.handle().into_iter().chain(cell).collect(),
                             values: [(
-                                Measure::Local(Selector::Operand(at.site)),
+                                Measure::Local(Selector::Operand(at.site.clone())),
                                 i128::from(bytes),
                             )]
                             .into(),
@@ -183,6 +176,9 @@ impl KernelMachine {
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_source_published();
+            if at.phase == room::Phase::Open {
+                crate::machine::islands::witness::callee_read_published();
+            }
             if let Some(phase) = frame
                 .control
                 .iter()

@@ -36,6 +36,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             }
             doc::Node::Action(_) => phases.push(Phase::Enter),
             doc::Node::Expr(doc::Expr::Act(act)) => {
+                if matches!(
+                    act.kind,
+                    doc::ActKind::Call(doc::Callee::Value(_))
+                        | doc::ActKind::Spawn(doc::Callee::Value(_))
+                ) {
+                    phases.push(Phase::Open);
+                }
                 phases.push(Phase::Enter);
                 if matches!(act.kind, doc::ActKind::Call(_)) {
                     phases.push(Phase::Restore);
@@ -119,6 +126,9 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                 (doc::Node::Action(_), Phase::Enter) => {
                     expected_inputs = Box::new([]);
                     output = None;
+                }
+                (doc::Node::Expr(doc::Expr::Act(_)), Phase::Open) => {
+                    expected_inputs = Box::new([]);
                 }
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Enter) => output = None,
                 (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {
@@ -422,6 +432,16 @@ fn obligations(
             delta.push((release([Owner::PendingDeparture(site.clone())]), -1));
         }
         (doc::Node::Stmt(doc::Stmt::Try(_)), Phase::Suspend | Phase::Restore) => {}
+        (doc::Node::Expr(doc::Expr::Act(act)), Phase::Open)
+            if matches!(
+                act.kind,
+                doc::ActKind::Call(doc::Callee::Value(_))
+                    | doc::ActKind::Spawn(doc::Callee::Value(_))
+            ) =>
+        {
+            peak.push((Measure::Local(operand(site)), 1));
+            delta.push((Measure::Local(operand(site)), 1));
+        }
         (doc::Node::Expr(doc::Expr::Act(_)), Phase::Restore) => {}
         (doc::Node::Stmt(doc::Stmt::Try(t)), Phase::Catch) => {
             if let Some(c) = &t.catch

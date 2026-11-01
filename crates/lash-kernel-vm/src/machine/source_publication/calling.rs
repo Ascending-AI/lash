@@ -38,19 +38,7 @@ impl KernelMachine {
         let Some(bank) = self.regs.prepare_source_arguments(arguments)? else {
             return Ok(None);
         };
-        // A value callee is read before the argument expressions into the
-        // first opcode register. It is not one of ActExpr.args, whose source
-        // occurrences alone are observed by the zero-delta Enter event.
-        let mut borrowed = bank.owners();
-        if matches!(
-            entry.kind,
-            crate::compile::NestedKind::Call(crate::compile::NestedCallee::Read)
-        ) {
-            if borrowed.is_empty() {
-                return Err(malformed("value call has no callee receipt").into());
-            }
-            borrowed.remove(0);
-        }
+        let borrowed = bank.owners();
         let values = bank.values();
         let document = running
             .exe

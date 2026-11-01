@@ -2,7 +2,6 @@
 use super::literal_storage::{Literal, PreparedLiteral};
 use super::*;
 use crate::compile::room::publication::Occurrence;
-use crate::compile::room::{Phase, Point};
 use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
 use lash_kernel_exec::Op;
 use lash_kernel_state::kernel_internals::logical::JournalEvent;
@@ -73,14 +72,7 @@ impl KernelMachine {
                 loops,
             )
         };
-        let Ok(unpaid) = source.next_after_commit(site) else {
-            return Ok(false);
-        };
-        let at = Point {
-            site: (**site).clone(),
-            phase: Phase::Commit,
-        };
-        let Ok(interval) = source.compile_leaf(site) else {
+        let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
             return Ok(false);
         };
         self.logical_flush()?;

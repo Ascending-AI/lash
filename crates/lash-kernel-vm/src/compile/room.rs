@@ -1089,6 +1089,17 @@ fn operand(site: &Site) -> Owner {
 }
 fn inputs(site: &Site, node: doc::Node<'_>) -> Box<[Owner]> {
     match node {
+        doc::Node::Expr(doc::Expr::Act(act))
+            if matches!(
+                act.kind,
+                doc::ActKind::Call(doc::Callee::Value(_))
+                    | doc::ActKind::Spawn(doc::Callee::Value(_))
+            ) =>
+        {
+            return std::iter::once(operand(site))
+                .chain((0..act.args.len()).map(|index| operand(&child(site, index))))
+                .collect();
+        }
         doc::Node::Expr(doc::Expr::If { .. }) => return vec![Owner::Selected(site.clone())].into(),
         doc::Node::Expr(doc::Expr::Let { .. }) => return vec![operand(&child(site, 1))].into(),
         doc::Node::Stmt(doc::Stmt::If { .. } | doc::Stmt::While { .. }) => return Box::new([]),
