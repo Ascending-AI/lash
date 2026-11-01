@@ -493,7 +493,7 @@ async fn run_cases(dialect: Dialect, postgres_url: Option<String>, cases: &[Canc
         };
         let report = matrix
             .labels(&[
-                CommitLabel::CELL_SNAPSHOT_ADMIT,
+                CommitLabel::CELL_ADMIT,
                 CommitLabel::CALL_CANCEL_REQUEST,
                 CommitLabel::CALL_CANCEL,
                 CommitLabel::CALL_FINAL,
@@ -511,7 +511,7 @@ async fn run_cases(dialect: Dialect, postgres_url: Option<String>, cases: &[Canc
             report.cells.len(),
             report.labels()
         );
-        for label in [CommitLabel::CELL_SNAPSHOT_ADMIT, CommitLabel::ROUND_OUTCOME] {
+        for label in [CommitLabel::CELL_ADMIT, CommitLabel::ROUND_OUTCOME] {
             assert!(
                 report.labels().contains(&label),
                 "the law cut no {label} commit for {case:?}"

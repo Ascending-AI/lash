@@ -283,8 +283,8 @@ struct ResumeSample {
 /// its first, which commits the model response that asked for the cell
 /// (FIG-6000).
 pub(crate) fn is_park(label: &str) -> bool {
-    label == CommitLabel::CELL_SNAPSHOT_ADMIT.as_str()
-        || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT.as_str()
+    label == CommitLabel::CELL_ADMIT.as_str()
+        || label == CommitLabel::MODEL_DONE_CELL_ADMIT.as_str()
 }
 
 fn held_checkpoint(transactions: &[Transaction], actor: &ActorKey) -> usize {

@@ -470,8 +470,7 @@ fn cpu_ms() -> Result<f64> {
 fn zero_prefix_cut_label(label: lash_durable::CommitLabel) -> bool {
     matches!(
         label,
-        lash_durable::CommitLabel::CELL_SNAPSHOT_ADMIT
-            | lash_durable::CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        lash_durable::CommitLabel::CELL_ADMIT | lash_durable::CommitLabel::MODEL_DONE_CELL_ADMIT
     )
 }
 
@@ -482,7 +481,7 @@ mod tests {
     #[test]
     fn zero_prefix_cuts_before_the_snapshot_carrying_model_done() {
         assert!(super::zero_prefix_cut_label(
-            lash_durable::CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+            lash_durable::CommitLabel::MODEL_DONE_CELL_ADMIT
         ));
     }
 }

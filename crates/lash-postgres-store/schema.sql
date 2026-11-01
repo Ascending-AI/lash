@@ -2015,6 +2015,14 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
+        WHEN 'durable_graph.admission_deliver' THEN
+            v_rows := 0;
+            FOR v_row IN UPDATE lash_effect_admissions SET delivered_batch = ((v_p->>2)::BIGINT), delivered_position = ((v_p->>3)::BIGINT) WHERE exec_key = (v_p->>0) AND effect_id = (decode(v_p->>1, 'hex')) AND delivered_batch IS NULL RETURNING exec_key LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
         WHEN 'durable_run_record.delete_owner' THEN
             v_rows := 0;
             FOR v_row IN DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) RETURNING (SELECT hash FROM lash_blobs WHERE id = record_ref) AS record_ref LOOP

@@ -341,19 +341,13 @@ fn assert_focused_cuts(case: Case, report: &MatrixReport) {
     match case {
         Case::Cell => {
             assert!(
-                cut(
-                    CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-                    Fault::StaleEpoch
-                ),
+                cut(CommitLabel::MODEL_DONE_CELL_ADMIT, Fault::StaleEpoch),
                 "no admission was cut under a stale epoch"
             );
             // FIG-6315: CellCase requires Answered even when the first-save
             // cut settles its operation Interrupted and carries no bindings.
             assert!(
-                cut(
-                    CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-                    Fault::CommitThenAbort
-                ),
+                cut(CommitLabel::MODEL_DONE_CELL_ADMIT, Fault::CommitThenAbort),
                 "the cell's first save was not cut"
             );
         }

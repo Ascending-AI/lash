@@ -1198,7 +1198,7 @@ async fn a_cell_killed_before_its_first_save_runs_the_paid_cell_again() {
     let deployment = a_cell_resumes_from_its_paid_answer(
         Answer::Cell,
         None,
-        Some((CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT, 1, Fault::Abort)),
+        Some((CommitLabel::MODEL_DONE_CELL_ADMIT, 1, Fault::Abort)),
     )
     .await;
     assert_eq!(markers(&deployment.world), [ANSWERS[0]]);
@@ -1219,7 +1219,7 @@ async fn a_cell_killed_after_its_first_save_resumes_its_progress() {
         Answer::Cell,
         None,
         Some((
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_ADMIT,
             1,
             Fault::CommitThenAbort,
         )),

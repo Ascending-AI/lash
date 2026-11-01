@@ -2077,7 +2077,7 @@ async fn prove_installed(
         // A cell's first save commits the model response that asked for it
         // (FIG-6000).
         let response = if turn.code() {
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+            CommitLabel::MODEL_DONE_CELL_ADMIT
         } else {
             CommitLabel::MODEL_DONE
         };
@@ -2243,7 +2243,7 @@ async fn a_cell_members_state_change_survives_a_cut_after_its_outcome(tier: Tier
         Turn::StateCell,
         tier,
         &[
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_ADMIT,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::MODEL_START,
         ],

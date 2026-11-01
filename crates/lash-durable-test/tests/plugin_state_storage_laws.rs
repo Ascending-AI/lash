@@ -890,7 +890,7 @@ async fn prove(shape: Shape, tier: Tier, committed: bool) {
     // A cell's first save commits the model response that asked for it
     // (FIG-6000).
     let response = if shape == Shape::Cell {
-        CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+        CommitLabel::MODEL_DONE_CELL_ADMIT
     } else {
         CommitLabel::MODEL_DONE
     };

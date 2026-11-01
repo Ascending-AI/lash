@@ -1289,7 +1289,7 @@ const FAULTS: [Fault; 5] = [
 #[tokio::test]
 async fn a_saved_read_and_its_fact_survive_reload_exactly_once_on_sqlite_memory() {
     let report = Matrix::new()
-        .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
+        .labels(&[CommitLabel::CELL_ADMIT])
         .faults(&[Fault::CommitThenAbort])
         .horizon(Duration::from_secs(600))
         .run_test(|| ReadTurn::new(Cell::ReadWriteRead, Law::SavedExact))
@@ -1652,18 +1652,9 @@ async fn a_denying_hook_prevents_cell_and_model_reads_on_sqlite_memory() {
 async fn a_cell_charge_bound_retains_limit_observation_and_consumption_on_sqlite_memory() {
     let report = Matrix::new()
         .faults(&[Fault::CommitThenAbort])
-        .labels(&[CommitLabel::CELL_SNAPSHOT])
         .horizon(Duration::from_secs(600))
         .run_test(|| ReadTurn::new(Cell::Bound, Law::Counted))
         .await;
-    assert!(
-        report
-            .cells
-            .iter()
-            .any(|cell| cell.point.label == CommitLabel::CELL_SNAPSHOT
-                && cell.fault == Fault::CommitThenAbort),
-        "the saved end must be taken over"
-    );
     report.assert_held();
 }
 
@@ -1679,22 +1670,14 @@ async fn a_model_citation_read_survives_canonical_plan_decode_on_sqlite_memory()
         .assert_held();
 }
 
-/// FIG-7557: a separately saved memory stop retains its fact on takeover.
+/// FIG-7557: a memory stop retains its fact on takeover: the run again
+/// stops at the same step.
 #[tokio::test]
 async fn a_saved_cell_memory_bound_survives_takeover_on_sqlite_memory() {
     let report = Matrix::new()
         .faults(&[Fault::CommitThenAbort])
-        .labels(&[CommitLabel::CELL_SNAPSHOT])
         .horizon(Duration::from_secs(600))
         .run_test(|| ReadTurn::new(Cell::BoundMemory, Law::Counted))
         .await;
-    assert!(
-        report
-            .cells
-            .iter()
-            .any(|cell| cell.point.label == CommitLabel::CELL_SNAPSHOT
-                && cell.fault == Fault::CommitThenAbort),
-        "the saved memory end must be taken over"
-    );
     report.assert_held();
 }

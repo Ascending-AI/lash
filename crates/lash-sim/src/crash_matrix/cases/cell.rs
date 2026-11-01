@@ -102,8 +102,8 @@ impl Workload for CellCase {
         // The cell's first snapshot commits the model response that asked
         // for it (FIG-6000).
         let first_snapshot = trace.iter().position(|write| {
-            (write.point.label == CommitLabel::CELL_SNAPSHOT_ADMIT
-                || write.point.label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT)
+            (write.point.label == CommitLabel::CELL_ADMIT
+                || write.point.label == CommitLabel::MODEL_DONE_CELL_ADMIT)
                 && write.committed()
         });
         let cut_at = cut.and_then(|cut| {
@@ -134,8 +134,7 @@ impl Workload for CellCase {
         // FIG-6000: a stale admission returns only after its owner's
         // self-stop deadline. Its body must never start on either owner.
         if cut.is_some_and(|cut| {
-            cut.fault == Fault::StaleEpoch
-                && cut.point.label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
+            cut.fault == Fault::StaleEpoch && cut.point.label == CommitLabel::MODEL_DONE_CELL_ADMIT
         }) {
             let bodies = world.ledger().of_tool(EXT_WRITE);
             if !bodies.is_empty() {

@@ -1832,10 +1832,7 @@ async fn cancelled_before_save(dialect: Dialect) {
 /// save, before it enters the store.
 async fn held_past_its_slice(dialect: Dialect) {
     let report = Matrix::new()
-        .labels(&[
-            CommitLabel::CELL_SNAPSHOT_ADMIT,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-        ])
+        .labels(&[CommitLabel::CELL_ADMIT, CommitLabel::MODEL_DONE_CELL_ADMIT])
         .faults(&[Fault::Abort])
         .horizon(Duration::from_secs(600))
         .run_test(|| CellTurn::new(Cell::LongStretch, dialect, None))

@@ -1270,7 +1270,7 @@ async fn lo_fence_retries_one_conflicted_kernel_round_on_sqlite_memory() {
 /// a round outcome, even when the ordinary activation failure budget is one.
 #[tokio::test]
 async fn lo_fence_retries_one_conflicted_kernel_snapshot_on_sqlite_memory() {
-    conflicted_kernel_commit(lash_durable::CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT).await;
+    conflicted_kernel_commit(lash_durable::CommitLabel::MODEL_DONE_CELL_ADMIT).await;
 }
 
 async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {

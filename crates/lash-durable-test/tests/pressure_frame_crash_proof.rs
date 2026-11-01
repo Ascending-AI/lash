@@ -868,10 +868,7 @@ async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
         .run_test(PromptUsage::new)
         .await;
     report.assert_held();
-    for label in [
-        CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-        CommitLabel::TURN_COMMIT,
-    ] {
+    for label in [CommitLabel::MODEL_DONE_CELL_ADMIT, CommitLabel::TURN_COMMIT] {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"

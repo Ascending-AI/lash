@@ -79,7 +79,7 @@ async fn remaining_reproducer_cells(case: Case) {
         Case::Cell => (
             0..1,
             &[Fault::CommitThenAbort][..],
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
+            CommitLabel::MODEL_DONE_CELL_ADMIT,
         ),
         _ => return,
     };
@@ -297,7 +297,7 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
         let worlds = RefCell::new(Vec::new());
         let report = Matrix::new()
             .faults(&[Fault::StaleEpoch])
-            .labels(&[CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT])
+            .labels(&[CommitLabel::MODEL_DONE_CELL_ADMIT])
             .run_test(|| {
                 let deployment = Deployment::new(Case::Cell, seed, Dialect::SqliteMemory);
                 worlds.borrow_mut().push(Arc::clone(deployment.world()));

@@ -27,8 +27,7 @@
 //!   `Interrupted`, and the model was told so;
 //! - P3 (K2, commit-then-abort at `round.outcome`): the saved `Completed`
 //!   value reached the model, the body ran once;
-//! - P4: no hidden replay: a cell's program is entered fresh only before its
-//!   first snapshot commits, a claim restores the turn at most once, no
+//! - P4: no hidden replay: a claim restores the turn at most once, no
 //!   outcome is looked up for re-running code and no committed ordinal is
 //!   emitted again;
 //! - P5: a zombie's writes after its reap are refused;
@@ -720,43 +719,10 @@ impl V0 {
             violations.push(format!("P7: the turn committed {commits} times"));
         }
 
-        // P4: no hidden replay. A cell's program is entered fresh only by an
-        // owner that found no snapshot: once more for each first snapshot
-        // that did not commit, and once more when the owner running it was
-        // lost before any snapshot committed. The first snapshot commits
-        // the model response that asked for the cell (FIG-6000).
-        let admits = |label: CommitLabel| {
-            label == CommitLabel::CELL_SNAPSHOT_ADMIT
-                || label == CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
-        };
-        let unsnapshotted = trace
-            .iter()
-            .filter(|write| admits(write.point.label) && !write.committed())
-            .count();
-        let first_snapshot = trace
-            .iter()
-            .position(|write| admits(write.point.label) && write.committed());
-        let lost_before_snapshot = cut
-            .filter(|cut| cut.fault.kills() || cut.fault == Fault::Zombie)
-            .and_then(|cut| {
-                trace
-                    .iter()
-                    .position(|write| write.node == cut.node && write.point == cut.point)
-            })
-            .is_some_and(|at| first_snapshot.is_none_or(|first| at < first));
+        // An in-turn cell runs again from its start under each owner that
+        // takes its turn over, following its journal (FIG-7585): P1 bounds
+        // what it may run again.
         let programs: usize = counts.vm_programs.values().sum();
-        // A working turn's second cell never parks: it runs again under each
-        // owner that took the turn over before its end was consumed.
-        let second_cell = match self.protocol {
-            Protocol::Working(_) => 1 + owners(&trace),
-            _ => 0,
-        };
-        if programs > 1 + second_cell + unsnapshotted + usize::from(lost_before_snapshot) {
-            violations.push(format!(
-                "P4: the cell's program was entered fresh {programs} times with {unsnapshotted} uncommitted snapshots: {:?}",
-                counts.vm_programs
-            ));
-        }
         if matches!(
             self.protocol,
             Protocol::Code | Protocol::Archived | Protocol::Working(_)
