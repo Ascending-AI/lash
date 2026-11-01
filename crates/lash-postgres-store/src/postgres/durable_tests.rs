@@ -586,7 +586,7 @@ async fn lo_idle_writer_when_configured() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lo_idle_writer_close_and_redrive_when_configured() {
     use lash_core_execution::testing::store_fixtures::root_session_request;
-    use lash_core_store::store::{SessionCatalogStore, SessionLookup};
+    use lash_core_store::store::{SessionCatalogStore, SessionCommitStore as _, SessionLookup};
     use lash_durable::domain::{
         DomainWrite, MailAnswer, MailDomainWrite, RedriveAnswer, RedriveRequest, SessionCloseStep,
         SessionCloseWrite,
@@ -602,8 +602,20 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
     let catalog = storage.store();
     let durable = storage.durable_store();
     let session = SessionId::fixture("lo-close");
+    let request = root_session_request(&session);
+    catalog.admit_session(&request).await.unwrap();
+    // A head leaf whose frame the close ends.
+    let mut state = lash_core_store::session_state::RuntimeSessionState {
+        session_id: session.clone(),
+        ..lash_core_store::session_state::RuntimeSessionState::fixture(
+            request.config.session_policy(),
+        )
+    };
+    state.ensure_agent_frame_initialized();
     catalog
-        .admit_session(&root_session_request(&session))
+        .commit_runtime_state(
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state),
+        )
         .await
         .unwrap();
     let actor = ActorKey::session(session.as_str()).unwrap();
@@ -816,6 +828,80 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         durable.session_close(&session).await.unwrap().unwrap().done,
         Some(SessionCloseStep::EndScope)
     );
+    // What the deletion cannot read refuses it, deleting nothing: a
+    // cleanup plan its frame does not read, then a head leaf the graph
+    // does not hold.
+    let head = catalog
+        .load_session_head_meta(&session)
+        .await
+        .unwrap()
+        .unwrap();
+    let frame = lash_core_store::artifact_referrer::ArtifactReferrer::FrameEnvironment(
+        lash_core_store::artifact_referrer::FrameEnvironmentId::new(
+            session.clone(),
+            head.current_frame_node_id.unwrap(),
+        ),
+    )
+    .canonical_id();
+    let leaf = head.leaf_node_id.unwrap().to_string();
+    let corruptions = [
+        (
+            "INSERT INTO lash_artifact_cleanup_obligations (referrer_kind, referrer_id, \
+             cleanup_json, obligation_id, obligation_state, obligation_due_at_ms) \
+             VALUES ('frame_environment', $1, '{\"plan\":\"await_later\"}', 'law-plan', 'due', 0)",
+            frame.clone(),
+            "DELETE FROM lash_artifact_cleanup_obligations WHERE obligation_id = 'law-plan' \
+             AND referrer_id = $1",
+            frame,
+            lash_durable::StoreFailureKind::Corrupt,
+        ),
+        (
+            "UPDATE lash_session_revisions SET leaf_node_id = 'law-missing-leaf' \
+             WHERE leaf_node_id = $1",
+            leaf.clone(),
+            "UPDATE lash_session_revisions SET leaf_node_id = $1 \
+             WHERE leaf_node_id = 'law-missing-leaf'",
+            leaf,
+            // MissingFrameOpenAncestor, as the head's decode refused it.
+            lash_durable::StoreFailureKind::Unavailable,
+        ),
+    ];
+    for (corrupt, value, restore, restored, refused) in corruptions {
+        assert_eq!(
+            sqlx::query(corrupt)
+                .bind(&value)
+                .execute(storage.pool())
+                .await
+                .unwrap()
+                .rows_affected(),
+            1
+        );
+        let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
+        tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
+            session: session.clone(),
+            step: SessionCloseStep::Artifacts,
+        }));
+        match durable
+            .commit(tx, CommitLabel::new("law.unreadable-artifacts"))
+            .await
+        {
+            Err(lash_durable::DurableError::Store(failure)) => assert_eq!(failure.kind, refused),
+            other => panic!("an unreadable deletion committed or failed otherwise: {other:?}"),
+        }
+        assert!(matches!(
+            catalog.lookup_session(&session).await.unwrap(),
+            SessionLookup::Live(_)
+        ));
+        assert_eq!(
+            durable.session_close(&session).await.unwrap().unwrap().done,
+            Some(SessionCloseStep::EndScope)
+        );
+        sqlx::query(restore)
+            .bind(&restored)
+            .execute(storage.pool())
+            .await
+            .unwrap();
+    }
     let mut tx = durable.begin(&actor, grant.epoch, u64::MAX).await.unwrap();
     tx.write(DomainWrite::SessionClose(SessionCloseWrite::Step {
         session: session.clone(),

@@ -189,7 +189,12 @@ pub(super) async fn apply(
             }
             Ok(())
         }
-        Err(_) => Err(out_of_order(tx, session, *step).await?),
+        Err(refused) => Err(
+            match super::session_delete::unreadable(&program, &refused) {
+                Some(unreadable) => super::store_failure(unreadable),
+                None => out_of_order(tx, session, *step).await?,
+            },
+        ),
     }
 }
 

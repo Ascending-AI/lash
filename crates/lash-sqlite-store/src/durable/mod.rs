@@ -498,14 +498,22 @@ fn registered_boots(tx: &Connection) -> rusqlite::Result<Vec<Owner>> {
 }
 
 fn store_failure(error: rusqlite::Error) -> DurableError {
-    use lash_core_store::store::StoreError;
     let kind = match &error {
         rusqlite::Error::FromSqlConversionFailure(..)
         | rusqlite::Error::InvalidColumnType(..)
         | rusqlite::Error::IntegralValueOutOfRange(..) => StoreFailureKind::Corrupt,
         _ => StoreFailureKind::Unavailable,
     };
-    let error = crate::sqlite_error(error);
+    store_error_failure(crate::sqlite_error(error), kind)
+}
+
+/// `error` as a durable store failure, of `kind` unless the error names
+/// its own.
+fn store_error_failure(
+    error: lash_core_store::store::StoreError,
+    kind: StoreFailureKind,
+) -> DurableError {
+    use lash_core_store::store::StoreError;
     let kind = match &error {
         StoreError::Contended => StoreFailureKind::Contended,
         StoreError::WriterFenced { .. } => StoreFailureKind::WriterRetired,

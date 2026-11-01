@@ -115,12 +115,9 @@ pub(super) fn apply(
                     u64::try_from(commit.now.0).unwrap_or(0),
                     &mut Default::default(),
                 ) {
-                    return Ok(Err(lash_durable::DurableError::Store(
-                        lash_durable::StoreFailure {
-                            code: error.storage_code().cloned(),
-                            kind: lash_durable::StoreFailureKind::Unavailable,
-                            message: error.to_string(),
-                        },
+                    return Ok(Err(super::store_error_failure(
+                        error,
+                        lash_durable::StoreFailureKind::Unavailable,
                     )));
                 }
             }

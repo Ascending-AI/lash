@@ -1484,9 +1484,9 @@ DECLARE
     v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 9b70f5bc8cb837b1); a call
+    -- Generated from this build's statements (registry db0dbb2f29d0e581); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '9b70f5bc8cb837b1'
+    IF p_registry IS DISTINCT FROM 'db0dbb2f29d0e581'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2987,6 +2987,34 @@ BEGIN
                  ) AS named
                  ORDER BY named.key COLLATE "C"
              ) AS ordered LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_session_delete_postgres.unreadable' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT revision.leaf_node_id AS missing_leaf,
+                    CAST(NULL AS TEXT) AS referrer_kind, CAST(NULL AS TEXT) AS plan
+             FROM lash_session_head AS head JOIN lash_session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = (v_p->>0) AND revision.leaf_node_id IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM lash_graph_nodes AS leaf
+                   WHERE leaf.node_id = revision.leaf_node_id AND leaf.frame_node_id IS NOT NULL)
+             UNION ALL
+             SELECT CAST(NULL AS TEXT), stored.referrer_kind, stored.cleanup_json::jsonb ->> 'plan'
+             FROM lash_artifact_cleanup_obligations AS stored
+             WHERE (stored.referrer_kind = 'session' AND stored.referrer_id = (v_p->>0)
+                    AND COALESCE(stored.cleanup_json::jsonb ->> 'plan', '')
+                        NOT IN ('ended', 'await_session_graph_retired'))
+                OR (stored.referrer_kind = 'frame_environment'
+                    AND stored.referrer_id IN (
+                        SELECT '[' || to_json(CAST((v_p->>0) AS TEXT))::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']'
+                        FROM lash_session_head AS head JOIN lash_session_revisions AS revision
+                            ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+                        JOIN lash_graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+                        WHERE head.session_id = (v_p->>0))
+                    AND COALESCE(stored.cleanup_json::jsonb ->> 'plan', '') NOT IN ('ended', 'await_frame')) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;

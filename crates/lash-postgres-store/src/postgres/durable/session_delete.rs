@@ -25,7 +25,7 @@ use lash_durable::{ActorKey, DurableError, DurableInstant};
 use lash_kernel_value::identity::SessionId;
 use lash_store_sql::Dialect;
 
-use super::steps::{Collect, Entry, Shape, Slots, Step, Ty, Value};
+use super::steps::{Collect, Entry, Refused, Shape, Slots, Step, Ty, Value};
 use super::{corrupt, environment, graph, head_commit, model_calls, prompts, run_records};
 use super::{snapshots, tool_calls, waits};
 use crate::session_sql::session_sql;
@@ -49,6 +49,32 @@ lash_store_sql::statements! {
                  ) AS named
                  ORDER BY named.key COLLATE \"C\"
              ) AS ordered";
+
+        /// What session `?1`'s deletion cannot read: its head's leaf, when
+        /// no graph row names the leaf's frame, and each stored cleanup of
+        /// that frame or of the session whose plan is not one its referrer
+        /// reads.
+        unreadable = "SELECT revision.leaf_node_id AS missing_leaf,
+                    CAST(NULL AS TEXT) AS referrer_kind, CAST(NULL AS TEXT) AS plan
+             FROM session_head AS head JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ?1 AND revision.leaf_node_id IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM graph_nodes AS leaf
+                   WHERE leaf.node_id = revision.leaf_node_id AND leaf.frame_node_id IS NOT NULL)
+             UNION ALL
+             SELECT CAST(NULL AS TEXT), stored.referrer_kind, stored.cleanup_json::jsonb ->> 'plan'
+             FROM artifact_cleanup_obligations AS stored
+             WHERE (stored.referrer_kind = 'session' AND stored.referrer_id = ?1
+                    AND COALESCE(stored.cleanup_json::jsonb ->> 'plan', '')
+                        NOT IN ('ended', 'await_session_graph_retired'))
+                OR (stored.referrer_kind = 'frame_environment'
+                    AND stored.referrer_id IN (
+                        SELECT '[' || to_json(CAST(?1 AS TEXT))::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']'
+                        FROM session_head AS head JOIN session_revisions AS revision
+                            ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+                        JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+                        WHERE head.session_id = ?1)
+                    AND COALESCE(stored.cleanup_json::jsonb ->> 'plan', '') NOT IN ('ended', 'await_frame'))";
 
         /// Fence the frame session `?1`'s head leaves, ended at `?2`.
         fence_frame = "INSERT INTO referrer_fences (referrer_kind, referrer_id, ended_at_ms)
@@ -126,6 +152,7 @@ fn ingress() -> &'static crate::turn_ingress::TurnIngressSql {
 
 pub(super) static LOCK_REFERRERS: Entry =
     Entry::new(|| &SQL.lock_referrers, &[Ty::Text], Shape::Select);
+pub(super) static UNREADABLE: Entry = Entry::new(|| &SQL.unreadable, &[Ty::Text], Shape::Select);
 pub(super) static FENCE_FRAME: Entry =
     Entry::new(|| &SQL.fence_frame, &[Ty::Text, Ty::Now], Shape::Exec);
 pub(super) static ARM_FRAME: Entry = Entry::new(
@@ -232,6 +259,7 @@ pub(super) static TERMINAL: Entry = Entry::new(
 pub(super) fn entries() -> Vec<&'static Entry> {
     vec![
         &LOCK_REFERRERS,
+        &UNREADABLE,
         &FENCE_FRAME,
         &ARM_FRAME,
         &END_FRAME,
@@ -328,6 +356,9 @@ pub(super) fn steps(session: &SessionId) -> Result<Vec<Step>, DurableError> {
         // edges; then the session's cleanup, awaiting its graph's
         // retirement.
         materialized(Step::any(&LOCK_REFERRERS, id())),
+        // A leaf without its frame or a cleanup plan its referrer does not
+        // read is refused, never passed over or replaced.
+        materialized(Step::none(&UNREADABLE, id())),
         materialized(Step::any(
             &FENCE_FRAME,
             vec![Value::text(session.as_str()), Value::Now],
@@ -422,6 +453,41 @@ pub(super) fn steps(session: &SessionId) -> Result<Vec<Step>, DurableError> {
     ])
 }
 
+/// The error naming what a deletion could not read, when `refused` is
+/// `program`'s read of it ([`UNREADABLE`]): the leaf whose frame is
+/// missing, or the cleanup whose plan its referrer does not read.
+pub(super) fn unreadable(program: &[Step], refused: &Refused) -> Option<crate::StoreError> {
+    use sqlx::Row as _;
+    if !std::ptr::eq(program.get(refused.index)?.entry, &UNREADABLE) {
+        return None;
+    }
+    let row = refused.rows.first()?;
+    let column = |name: &str| {
+        row.try_get::<Option<String>, _>(name)
+            .map_err(crate::support::store_sqlx_error)
+    };
+    Some(
+        match (
+            column("missing_leaf"),
+            column("referrer_kind"),
+            column("plan"),
+        ) {
+            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => error,
+            (Ok(Some(leaf)), _, _) => match leaf.try_into() {
+                Ok(leaf_node_id) => crate::StoreError::MissingFrameOpenAncestor { leaf_node_id },
+                Err(error) => error.into(),
+            },
+            (Ok(None), Ok(kind), Ok(plan)) => crate::StoreError::StoredDataCorrupt {
+                record_kind: "artifact_cleanup_obligation",
+                message: format!(
+                    "a {} referrer's cleanup plan {plan:?} is not one it reads",
+                    kind.unwrap_or_default()
+                ),
+            },
+        },
+    )
+}
+
 /// Delete `session`'s rows in the catalog's guarded transaction `tx` at
 /// `now`, holding the roots they held: how many stored roots it held.
 pub(crate) async fn delete(
@@ -441,7 +507,11 @@ pub(crate) async fn delete(
     let slots = super::steps::run_capturing(tx, &program, &context)
         .await
         .map_err(super::steps::Failure::into_store)?
-        .map_err(|_| crate::StoreError::Backend("a session deletion step refused".to_owned()))?;
+        .map_err(|refused| {
+            unreadable(&program, &refused).unwrap_or_else(|| {
+                crate::StoreError::Backend("a session deletion step refused".to_owned())
+            })
+        })?;
     if deleted_materialized(&slots) {
         tx.staged_turn_change();
     }
