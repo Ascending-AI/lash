@@ -345,6 +345,15 @@ impl KernelMachine {
                     };
                     return self.source_done(running, source_pc, Ran::Tested(tested));
                 }
+                Op::Return { .. } => {
+                    self.close_region(running.stream);
+                    if let Some(completion) = self.publish_source_return(running, source_pc)? {
+                        return Ok(Ran::Depart(completion));
+                    }
+                    if let Some(ran) = self.run_rare(host, running, op)? {
+                        return self.source_done(running, source_pc, ran);
+                    }
+                }
                 Op::End => {
                     self.close_region(running.stream);
                     if self.publish_source_end(running, source_pc)? {

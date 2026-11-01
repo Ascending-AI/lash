@@ -272,6 +272,21 @@ impl Registers {
             transfer,
         }))
     }
+    pub(super) fn prepare_source_return(
+        &mut self,
+        reg: lash_kernel_exec::Reg,
+        at: &lash_kernel_value::sites::Site,
+    ) -> Result<Option<PreparedEnd<'_>>, HeapFault> {
+        let Some(actual) = self.source.end_register(at)? else {
+            return Ok(None);
+        };
+        if actual != reg {
+            return Err(HeapFault::Malformed(
+                "return operand occupies another register".into(),
+            ));
+        }
+        self.prepare_source_end(at)
+    }
     pub(super) fn prepare_source_releases(
         &mut self,
         owners: &[lash_kernel_state::kernel_internals::logical::Owner],
