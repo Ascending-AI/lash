@@ -6,6 +6,7 @@ use crate::{
     SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolFailure,
     ToolFailureClass, TurnActivityId, TurnEvent,
 };
+use lash_protocol_types::sync::MutexExt;
 
 #[derive(Clone)]
 pub struct ToolInvocation {
@@ -452,6 +453,10 @@ impl RuntimeExecutionContext<'_> {
         duration_ms: Option<u64>,
     ) {
         self.trace_tool_call_returned(record, &[], None);
+        let output = std::sync::Arc::new(record.output.clone());
+        self.returned_outputs
+            .lock_recover()
+            .insert(record.call_id.clone(), std::sync::Arc::downgrade(&output));
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:returned", record.call_id));
         cursor.observe(
@@ -464,7 +469,7 @@ impl RuntimeExecutionContext<'_> {
                     provider_call_id: record.provider_call_id.clone(),
                     name: record.tool.clone(),
                     args: record.args.clone(),
-                    output: record.output.clone(),
+                    output,
                     duration_ms,
                     graph_key: self.code_block_graph_key(),
                 },
@@ -478,6 +483,15 @@ impl RuntimeExecutionContext<'_> {
         record: &ToolCallRecord,
         duration_ms: Option<u64>,
     ) {
+        // The live return of the call published this output when the
+        // commit kept it: share it rather than retain a second copy.
+        let returned = self
+            .returned_outputs
+            .lock_recover()
+            .remove(&record.call_id)
+            .and_then(|returned| returned.upgrade())
+            .filter(|returned| **returned == record.output);
+        let output = returned.unwrap_or_else(|| std::sync::Arc::new(record.output.clone()));
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:complete", record.call_id));
         cursor.observe(
@@ -489,7 +503,7 @@ impl RuntimeExecutionContext<'_> {
                     provider_call_id: record.provider_call_id.clone(),
                     name: record.tool.clone(),
                     args: record.args.clone(),
-                    output: record.output.clone(),
+                    output,
                     duration_ms,
                     graph_key: self.code_block_graph_key(),
                 },

@@ -200,7 +200,7 @@ pub async fn observe_tool_read<T>(
             provider_call_id: None,
             name,
             args,
-            output,
+            output: std::sync::Arc::new(output),
             duration_ms: Some(read.elapsed_us / 1000),
             graph_key: read.graph_key(),
             classification: crate::ToolCallClassification::UnrecordedRead {

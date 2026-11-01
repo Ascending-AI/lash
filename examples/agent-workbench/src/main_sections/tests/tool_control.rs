@@ -95,7 +95,9 @@ struct CompletedToolCalls {
 impl TurnActivitySink for CompletedToolCalls {
     async fn emit(&self, activity: lash::TurnActivity) {
         if let lash::TurnEvent::ToolCallCompleted { output, .. } = activity.event {
-            self.outputs.lock_recover().push(output);
+            self.outputs
+                .lock_recover()
+                .push(std::sync::Arc::unwrap_or_clone(output));
         }
     }
 }

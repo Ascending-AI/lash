@@ -232,6 +232,14 @@ pub struct RuntimeExecutionContext<'run> {
             std::collections::BTreeMap<crate::ToolCallId, tool_completion::TracedToolCall>,
         >,
     >,
+    /// The output each call's live return published, while some holder of
+    /// that activity keeps it: the call's committed completion shares it
+    /// when its outcome is that output, so a retained pair holds it once.
+    pub(crate) returned_outputs: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<crate::ToolCallId, std::sync::Weak<crate::ToolCallOutput>>,
+        >,
+    >,
     /// The latest `max_tool_calls` refusal this execution met, kept typed for
     /// the language runtime that reports the failed cell or process: its own
     /// error channel carries the refusal's class, code and message only.
@@ -425,6 +433,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             held_response: self.held_response.clone(),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
             tool_requests: Arc::clone(&self.tool_requests),
+            returned_outputs: Arc::clone(&self.returned_outputs),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
             linked_execution: self.linked_execution.clone(),
             extension_trace: self.extension_trace.clone(),

@@ -321,8 +321,10 @@ pub enum TurnEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
+        // Shared with the call's other activity that carries the same
+        // output, so a buffer retaining both holds it once.
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-        output: crate::ToolCallOutput,
+        output: std::sync::Arc<crate::ToolCallOutput>,
         /// The observed call window, absent when unmeasured.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
@@ -340,8 +342,10 @@ pub enum TurnEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
+        // Shared with the call's other activity that carries the same
+        // output, so a buffer retaining both holds it once.
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-        output: crate::ToolCallOutput,
+        output: std::sync::Arc<crate::ToolCallOutput>,
         /// The observed call window, absent when unmeasured.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,

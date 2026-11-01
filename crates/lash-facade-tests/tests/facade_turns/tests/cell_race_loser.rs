@@ -277,7 +277,9 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
         .await
         .into_iter()
         .filter_map(|activity| match activity.event {
-            lash::TurnEvent::ToolCallCompleted { output, .. } => Some(output),
+            lash::TurnEvent::ToolCallCompleted { output, .. } => {
+                Some(std::sync::Arc::unwrap_or_clone(output))
+            }
             _ => None,
         })
         .collect();
@@ -467,7 +469,7 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
         .into_iter()
         .find_map(|activity| match activity.event {
             lash::TurnEvent::ToolCallCompleted { output, .. } if !output.is_success() => {
-                Some(output)
+                Some(std::sync::Arc::unwrap_or_clone(output))
             }
             _ => None,
         });

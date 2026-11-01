@@ -128,6 +128,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             held_response: None,
             incorporation_ledger: Arc::default(),
             tool_requests: Arc::default(),
+            returned_outputs: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             linked_execution: None,
             extension_trace: crate::trace::ExtensionTrace::untraced(),

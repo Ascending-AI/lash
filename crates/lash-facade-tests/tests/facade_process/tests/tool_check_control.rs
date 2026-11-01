@@ -130,7 +130,9 @@ async fn run_policy_turn(
         .await
         .into_iter()
         .filter_map(|activity| match activity.event {
-            TurnEvent::ToolCallCompleted { output, .. } => Some(output),
+            TurnEvent::ToolCallCompleted { output, .. } => {
+                Some(std::sync::Arc::unwrap_or_clone(output))
+            }
             _ => None,
         })
         .collect();

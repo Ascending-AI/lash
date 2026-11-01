@@ -37,6 +37,12 @@ impl<T: DurableSerialize + ?Sized> DurableSerialize for Box<T> {
     }
 }
 
+impl<T: DurableSerialize + ?Sized> DurableSerialize for std::sync::Arc<T> {
+    fn serialize_durable<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize(self.as_ref(), serializer)
+    }
+}
+
 impl<T: DurableSerialize> DurableSerialize for Option<T> {
     fn serialize_durable<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {

@@ -271,7 +271,7 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
             } if provider_call_id.as_deref() == Some(format!("call-{symbol}").as_str())
                 || output.value_for_projection()["set"] == symbol =>
             {
-                Some(output.clone())
+                Some(lash_core::ToolCallOutput::clone(output))
             }
             _ => None,
         })

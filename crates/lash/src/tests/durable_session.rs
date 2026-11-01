@@ -74,7 +74,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
                 provider_call_id,
                 tool: name,
                 args,
-                output,
+                output: std::sync::Arc::unwrap_or_clone(output),
             }),
             _ => None,
         })
