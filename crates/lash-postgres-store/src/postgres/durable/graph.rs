@@ -84,7 +84,7 @@ lash_store_sql::statements! {
     pub(crate) struct GraphPostgresStatements @ "durable_graph_postgres" {
         /// Artifact `?3` of namespace `?2`'s graph node: PostgreSQL's bridge
         /// is the artifact row's `graph_ref`, set only for storage kind 1.
-        artifact_root = "SELECT graph_ref FROM lash_vm_artifacts
+        artifact_root = "SELECT (SELECT hash FROM blobs WHERE id = graph_ref) AS graph_ref FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2 AND storage_kind = 1";
 
         /// The encoding of every stored blob among the nodes `?1` a commit
@@ -116,9 +116,11 @@ lash_store_sql::statements! {
 
         /// Every edge of freshly installed parents `?1` to children `?2`
         /// (raw digests).
-        insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT parent, child
-             FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)";
+        insert_edges = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id
+             FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)
+             JOIN blobs AS parent ON parent.hash = staged.parent
+             JOIN blobs AS child ON child.hash = staged.child";
 
         /// Every blob the roots `?1` reach along stored edges, the roots
         /// included, with its encoding and bytes: one read of a whole graph,
@@ -126,11 +128,11 @@ lash_store_sql::statements! {
         /// persistent-heap page is read (envelope kind 1000 to 1999, a
         /// two-byte varint after the magic): the page is a leaf.
         walk_reach = "WITH RECURSIVE reach AS (
-                 SELECT UNNEST(?1::bytea[]) AS hash
+                 SELECT id FROM blobs WHERE hash = ANY(?1::bytea[])
                  UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge
-                 JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
+                 SELECT edge.child_id FROM blob_edges AS edge
+                 JOIN reach ON edge.parent_id = reach.id
+                 JOIN blobs AS parent ON parent.id = reach.id
                  WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -140,16 +142,16 @@ lash_store_sql::statements! {
                    END
              )
              SELECT blobs.hash, blobs.encoding, blobs.content
-             FROM blobs JOIN reach ON blobs.hash = reach.hash";
+             FROM blobs JOIN reach ON blobs.id = reach.id";
 
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
         walk_reach_graph = "WITH RECURSIVE reach AS (
-                 SELECT UNNEST(?1::bytea[]) AS hash
+                 SELECT id FROM blobs WHERE hash = ANY(?1::bytea[])
                  UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge
-                 JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
+                 SELECT edge.child_id FROM blob_edges AS edge
+                 JOIN reach ON edge.parent_id = reach.id
+                 JOIN blobs AS parent ON parent.id = reach.id
                  WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -160,7 +162,7 @@ lash_store_sql::statements! {
              )
              SELECT blobs.hash, blobs.encoding,
                     CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::bytea[]) THEN blobs.content END
-             FROM blobs JOIN reach ON blobs.hash = reach.hash";
+             FROM blobs JOIN reach ON blobs.id = reach.id";
 
         /// One level of a walk: every blob in `?1`. A graph-only walk
         /// (`?3`) omits opaque children's bytes, but includes roots `?2`.
@@ -178,26 +180,32 @@ lash_store_sql::statements! {
 
         /// Discover at most the changed-path batch, stopping at held or shared boundaries.
         retirement_candidates = "WITH RECURSIVE candidates AS (
-             SELECT unnest(?1::BYTEA[]) AS hash UNION
-             SELECT edge.child_hash AS hash FROM candidates JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
-              WHERE ?3::BOOLEAN AND NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
-                AND (NOT (candidates.hash = ANY(?1::BYTEA[]))
-                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash))
-                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
-         ) SELECT hash FROM candidates LIMIT ?2";
+             SELECT id FROM blobs WHERE hash = ANY(?1::BYTEA[]) UNION
+             SELECT edge.child_id AS id FROM candidates JOIN blob_edges AS edge ON edge.parent_id = candidates.id
+              WHERE ?3::BOOLEAN AND NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.id)
+                AND (candidates.id NOT IN (SELECT id FROM blobs WHERE hash = ANY(?1::BYTEA[]))
+                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_id = candidates.id))
+                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_id = candidates.id LIMIT 2) AS incoming) <= 1
+         ) SELECT (SELECT hash FROM blobs WHERE id = candidates.id) AS id FROM candidates LIMIT ?2";
         /// Reclassify liveness under the exact set of row locks acquired.
-        retirement_unprotected = "WITH RECURSIVE candidates AS (SELECT unnest(?1::BYTEA[]) AS hash), protected AS (
-             SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
-                OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY(?1::BYTEA[])))
-             UNION SELECT edge.child_hash AS hash FROM protected JOIN blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY(?1::BYTEA[])
-         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)";
-        retirement_edges = "DELETE FROM blob_edges WHERE parent_hash = ANY(?1::BYTEA[]) RETURNING child_hash";
+        retirement_unprotected = "WITH RECURSIVE candidates AS MATERIALIZED (
+                 SELECT id, hash FROM blobs WHERE hash = ANY(?1::BYTEA[])), protected AS (
+             SELECT id FROM candidates WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.id)
+                OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_id = candidates.id
+                    AND NOT EXISTS (SELECT 1 FROM candidates AS parent WHERE parent.id = edge.parent_id))
+             UNION SELECT edge.child_id AS id FROM protected JOIN blob_edges AS edge ON edge.parent_id = protected.id
+                WHERE EXISTS (SELECT 1 FROM candidates AS child WHERE child.id = edge.child_id)
+         ) SELECT hash FROM candidates WHERE id NOT IN (SELECT id FROM protected)";
+        retirement_edges = "DELETE FROM blob_edges
+             WHERE parent_id IN (SELECT id FROM blobs WHERE hash = ANY(?1::BYTEA[]))
+             RETURNING (SELECT hash FROM blobs WHERE id = child_id) AS child_hash";
         retirement_nodes = "DELETE FROM blobs WHERE hash = ANY(?1::BYTEA[]) RETURNING hash";
 
         /// A repeated inline retirement takes its own queued holds before
         /// reclassifying liveness. A hold owned by a step is left to that step.
         retirement_released_holds = "DELETE FROM retirement_holds WHERE root_ref IN (
-             SELECT root_ref FROM retirement_holds WHERE root_ref = ANY(?1::bytea[])
+             SELECT root_ref FROM retirement_holds
+             WHERE root_ref IN (SELECT id FROM blobs WHERE hash = ANY(?1::bytea[]))
              ORDER BY root_ref FOR UPDATE SKIP LOCKED)";
 
         peel_plan = "SELECT * FROM lash_graph_peel_plan(?1, ?2, ?3)";
@@ -212,7 +220,7 @@ lash_store_sql::statements! {
         /// 1000 to 1999, a two-byte varint after the magic) unless `?8`
         /// asks for the whole closure: the page is a leaf.
         hydrate = "WITH RECURSIVE root AS (
-                 SELECT root_ref AS hash FROM exec_snapshots WHERE ?1 = 'exec' AND exec_key = ?2
+                 SELECT root_ref AS id FROM exec_snapshots WHERE ?1 = 'exec' AND exec_key = ?2
                  UNION ALL SELECT record_ref FROM run_records
                      WHERE ?1 = 'run_fact' AND owner_key = ?2 AND run_seq = ?5 AND ordinal = ?6
                  UNION ALL SELECT decision_ref FROM tool_calls
@@ -240,9 +248,9 @@ lash_store_sql::statements! {
                      WHERE ?1 = 'admission_base' AND session_id = ?2
                  UNION ALL SELECT graph_ref FROM lash_vm_artifacts
                      WHERE ?1 = 'artifact' AND namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
+             reach AS (SELECT root.id FROM root WHERE root.id IS NOT NULL UNION
+                 SELECT edge.child_id FROM blob_edges AS edge JOIN reach ON edge.parent_id = reach.id
+                 JOIN blobs AS parent ON parent.id = reach.id
                  WHERE ?8::boolean OR CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -250,8 +258,8 @@ lash_store_sql::statements! {
                        ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
                             NOT BETWEEN 1000 AND 1999
                    END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+             SELECT (SELECT hash FROM blobs WHERE id = root.id) AS id, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.id = reach.id) ON TRUE";
     }
 }
 

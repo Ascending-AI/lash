@@ -20,11 +20,17 @@ pub(crate) const SCHEMA: &str = "
 -- A blob's encoding is stored, never sniffed from its bytes (FIG-5887 §7):
 -- 0 is opaque bytes an adapter's codec owns, with no edges; 1 is a canonical
 -- checkpoint graph node, whose edges are exactly its child table.
+-- Every graph reference names a blob by its integer id; the content hash is
+-- only the install's dedup key. Ids are rowids and a deleted max id is
+-- reused, which is safe because no row can name a deleted id: every column
+-- holding one is a foreign key, but the retirement frontier's hints, which
+-- authorize nothing.
 -- Blob references use the default nondeferrable NO ACTION check. A batch
 -- delete still refuses a referenced node before the statement succeeds,
 -- without RESTRICT's per-row trigger subprograms for every root source.
 CREATE TABLE IF NOT EXISTS blobs (
-    hash     BLOB PRIMARY KEY,
+    id       INTEGER PRIMARY KEY,
+    hash     BLOB NOT NULL UNIQUE,
     content  BLOB NOT NULL,
     encoding INTEGER NOT NULL CONSTRAINT ck_blobs_encoding CHECK (encoding IN (0, 1))
 );
@@ -38,8 +44,8 @@ CREATE TABLE IF NOT EXISTS session_revisions (
     session_id     TEXT NOT NULL,
     head_revision  INTEGER NOT NULL,
     leaf_node_id   TEXT,
-    checkpoint_ref BLOB REFERENCES blobs(hash),
-    config_ref BLOB NOT NULL REFERENCES blobs(hash),
+    checkpoint_ref INTEGER REFERENCES blobs(id),
+    config_ref INTEGER NOT NULL REFERENCES blobs(id),
     terminal_ordinal INTEGER CONSTRAINT ck_session_revisions_terminal_ordinal CHECK (terminal_ordinal > 0),
     PRIMARY KEY (session_id, head_revision)
 ) WITHOUT ROWID;
@@ -125,7 +131,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    admission_base_checkpoint_ref     BLOB REFERENCES blobs(hash),
+    admission_base_checkpoint_ref     INTEGER REFERENCES blobs(id),
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
     retention_kind                    TEXT NOT NULL,
@@ -441,7 +447,7 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    blob_ref     BLOB NOT NULL REFERENCES blobs(hash),
+    blob_ref     INTEGER NOT NULL REFERENCES blobs(id),
     PRIMARY KEY (namespace, artifact_ref)
 );
 
@@ -913,24 +919,28 @@ mod compat_tests {
             .expect("provision SQLite database");
     }
 
-    /// HASH-KEY-WIDTH (FIG-6957): content addresses and every reference to
-    /// them are binary keys; widening them doubles the random-key B-trees.
+    /// HASH-KEY-WIDTH (FIG-6957): content addresses are binary keys, and
+    /// every reference to a blob is its integer id (FIG-7584); widening
+    /// either grows the B-trees that hold them.
     #[test]
     fn content_hash_columns_are_binary_keys() {
         let mut connection = Connection::open_in_memory().unwrap();
         provision(&mut connection);
         let columns = connection.statement_once(
             "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
-             WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref', 'attachment_id')
+             WHERE m.type = 'table' AND (p.name IN ('hash', 'attachment_id')
+               OR (m.name = 'retirement_frontier' AND p.name = 'node_ref')
                OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
                           WHERE f.\"from\" = p.name AND f.\"table\" = 'blobs'))"
         ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
         assert!(!columns.is_empty());
         for (table, column, kind) in columns {
+            let address = matches!(column.as_str(), "hash" | "attachment_id");
             assert_eq!(
-                kind, "BLOB",
-                "{table}.{column} must store a binary content address"
+                kind,
+                if address { "BLOB" } else { "INTEGER" },
+                "{table}.{column} must store a binary content address or a node id"
             );
         }
     }

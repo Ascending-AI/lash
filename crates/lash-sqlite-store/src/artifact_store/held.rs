@@ -26,7 +26,7 @@ lash_store_sql::statements! {
     /// SQLite binds a set as the JSON array `json_each` reads.
     pub(crate) struct HeldSqliteStatements @ "artifact_held" {
         /// The blob each reference of JSON `?2` in namespace `?1` points at.
-        select_blob_refs = "SELECT artifact_ref, blob_ref FROM artifact_refs
+        select_blob_refs = "SELECT artifact_ref, (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref IN (SELECT value FROM json_each(?2))";
 
         /// Each reference of JSON `?2` in namespace `?1` that referrer
@@ -41,7 +41,7 @@ lash_store_sql::statements! {
         /// Point each `[reference, blob]` of JSON `?2` in namespace `?1`. An
         /// artifact is immutable: a pointer already there is kept.
         insert_pointers = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             SELECT ?1, value ->> 0, unhex(value ->> 1) FROM json_each(?2) WHERE true
+             SELECT ?1, value ->> 0, COALESCE((SELECT id FROM blobs WHERE hash = unhex(value ->> 1)), CASE WHEN unhex(value ->> 1) IS NOT NULL THEN -1 END) FROM json_each(?2) WHERE true
              ON CONFLICT (namespace, artifact_ref) DO NOTHING";
 
         /// Referrer `?3`/`?4`'s edge to each reference of JSON `?2` in
@@ -68,7 +68,7 @@ lash_store_sql::statements! {
                    WHERE edge.namespace = doomed.namespace
                      AND edge.artifact_ref = doomed.artifact_ref
                )
-             RETURNING blob_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref";
     }
 }
 

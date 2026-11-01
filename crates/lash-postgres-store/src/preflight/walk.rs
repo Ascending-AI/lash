@@ -315,11 +315,11 @@ async fn fetch_sessions(
     // the whole table.
     let sql = crate::session_sql::session_sql();
     let query = match scan.after.as_deref() {
-        None => crate::observed_sql::query_as::<_, (String, crate::keys::Key)>(
+        None => crate::observed_sql::query_as::<_, (String, String)>(
             sql.head_postgres.scan_checkpoints_first_page.sql(),
         )
         .bind(row_limit(scan)),
-        Some(after) => crate::observed_sql::query_as::<_, (String, crate::keys::Key)>(
+        Some(after) => crate::observed_sql::query_as::<_, (String, String)>(
             sql.head_postgres.scan_checkpoints_after.sql(),
         )
         .bind(after.to_string())
@@ -332,7 +332,7 @@ async fn fetch_sessions(
         .into_iter()
         .map(|(session_key, checkpoint_ref)| SessionCheckpointRow {
             session_key,
-            checkpoint_ref: checkpoint_ref.0,
+            checkpoint_ref,
         })
         .collect())
 }
@@ -357,7 +357,8 @@ async fn fetch_blobs(
             .select_bodies_by_hash
             .sql(),
     )
-    .bind(crate::keys::keys(hashes))
+    // A dangling reference names its node id, not a digest: it has no body.
+    .bind(hashes.iter().filter_map(crate::keys::lookup).collect::<Vec<_>>())
     .fetch_all(crate::observed_sql::executor(&mut **snapshot))
     .await?;
     Ok(rows

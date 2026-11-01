@@ -80,7 +80,9 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     for node in staging.nodes().values() {
         for child in node.children().expect("canonical children") {
             tx.execute(
-                "INSERT OR IGNORE INTO blob_edges (parent_hash, child_hash) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO blob_edges (parent_id, child_id)
+                 SELECT parent.id, child.id FROM blobs AS parent, blobs AS child
+                 WHERE parent.hash = ?1 AND child.hash = ?2",
                 rusqlite::params![node.id.0.as_slice(), child.0.as_slice()],
             )
             .expect("install config edge");
@@ -89,7 +91,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     for (id, root) in roots_without_identity {
         assert_eq!(
             tx.execute(
-                "UPDATE session_revisions SET config_ref = ?1 WHERE session_id = ?2",
+                "UPDATE session_revisions SET config_ref = (SELECT id FROM blobs WHERE hash = ?1) WHERE session_id = ?2",
                 rusqlite::params![root.0.as_slice(), id],
             )
             .expect("replace only the stored identity"),

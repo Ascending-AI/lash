@@ -45,7 +45,7 @@ crate::statements! {
         insert_phase = "INSERT INTO turn_phases
                  (session_id, run, phase, phase_arg, iteration, checkpoint_ref,
                   model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+             VALUES (?1, ?2, ?3, ?4, ?5, COALESCE((SELECT id FROM blobs WHERE hash = ?6), CASE WHEN ?6 IS NOT NULL THEN -1 END), ?7, ?8, ?9, ?10)";
 
         /// Move run `?2` of session `?1` to phase `?3` (argument `?4`) at
         /// iteration `?5` with checkpoint `?6` and model pin `?7`, `?8`,
@@ -53,7 +53,8 @@ crate::statements! {
         /// `?10` becomes the turn's latest; a null `?10` keeps the count. No
         /// row when the run has no phase row.
         advance_phase = "UPDATE turn_phases
-             SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
+             SET phase = ?3, phase_arg = ?4, iteration = ?5,
+                 checkpoint_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?6), CASE WHEN ?6 IS NOT NULL THEN -1 END),
                  model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
                  model_calls = COALESCE(?10, model_calls), model_stream_from = ?11,
                  answer_ref = NULL
@@ -63,7 +64,7 @@ crate::statements! {
         /// Record receipt `?3` of the call run `?2` of session `?1` pins in
         /// its model phase, at epoch `?4`. No row when the run has no phase
         /// row, is not in its model phase, or holds a receipt.
-        answer_set = "UPDATE turn_phases SET answer_ref = ?3, written_epoch = ?4
+        answer_set = "UPDATE turn_phases SET answer_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END), written_epoch = ?4
              WHERE session_id = ?1 AND run = ?2 AND phase = 'model' AND answer_ref IS NULL
              RETURNING run";
 
@@ -76,7 +77,7 @@ crate::statements! {
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
                  terminal_head_revision = ?5, terminal_at_ms = ?6,
-                 terminal_transcript_ref = ?7,
+                 terminal_transcript_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?7), CASE WHEN ?7 IS NOT NULL THEN -1 END),
                  terminal_window_revision = (
                      SELECT revision.head_revision FROM session_head AS head
                      JOIN session_revisions AS revision
@@ -91,65 +92,66 @@ crate::statements! {
         /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot,
         /// working execution and receipt.
         delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
-             RETURNING checkpoint_ref, working_execution_ref, answer_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref, (SELECT hash FROM blobs WHERE id = working_execution_ref) AS working_execution_ref,
+                 (SELECT hash FROM blobs WHERE id = answer_ref) AS answer_ref";
 
         /// Record plugin `?3`'s namespace entry `?4` for run `?2` of session
         /// `?1`, with values root `?5`. `?6` retains the held root for a
         /// metadata-only write; otherwise replace it, including NULL for base.
         upsert_namespace = "INSERT INTO turn_namespaces
                  (session_id, run, plugin, entry, graph_root_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+             VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT id FROM blobs WHERE hash = ?5), CASE WHEN ?5 IS NOT NULL THEN -1 END))
              ON CONFLICT (session_id, run, plugin)
              DO UPDATE SET entry = excluded.entry,
                  graph_root_ref = CASE WHEN ?6 THEN turn_namespaces.graph_root_ref
                      ELSE excluded.graph_root_ref END";
 
         /// Run `?2` of session `?1`'s namespace rows, by plugin.
-        namespaces = "SELECT plugin, entry, graph_root_ref FROM turn_namespaces
+        namespaces = "SELECT plugin, entry, (SELECT hash FROM blobs WHERE id = graph_root_ref) AS graph_root_ref FROM turn_namespaces
              WHERE session_id = ?1 AND run = ?2
              ORDER BY plugin";
 
         /// Plugin `?3`'s namespace root for run `?2` of session `?1`.
-        namespace_root = "SELECT graph_root_ref FROM turn_namespaces
+        namespace_root = "SELECT (SELECT hash FROM blobs WHERE id = graph_root_ref) AS graph_root_ref FROM turn_namespaces
              WHERE session_id = ?1 AND run = ?2 AND plugin = ?3";
 
         /// Run `?2` of session `?1`'s transcript: the TurnTranscript its
         /// terminal published (FIG-6601).
-        transcript_root = "SELECT terminal_transcript_ref FROM session_runs
+        transcript_root = "SELECT (SELECT hash FROM blobs WHERE id = terminal_transcript_ref) AS terminal_transcript_ref FROM session_runs
              WHERE session_id = ?1 AND run = ?2";
 
         /// Run `?2` of session `?1`'s phase root.
-        phase_root = "SELECT checkpoint_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+        phase_root = "SELECT (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
 
         /// Run `?2` of session `?1`'s phase root and receipt: what an advance
         /// replaces.
-        phase_roots = "SELECT checkpoint_ref, answer_ref FROM turn_phases
+        phase_roots = "SELECT (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref, (SELECT hash FROM blobs WHERE id = answer_ref) AS answer_ref FROM turn_phases
              WHERE session_id = ?1 AND run = ?2";
 
         /// Run `?2` of session `?1`'s receipt root.
-        answer_root = "SELECT answer_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+        answer_root = "SELECT (SELECT hash FROM blobs WHERE id = answer_ref) AS answer_ref FROM turn_phases WHERE session_id = ?1 AND run = ?2";
 
         /// Run `?2` of session `?1`'s working execution root.
-        working_root = "SELECT working_execution_ref FROM turn_phases
+        working_root = "SELECT (SELECT hash FROM blobs WHERE id = working_execution_ref) AS working_execution_ref FROM turn_phases
              WHERE session_id = ?1 AND run = ?2";
 
         /// Point run `?2` of session `?1`'s working execution at `?3` when it
         /// is `?4`, at epoch `?5`. No row otherwise.
-        working_set = "UPDATE turn_phases SET working_execution_ref = ?3, written_epoch = ?5
+        working_set = "UPDATE turn_phases SET working_execution_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END), written_epoch = ?5
              WHERE session_id = ?1 AND run = ?2
-               AND working_execution_ref IS NOT DISTINCT FROM ?4
+               AND (SELECT hash FROM blobs WHERE id = working_execution_ref) IS NOT DISTINCT FROM ?4
              RETURNING run";
 
         /// Drop run `?2` of session `?1`'s namespace rows, returning each
         /// values root.
         delete_namespaces = "DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
-             RETURNING graph_root_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = graph_root_ref) AS graph_root_ref";
 
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                    (SELECT hash FROM blobs WHERE id = p.checkpoint_ref) AS checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
-                    p.working_execution_ref, p.answer_ref,
+                    (SELECT hash FROM blobs WHERE id = p.working_execution_ref) AS working_execution_ref, (SELECT hash FROM blobs WHERE id = p.answer_ref) AS answer_ref,
                     COALESCE((SELECT admitted_count FROM tool_calls
                         WHERE owner_key = 't/' || REPLACE(REPLACE(r.session_id, '%', '%25'), '/', '%2F') || '/' || REPLACE(REPLACE(r.run, '%', '%25'), '/', '%2F')
                         ORDER BY admission_seq DESC LIMIT 1), 0)

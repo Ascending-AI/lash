@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS exec_snapshots (
     exec_key TEXT PRIMARY KEY,
     rev INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
     -- The execution's ExecRoot node (FIG-5887 §7) and the commit that wrote it.
-    root_ref BLOB NOT NULL REFERENCES blobs(hash),
+    root_ref INTEGER NOT NULL REFERENCES blobs(id),
     commit_id BLOB NOT NULL CONSTRAINT ck_exec_snapshots_commit_id CHECK (length(commit_id) = 32),
     written_epoch INTEGER NOT NULL
 );

@@ -145,7 +145,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         "collection releases the unpinned revision"
     );
     let root: String = connection.query_row_once(
-        "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
+        "SELECT lower(hex((SELECT hash FROM blobs WHERE id = config_ref))) FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
     ).expect("the head retains its config graph");
     let root = lash_core_store::checkpoint_graph::NodeId::from_hex(&root).expect("node id");
     let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20);
@@ -2304,14 +2304,14 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
         .expect("head");
     let raw = Connection::open(&path).expect("corruption connection");
     let root: String = raw
-        .query_row_once(
-            "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1",
+        .query_row(
+            "SELECT lower(hex((SELECT hash FROM blobs WHERE id = config_ref))) FROM session_revisions WHERE session_id = ?1",
             [owner.as_str()],
             |row| row.get(0),
         )
         .expect("owner root");
     raw.execute_once(
-        "UPDATE session_revisions SET config_ref = unhex(?1) WHERE session_id = ?2",
+        "UPDATE session_revisions SET config_ref = (SELECT id FROM blobs WHERE hash = unhex(?1)) WHERE session_id = ?2",
         params![root, foreign.as_str()],
     )
     .expect("mis-key the cached root");

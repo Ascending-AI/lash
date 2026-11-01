@@ -13,7 +13,7 @@ async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
                 let mut statement =
                     connection.statement(super::SQL.sqlite.retirement_candidates.sql())?;
                 let rows = statement
-                    .query_map(rusqlite::params!["[]", 256], |_| Ok(()))?
+                    .query_map(rusqlite::params!["[]", 256, "[]"], |_| Ok(()))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 assert!(rows.is_empty());
                 reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
@@ -64,7 +64,9 @@ async fn lo_root_retirement_work_ignores_unrelated_edges() {
                 }
                 for (id, _) in staging.nodes().iter().filter(|(id, _)| **id != child) {
                     connection.execute_once(
-                        "INSERT INTO blob_edges(parent_hash, child_hash) VALUES (?1, ?2)",
+                        "INSERT INTO blob_edges(parent_id, child_id)
+                         SELECT parent.id, child.id FROM blobs AS parent, blobs AS child
+                         WHERE parent.hash = ?1 AND child.hash = ?2",
                         rusqlite::params![id.0.as_slice(), child.0.as_slice()],
                     )?;
                 }
@@ -75,7 +77,7 @@ async fn lo_root_retirement_work_ignores_unrelated_edges() {
                 )?;
                 let result = super::peel_batch(
                     connection,
-                    &std::collections::BTreeSet::from([root.0]),
+                    super::Frontier::Digests(&std::collections::BTreeSet::from([root.0])),
                     256,
                 )?;
                 assert_eq!(result, (1, 1, Default::default()));
@@ -183,8 +185,8 @@ async fn an_install_reuses_a_stored_root_instead_of_revisiting_its_chain() {
     );
 }
 
-/// HASH-PUBLICATION-ATOMIC (FIG-6957): a binary root's foreign-key
-/// refusal rolls back its preceding blob insert, preserving a rooted
+/// HASH-PUBLICATION-ATOMIC (FIG-6957): a root's foreign-key refusal (an
+/// id no blob holds) rolls back its preceding blob insert, preserving a rooted
 /// control. Exactly-once recovery relies on this one transaction boundary.
 #[tokio::test]
 async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
@@ -202,7 +204,8 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
                 rusqlite::params![SqlHash(retained.as_str()), b"retained control".as_slice()],
             )?;
             tx.execute_once(
-                "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
+                "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms)
+                 SELECT id, 1, 0 FROM blobs WHERE hash = ?1",
                 [SqlHash(retained.as_str())],
             )?;
             Ok(())
@@ -213,7 +216,6 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
         .conn
         .write(move |tx| {
             let candidate = BlobRef::for_content(b"unpublished candidate");
-            let absent = BlobRef::for_content(b"absent root");
             tx.execute_once(
                 "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
                 rusqlite::params![
@@ -222,8 +224,9 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
                 ],
             )?;
             tx.execute_once(
-                "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
-                [SqlHash(absent.as_str())],
+                "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms)
+                 SELECT max(id) + 1, 1, 0 FROM blobs",
+                [],
             )?;
             Ok(())
         })
@@ -247,7 +250,7 @@ async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             assert_eq!(keys, [(control.0, "blob".to_owned(), 32)]);
             let rooted: i64 = connection.query_row_once(
-                "SELECT count(*) FROM retirement_holds JOIN blobs ON root_ref = hash",
+                "SELECT count(*) FROM retirement_holds JOIN blobs ON root_ref = id",
                 [],
                 |row| row.get(0),
             )?;

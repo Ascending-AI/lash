@@ -100,7 +100,7 @@ fn published(location: &SqliteLocation) -> (i64, i64, i64, Vec<(String, String)>
             .expect("count rows")
     };
     let mut heads = connection
-        .statement_once("SELECT head.session_id, lower(hex(revision.config_ref)) FROM session_head AS head JOIN session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id")
+        .statement_once("SELECT head.session_id, lower(hex((SELECT hash FROM blobs WHERE id = revision.config_ref))) FROM session_head AS head JOIN session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id")
         .expect("prepare the head read");
     let heads = heads
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))

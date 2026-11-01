@@ -218,7 +218,8 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         sqlx::query(
             "DELETE FROM lash_blobs AS leaf WHERE EXISTS (
                  SELECT 1 FROM lash_blob_edges
-                 WHERE parent_hash = leaf.hash AND child_hash = decode($1, 'hex')
+                 WHERE parent_id = leaf.id
+                   AND child_id = (SELECT id FROM lash_blobs WHERE hash = decode($1, 'hex'))
              )",
         )
         .bind(shared.blob_ref.as_str())
@@ -247,13 +248,13 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         assert_eq!(receipt.checkpoint_ref, victim_receipt.checkpoint_ref);
         let reached: Vec<(String, bool)> = sqlx::query_as(
             "WITH RECURSIVE reach AS (
-                 SELECT decode($1, 'hex') AS hash
+                 SELECT id FROM lash_blobs WHERE hash = decode($1, 'hex')
                  UNION
-                 SELECT edge.child_hash FROM lash_blob_edges AS edge
-                 JOIN reach ON edge.parent_hash = reach.hash
+                 SELECT edge.child_id FROM lash_blob_edges AS edge
+                 JOIN reach ON edge.parent_id = reach.id
              )
-             SELECT encode(reach.hash, 'hex'), EXISTS (SELECT 1 FROM lash_blobs WHERE hash = reach.hash)
-             FROM reach",
+             SELECT encode(node.hash, 'hex'), node.id IS NOT NULL
+             FROM reach LEFT JOIN lash_blobs AS node ON node.id = reach.id",
         )
         .bind(receipt.checkpoint_ref.as_str())
         .fetch_all(storage.pool())

@@ -162,7 +162,8 @@ lash_store_sql::statements! {
     pub(crate) struct SessionHeadPostgresStatements @ "session_head" {
 
         /// The published head of `?1`, row-locked.
-        select_meta_for_update = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
+        select_meta_for_update = "SELECT (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref, head.head_revision, revision.leaf_node_id,
+                (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref,
                 leaf.frame_node_id
          FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
@@ -189,11 +190,12 @@ lash_store_sql::statements! {
         insert_fork = "INSERT INTO session_head (session_id, head_revision) VALUES (?1, 0)";
 
         /// Every distinct checkpoint root the sessions in `?1` have published.
-        select_checkpoints_for_sessions = "SELECT DISTINCT revision.checkpoint_ref
-         FROM session_head AS head JOIN session_revisions AS revision
-           ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
-         WHERE head.session_id = ANY(?1) AND revision.checkpoint_ref IS NOT NULL
-         ORDER BY checkpoint_ref";
+        select_checkpoints_for_sessions = "SELECT hash FROM blobs WHERE id IN (
+             SELECT revision.checkpoint_ref
+             FROM session_head AS head JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ANY(?1) AND revision.checkpoint_ref IS NOT NULL)
+         ORDER BY hash";
 
         /// The first page of sessions that have published a checkpoint root,
         /// `?1` rows of it.
@@ -208,7 +210,9 @@ lash_store_sql::statements! {
         /// one with `?1 IS NULL OR session_id > ?1`: that predicate is not
         /// sargable, so the paginated walk this exists to make cheap would
         /// scan the whole table on every page.
-        scan_checkpoints_first_page = "SELECT head.session_id, revision.checkpoint_ref
+        scan_checkpoints_first_page = "SELECT head.session_id,
+            COALESCE(encode((SELECT hash FROM blobs WHERE id = revision.checkpoint_ref), 'hex'),
+                'node ' || revision.checkpoint_ref)
      FROM session_head AS head JOIN session_revisions AS revision
        ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
      WHERE revision.checkpoint_ref IS NOT NULL
@@ -217,7 +221,9 @@ lash_store_sql::statements! {
 
         /// The page of sessions that have published a checkpoint root after
         /// `?1`, `?2` rows of it.
-        scan_checkpoints_after = "SELECT head.session_id, revision.checkpoint_ref
+        scan_checkpoints_after = "SELECT head.session_id,
+            COALESCE(encode((SELECT hash FROM blobs WHERE id = revision.checkpoint_ref), 'hex'),
+                'node ' || revision.checkpoint_ref)
      FROM session_head AS head JOIN session_revisions AS revision
        ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
      WHERE revision.checkpoint_ref IS NOT NULL
@@ -270,7 +276,8 @@ lash_store_sql::statements! {
         /// the fork's own head roots the checkpoint before the row can go.
         /// SQLite reads the same row with the shared statement, under its
         /// single-writer lock.
-        select_for_share = "SELECT revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
+        select_for_share = "SELECT revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref,
+                    (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref
              FROM session_revisions AS revision
              WHERE revision.session_id = ?1 AND revision.head_revision = ?2
              FOR SHARE OF revision";

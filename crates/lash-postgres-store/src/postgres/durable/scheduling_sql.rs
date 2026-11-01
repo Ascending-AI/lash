@@ -156,7 +156,7 @@ lash_store_sql::statements! {
                     h.head_revision, v.leaf_node_id, leaf.generation, leaf.frame_node_id,
                     NOT leaf.tombstoned,
                     (SELECT jsonb_agg(jsonb_build_array(plugin_id, min_format, max_format))
-                       FROM fleet_plugin_writers), v.config_ref,
+                       FROM fleet_plugin_writers), (SELECT hash FROM blobs WHERE id = v.config_ref) AS config_ref,
                     COALESCE((SELECT jsonb_agg(jsonb_build_array(q.turn_id, q.call_id, q.request_id, q.origin, q.reason)
                                                ORDER BY q.turn_id, q.call_id)
                               FROM tool_calls q WHERE q.session_id = ?2 AND q.request_id IS NOT NULL AND q.answer_outcome IS NULL), '[]'::jsonb)::text,

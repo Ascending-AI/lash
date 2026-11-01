@@ -10,7 +10,7 @@ lash_store_sql::statements! {
                  FROM artifact_referrer_edges AS edge
                  WHERE edge.namespace = refs.namespace AND edge.artifact_ref = refs.artifact_ref)
              FROM artifact_refs AS refs
-             LEFT JOIN blobs AS body ON body.hash = refs.blob_ref
+             LEFT JOIN blobs AS body ON body.id = refs.blob_ref
              WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2";
     }
 }

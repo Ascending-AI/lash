@@ -7,7 +7,8 @@ lash_store_sql::statements! {
     struct OwnerSqliteStatements @ "durable_owner_sqlite" {
         /// The actor fence and its unchanged turn frontier share one read.
         fence = "WITH open_turn AS MATERIALIZED (
-             SELECT r.run, p.checkpoint_ref, p.answer_ref,
+             SELECT r.run, (SELECT hash FROM blobs WHERE id = p.checkpoint_ref) AS checkpoint_ref,
+                    (SELECT hash FROM blobs WHERE id = p.answer_ref) AS answer_ref,
                     c.request_id, c.origin, c.reason, c.disposition, c.mode
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run

@@ -150,11 +150,13 @@ async fn a_run_scoped_fact_walk_takes_one_round_trip() {
     install_staged(&mut connection, staging.nodes())
         .await
         .expect("install");
-    sqlx::query("DELETE FROM lash_blob_edges WHERE parent_hash = $1")
-        .bind(crate::keys::key(root.to_hex()))
-        .execute(&mut *connection)
-        .await
-        .expect("missing stored edge");
+    sqlx::query(
+        "DELETE FROM lash_blob_edges WHERE parent_id = (SELECT id FROM lash_blobs WHERE hash = $1)",
+    )
+    .bind(crate::keys::key(root.to_hex()))
+    .execute(&mut *connection)
+    .await
+    .expect("missing stored edge");
     let total = staging.get(&root).expect("root").bytes.len() as u64 + opaque_bytes.len() as u64;
     let mut limits = DecodeLimits::within_total(total);
     limits.nodes = 2;

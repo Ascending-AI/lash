@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS model_call_records (
     call_id TEXT NOT NULL,
     attempt INTEGER CHECK (attempt > 0), answered INTEGER NOT NULL DEFAULT 0 CHECK (answered IN (0, 1)),
     enclosing_owner TEXT, enclosing_run INTEGER, enclosing_call TEXT,
-    record_ref BLOB REFERENCES blobs(hash),
+    record_ref INTEGER REFERENCES blobs(id),
     ended_at_ms INTEGER,
     written_epoch INTEGER,
     PRIMARY KEY (session_id, call_id),
@@ -35,7 +35,7 @@ pub(super) static SQL: LazyLock<ModelCallStatements> =
 lash_store_sql::statements! {
     lazy
     struct ModelCallSqliteStatements @ "durable_model_call_sqlite" {
-        selected = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
+        selected = "SELECT call_id, (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref, ended_at_ms FROM model_call_records
             WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
               AND call_id IN (SELECT value FROM json_each(?3)) ORDER BY run, call";
         selected_pins = "SELECT run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call FROM model_call_records

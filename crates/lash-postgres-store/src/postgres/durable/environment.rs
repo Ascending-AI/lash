@@ -666,21 +666,23 @@ lash_store_sql::statements! {
                         WHERE namespace = 'kernel_document' AND artifact_ref = owed.ref
                           AND referrer_kind = 'environment_version' AND referrer_id = ?1))) AS ready
             FROM environment_owners WHERE owner_id = ?1 FOR UPDATE";
-        head_is = "SELECT (SELECT root_ref FROM environment_heads WHERE session_id = ?1)
+        head_is = "SELECT (SELECT root.hash FROM environment_heads AS head
+                JOIN blobs AS root ON root.id = head.root_ref WHERE head.session_id = ?1)
             IS NOT DISTINCT FROM ?2::bytea AS same";
         published_at = "SELECT state = 'published' AND version_id = ?2 AS published
             FROM environment_owners WHERE owner_id = ?1";
         head_replace = "WITH old AS (SELECT root_ref FROM environment_heads WHERE session_id = ?1),
             put AS (INSERT INTO environment_heads (session_id, root_ref, written_epoch)
-                VALUES (?1, ?2, ?3) ON CONFLICT (session_id) DO UPDATE
+                VALUES (?1, COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END), ?3)
+                ON CONFLICT (session_id) DO UPDATE
                 SET root_ref = excluded.root_ref, written_epoch = excluded.written_epoch)
-            SELECT root_ref FROM old";
+            SELECT (SELECT hash FROM blobs WHERE id = old.root_ref) AS root_ref FROM old";
         owner_has_reader = "WITH RECURSIVE reachable AS (
-            SELECT hash FROM blobs
+            SELECT id FROM blobs
             WHERE hash = (SELECT manifest_ref FROM environment_owners WHERE owner_id = ?1)
-            UNION SELECT e.parent_hash FROM blob_edges e JOIN reachable r ON e.child_hash = r.hash
+            UNION SELECT e.parent_id FROM blob_edges e JOIN reachable r ON e.child_id = r.id
             ) SELECT EXISTS(SELECT 1 FROM reachable
-                JOIN graph_root_catalog roots ON roots.root_ref = reachable.hash) AS held";
+                JOIN graph_root_catalog roots ON roots.root_ref = reachable.id) AS held";
         peel_owner = "SELECT owner_id FROM environment_owners WHERE owner_id = ?1 FOR UPDATE SKIP LOCKED";
         owners_of = "SELECT owner_id FROM environment_owners WHERE manifest_ref = ANY(?1) ORDER BY owner_id";
         owner_nodes = "SELECT owner_id, manifest_ref FROM environment_owners WHERE manifest_ref = ANY(?1) ORDER BY owner_id";

@@ -60,16 +60,16 @@ use crate::conn::{FencedTx, TxOutcome, cached_execute};
 /// The graph tables and the root catalog, created after every table the
 /// catalog names.
 pub(crate) const TABLES: &str = "
--- One row per child of an installed graph node, keyed by the child: the
--- reverse of its envelope's child table. The parent's own bytes hold the
--- forward direction, so its peel reads its children there and deletes their
--- edges (FIG-6939); a child cannot go while an edge names it.
+-- One row per child of an installed graph node, by node id and keyed by the
+-- parent: its envelope's child table. New nodes take the highest ids, so an
+-- install's edges land on the rightmost pages. Neither end can go while an
+-- edge names it: a peel deletes a parent's edges before the parent.
 CREATE TABLE IF NOT EXISTS blob_edges (
-    parent_hash BLOB NOT NULL,
-    child_hash BLOB NOT NULL REFERENCES blobs(hash),
-    PRIMARY KEY (child_hash, parent_hash)
+    parent_id INTEGER NOT NULL REFERENCES blobs(id),
+    child_id INTEGER NOT NULL REFERENCES blobs(id),
+    PRIMARY KEY (parent_id, child_id)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_blob_edges_parent ON blob_edges(parent_hash);
+CREATE INDEX IF NOT EXISTS idx_blob_edges_child ON blob_edges(child_id);
 
 -- An execution's admitted effect, by its canonical binary identity, to its
 -- Admission node, while a live kernel or a released member needs the lookup.
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
     owner_key TEXT,
     run_seq INTEGER,
     member_ordinal INTEGER,
-    admission_ref BLOB NOT NULL REFERENCES blobs(hash),
+    admission_ref INTEGER NOT NULL REFERENCES blobs(id),
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
@@ -98,7 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
 CREATE TABLE IF NOT EXISTS root_leases (
     lease_id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_key BLOB NOT NULL,
-    root_ref BLOB NOT NULL REFERENCES blobs(hash),
+    root_ref INTEGER NOT NULL REFERENCES blobs(id),
     actor_key TEXT,
     epoch INTEGER,
     ttl_ms INTEGER NOT NULL CONSTRAINT ck_root_leases_ttl CHECK (ttl_ms > 0),
@@ -114,7 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_root_leases_expiry ON root_leases (expires_at_ms)
 -- lease released. A root of the catalog until a step takes it; `closure` 0
 -- peels the node alone.
 CREATE TABLE IF NOT EXISTS retirement_holds (
-    root_ref BLOB PRIMARY KEY REFERENCES blobs(hash),
+    root_ref INTEGER PRIMARY KEY REFERENCES blobs(id),
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -124,9 +124,10 @@ CREATE INDEX IF NOT EXISTS idx_retirement_holds_queue
 -- A retirement step's unfinished frontier (FIG-6193): a node under a
 -- retired root, or a reaped lease's root, that a bounded step has not peeled
 -- yet. Only retirement steps write or take it: no root of the catalog and no
--- foreign key; a node gone meanwhile is passed over.
+-- foreign key; a node gone meanwhile is passed over. A row is a hint, never
+-- an authority: a reused id it names is checked like any other candidate.
 CREATE TABLE IF NOT EXISTS retirement_frontier (
-    node_ref BLOB PRIMARY KEY,
+    node_ref INTEGER PRIMARY KEY,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_frontier_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
 ) WITHOUT ROWID;
@@ -148,7 +149,7 @@ CREATE TABLE IF NOT EXISTS environment_owners (
 );
 CREATE TABLE IF NOT EXISTS environment_heads (
     session_id TEXT PRIMARY KEY,
-    root_ref BLOB NOT NULL REFERENCES blobs(hash),
+    root_ref INTEGER NOT NULL REFERENCES blobs(id),
     written_epoch INTEGER NOT NULL
 );
 
@@ -177,9 +178,9 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     UNION ALL SELECT 'retirement', root_ref FROM retirement_holds
     UNION ALL SELECT 'terminal_transcript', terminal_transcript_ref FROM session_runs
         WHERE terminal_transcript_ref IS NOT NULL
-    UNION ALL SELECT 'prompt_snapshot', hash FROM prompt_snapshot_texts WHERE part = 'snapshot'
-    UNION ALL SELECT 'prompt_request', hash FROM prompt_snapshot_texts WHERE part = 'request'
-    UNION ALL SELECT 'prompt_prefix', hash FROM prompt_prefixes;
+    UNION ALL SELECT 'prompt_snapshot', text_ref FROM prompt_snapshot_texts WHERE part = 'snapshot'
+    UNION ALL SELECT 'prompt_request', text_ref FROM prompt_snapshot_texts WHERE part = 'request'
+    UNION ALL SELECT 'prompt_prefix', root_ref FROM prompt_prefixes;
 ";
 
 lash_store_sql::statements! {
@@ -190,7 +191,8 @@ lash_store_sql::statements! {
     pub(crate) struct GraphSqliteStatements @ "durable_graph_sqlite" {
         /// Artifact `?2` of namespace `?1`'s blob: SQLite's bridge is its
         /// pointer table.
-        artifact_root = "SELECT blob_ref FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2";
+        artifact_root = "SELECT (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref FROM artifact_refs
+             WHERE namespace = ?1 AND artifact_ref = ?2";
 
         /// The encoding of every stored blob in JSON `?1`.
         stored_encodings = "SELECT hash, encoding FROM blobs
@@ -245,62 +247,61 @@ lash_store_sql::statements! {
 
         /// Every edge of JSON `?1`, an array of `[parent, child]` digests
         /// of freshly installed parents.
-        insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1)";
+        insert_edges = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id FROM json_each(?1) AS edge
+               JOIN blobs AS parent ON parent.hash = unhex(edge.value ->> 0)
+               JOIN blobs AS child ON child.hash = unhex(edge.value ->> 1)";
 
         /// Discover one bounded changed-path set, stopping at live/shared
         /// boundaries. Outside edges and catalog roots seed protection. Cast
         /// the integer limit so SQLite does not expire this large cached
-        /// program when the batch rebinds its limit for execution.
-        retirement_candidates = "WITH RECURSIVE candidates AS (
-             SELECT unhex(value) AS hash FROM json_each(?1)
+        /// program when the batch rebinds its limit for execution. The
+        /// frontier is JSON node ids `?1` or JSON hex digests `?3`, so a
+        /// retirement that starts from digests enters the id-keyed graph
+        /// in this statement; a frontier node the limit left unexamined
+        /// answers a NULL verdict.
+        retirement_candidates = "WITH RECURSIVE frontier AS MATERIALIZED (
+             SELECT value AS id FROM json_each(?1)
              UNION
-             SELECT edge.child_hash AS hash FROM candidates
-               JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
-              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
-                AND (candidates.hash NOT IN (SELECT unhex(value) FROM json_each(?1))
-                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash))
-                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2)) <= 1
+             SELECT id FROM blobs WHERE hash IN (SELECT unhex(value) FROM json_each(?3))
+         ), candidates AS (
+             SELECT id FROM frontier
+             UNION
+             SELECT edge.child_id AS id FROM candidates
+               JOIN blob_edges AS edge ON edge.parent_id = candidates.id
+              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.id)
+                AND (candidates.id NOT IN (SELECT id FROM frontier)
+                     OR NOT EXISTS (SELECT 1 FROM blob_edges WHERE child_id = candidates.id))
+                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_id = candidates.id LIMIT 2)) <= 1
              LIMIT CAST(?2 AS INTEGER)
          ), protected AS (
-             SELECT hash FROM candidates
-              WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
-                 OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidates.hash
-                     AND edge.parent_hash NOT IN (SELECT hash FROM candidates))
+             SELECT id FROM candidates
+              WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.id)
+                 OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_id = candidates.id
+                     AND edge.parent_id NOT IN (SELECT id FROM candidates))
              UNION
-             SELECT edge.child_hash AS hash FROM protected JOIN blob_edges AS edge ON edge.parent_hash = protected.hash
-              WHERE edge.child_hash IN (SELECT hash FROM candidates)
-         ) SELECT candidates.hash, candidates.hash NOT IN (SELECT hash FROM protected) FROM candidates";
+             SELECT edge.child_id AS id FROM protected JOIN blob_edges AS edge ON edge.parent_id = protected.id
+              WHERE edge.child_id IN (SELECT id FROM candidates)
+         ) SELECT candidates.id, candidates.id NOT IN (SELECT id FROM protected) FROM candidates
+           UNION ALL
+           SELECT id, NULL FROM frontier WHERE id NOT IN (SELECT id FROM candidates)";
 
         /// Outgoing edges of the proven unprotected set, removed together.
-        retire_edges = "DELETE FROM blob_edges WHERE parent_hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING child_hash";
+        retire_edges = "DELETE FROM blob_edges WHERE parent_id IN (SELECT value FROM json_each(?1)) RETURNING child_id";
 
         /// Delete exactly the set proved under the same writer transaction.
-        retire_nodes = "DELETE FROM blobs WHERE hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING hash";
+        retire_nodes = "DELETE FROM blobs WHERE id IN (SELECT value FROM json_each(?1)) RETURNING id";
 
-        /// One level of a peel: delete every blob in JSON `?1` no root names
-        /// and no edge reaches, and return each one deleted with its bytes
-        /// and encoding, which name the children its edges reach.
-        peel_orphans = "DELETE FROM blobs AS candidate
-             WHERE candidate.hash IN (SELECT unhex(value) FROM json_each(?1))
+        /// One level of a peel: every node id of JSON `?1` no root names
+        /// and no edge reaches.
+        peel_orphans = "SELECT candidate.id FROM blobs AS candidate
+             WHERE candidate.id IN (SELECT value FROM json_each(?1))
                AND NOT EXISTS (
-                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.id
                )
                AND NOT EXISTS (
-                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
-               )
-             RETURNING hash, content, encoding";
-
-        /// Delete the edges of JSON `?1`, `[child, parent]` digest pairs:
-        /// the edges of peeled parents.
-        delete_edges = "DELETE FROM blob_edges
-             WHERE (child_hash, parent_hash) IN (SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1))";
-
-        /// Delete every edge of parent `?1` by a scan, returning each child
-        /// it reached: the edges of a peeled parent whose bytes no longer
-        /// name its children.
-        delete_parent_edges = "DELETE FROM blob_edges WHERE parent_hash = ?1
-             RETURNING child_hash";
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_id = candidate.id
+               )";
     }
 }
 
@@ -894,20 +895,27 @@ pub(super) fn hydrate_in(
     Ok(walk(tx, root, limits)?.map(|nodes| HydratedGraph { owner, root, nodes }))
 }
 
-/// Peels `frontier`, the roots the caller's transaction retired: deletes
-/// each one nothing names or reaches any more, then each child the deleted
+/// Peels `roots`, digests the caller's transaction retired: deletes each
+/// one nothing names or reaches any more, then each child the deleted
 /// nodes' edges reached, level by level, stopping wherever something still
 /// names a node. Its work is the newly unreachable nodes and their edges,
 /// never a closure something still roots. Answers how many it deleted.
-pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Result<usize> {
-    let mut frontier = frontier;
-    let mut deleted = 0;
+pub(crate) fn peel(tx: &Connection, roots: BTreeSet<String>) -> rusqlite::Result<usize> {
+    let (_, mut deleted, mut frontier) = peel_batch(tx, Frontier::Digests(&roots), 4096)?;
     while !frontier.is_empty() {
-        let (_, gone, children) = peel_batch(tx, &frontier, 4096)?;
+        let (_, gone, children) = peel_batch(tx, Frontier::Ids(&frontier), 4096)?;
         deleted += gone;
         frontier = children;
     }
     Ok(deleted)
+}
+
+/// Where a retirement batch starts: stored node ids, or the hex digests a
+/// release answered, resolved inside the batch's first statement.
+#[derive(Clone, Copy)]
+pub(super) enum Frontier<'a> {
+    Ids(&'a BTreeSet<i64>),
+    Digests(&'a BTreeSet<String>),
 }
 
 /// `values` as one JSON array, the binding a `json_each` statement reads.
@@ -921,121 +929,90 @@ pub(super) fn retirement_sql_for_testing() -> &'static str {
     SQL.sqlite.retirement_candidates.sql()
 }
 
-/// Set-based closure retirement. Candidate hints never authorize deletion:
-/// live roots and all outside incoming edges are checked under this writer.
+/// Set-based closure retirement over node ids. Candidate hints never
+/// authorize deletion: live roots and all outside incoming edges are checked
+/// under this writer.
 pub(super) fn peel_batch(
     tx: &Connection,
-    frontier: &BTreeSet<String>,
+    frontier: Frontier<'_>,
     limit: usize,
-) -> rusqlite::Result<(usize, usize, BTreeSet<String>)> {
-    let candidates = tx
+) -> rusqlite::Result<(usize, usize, BTreeSet<i64>)> {
+    let none = BTreeSet::<i64>::new();
+    let (ids, digests) = match frontier {
+        Frontier::Ids(ids) if ids.is_empty() => return Ok((0, 0, BTreeSet::new())),
+        Frontier::Digests(digests) if digests.is_empty() => return Ok((0, 0, BTreeSet::new())),
+        Frontier::Ids(ids) => (json_array(ids), json_array(&none)),
+        Frontier::Digests(digests) => (json_array(&none), json_array(digests)),
+    };
+    let rows = tx
         .statement(SQL.sqlite.retirement_candidates.sql())?
         .query_map(
             rusqlite::params![
-                json_array(frontier),
-                i64::try_from(limit.max(1)).unwrap_or(i64::MAX)
+                ids,
+                i64::try_from(limit.max(1)).unwrap_or(i64::MAX),
+                digests
             ],
-            |row| Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?)),
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<bool>>(1)?)),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let examined: BTreeSet<_> = candidates.iter().map(|(hash, _)| hash.clone()).collect();
-    let gone: BTreeSet<_> = candidates
-        .iter()
-        .filter(|(_, unprotected)| *unprotected)
-        .map(|(hash, _)| hash.clone())
-        .collect();
-    let mut next: BTreeSet<_> = frontier.difference(&examined).cloned().collect();
+    let mut examined = BTreeSet::new();
+    let mut gone = BTreeSet::new();
+    let mut next = BTreeSet::new();
+    for (id, verdict) in rows {
+        match verdict {
+            Some(unprotected) => {
+                examined.insert(id);
+                if unprotected {
+                    gone.insert(id);
+                }
+            }
+            None => {
+                next.insert(id);
+            }
+        }
+    }
     if gone.is_empty() {
         return Ok((examined.len(), 0, next));
     }
-    super::environment::peeled(tx, &gone)?;
-    let batch = json_array(&gone);
-    next.extend(
-        tx.statement(SQL.sqlite.retire_edges.sql())?
-            .query_map([&batch], |row| crate::codec::hash_column(row, 0))?
-            .collect::<rusqlite::Result<BTreeSet<_>>>()?
-            .difference(&examined)
-            .cloned(),
-    );
+    let (deleted, children) = delete_nodes(tx, &gone)?;
+    next.extend(children.difference(&examined));
+    Ok((examined.len(), deleted, next))
+}
+
+/// Deletes the proven set `gone` with its outgoing edges, answering how
+/// many nodes went and the children those edges reached.
+fn delete_nodes(tx: &Connection, gone: &BTreeSet<i64>) -> rusqlite::Result<(usize, BTreeSet<i64>)> {
+    super::environment::peeled(tx, gone)?;
+    let batch = json_array(gone);
+    let children = tx
+        .statement(SQL.sqlite.retire_edges.sql())?
+        .query_map([&batch], |row| row.get(0))?
+        .collect::<rusqlite::Result<BTreeSet<i64>>>()?;
     let deleted = tx
         .statement(SQL.sqlite.retire_nodes.sql())?
         .query_map([&batch], |_| Ok(()))?
         .collect::<rusqlite::Result<Vec<_>>>()?
         .len();
-    Ok((examined.len(), deleted, next))
+    Ok((deleted, children))
 }
 
 /// One level of [`peel`]: deletes every node of `frontier` nothing names or
 /// reaches, and answers how many with the children their edges reached.
 pub(super) fn peel_level(
     tx: &Connection,
-    frontier: &BTreeSet<String>,
-) -> rusqlite::Result<(usize, BTreeSet<String>)> {
-    // One statement deletes the level's deletable nodes before any of
-    // their edges goes. A frontier may contain both a parent and its child:
-    // the child becomes deletable only after the parent's edge goes, on the
-    // next level.
+    frontier: &BTreeSet<i64>,
+) -> rusqlite::Result<(usize, BTreeSet<i64>)> {
+    // The level's deletable set is read before any of its edges goes. A
+    // frontier may contain both a parent and its child: the child becomes
+    // deletable only after the parent's edge goes, on the next level.
     let gone = tx
         .statement(SQL.sqlite.peel_orphans.sql())?
-        .query_map([json_array(frontier)], |row| {
-            Ok((
-                crate::codec::hash_column(row, 0)?,
-                row.get::<_, Vec<u8>>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    super::environment::peeled(tx, &gone.iter().map(|(id, _, _)| id.clone()).collect())?;
-    let mut children = BTreeSet::new();
-    let mut edges = Vec::new();
-    for (parent, bytes, encoding) in &gone {
-        match stored_children(parent, bytes, *encoding) {
-            Some(reached) => {
-                for child in reached {
-                    edges.push([child.clone(), parent.clone()]);
-                    children.insert(child);
-                }
-            }
-            // Bytes that no longer decode cannot name the children: their
-            // edges are found by the parent instead.
-            None => children.extend(
-                tx.statement(SQL.sqlite.delete_parent_edges.sql())?
-                    .query_map([crate::codec::SqlHash(parent)], |row| {
-                        crate::codec::hash_column(row, 0)
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?,
-            ),
-        }
+        .query_map([json_array(frontier)], |row| row.get(0))?
+        .collect::<rusqlite::Result<BTreeSet<i64>>>()?;
+    if gone.is_empty() {
+        return Ok((0, BTreeSet::new()));
     }
-    if !edges.is_empty() {
-        cached_execute(tx, SQL.sqlite.delete_edges.sql(), [json_array(&edges)])?;
-    }
-    Ok((gone.len(), children))
-}
-
-/// The children a stored node's edges reach: its envelope's child table, as
-/// [`install`] recorded them, and none for an opaque blob. `None` when the
-/// bytes are not the node they are stored under, whose edges then no longer
-/// follow from them.
-fn stored_children(hash: &str, bytes: &[u8], encoding: i64) -> Option<BTreeSet<String>> {
-    match encoding_of(encoding).ok()? {
-        BlobEncoding::Opaque => Some(BTreeSet::new()),
-        BlobEncoding::Graph => {
-            let envelope = check_envelope(
-                bytes,
-                NodeId::from_hex(hash)?,
-                &lash_durable::domain::graph::OWNER_READ_LIMITS,
-            )
-            .ok()?;
-            Some(
-                envelope
-                    .children
-                    .iter()
-                    .map(|child| child.to_hex())
-                    .collect(),
-            )
-        }
-    }
+    delete_nodes(tx, &gone)
 }
 
 /// Moves what `retired` recorded to retirement holds, before its

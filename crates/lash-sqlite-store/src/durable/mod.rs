@@ -216,7 +216,7 @@ pub(crate) fn retire_process_rows(
 pub(crate) fn engine_rows_for_testing(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut rows = Vec::new();
     for sql in [
-        "SELECT 'run_records ' || owner_key || ' ' || run_seq || '/' || ordinal || ' ' || lower(hex(record_ref))
+        "SELECT 'run_records ' || owner_key || ' ' || run_seq || '/' || ordinal || ' ' || lower(hex((SELECT hash FROM blobs WHERE id = record_ref)))
              FROM run_records",
         "SELECT 'exec_snapshots ' || exec_key FROM exec_snapshots",
         "SELECT 'effect_admissions ' || exec_key FROM effect_admissions",

@@ -49,8 +49,8 @@ lash_store_sql::statements! {
     struct RunFactBatchStatements @ "durable_run_fact_batch_sqlite" {
         /// Validate the batch's ordinal chain and outcome uniqueness against
         /// both stored rows and its earlier rows before inserting the set.
-        append = append_sql!("SELECT CAST(key AS INTEGER) AS pos, ?1 AS owner_key, ?2 AS run_seq, value->>0 AS ordinal, value->>1 AS kind, value->>2 AS call_id, unhex(value->>3) AS record_ref, ?3 AS written_epoch FROM json_each(?4)");
-        append_small = append_sql!("SELECT i.pos, c.owner_key, c.run_seq, i.ordinal, i.kind, i.call_id, i.record_ref, c.written_epoch FROM (SELECT ?1 AS owner_key, ?2 AS run_seq, ?3 AS written_epoch) AS c CROSS JOIN (SELECT 0 AS pos, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref UNION ALL SELECT 1, ?8, ?9, ?10, ?11 WHERE ?8 IS NOT NULL) AS i");
+        append = append_sql!("SELECT CAST(key AS INTEGER) AS pos, ?1 AS owner_key, ?2 AS run_seq, value->>0 AS ordinal, value->>1 AS kind, value->>2 AS call_id, COALESCE((SELECT id FROM blobs WHERE hash = unhex(value->>3)), CASE WHEN unhex(value->>3) IS NOT NULL THEN -1 END) AS record_ref, ?3 AS written_epoch FROM json_each(?4)");
+        append_small = append_sql!("SELECT i.pos, c.owner_key, c.run_seq, i.ordinal, i.kind, i.call_id, i.record_ref, c.written_epoch FROM (SELECT ?1 AS owner_key, ?2 AS run_seq, ?3 AS written_epoch) AS c CROSS JOIN (SELECT 0 AS pos, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, COALESCE((SELECT id FROM blobs WHERE hash = ?7), CASE WHEN ?7 IS NOT NULL THEN -1 END) AS record_ref UNION ALL SELECT 1, ?8, ?9, ?10, COALESCE((SELECT id FROM blobs WHERE hash = ?11), CASE WHEN ?11 IS NOT NULL THEN -1 END) WHERE ?8 IS NOT NULL) AS i");
     }
 }
 static BATCH: LazyLock<RunFactBatchStatements> =
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS run_records (
                         'cell_report')),
     call_id TEXT,
     -- The fact's RoundFact node (FIG-5887 §7).
-    record_ref BLOB NOT NULL REFERENCES blobs(hash),
+    record_ref INTEGER NOT NULL REFERENCES blobs(id),
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (owner_key, run_seq, ordinal)
 );
@@ -571,7 +571,7 @@ mod tests {
         .unwrap();
         for owner in &owners {
             conn.execute_once(
-                "INSERT INTO run_records VALUES (?1, 1, 0, 'admit', NULL, ?2, 1)",
+                "INSERT INTO run_records VALUES (?1, 1, 0, 'admit', NULL, (SELECT id FROM blobs WHERE hash = ?2), 1)",
                 rusqlite::params![owner.stored(), root.as_slice()],
             )
             .unwrap();
@@ -653,7 +653,7 @@ mod tests {
                 conn.query_row_once(
                     "INSERT INTO run_records
                         (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
+                        VALUES (?1, ?2, ?3, ?4, ?5, (SELECT id FROM blobs WHERE hash = ?6), ?7) RETURNING ordinal",
                     rusqlite::params![
                         stored_owner,
                         1,
@@ -716,7 +716,7 @@ mod tests {
                 conn.query_row_once(
                     "INSERT INTO run_records
                         (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING ordinal",
+                        VALUES (?1, ?2, ?3, ?4, ?5, (SELECT id FROM blobs WHERE hash = ?6), ?7) RETURNING ordinal",
                     rusqlite::params![
                         owner.stored(),
                         run,
@@ -868,7 +868,7 @@ mod tests {
                         )
                         .expect("root body");
                         conn.execute_once(
-                            "INSERT INTO run_records VALUES (?1, 1, ?2, 'admit', NULL, ?3, 1)",
+                            "INSERT INTO run_records VALUES (?1, 1, ?2, 'admit', NULL, (SELECT id FROM blobs WHERE hash = ?3), 1)",
                             rusqlite::params![owner.stored(), ordinal, root.0.as_slice()],
                         )
                         .expect("ledger root");
@@ -912,7 +912,11 @@ mod tests {
             let bodies: Vec<_> = receipt
                 .shapes
                 .iter()
-                .filter(|(sql, _)| sql.starts_with("select ") && sql.contains("main.blobs"))
+                .filter(|(sql, _)| {
+                    sql.starts_with("select ")
+                        && sql.contains("main.blobs")
+                        && !sql.contains("main.run_records")
+                })
                 .map(|(_, shape)| shape)
                 .collect();
             let selects = bodies.iter().map(|shape| shape.statements).sum::<u64>();
@@ -963,7 +967,7 @@ mod tests {
             .expect("first root");
         let bytes = &staging.nodes()[&first].bytes;
         conn.execute_once(
-            "INSERT INTO blobs VALUES (?1, ?2, 1)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
             rusqlite::params![first.0.as_slice(), bytes.as_ref()],
         )
         .expect("first root");
@@ -971,7 +975,7 @@ mod tests {
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
             .expect("foreign corruption");
         conn.execute_once(
-            "INSERT INTO blobs VALUES (?1, x'00', 7)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 7)",
             [later.0.as_slice()],
         )
         .expect("corrupt later root");
@@ -1001,7 +1005,7 @@ mod tests {
             })
         );
         conn.execute_once(
-            "INSERT INTO blobs VALUES (?1, x'00', 1)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, x'00', 1)",
             [missing.0.as_slice()],
         )
         .expect("corrupt descendant");
@@ -1109,7 +1113,7 @@ mod tests {
         conn.execute_once(
             "INSERT INTO run_records
                  (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-             VALUES (?1, -1, 0, 'admit', NULL, ?2, 1)",
+             VALUES (?1, -1, 0, 'admit', NULL, (SELECT id FROM blobs WHERE hash = ?2), 1)",
             rusqlite::params![owner.stored(), record.0.as_slice()],
         )
         .expect("foreign negative identity");

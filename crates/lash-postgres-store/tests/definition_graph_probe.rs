@@ -18,7 +18,7 @@ impl PostgresDefinitionGraphProbe {
 impl lash_conformance::DefinitionGraphProbe for PostgresDefinitionGraphProbe {
     async fn module_row(&self, artifact_ref: &str) -> lash_conformance::ModuleRow {
         let row: Option<(i16, Option<String>)> = sqlx::query_as(
-            "SELECT storage_kind, encode(graph_ref, 'hex') FROM lash_lash_vm_artifacts
+            "SELECT storage_kind, encode((SELECT hash FROM lash_blobs WHERE id = graph_ref), 'hex') FROM lash_lash_vm_artifacts
              WHERE namespace = 'kernel_document' AND artifact_ref = $1",
         )
         .bind(artifact_ref)

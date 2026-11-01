@@ -101,11 +101,11 @@ crate::statements! {
         /// latest turn was admitted on, replacing the previous admission's
         /// (FIG-3682). Maintenance keeps it as a checkpoint root, so a replay
         /// of that turn can still read the head it was admitted on.
-        retain_admission_base = "UPDATE session_meta SET admission_base_checkpoint_ref = ?2 WHERE session_id = ?1";
+        retain_admission_base = "UPDATE session_meta SET admission_base_checkpoint_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END) WHERE session_id = ?1";
 
         /// The checkpoint session `?1`'s admission base retains: what a
         /// replacement or the session's deletion retires.
-        select_admission_base = "SELECT admission_base_checkpoint_ref FROM session_meta
+        select_admission_base = "SELECT (SELECT hash FROM blobs WHERE id = admission_base_checkpoint_ref) AS admission_base_checkpoint_ref FROM session_meta
              WHERE session_id = ?1";
 
         /// The recorded lineage of `?1`.

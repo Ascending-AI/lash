@@ -12,7 +12,7 @@ pub(super) static SQL: LazyLock<ModelCallStatements> =
 lash_store_sql::statements! {
     lazy
     struct ModelCallPostgresStatements @ "durable_model_call_postgres" {
-        selected = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
+        selected = "SELECT call_id, (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref, ended_at_ms FROM model_call_records
             WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END)
               AND call_id = ANY(?3) ORDER BY run, call";
         selected_pins = "SELECT run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call FROM model_call_records

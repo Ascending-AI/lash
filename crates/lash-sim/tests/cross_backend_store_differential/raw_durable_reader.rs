@@ -68,7 +68,7 @@ impl RawDurableReader {
                     .as_ref()
                     .expect("Postgres reader is attached to a store");
                 let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id, encode(checkpoint_ref, 'hex')
+                    "SELECT head_revision, leaf_node_id, encode((SELECT hash FROM lash_blobs WHERE id = checkpoint_ref), 'hex')
                      FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
                      WHERE session_id = $1",
                 )
@@ -160,7 +160,7 @@ impl RawDurableReader {
                     )
                     .collect();
                 let revision_rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id, encode(checkpoint_ref, 'hex')
+                    "SELECT head_revision, leaf_node_id, encode((SELECT hash FROM lash_blobs WHERE id = checkpoint_ref), 'hex')
                      FROM lash_session_revisions
                      WHERE session_id = $1
                      ORDER BY head_revision ASC",
@@ -290,7 +290,7 @@ pub(super) async fn read_sqlite_durable_state(
 
     let head: Option<(i64, Option<String>, Option<String>)> = connection
         .query_row(
-            "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex(checkpoint_ref)) END
+            "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex((SELECT hash FROM lash_blobs WHERE id = checkpoint_ref))) END
              FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1",
             [session_id.as_str()],
@@ -426,7 +426,7 @@ pub(super) async fn read_sqlite_durable_state(
     let revisions = {
         let mut statement = connection
             .prepare(
-                "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex(checkpoint_ref)) END
+                "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex((SELECT hash FROM lash_blobs WHERE id = checkpoint_ref))) END
                  FROM session_revisions
                  WHERE session_id = ?1
                  ORDER BY head_revision ASC",

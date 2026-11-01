@@ -56,11 +56,14 @@ lash_store_sql::statements! {
                  DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
 
              )
-             SELECT (SELECT checkpoint_ref FROM phase) AS checkpoint_ref,
-                 (SELECT working_execution_ref FROM phase) AS working_execution_ref,
-                 ARRAY(SELECT answer_ref FROM phase WHERE answer_ref IS NOT NULL
+             SELECT (SELECT hash FROM blobs WHERE id = (SELECT checkpoint_ref FROM phase))
+                     AS checkpoint_ref,
+                 (SELECT hash FROM blobs WHERE id = (SELECT working_execution_ref FROM phase))
+                     AS working_execution_ref,
+                 ARRAY(SELECT hash FROM blobs WHERE id IN (
+                     SELECT answer_ref FROM phase WHERE answer_ref IS NOT NULL
                      UNION ALL
-                     SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)
+                     SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL))
                      AS closure_roots";
 
         /// Number revision `?2` of session `?1` as its next terminal, once,
@@ -84,7 +87,8 @@ lash_store_sql::statements! {
         /// `upsert_namespace` does one: `?6[i]` retains the held root.
         upsert_namespaces = "INSERT INTO turn_namespaces
                  (session_id, run, plugin, entry, graph_root_ref)
-             SELECT ?1, ?2, written.plugin, written.entry, written.root
+             SELECT ?1, ?2, written.plugin, written.entry,
+                 COALESCE((SELECT id FROM blobs WHERE hash = written.root), CASE WHEN written.root IS NOT NULL THEN -1 END)
              FROM UNNEST(?3::text[], ?4::text[], ?5::bytea[], ?6::boolean[])
                  AS written(plugin, entry, root, held)
              ON CONFLICT (session_id, run, plugin)
@@ -99,7 +103,7 @@ lash_store_sql::statements! {
         /// The values root of each plugin `?3[i]`'s namespace row for run
         /// `?2` of session `?1`: what [`Self::upsert_namespaces`] may
         /// replace, and so retire (FIG-5949).
-        namespace_roots = "SELECT graph_root_ref FROM turn_namespaces
+        namespace_roots = "SELECT (SELECT hash FROM blobs WHERE id = graph_root_ref) AS graph_root_ref FROM turn_namespaces
              WHERE session_id = ?1 AND run = ?2 AND plugin = ANY(?3::text[])";
     }
 }
@@ -1019,7 +1023,7 @@ mod ddl_tests {
             "INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration,
                  checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
-             VALUES ('s', $1, $2, $3, 0, $4, $5, $6, $7, 1)",
+             VALUES ('s', $1, $2, $3, 0, (SELECT id FROM lash_blobs WHERE hash = $4), $5, $6, $7, 1)",
         )
         .bind(run)
         .bind(phase)

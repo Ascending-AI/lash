@@ -390,7 +390,7 @@ fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
     let fixed = [
         "from temp.lash_woken",
         "select request_id, origin, reason, disposition, mode from",
-        "select checkpoint_ref, answer_ref from",
+        "as checkpoint_ref, (select hash from main.blobs where id = answer_ref) as answer_ref from",
     ];
     let turn = shapes["rounds"]
         .as_array()
@@ -471,7 +471,7 @@ fn a_coding_turn_loads_its_window_only_where_it_holds_none() {
     let shapes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
     let window = [
-        "select revision.config_ref, head.head_revision, revision.leaf_node_id",
+        "as config_ref, head.head_revision, revision.leaf_node_id",
         "select session_state_version from session_meta",
     ];
     let turn = shapes["rounds"]
@@ -761,7 +761,7 @@ async fn chat_short_reuses_session_package_facts_without_turn_writes() {
                 CREATE TRIGGER fact_pointer_insert AFTER INSERT ON artifact_refs
                 WHEN new.namespace = 'kernel_document' AND (new.artifact_ref LIKE 'package:v1:%' OR new.artifact_ref LIKE 'publication:v1:%')
                 BEGIN
-                    INSERT OR IGNORE INTO fact_hashes VALUES (new.artifact_ref, new.blob_ref);
+                    INSERT OR IGNORE INTO fact_hashes VALUES (new.artifact_ref, (SELECT hash FROM blobs WHERE id = new.blob_ref));
                     INSERT INTO fact_writes VALUES ('pointer', 'insert', new.artifact_ref, NULL);
                 END;
                 CREATE TRIGGER fact_pointer_delete AFTER DELETE ON artifact_refs

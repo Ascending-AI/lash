@@ -57,7 +57,8 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     )
     .expect("artifact blob");
     conn.execute_once(
-        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', ?2)",
+        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+         VALUES (?1, 'module', (SELECT id FROM blobs WHERE hash = ?2))",
         params![
             crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
             blob_hash.as_slice()
@@ -163,7 +164,8 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
     )
     .expect("artifact blob");
     conn.execute_once(
-        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, ?3)",
+        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+         VALUES (?1, ?2, (SELECT id FROM blobs WHERE hash = ?3))",
         params![
             crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
             "carried",

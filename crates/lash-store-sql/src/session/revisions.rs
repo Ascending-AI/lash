@@ -31,7 +31,7 @@ crate::statements! {
     /// `session_revisions` statements both backends issue verbatim.
     pub struct SessionRevisionStatements @ "session_revision" {
         /// The already-held configuration of session `?1`'s current revision.
-        select_config_ref = "SELECT revision.config_ref FROM session_head AS head
+        select_config_ref = "SELECT (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref FROM session_head AS head
              JOIN session_revisions AS revision USING (session_id, head_revision)
              WHERE head.session_id = ?1";
 
@@ -39,10 +39,11 @@ crate::statements! {
         /// `?4` and the config reference `?5` it was published with.
         insert = "INSERT INTO session_revisions
                  (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5)";
+             VALUES (?1, ?2, ?3, COALESCE((SELECT id FROM blobs WHERE hash = ?4), CASE WHEN ?4 IS NOT NULL THEN -1 END), COALESCE((SELECT id FROM blobs WHERE hash = ?5), CASE WHEN ?5 IS NOT NULL THEN -1 END))";
 
         /// Revision `?2` of session `?1`, if it is retained.
-        select = "SELECT revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
+        select = "SELECT revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref,
+                    (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref
              FROM session_revisions AS revision
              WHERE revision.session_id = ?1 AND revision.head_revision = ?2";
 
@@ -51,21 +52,23 @@ crate::statements! {
              WHERE session_id = ?1";
 
         /// Every retained revision of session `?1`, oldest first.
-        select_by_session = "SELECT revision.head_revision, revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
+        select_by_session = "SELECT revision.head_revision, revision.leaf_node_id,
+                    (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref, (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref
              FROM session_revisions AS revision
              WHERE revision.session_id = ?1
              ORDER BY revision.head_revision";
 
         /// Every checkpoint root a retained revision publishes.
-        select_checkpoint_roots = "SELECT DISTINCT checkpoint_ref FROM session_revisions
-             WHERE checkpoint_ref IS NOT NULL";
+        select_checkpoint_roots = "SELECT hash FROM blobs WHERE id IN (
+                 SELECT checkpoint_ref FROM session_revisions WHERE checkpoint_ref IS NOT NULL)";
 
         /// The distinct checkpoint roots session `?1`'s retained revisions
         /// publish, in hash order: what its deletion may reclaim.
-        select_session_checkpoints = "SELECT DISTINCT checkpoint_ref FROM session_revisions
-             WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
-             UNION SELECT config_ref FROM session_revisions WHERE session_id = ?1
-             ORDER BY checkpoint_ref";
+        select_session_checkpoints = "SELECT hash FROM blobs WHERE id IN (
+                 SELECT checkpoint_ref FROM session_revisions
+                 WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
+                 UNION SELECT config_ref FROM session_revisions WHERE session_id = ?1)
+             ORDER BY hash";
 
         /// The distinct leaves session `?1`'s retained revisions publish:
         /// where its deletion starts ancestry retirement.
@@ -160,6 +163,6 @@ crate::statements! {
                          ))
                      )
                )
-             RETURNING session_id, leaf_node_id, checkpoint_ref, config_ref";
+             RETURNING session_id, leaf_node_id, (SELECT hash FROM blobs WHERE id = checkpoint_ref) AS checkpoint_ref, (SELECT hash FROM blobs WHERE id = config_ref) AS config_ref";
     }
 }

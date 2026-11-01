@@ -17,36 +17,38 @@ crate::statements! {
             WHERE (held.execution_owner, held.run_seq, held.member, held.cancellable, held.counted)
                 = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted)";
         decide = "UPDATE tool_calls AS held SET decision = i.decision, decision_ref = i.fact
-            FROM (SELECT ?1 AS owner, ?2 AS call, ?3 AS decision, ?4 AS fact) AS i
+            FROM (SELECT ?1 AS owner, ?2 AS call, ?3 AS decision, COALESCE((SELECT id FROM blobs WHERE hash = ?4), CASE WHEN ?4 IS NOT NULL THEN -1 END) AS fact) AS i
             WHERE held.execution_owner = i.owner AND held.call_id = i.call
               AND ((held.decision IS NULL AND held.answer_outcome IS NULL)
                 OR (held.decision, held.decision_ref) IS NOT DISTINCT FROM (i.decision, i.fact))";
         answer = "UPDATE tool_calls AS held SET answer_outcome = i.outcome, body_ref = i.body
-            FROM (SELECT ?1 AS owner, ?2 AS call, ?3 AS outcome, ?4 AS body, ?5 AS cancelled) AS i
+            FROM (SELECT ?1 AS owner, ?2 AS call, ?3 AS outcome, COALESCE((SELECT id FROM blobs WHERE hash = ?4), CASE WHEN ?4 IS NOT NULL THEN -1 END) AS body, ?5 AS cancelled) AS i
             WHERE held.execution_owner = i.owner AND held.call_id = i.call
               AND (i.outcome <> '\"Read\"' OR NOT held.cancellable)
               AND (held.decision IS NULL OR held.decision = CASE WHEN i.cancelled THEN 'cancel' ELSE 'final' END)
               AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body))";
         complete = "UPDATE tool_calls AS held SET decision = 'final', decision_ref = i.fact, answer_outcome = i.outcome, body_ref = i.body
-            FROM (SELECT ?1 AS owner, ?2 AS call, ?3 AS fact, ?4 AS outcome, ?5 AS body, ?6 AS cancelled) AS i
+            FROM (SELECT ?1 AS owner, ?2 AS call, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END) AS fact, ?4 AS outcome, COALESCE((SELECT id FROM blobs WHERE hash = ?5), CASE WHEN ?5 IS NOT NULL THEN -1 END) AS body, ?6 AS cancelled) AS i
             WHERE held.execution_owner = i.owner AND held.call_id = i.call AND NOT i.cancelled
               AND (i.outcome <> '\"Read\"' OR NOT held.cancellable)
               AND ((held.decision IS NULL AND held.answer_outcome IS NULL)
                 OR ((held.decision, held.decision_ref) IS NOT DISTINCT FROM ('final', i.fact)
                   AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body))))";
-        decision_root = "SELECT decision_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
-        answer_root = "SELECT body_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
-        page = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
+        decision_root = "SELECT (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
+        answer_root = "SELECT (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref FROM tool_calls WHERE execution_owner = ?1 AND call_id = ?2";
+        page = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, answer_outcome,
+                (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1
               AND (admission_seq, call_id) > (?2, ?3)
             ORDER BY admission_seq, call_id LIMIT ?4";
-        saved_reads = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
+        saved_reads = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, answer_outcome,
+                (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND NOT cancellable AND answer_outcome = '\"Read\"'
               AND (admission_seq, call_id) > (?2, ?3)
             ORDER BY admission_seq, call_id LIMIT ?4";
         finish_reads = "UPDATE tool_calls SET answer_outcome = ?2
             WHERE owner_key = ?1 AND NOT cancellable AND answer_outcome IS NULL";
-        delete_owner = "DELETE FROM tool_calls WHERE owner_key = ?1 RETURNING decision_ref, body_ref";
-        delete_session = "DELETE FROM tool_calls WHERE session_id = ?1 RETURNING decision_ref, body_ref";
+        delete_owner = "DELETE FROM tool_calls WHERE owner_key = ?1 RETURNING (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref";
+        delete_session = "DELETE FROM tool_calls WHERE session_id = ?1 RETURNING (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref";
     }
 }

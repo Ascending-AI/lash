@@ -434,7 +434,7 @@ mod walk {
             .expect("write foreign data");
         raw.execute_once(
             "INSERT INTO session_revisions (session_id, config_ref, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES ('orphaned', zeroblob(32), 0, NULL, X'7777777777777777777777777777777777777777777777777777777777777777')",
+             VALUES ('orphaned', 0, 0, NULL, 7777)",
             [],
         ).expect("record the fixture revision");
         raw.execute_once(
@@ -454,12 +454,7 @@ mod walk {
         assert_eq!(page.items[0].session_id.as_deref(), Some("orphaned"));
         match &page.items[0].payload {
             DurablePayload::Missing { reason } => {
-                assert!(
-                    reason.contains(
-                        "7777777777777777777777777777777777777777777777777777777777777777"
-                    ),
-                    "{reason}"
-                );
+                assert!(reason.contains("node 7777"), "{reason}");
                 assert!(reason.contains("orphaned"), "{reason}");
             }
             other => panic!("expected a Missing payload, got {other:?}"),

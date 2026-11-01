@@ -30,7 +30,7 @@
         "sql_statements": 238.0,
         "sql_transactions": 16.0,
         "sql_writes": 84.0,
-        "store_bytes_written": 954368.0,
+        "store_bytes_written": 681984.0,
         "tool_bodies": 1.0
       },
       "median_noise": {
@@ -76,7 +76,7 @@
         "sql_statements": 238.0,
         "sql_transactions": 16.0,
         "sql_writes": 84.0,
-        "store_bytes_written": 954368.0,
+        "store_bytes_written": 681984.0,
         "tool_bodies": 1.0
       },
       "depth_slope": {
@@ -126,7 +126,7 @@
         "sql_statements": 197.0,
         "sql_transactions": 11.0,
         "sql_writes": 76.0,
-        "store_bytes_written": 653312.0,
+        "store_bytes_written": 471040.0,
         "tool_bodies": 1.0
       },
       "median_noise": {
@@ -172,7 +172,7 @@
         "sql_statements": 197.0,
         "sql_transactions": 11.0,
         "sql_writes": 76.0,
-        "store_bytes_written": 653312.0,
+        "store_bytes_written": 471040.0,
         "tool_bodies": 1.0
       },
       "depth_slope": {
@@ -224,7 +224,7 @@
         "sql_statements": 331.0,
         "sql_transactions": 23.0,
         "sql_writes": 113.0,
-        "store_bytes_written": 1595392.0,
+        "store_bytes_written": 1058816.0,
         "tool_bodies": 2.0,
         "worker_allocated_bytes": 4491817.0,
         "worker_allocations": 11845.0,
@@ -282,7 +282,7 @@
         "sql_statements": 331.0,
         "sql_transactions": 23.0,
         "sql_writes": 113.0,
-        "store_bytes_written": 1595392.0,
+        "store_bytes_written": 1058816.0,
         "tool_bodies": 2.0,
         "worker_allocated_bytes": 4491817.0,
         "worker_allocations": 11845.0,
@@ -344,7 +344,7 @@
         "sql_statements": 334.0,
         "sql_transactions": 23.0,
         "sql_writes": 113.0,
-        "store_bytes_written": 1519616.0,
+        "store_bytes_written": 1046528.0,
         "tool_bodies": 2.0,
         "worker_allocated_bytes": 7875213.0,
         "worker_allocations": 27711.0,
@@ -402,7 +402,7 @@
         "sql_statements": 334.0,
         "sql_transactions": 23.0,
         "sql_writes": 113.0,
-        "store_bytes_written": 1519616.0,
+        "store_bytes_written": 1046528.0,
         "tool_bodies": 2.0,
         "worker_allocated_bytes": 7875213.0,
         "worker_allocations": 27711.0,

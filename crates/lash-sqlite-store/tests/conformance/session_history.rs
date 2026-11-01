@@ -215,7 +215,7 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
             serde_json::to_vec(&prompt).expect("original prompt")
         );
         let physical: usize = backend.raw().query_row(
-            "SELECT length(content) FROM blobs JOIN artifact_refs ON blob_ref = hash WHERE namespace = 'turn_prelude' AND artifact_ref = ?1",
+            "SELECT length(content) FROM blobs JOIN artifact_refs ON blob_ref = id WHERE namespace = 'turn_prelude' AND artifact_ref = ?1",
             [reference.as_str()], |row| row.get(0)).expect("physical prelude bytes");
         sizes.push((bytes.len(), physical));
     }

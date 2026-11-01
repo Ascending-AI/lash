@@ -19,16 +19,16 @@ crate::statements! {
         pin_by_key = "SELECT run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref IS NULL";
         append = "INSERT INTO model_call_records
             (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, TRUE)
+            VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT id FROM blobs WHERE hash = ?5), CASE WHEN ?5 IS NOT NULL THEN -1 END), ?6, ?7, TRUE)
             ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref,
                 ended_at_ms = COALESCE(model_call_records.ended_at_ms, excluded.ended_at_ms),
                 written_epoch = COALESCE(model_call_records.written_epoch, excluded.written_epoch), answered = TRUE
             WHERE model_call_records.call_id = excluded.call_id
               AND (model_call_records.record_ref IS NULL OR model_call_records.record_ref = excluded.record_ref)";
-        root = "SELECT record_ref FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref IS NOT NULL";
-        read = "SELECT call_id, record_ref, ended_at_ms FROM model_call_records
+        root = "SELECT (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref IS NOT NULL";
+        read = "SELECT call_id, (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref, ended_at_ms FROM model_call_records
             WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END) ORDER BY run, call";
         ids = "SELECT call_id FROM model_call_records WHERE session_id = ?1 AND record_ref IS NOT NULL AND run IN (?2, CASE WHEN ?2 LIKE 'turn:%' THEN 'owned:' || SUBSTR(?2, 6) END) ORDER BY run, call";
-        delete_session = "DELETE FROM model_call_records WHERE session_id = ?1 RETURNING record_ref";
+        delete_session = "DELETE FROM model_call_records WHERE session_id = ?1 RETURNING (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref";
     }
 }

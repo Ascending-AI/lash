@@ -117,16 +117,18 @@ table lash_attachment_uploads
   column written_at_ms bigint not-null
   primary-key (attachment_id)
 table lash_blob_edges
-  column child_hash bytea not-null
-  column parent_hash bytea not-null
-  primary-key (parent_hash, child_hash)
-  foreign-key (child_hash) references lash_blobs (hash) on delete restrict
-  foreign-key (parent_hash) references lash_blobs (hash) on delete cascade
+  column child_id bigint not-null
+  column parent_id bigint not-null
+  primary-key (parent_id, child_id)
+  foreign-key (child_id) references lash_blobs (id) on delete restrict
+  foreign-key (parent_id) references lash_blobs (id) on delete cascade
 table lash_blobs
   column content bytea not-null
   column encoding smallint not-null
   column hash bytea not-null
-  primary-key (hash)
+  column id bigint not-null identity-always
+  unique (hash)
+  primary-key (id)
 table lash_catalog_identity
   column catalog_id text not-null
   column singleton boolean not-null default
@@ -150,7 +152,7 @@ table lash_deleted_sessions
   column session_id text not-null
   primary-key (session_id)
 table lash_effect_admissions
-  column admission_ref bytea not-null
+  column admission_ref bigint not-null
   column effect_id bytea not-null
   column exec_key text not-null
   column member_ordinal bigint nullable
@@ -159,13 +161,13 @@ table lash_effect_admissions
   column written_epoch bigint not-null
   unique (owner_key, run_seq, member_ordinal)
   primary-key (exec_key, effect_id)
-  foreign-key (admission_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (admission_ref) references lash_blobs (id) on delete restrict
 table lash_environment_heads
-  column root_ref bytea not-null
+  column root_ref bigint not-null
   column session_id text not-null
   column written_epoch bigint not-null
   primary-key (session_id)
-  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (root_ref) references lash_blobs (id) on delete restrict
 table lash_environment_owners
   column actor_key text not-null
   column body_json text nullable
@@ -182,10 +184,10 @@ table lash_exec_snapshots
   column commit_id bytea not-null
   column exec_key text not-null
   column rev bigint not-null
-  column root_ref bytea not-null
+  column root_ref bigint not-null
   column written_epoch bigint not-null
   primary-key (exec_key)
-  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (root_ref) references lash_blobs (id) on delete restrict
 table lash_execution_resolutions
   column execution text not-null
   column link text not-null
@@ -236,11 +238,11 @@ table lash_graph_nodes
 table lash_lash_vm_artifacts
   column artifact_bytes bytea nullable
   column artifact_ref text not-null
-  column graph_ref bytea nullable
+  column graph_ref bigint nullable
   column namespace text not-null
   column storage_kind smallint not-null
   primary-key (namespace, artifact_ref)
-  foreign-key (graph_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (graph_ref) references lash_blobs (id) on delete restrict
 table lash_migrations
   column backfill_cursor text nullable
   column backfill_rows bigint nullable
@@ -262,13 +264,13 @@ table lash_model_call_records
   column enclosing_owner text nullable
   column enclosing_run bigint nullable
   column ended_at_ms bigint nullable
-  column record_ref bytea nullable
+  column record_ref bigint nullable
   column run text not-null
   column session_id text not-null
   column written_epoch bigint nullable
   unique (session_id, run, call)
   primary-key (session_id, call_id)
-  foreign-key (record_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (record_ref) references lash_blobs (id) on delete restrict
 table lash_nodes
   column boot_id text not-null
   column capabilities_json text not-null
@@ -393,19 +395,19 @@ table lash_processes
   unique (start_key) where start_key is not null
   primary-key (process_id)
 table lash_prompt_prefixes
-  column hash bytea not-null
+  column root_ref bigint not-null
   column session_id text not-null
   primary-key (session_id)
-  foreign-key (hash) references lash_blobs (hash) on delete no action
+  foreign-key (root_ref) references lash_blobs (id) on delete no action
 table lash_prompt_snapshot_texts
   column call text not-null
-  column hash bytea not-null
   column owner text not-null
   column part text not-null
   column session_id text not-null
-  primary-key (session_id, owner, call, part, hash)
-  foreign-key (hash) references lash_blobs (hash) on delete no action
+  column text_ref bigint not-null
+  primary-key (session_id, owner, call, part, text_ref)
   foreign-key (session_id, owner, call) references lash_prompt_snapshots (session_id, owner, call) on delete no action
+  foreign-key (text_ref) references lash_blobs (id) on delete no action
 table lash_prompt_snapshots
   column call text not-null
   column owner text not-null
@@ -449,36 +451,36 @@ table lash_release_stamp
   primary-key (singleton)
 table lash_retirement_frontier
   column closure boolean not-null
-  column node_ref bytea not-null
+  column node_ref bigint not-null
   column queued_at_ms bigint not-null
   primary-key (node_ref)
 table lash_retirement_holds
   column closure boolean not-null
   column queued_at_ms bigint not-null
-  column root_ref bytea not-null
+  column root_ref bigint not-null
   primary-key (root_ref)
-  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (root_ref) references lash_blobs (id) on delete restrict
 table lash_root_leases
   column actor_key text nullable
   column epoch bigint nullable
   column expires_at_ms bigint not-null
   column lease_id bigint not-null identity-always
   column owner_key bytea not-null
-  column root_ref bytea not-null
+  column root_ref bigint not-null
   column ttl_ms bigint not-null
   primary-key (lease_id)
-  foreign-key (root_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (root_ref) references lash_blobs (id) on delete restrict
 table lash_run_records
   column call_id text nullable
   column kind text not-null
   column ordinal bigint not-null
   column owner_key text not-null
-  column record_ref bytea not-null
+  column record_ref bigint not-null
   column run_seq bigint not-null
   column written_epoch bigint not-null
   unique (owner_key, run_seq, call_id) where (kind = any (array['x_outcome'::text, 'x_final_outcome'::text])) and (call_id is not null)
   primary-key (owner_key, run_seq, ordinal)
-  foreign-key (record_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (record_ref) references lash_blobs (id) on delete restrict
 table lash_runtime_turn_commits
   column change_seq bigint nullable
   column committed_at_ms bigint not-null
@@ -518,7 +520,7 @@ table lash_session_ingress_sequence
   column session_id text not-null
   primary-key (session_id)
 table lash_session_meta
-  column admission_base_checkpoint_ref bytea nullable
+  column admission_base_checkpoint_ref bigint nullable
   column caused_by_call_id text nullable
   column caused_by_effect_id text nullable
   column caused_by_kind text nullable
@@ -542,7 +544,7 @@ table lash_session_meta
   column source_node_id text nullable
   column source_session_id text nullable
   primary-key (session_id)
-  foreign-key (admission_base_checkpoint_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (admission_base_checkpoint_ref) references lash_blobs (id) on delete restrict
 table lash_session_meta_pending_observer_intents
   column process_id text not-null
   column process_index bigint not-null
@@ -551,15 +553,15 @@ table lash_session_meta_pending_observer_intents
   primary-key (session_id, process_id)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
 table lash_session_revisions
-  column checkpoint_ref bytea nullable
-  column config_ref bytea not-null
+  column checkpoint_ref bigint nullable
+  column config_ref bigint not-null
   column head_revision bigint not-null
   column leaf_node_id text nullable
   column session_id text not-null
   column terminal_ordinal bigint nullable
   primary-key (session_id, head_revision)
-  foreign-key (checkpoint_ref) references lash_blobs (hash) on delete restrict
-  foreign-key (config_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (checkpoint_ref) references lash_blobs (id) on delete restrict
+  foreign-key (config_ref) references lash_blobs (id) on delete restrict
 table lash_session_run_specs
   column session_id text not-null
   column spec_hash text not-null
@@ -574,11 +576,11 @@ table lash_session_runs
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
-  column terminal_transcript_ref bytea nullable
+  column terminal_transcript_ref bigint nullable
   column terminal_window_revision bigint nullable
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
-  foreign-key (terminal_transcript_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (terminal_transcript_ref) references lash_blobs (id) on delete restrict
 table lash_session_scope_ends
   column begun_at_ms bigint not-null
   column scope_key text not-null
@@ -597,12 +599,12 @@ table lash_tool_calls
   column admission_seq bigint not-null
   column admitted_count bigint not-null
   column answer_outcome text nullable
-  column body_ref bytea nullable
+  column body_ref bigint nullable
   column call_id text not-null
   column cancellable boolean not-null
   column counted boolean not-null
   column decision text nullable
-  column decision_ref bytea nullable
+  column decision_ref bigint nullable
   column execution_owner text not-null
   column member bigint not-null
   column origin text nullable
@@ -614,8 +616,8 @@ table lash_tool_calls
   column turn_id text nullable
   unique (execution_owner, call_id)
   primary-key (owner_key, call_id)
-  foreign-key (body_ref) references lash_blobs (hash) on delete restrict
-  foreign-key (decision_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (body_ref) references lash_blobs (id) on delete restrict
+  foreign-key (decision_ref) references lash_blobs (id) on delete restrict
 table lash_tool_intent_retired_owners
   column owner text not-null
   primary-key (owner)
@@ -650,15 +652,15 @@ table lash_turn_change_clock
   primary-key (singleton)
 table lash_turn_namespaces
   column entry text not-null
-  column graph_root_ref bytea nullable
+  column graph_root_ref bigint nullable
   column plugin text not-null
   column run text not-null
   column session_id text not-null
   primary-key (session_id, run, plugin)
-  foreign-key (graph_root_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (graph_root_ref) references lash_blobs (id) on delete restrict
 table lash_turn_phases
-  column answer_ref bytea nullable
-  column checkpoint_ref bytea nullable
+  column answer_ref bigint nullable
+  column checkpoint_ref bigint nullable
   column iteration bigint not-null
   column model_calls bigint not-null default
   column model_deadline_ms bigint nullable
@@ -669,12 +671,12 @@ table lash_turn_phases
   column run text not-null
   column session_id text not-null
   column turn_deadline_ms bigint nullable
-  column working_execution_ref bytea nullable
+  column working_execution_ref bigint nullable
   column written_epoch bigint not-null
   primary-key (session_id, run)
-  foreign-key (answer_ref) references lash_blobs (hash) on delete restrict
-  foreign-key (checkpoint_ref) references lash_blobs (hash) on delete restrict
-  foreign-key (working_execution_ref) references lash_blobs (hash) on delete restrict
+  foreign-key (answer_ref) references lash_blobs (id) on delete restrict
+  foreign-key (checkpoint_ref) references lash_blobs (id) on delete restrict
+  foreign-key (working_execution_ref) references lash_blobs (id) on delete restrict
 table lash_waits
   column call_id text nullable
   column compacted boolean not-null default

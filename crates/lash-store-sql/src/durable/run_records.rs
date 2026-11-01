@@ -30,38 +30,38 @@ crate::statements! {
              WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3";
 
         /// Owner `?1`'s run `?2` fact `?3`'s node.
-        root = "SELECT record_ref FROM run_records
+        root = "SELECT (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref FROM run_records
              WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3";
 
         /// Delete owner `?1`'s facts of every run before `?2`, returning
         /// each RoundFact node they rooted.
         prune = "DELETE FROM run_records WHERE owner_key = ?1 AND run_seq < ?2
-             RETURNING record_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref";
 
         /// Only owner `?1`'s run `?2`, in ordinal order.
-        read_of = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch
+        read_of = "SELECT run_seq, ordinal, kind, call_id, (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref, written_epoch
              FROM run_records WHERE owner_key = ?1 AND run_seq = ?2
              ORDER BY ordinal";
 
         /// Delete every fact of owner `?1`: a consumed cell's, or a pruned
         /// process's. Returns each RoundFact node it held.
-        delete_owner = "DELETE FROM run_records WHERE owner_key = ?1 RETURNING record_ref";
+        delete_owner = "DELETE FROM run_records WHERE owner_key = ?1 RETURNING (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref";
 
         /// A terminal turn's exact owner `?1` and its cells under `?2`.
         /// Both ledgers retire together; every removed reference is returned.
         delete_turn = "DELETE FROM run_records
              WHERE owner_key = ?1 OR substr(owner_key, 1, length(CAST(?2 AS TEXT))) = CAST(?2 AS TEXT)
-             RETURNING record_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref";
 
         /// Delete every fact whose owner key starts with `?1`: the cells of
         /// one turn at its end, or every owner of one session at its delete.
         /// Returns each RoundFact node it held.
         delete_under = "DELETE FROM run_records
              WHERE substr(owner_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
-             RETURNING record_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref";
 
         /// Every fact of owner `?1`, by run and ordinal.
-        read = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch
+        read = "SELECT run_seq, ordinal, kind, call_id, (SELECT hash FROM blobs WHERE id = record_ref) AS record_ref, written_epoch
              FROM run_records WHERE owner_key = ?1
              ORDER BY run_seq, ordinal";
     }

@@ -16,7 +16,7 @@
 //!
 //! A commit that retires a root holds it ([`hold`]); a step continues its
 //! own frontier (`retirement_frontier`), oldest first, before it takes the
-//! oldest hold, peels level by level in digest order until its node budget
+//! oldest hold, peels level by level in node id order until its node budget
 //! is spent, and puts the frontier it did not reach back on it, in one
 //! transaction. Expired leases are reaped first: their roots join the
 //! frontier, so what only they kept is peeled by a later step.
@@ -55,8 +55,14 @@ lash_store_sql::statements! {
         /// or the node alone when 0, queued at `?3`. A node already held
         /// keeps the wider hold and its place in the queue.
         hold = "INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
-             SELECT blobs.hash, ?2, ?3 FROM blobs
+             SELECT blobs.id, ?2, ?3 FROM blobs
              WHERE blobs.hash IN (SELECT unhex(value) FROM json_each(?1))
+             ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
+
+        /// [`hold`](Self::hold) of every stored node id of JSON `?1`.
+        hold_nodes = "INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
+             SELECT blobs.id, ?2, ?3 FROM blobs
+             WHERE blobs.id IN (SELECT value FROM json_each(?1))
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Mixed closure and node-only holds from one owner commit. A retained
@@ -69,26 +75,40 @@ lash_store_sql::statements! {
                  SELECT substr(closure_bytes, pos, 32) AS hash, 1 AS closure FROM input, offsets WHERE pos <= length(closure_bytes)
                  UNION ALL SELECT substr(node_bytes, pos, 32), 0 FROM input, offsets WHERE pos <= length(node_bytes))
              INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
-             SELECT blobs.hash, retired.closure, ?3 FROM retired
+             SELECT blobs.id, retired.closure, ?3 FROM retired
              JOIN blobs ON blobs.hash = retired.hash
-             WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE decision_ref = retired.hash)
-               AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE body_ref = retired.hash)
+             WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE decision_ref = blobs.id)
+               AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE body_ref = blobs.id)
              ON CONFLICT (root_ref) DO UPDATE SET closure = excluded.closure
              WHERE retirement_holds.closure < excluded.closure";
 
         /// Release the complete owner handoff, returning roots for holds.
         release_leases = "DELETE FROM root_leases
-            WHERE lease_id IN (SELECT value FROM json_each(?1)) RETURNING root_ref";
+            WHERE lease_id IN (SELECT value FROM json_each(?1))
+            RETURNING (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref";
 
-        /// The oldest hold.
+        /// End lease `?1` if it expired by `?2`; answers the node id of the
+        /// root it held.
+        lease_reap = "DELETE FROM root_leases WHERE lease_id = ?1 AND expires_at_ms <= ?2
+             RETURNING root_ref";
+
+        /// Take the oldest `?1` nodes of the steps' frontier, in one
+        /// statement; answers each node id and whether its closure is peeled.
+        frontier_take = "DELETE FROM retirement_frontier
+             WHERE node_ref IN (SELECT node_ref FROM retirement_frontier
+                 ORDER BY queued_at_ms, node_ref LIMIT ?1)
+             RETURNING node_ref, closure";
+
+        /// The oldest hold's node id.
         hold_next = "SELECT root_ref FROM retirement_holds
              ORDER BY queued_at_ms, root_ref LIMIT 1";
 
-        /// Put every node of JSON `?1` on the steps' frontier, its closure
+        /// Put every node id of JSON `?1` on the steps' frontier, its closure
         /// when `?2` is 1 or the node alone when 0, queued at `?3`. A node
         /// already there keeps the wider peel and its place in the queue.
         frontier_put = "INSERT INTO retirement_frontier (node_ref, closure, queued_at_ms)
-             SELECT unhex(value), ?2, ?3 FROM json_each(?1) WHERE true
+             SELECT blobs.id, ?2, ?3 FROM blobs
+             WHERE blobs.id IN (SELECT value FROM json_each(?1))
              ON CONFLICT (node_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Up to `?2` leases expired by `?1`, oldest first.
@@ -102,7 +122,8 @@ lash_store_sql::statements! {
         /// meanwhile is seen whole or not at all.
         leased_pages = "WITH lease AS (
                  SELECT EXISTS (SELECT 1 FROM root_leases
-                     WHERE lease_id = ?1 AND root_ref = ?2 AND expires_at_ms > ?3) AS live)
+                     WHERE lease_id = ?1 AND root_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END)
+                         AND expires_at_ms > ?3) AS live)
              SELECT NULL, NULL, NULL, lease.live FROM lease
              UNION ALL
              SELECT blobs.hash, blobs.content, blobs.encoding, NULL FROM lease JOIN blobs
@@ -126,9 +147,12 @@ lash_store_sql::statements! {
         /// Every edge of JSON `?1`, `[parent, child]` digest pairs, that is
         /// not stored yet: a supplied node another commit installed already
         /// has its edges.
-        insert_edges_once = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1) WHERE true
-             ON CONFLICT (parent_hash, child_hash) DO NOTHING";
+        insert_edges_once = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id FROM json_each(?1) AS edge
+               JOIN blobs AS parent ON parent.hash = unhex(edge.value ->> 0)
+               JOIN blobs AS child ON child.hash = unhex(edge.value ->> 1)
+              WHERE true
+             ON CONFLICT (parent_id, child_id) DO NOTHING";
     }
 }
 
@@ -198,6 +222,25 @@ pub(super) fn hold(
         held += cached_execute(
             tx,
             SQL.sqlite.hold.sql(),
+            rusqlite::params![graph::json_array(&chunk), i64::from(closure), now.0],
+        )?;
+    }
+    Ok(held)
+}
+
+/// [`hold`] of node ids: what a peel left of a closure it did not finish.
+pub(super) fn hold_nodes(
+    tx: &Connection,
+    nodes: &BTreeSet<i64>,
+    closure: bool,
+    now: DurableInstant,
+) -> rusqlite::Result<usize> {
+    let nodes: Vec<i64> = nodes.iter().copied().collect();
+    let mut held = 0;
+    for chunk in nodes.chunks(HOLD_BATCH) {
+        held += cached_execute(
+            tx,
+            SQL.sqlite.hold_nodes.sql(),
             rusqlite::params![graph::json_array(&chunk), i64::from(closure), now.0],
         )?;
     }
@@ -498,10 +541,8 @@ pub(crate) fn retire_step_in(
     let mut reaped = BTreeSet::new();
     for lease in expired {
         if let Some(root) = tx
-            .statement(SQL.pages.lease_reap.sql())?
-            .query_row(rusqlite::params![lease, now.0], |row| {
-                crate::codec::hash_column(row, 0)
-            })
+            .statement(SQL.sqlite.lease_reap.sql())?
+            .query_row(rusqlite::params![lease, now.0], |row| row.get::<_, i64>(0))
             .optional()?
         {
             reaped.insert(root);
@@ -539,18 +580,19 @@ pub(crate) fn retire_step_in(
                 continue;
             }
         }
-        // The next nodes in digest order, within the budget.
+        // The next nodes in id order, within the budget.
         let take = PEEL_LEVEL.min(remaining).min(examinable);
-        let level: BTreeSet<String> = frontier.iter().take(take).cloned().collect();
+        let level: BTreeSet<i64> = frontier.iter().take(take).copied().collect();
         for node in &level {
             frontier.remove(node);
         }
-        let (examined, gone, children) = graph::peel_batch(tx, &level, remaining.min(examinable))?;
+        let (examined, gone, children) =
+            graph::peel_batch(tx, graph::Frontier::Ids(&level), remaining.min(examinable))?;
         examinable = examinable.saturating_sub(examined);
         progress.nodes_deleted += gone as u64;
         remaining = remaining.saturating_sub(gone);
         frontier.extend(children);
-        if let Some(first_excess) = frontier.iter().nth(FRONTIER_CAP).cloned() {
+        if let Some(first_excess) = frontier.iter().nth(FRONTIER_CAP).copied() {
             let excess = frontier.split_off(&first_excess);
             frontier_put(tx, &excess, true, now)?;
         }
@@ -563,11 +605,11 @@ pub(crate) fn retire_step_in(
 /// `closure`, queued at `now`.
 fn frontier_put(
     tx: &Connection,
-    nodes: &BTreeSet<String>,
+    nodes: &BTreeSet<i64>,
     closure: bool,
     now: DurableInstant,
 ) -> rusqlite::Result<()> {
-    let nodes: Vec<&String> = nodes.iter().collect();
+    let nodes: Vec<i64> = nodes.iter().copied().collect();
     for chunk in nodes.chunks(HOLD_BATCH) {
         cached_execute(
             tx,
@@ -581,11 +623,11 @@ fn frontier_put(
 /// The next nodes a step peels from: up to `limit` of its own frontier,
 /// oldest first, in one statement; else the oldest hold. Answers each node
 /// and whether its closure is peeled.
-fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(String, bool)>> {
+fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(i64, bool)>> {
     let continued = tx
-        .statement(SQL.pages.frontier_take.sql())?
+        .statement(SQL.sqlite.frontier_take.sql())?
         .query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-            Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if !continued.is_empty() {
@@ -593,14 +635,14 @@ fn next_retired(tx: &Connection, limit: usize) -> rusqlite::Result<Vec<(String, 
     }
     let Some(root) = tx
         .statement(SQL.sqlite.hold_next.sql())?
-        .query_row([], |row| crate::codec::hash_column(row, 0))
+        .query_row([], |row| row.get::<_, i64>(0))
         .optional()?
     else {
         return Ok(Vec::new());
     };
     let closure: bool = tx
         .statement(SQL.pages.hold_take.sql())?
-        .query_row([crate::codec::SqlHash(&root)], |row| row.get(0))?;
+        .query_row([root], |row| row.get(0))?;
     Ok(vec![(root, closure)])
 }
 

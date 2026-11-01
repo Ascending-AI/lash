@@ -175,7 +175,8 @@ BEGIN
                 AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
                     WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
             RETURNING artifact.graph_ref)
-        SELECT ARRAY(SELECT graph_ref FROM gone WHERE graph_ref IS NOT NULL) INTO v_frontier;
+        SELECT ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref)
+            INTO v_frontier;
         -- A bridged artifact's row was its graph node's root: peel it
         -- (FIG-5949).
         {PEEL}

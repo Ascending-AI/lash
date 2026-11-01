@@ -61,11 +61,11 @@ lash_store_sql::statements! {
         /// second publication of the same reference keeps the first pointer
         /// and the caller compares what it reads back.
         insert_pointer = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             VALUES (?1, ?2, ?3)
+             VALUES (?1, ?2, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END))
              ON CONFLICT (namespace, artifact_ref) DO NOTHING";
 
         /// The blob `?1`/`?2` points at.
-        select_blob_ref = "SELECT blob_ref FROM artifact_refs
+        select_blob_ref = "SELECT (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
         /// Holder fence, exact bundle lease and pointer in one snapshot.
@@ -75,26 +75,26 @@ lash_store_sql::statements! {
              EXISTS (SELECT 1 FROM artifact_referrer_edges
                  WHERE namespace = ?1 AND artifact_ref = ?2
                    AND referrer_kind = ?3 AND referrer_id = ?4),
-             refs.blob_ref
+             (SELECT hash FROM blobs WHERE id = refs.blob_ref) AS blob_ref
              FROM (SELECT 1) AS subject LEFT JOIN artifact_refs AS refs
                  ON refs.namespace = ?1 AND refs.artifact_ref = ?2";
 
         /// The blob `?1`/`?2` points at and its encoding: a graph node is a
         /// node-bodied artifact's root (FIG-6469). A dangling pointer has
         /// none.
-        select_body_ref = "SELECT refs.blob_ref, blobs.encoding FROM artifact_refs AS refs
-             LEFT JOIN blobs ON blobs.hash = refs.blob_ref
+        select_body_ref = "SELECT blobs.hash, blobs.encoding FROM artifact_refs AS refs
+             LEFT JOIN blobs ON blobs.id = refs.blob_ref
              WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2";
 
         /// Every pointer row, as the collector's root set.
-        select_gc_roots = "SELECT namespace, blob_ref FROM artifact_refs
+        select_gc_roots = "SELECT namespace, (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref FROM artifact_refs
              ORDER BY namespace, artifact_ref";
 
         /// One preflight page of published artifacts in namespace `?1`, after
         /// reference `?2`, at most `?3` rows.
-        select_preflight_page = "SELECT refs.artifact_ref, refs.blob_ref, blobs.content, blobs.encoding
+        select_preflight_page = "SELECT refs.artifact_ref, blobs.hash, blobs.content, blobs.encoding
              FROM artifact_refs AS refs
-             LEFT JOIN blobs ON blobs.hash = refs.blob_ref
+             LEFT JOIN blobs ON blobs.id = refs.blob_ref
              WHERE refs.namespace = ?1
                AND (?2 IS NULL OR refs.artifact_ref > ?2)
              ORDER BY refs.artifact_ref
@@ -269,13 +269,13 @@ fn retain_process_env_tx(
         namespace: &str,
         reference: &str,
     ) -> rusqlite::Result<Vec<u8>> {
-        let stored: Option<(String, Option<i64>)> = tx
+        let stored: Option<(Option<String>, Option<i64>)> = tx
             .statement(artifact_sql().refs.select_body_ref.sql())?
             .query_row(params![namespace, reference], |row| {
-                Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
+                Ok((crate::codec::optional_hash_column(row, 0)?, row.get(1)?))
             })
             .optional()?;
-        let Some((blob, encoding)) = stored else {
+        let Some((Some(blob), encoding)) = stored else {
             return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
                 artifact_ref: reference.into(),
             }));
@@ -767,16 +767,20 @@ impl SqliteStore {
         let resolved = self
             .read_connection()
             .read(move |conn| {
-                let stored: Option<(String, Option<i64>)> = conn
+                let stored: Option<(Option<String>, Option<i64>)> = conn
                     .statement(artifact_sql().refs.select_body_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![namespace, artifact_ref], |row| {
-                            Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
+                            Ok((crate::codec::optional_hash_column(row, 0)?, row.get(1)?))
                         })
                     })
                     .optional()?;
                 let Some((blob_ref, encoding)) = stored else {
                     return Ok(None);
+                };
+                // A pointer whose node id no blob holds points at nothing.
+                let Some(blob_ref) = blob_ref else {
+                    return Ok(Some(None));
                 };
                 #[cfg(feature = "testing")]
                 if let Some(pauses) = pauses.as_ref() {
@@ -1481,7 +1485,7 @@ mod tests {
         )
         .expect("insert artifact blob");
         conn.execute_once(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', zeroblob(32))",
+            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', (SELECT id FROM blobs WHERE hash = zeroblob(32)))",
             [],
         ).expect("insert artifact pointer");
         assert!(conn.execute_once(

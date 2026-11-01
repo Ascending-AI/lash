@@ -40,21 +40,21 @@ pub(super) fn snapshot(path: &Path) -> Result<Ownership> {
     // retirement holds schedule collection and do not constitute live owners.
     let mut query = conn.prepare(
         "WITH RECURSIVE
-         live(hash) AS (
+         live(id) AS (
            SELECT root_ref FROM graph_root_catalog WHERE source != 'retirement'
-           UNION SELECT child_hash FROM blob_edges JOIN live ON parent_hash = live.hash),
-         current(hash) AS (
+           UNION SELECT child_id FROM blob_edges JOIN live ON parent_id = live.id),
+         current(id) AS (
            SELECT checkpoint_ref FROM session_revisions JOIN session_head
              USING (session_id, head_revision) WHERE checkpoint_ref IS NOT NULL
            UNION SELECT root_ref FROM environment_heads
-           UNION SELECT child_hash FROM blob_edges JOIN current ON parent_hash = current.hash),
-         leased(hash) AS (
+           UNION SELECT child_id FROM blob_edges JOIN current ON parent_id = current.id),
+         leased(id) AS (
            SELECT root_ref FROM graph_root_catalog WHERE source = 'lease'
-           UNION SELECT child_hash FROM blob_edges JOIN leased ON parent_hash = leased.hash)
-         SELECT content, live.hash IS NOT NULL, current.hash IS NOT NULL, leased.hash IS NOT NULL
-         FROM blobs LEFT JOIN live ON blobs.hash = live.hash
-         LEFT JOIN current ON blobs.hash = current.hash
-         LEFT JOIN leased ON blobs.hash = leased.hash WHERE encoding = 1",
+           UNION SELECT child_id FROM blob_edges JOIN leased ON parent_id = leased.id)
+         SELECT content, live.id IS NOT NULL, current.id IS NOT NULL, leased.id IS NOT NULL
+         FROM blobs LEFT JOIN live ON blobs.id = live.id
+         LEFT JOIN current ON blobs.id = current.id
+         LEFT JOIN leased ON blobs.id = leased.id WHERE encoding = 1",
     )?;
     let mut rows = query.query([])?;
     let mut result = Ownership::default();
@@ -107,12 +107,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ownership.db");
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch("CREATE TABLE blobs(hash BLOB PRIMARY KEY, content BLOB, encoding INTEGER);
-            CREATE TABLE blob_edges(parent_hash BLOB, child_hash BLOB);
-            CREATE TABLE fixture_roots(source TEXT, root_ref BLOB);
+        conn.execute_batch("CREATE TABLE blobs(id INTEGER PRIMARY KEY, hash BLOB UNIQUE, content BLOB, encoding INTEGER);
+            CREATE TABLE blob_edges(parent_id INTEGER, child_id INTEGER);
+            CREATE TABLE fixture_roots(source TEXT, root_ref INTEGER);
             CREATE VIEW graph_root_catalog AS SELECT * FROM fixture_roots;
-            CREATE TABLE environment_heads(root_ref BLOB);
-            CREATE TABLE session_revisions(session_id TEXT, head_revision INTEGER, checkpoint_ref BLOB);
+            CREATE TABLE environment_heads(root_ref INTEGER);
+            CREATE TABLE session_revisions(session_id TEXT, head_revision INTEGER, checkpoint_ref INTEGER);
             CREATE TABLE session_head(session_id TEXT, head_revision INTEGER);").unwrap();
         let page = |kind, mut children: Vec<NodeId>, body: &str| {
             children.sort();
@@ -129,13 +129,14 @@ mod tests {
             );
             let id = NodeId::of_envelope(&body);
             conn.execute(
-                "INSERT INTO blobs VALUES (?1, ?2, 1)",
+                "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
                 rusqlite::params![id.0.as_slice(), body],
             )
             .unwrap();
             for child in children {
                 conn.execute(
-                    "INSERT INTO blob_edges VALUES (?1, ?2)",
+                    "INSERT INTO blob_edges SELECT parent.id, child.id FROM blobs AS parent, blobs AS child
+                     WHERE parent.hash = ?1 AND child.hash = ?2",
                     rusqlite::params![id.0.as_slice(), child.0.as_slice()],
                 )
                 .unwrap();
@@ -157,13 +158,13 @@ mod tests {
             ("retirement", old),
         ] {
             conn.execute(
-                "INSERT INTO fixture_roots VALUES (?1, ?2)",
+                "INSERT INTO fixture_roots SELECT ?1, id FROM blobs WHERE hash = ?2",
                 rusqlite::params![source, id.0.as_slice()],
             )
             .unwrap();
         }
         conn.execute(
-            "INSERT INTO session_revisions VALUES ('one', 1, ?1)",
+            "INSERT INTO session_revisions SELECT 'one', 1, id FROM blobs WHERE hash = ?1",
             [current.0.as_slice()],
         )
         .unwrap();
@@ -179,7 +180,7 @@ mod tests {
         // Release the retained control. Its private page becomes collectable;
         // the shared child of the current checkpoint stays pinned.
         conn.execute(
-            "DELETE FROM fixture_roots WHERE root_ref = ?1",
+            "DELETE FROM fixture_roots WHERE root_ref = (SELECT id FROM blobs WHERE hash = ?1)",
             [retained.0.as_slice()],
         )
         .unwrap();

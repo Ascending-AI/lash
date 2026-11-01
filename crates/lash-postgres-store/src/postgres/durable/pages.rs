@@ -97,25 +97,42 @@ lash_store_sql::statements! {
         /// in digest order. A node already held keeps the wider hold and
         /// its place in the queue.
         hold = "INSERT INTO retirement_holds AS held (root_ref, closure, queued_at_ms)
-             SELECT node.hash, bool_or(node.closure), ?3::bigint
+             SELECT stored.id, bool_or(node.closure), ?3::bigint
              FROM (SELECT UNNEST(?1::bytea[]) AS hash, TRUE AS closure
                    UNION ALL SELECT UNNEST(?2::bytea[]), FALSE) AS node
+             JOIN blobs AS stored ON stored.hash = node.hash
              WHERE node.hash = ANY(?4::bytea[])
-             GROUP BY node.hash
-             ORDER BY node.hash
+             GROUP BY stored.id
+             ORDER BY stored.id
              ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure";
 
-        /// The oldest hold no other transaction holds, locked for its step.
-        hold_next = "SELECT root_ref FROM retirement_holds
-             ORDER BY queued_at_ms, root_ref LIMIT 1 FOR UPDATE SKIP LOCKED";
+        /// The oldest hold no other transaction holds, locked for its step:
+        /// its node id and digest.
+        hold_next = "SELECT held.root_ref, root.hash FROM retirement_holds AS held
+             JOIN blobs AS root ON root.id = held.root_ref
+             ORDER BY held.queued_at_ms, held.root_ref LIMIT 1 FOR UPDATE OF held SKIP LOCKED";
+
+        /// End lease `?1` if it expired by `?2`; answers the digest of the
+        /// root it held.
+        lease_reap = "DELETE FROM root_leases WHERE lease_id = ?1 AND expires_at_ms <= ?2
+             RETURNING (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref";
+
+        /// Take the oldest `?1` nodes of the steps' frontier, in one
+        /// statement; answers each one still stored, by digest, and whether
+        /// its closure is peeled.
+        frontier_take = "WITH taken AS (DELETE FROM retirement_frontier
+                 WHERE node_ref IN (SELECT node_ref FROM retirement_frontier
+                     ORDER BY queued_at_ms, node_ref LIMIT ?1)
+                 RETURNING node_ref, closure)
+             SELECT node.hash, taken.closure FROM taken JOIN blobs AS node ON node.id = taken.node_ref";
 
         /// Put every node of `?1` on the step's frontier, its closure when
         /// `?2`, queued at `?3`. A node already there keeps the wider
         /// peel and its place in the queue.
         frontier_put = "INSERT INTO retirement_frontier AS queued (node_ref, closure, queued_at_ms)
-             SELECT node.hash, ?2::boolean, ?3::bigint
-             FROM UNNEST(?1::bytea[]) AS node(hash)
-             ORDER BY node.hash
+             SELECT stored.id, ?2::boolean, ?3::bigint
+             FROM UNNEST(?1::bytea[]) AS node(hash) JOIN blobs AS stored ON stored.hash = node.hash
+             ORDER BY stored.id
              ON CONFLICT (node_ref) DO UPDATE SET closure = queued.closure OR excluded.closure";
 
         /// Up to `?2` leases expired by `?1` no other transaction holds,
@@ -137,7 +154,8 @@ lash_store_sql::statements! {
                      (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT) AS now_ms),
              lease AS MATERIALIZED (
                  SELECT EXISTS (SELECT 1 FROM root_leases, clock
-                     WHERE lease_id = ?1 AND root_ref = ?2 AND expires_at_ms > clock.now_ms)
+                     WHERE lease_id = ?1 AND root_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END)
+                         AND expires_at_ms > clock.now_ms)
                      AS live)
              SELECT NULL::bytea, NULL::bytea, NULL::smallint, lease.live FROM lease
              UNION ALL
@@ -152,11 +170,13 @@ lash_store_sql::statements! {
         /// Every edge of parents `?1` to children `?2` (raw digests) not
         /// stored yet: a supplied node another commit installed already has
         /// its edges.
-        insert_edges_once = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT staged.parent, staged.child
+        insert_edges_once = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id
              FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)
+             JOIN blobs AS parent ON parent.hash = staged.parent
+             JOIN blobs AS child ON child.hash = staged.child
              ORDER BY 1, 2
-             ON CONFLICT (parent_hash, child_hash) DO NOTHING";
+             ON CONFLICT (parent_id, child_id) DO NOTHING";
     }
 }
 
@@ -641,7 +661,7 @@ async fn next_retired(
     limit: u64,
 ) -> Result<Vec<(String, bool)>, sqlx::Error> {
     let continued: Vec<(crate::keys::Key, bool)> =
-        crate::observed_sql::query_as(SQL.pages.frontier_take.sql())
+        crate::observed_sql::query_as(SQL.postgres.frontier_take.sql())
             .bind(i64::try_from(limit).unwrap_or(i64::MAX))
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await?;
@@ -651,14 +671,15 @@ async fn next_retired(
             .map(|(key, closure)| (key.0, closure))
             .collect());
     }
-    let root: Option<String> = crate::keys::query_scalar(SQL.postgres.hold_next.sql())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    let Some(root) = root else {
+    let held: Option<(i64, crate::keys::Key)> =
+        crate::observed_sql::query_as(SQL.postgres.hold_next.sql())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await?;
+    let Some((id, crate::keys::Key(root))) = held else {
         return Ok(Vec::new());
     };
     let closure: bool = crate::observed_sql::query_scalar(SQL.pages.hold_take.sql())
-        .bind(crate::keys::key(&root))
+        .bind(id)
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await?;
     Ok(vec![(root, closure)])
@@ -688,7 +709,7 @@ async fn retire_step_in(
         .await?;
     let mut reaped = BTreeSet::new();
     for lease in expired {
-        let root: Option<String> = crate::keys::query_scalar(SQL.pages.lease_reap.sql())
+        let root: Option<String> = crate::keys::query_scalar(SQL.postgres.lease_reap.sql())
             .bind(lease)
             .bind(now.0)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))

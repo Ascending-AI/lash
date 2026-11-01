@@ -50,11 +50,12 @@ lash_store_sql::statements! {
         /// rendered as "no such session". PostgreSQL's walk reads its own
         /// head table, `lash_session_head`, so the two texts fork on the table
         /// name alone.
-        select_session_checkpoint_page = "SELECT session_head.session_id, revision.checkpoint_ref, blobs.content, blobs.encoding
+        select_session_checkpoint_page = "SELECT session_head.session_id, blobs.hash, blobs.content, blobs.encoding,
+                    revision.checkpoint_ref
              FROM session_head JOIN session_revisions AS revision
                ON revision.session_id = session_head.session_id
               AND revision.head_revision = session_head.head_revision
-             LEFT JOIN blobs ON blobs.hash = revision.checkpoint_ref
+             LEFT JOIN blobs ON blobs.id = revision.checkpoint_ref
              WHERE revision.checkpoint_ref IS NOT NULL
                AND (?1 IS NULL OR session_head.session_id > ?1)
              ORDER BY session_head.session_id

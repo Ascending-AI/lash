@@ -86,32 +86,36 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
     (
         "checkpoint_blob_edges",
         "blob_edges",
-        "WITH RECURSIVE reach(hash) AS (
+        "WITH RECURSIVE reach(id) AS (
              SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
-             UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT lower(hex(parent_hash)), lower(hex(child_hash)) FROM blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
-        "WITH RECURSIVE reach(hash) AS (
+             UNION SELECT e.child_id FROM blob_edges e JOIN reach r ON e.parent_id = r.id)
+         SELECT lower(hex(parent.hash)), lower(hex(child.hash)) FROM blob_edges
+             JOIN blobs AS parent ON parent.id = parent_id JOIN blobs AS child ON child.id = child_id
+             WHERE parent_id IN (SELECT id FROM reach)",
+        "WITH RECURSIVE reach(id) AS (
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
-             UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT encode(parent_hash, 'hex') || ':' || encode(child_hash, 'hex') FROM lash_blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
+             UNION SELECT e.child_id FROM lash_blob_edges e JOIN reach r ON e.parent_id = r.id)
+         SELECT encode(parent.hash, 'hex') || ':' || encode(child.hash, 'hex') FROM lash_blob_edges
+             JOIN lash_blobs AS parent ON parent.id = parent_id JOIN lash_blobs AS child ON child.id = child_id
+             WHERE parent_id IN (SELECT id FROM reach)",
     ),
     // The checkpoint manifest and every node it reaches from this session's
     // head: a corrupted body is visible here and nowhere else.
     (
         "checkpoint_blobs",
         "blobs",
-        "WITH RECURSIVE reach(hash) AS (
+        "WITH RECURSIVE reach(id) AS (
              SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
-             UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT lower(hex(hash)), hex(content), encoding FROM blobs WHERE hash IN (SELECT hash FROM reach)",
-        "WITH RECURSIVE reach(hash) AS (
+             UNION SELECT e.child_id FROM blob_edges e JOIN reach r ON e.parent_id = r.id)
+         SELECT lower(hex(hash)), hex(content), encoding FROM blobs WHERE id IN (SELECT id FROM reach)",
+        "WITH RECURSIVE reach(id) AS (
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
-             UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT encode(hash, 'hex') || ':' || encode(content, 'hex') || ':' || encoding FROM lash_blobs WHERE hash IN (SELECT hash FROM reach)",
+             UNION SELECT e.child_id FROM lash_blob_edges e JOIN reach r ON e.parent_id = r.id)
+         SELECT encode(hash, 'hex') || ':' || encode(content, 'hex') || ':' || encoding FROM lash_blobs WHERE id IN (SELECT id FROM reach)",
     ),
 ];
 

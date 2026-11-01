@@ -23,7 +23,8 @@ crate::statements! {
     pub struct SessionHeadStatements @ "session_head" {
 
         /// The published head of `?1`.
-        select_meta = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
+        select_meta = "SELECT (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref, head.head_revision, revision.leaf_node_id,
+                    (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref,
                     leaf.frame_node_id
              FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
@@ -37,8 +38,8 @@ crate::statements! {
         /// Presence is separate from a NULL marker and a missing head, so
         /// generation refusal always precedes hydration and missing windows.
         select_window = "WITH selected AS (
-             SELECT head.session_id, head.head_revision, revision.config_ref,
-                    revision.leaf_node_id, revision.checkpoint_ref,
+             SELECT head.session_id, head.head_revision, (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref,
+                    revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref,
                     revision.head_revision AS retained_revision
              FROM session_head AS head
              LEFT JOIN session_revisions AS revision
@@ -56,8 +57,9 @@ crate::statements! {
 
         /// The terminal selector has its own indexed run predicate.
         select_terminal_window = "WITH selected AS (
-             SELECT ended.session_id, ended.terminal_window_revision AS head_revision, revision.config_ref,
-                    revision.leaf_node_id, revision.checkpoint_ref, revision.head_revision AS retained_revision
+             SELECT ended.session_id, ended.terminal_window_revision AS head_revision,
+                    (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref,
+                    revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref, revision.head_revision AS retained_revision
              FROM session_runs AS ended
              LEFT JOIN session_revisions AS revision
                ON revision.session_id = ended.session_id
@@ -80,7 +82,7 @@ crate::statements! {
 
 
         /// What session deletion needs from `?1`'s head before removing it.
-        select_reclaim = "SELECT revision.leaf_node_id, revision.checkpoint_ref
+        select_reclaim = "SELECT revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref
              FROM session_head AS head JOIN session_revisions AS revision
                ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
              WHERE head.session_id = ?1";
@@ -97,21 +99,22 @@ crate::statements! {
 
         /// Every live checkpoint root: every retained revision (including
         /// each head), and every retained admission base (FIG-3682).
-        select_checkpoint_roots = "SELECT checkpoint_ref FROM session_revisions WHERE checkpoint_ref IS NOT NULL
+        select_checkpoint_roots = "SELECT hash FROM blobs WHERE id IN (
+                 SELECT checkpoint_ref FROM session_revisions WHERE checkpoint_ref IS NOT NULL
                  UNION
                  SELECT admission_base_checkpoint_ref FROM session_meta
-                 WHERE admission_base_checkpoint_ref IS NOT NULL";
+                 WHERE admission_base_checkpoint_ref IS NOT NULL)";
 
 
         /// Replace `?1`'s stored head document with `?2`.
         set_head_json = "UPDATE blobs SET content = ?2
-             WHERE hash = (SELECT revision.config_ref FROM session_head AS head
+             WHERE id = (SELECT revision.config_ref FROM session_head AS head
                  JOIN session_revisions AS revision USING (session_id, head_revision) WHERE head.session_id = ?1)";
 
 
         /// Replace `?1`'s stored head document with text no decoder accepts.
         corrupt_head_json = "UPDATE blobs SET content = ?2
-             WHERE hash = (SELECT revision.config_ref FROM session_head AS head
+             WHERE id = (SELECT revision.config_ref FROM session_head AS head
                  JOIN session_revisions AS revision USING (session_id, head_revision) WHERE head.session_id = ?1)";
     }
 }

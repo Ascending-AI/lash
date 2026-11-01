@@ -268,16 +268,16 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
         let mut query = conn
             .prepare(
-                "WITH RECURSIVE reachable(hash) AS (
+                "WITH RECURSIVE reachable(id) AS (
                      SELECT revision.config_ref FROM session_head AS head
                      JOIN session_revisions AS revision
                        ON revision.session_id = head.session_id
                       AND revision.head_revision = head.head_revision
                      WHERE head.session_id = 'keep/me'
                      UNION
-                     SELECT edge.child_hash FROM blob_edges AS edge
-                     JOIN reachable ON edge.parent_hash = reachable.hash
-                 ) SELECT lower(hex(hash)) FROM reachable",
+                     SELECT edge.child_id FROM blob_edges AS edge
+                     JOIN reachable ON edge.parent_id = reachable.id
+                 ) SELECT lower(hex(hash)) FROM reachable JOIN blobs USING (id)",
             )
             .expect("surviving config closure query");
         query
@@ -296,7 +296,8 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .expect("insert host artifact blob");
         conn.execute(
             "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             VALUES ('kernel_document', 'shared-module', zeroblob(32))",
+             VALUES ('kernel_document', 'shared-module',
+                 (SELECT id FROM blobs WHERE hash = zeroblob(32)))",
             [],
         )
         .expect("insert host artifact ref");

@@ -53,14 +53,14 @@ lash_store_sql::statements! {
          ORDER BY COALESCE(definition_json, ''), COALESCE(env_ref, ''), MIN(process_id)";
 
         /// Environment bytes by reference without executable reconstruction.
-        select_environment_bytes = "SELECT b.content FROM artifact_refs a LEFT JOIN blobs b ON b.hash = a.blob_ref WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
+        select_environment_bytes = "SELECT b.content FROM artifact_refs a LEFT JOIN blobs b ON b.id = a.blob_ref WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
 
         /// A retained process and its environment bytes, or its prune tombstone, atomically.
         select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json, b.content, NULL, NULL
              FROM processes p
              LEFT JOIN artifact_refs a ON a.namespace = ?2
                AND a.artifact_ref = json_extract(p.execution_json, '$.input.launch.env')
-             LEFT JOIN blobs b ON b.hash = a.blob_ref
+             LEFT JOIN blobs b ON b.id = a.blob_ref
              WHERE p.process_id = ?1
              UNION ALL
              SELECT NULL, NULL, terminal_label, pruned_at_ms

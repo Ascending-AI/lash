@@ -68,7 +68,7 @@ async fn durable_waits_and_actors_refuse_impossible_rows() {
         (0_i64, vec![0_u8; 32], "ck_exec_snapshots_rev"),
         (1, vec![0; 31], "ck_exec_snapshots_commit_id"),
     ] {
-        let error = crate::observed_sql::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 'root', $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
+        let error = crate::observed_sql::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 0, $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
         assert_eq!(
             error
                 .as_database_error()

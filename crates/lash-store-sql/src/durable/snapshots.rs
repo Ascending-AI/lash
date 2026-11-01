@@ -14,15 +14,15 @@ crate::statements! {
     /// `exec_snapshots` statements both backends issue verbatim.
     pub struct SnapshotStatements @ "durable_snapshot" {
         /// Execution `?1`'s revision and root.
-        root = "SELECT rev, root_ref FROM exec_snapshots WHERE exec_key = ?1";
+        root = "SELECT rev, (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref FROM exec_snapshots WHERE exec_key = ?1";
 
         /// Execution `?1`'s row.
-        read = "SELECT rev, root_ref, written_epoch, commit_id FROM exec_snapshots
+        read = "SELECT rev, (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref, written_epoch, commit_id FROM exec_snapshots
              WHERE exec_key = ?1";
 
         /// Every row whose execution key starts with `?1`, by key: the cells
         /// of one turn.
-        under = "SELECT exec_key, rev, root_ref, written_epoch, commit_id
+        under = "SELECT exec_key, rev, (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref, written_epoch, commit_id
              FROM exec_snapshots
              WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
              ORDER BY exec_key";
@@ -30,7 +30,7 @@ crate::statements! {
         /// Insert execution `?1`'s first root `?2` by commit `?3` at epoch
         /// `?4`, when it has none. No row when it has one.
         put_first = "INSERT INTO exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
-             SELECT ?1, 1, ?2, ?3, ?4
+             SELECT ?1, 1, COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END), ?3, ?4
              WHERE NOT EXISTS (SELECT 1 FROM exec_snapshots WHERE exec_key = ?1)
              RETURNING rev";
 
@@ -38,23 +38,23 @@ crate::statements! {
         /// commit `?4` at epoch `?5`. No row when the stored revision is not
         /// `?2` or its root not `?6`.
         put_next = "UPDATE exec_snapshots
-             SET rev = rev + 1, root_ref = ?3, commit_id = ?4, written_epoch = ?5
-             WHERE exec_key = ?1 AND rev = ?2 AND root_ref = ?6
+             SET rev = rev + 1, root_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END), commit_id = ?4, written_epoch = ?5
+             WHERE exec_key = ?1 AND rev = ?2 AND root_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?6), CASE WHEN ?6 IS NOT NULL THEN -1 END)
              RETURNING rev";
 
         /// Retire execution `?1`'s root `?2`. No row when it is not `?2`.
-        retire = "DELETE FROM exec_snapshots WHERE exec_key = ?1 AND root_ref = ?2
+        retire = "DELETE FROM exec_snapshots WHERE exec_key = ?1 AND root_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END)
              RETURNING exec_key";
 
         /// Delete execution `?1`'s row, whichever root it holds, returning
         /// that root.
-        clear = "DELETE FROM exec_snapshots WHERE exec_key = ?1 RETURNING root_ref";
+        clear = "DELETE FROM exec_snapshots WHERE exec_key = ?1 RETURNING (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref";
 
         /// Delete every row whose execution key starts with `?1`: the cells
         /// one turn stopped in, at its end, or one session's, at its delete.
         /// Returns each root it held.
         clear_under = "DELETE FROM exec_snapshots
              WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
-             RETURNING root_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref";
     }
 }

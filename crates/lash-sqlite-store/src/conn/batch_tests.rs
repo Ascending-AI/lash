@@ -639,7 +639,7 @@ async fn a_member_leaving_a_deferred_foreign_key_dangling_is_refused_as_alone() 
             tx.execute_batch(
                 "INSERT INTO blobs (hash, content, encoding) VALUES ('config', x'00', 0);
                  INSERT INTO session_revisions (session_id, head_revision, config_ref)
-                     VALUES ('healed', 7, 'config');",
+                     VALUES ('healed', 7, (SELECT id FROM blobs WHERE hash = 'config'));",
             )?;
             Ok(TxOutcome::Commit("kept"))
         },

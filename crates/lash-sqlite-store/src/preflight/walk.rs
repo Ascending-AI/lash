@@ -249,7 +249,11 @@ fn read_session_checkpoints(
     )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         let session_id: SessionId = crate::codec::sql_identity(row.get::<_, String>(0)?)?;
-        let checkpoint_ref: String = crate::codec::hash_column(row, 1)?;
+        // A dangling reference has no digest to name: it names its node id.
+        let checkpoint_ref: String = match crate::codec::optional_hash_column(row, 1)? {
+            Some(hash) => hash,
+            None => format!("node {}", row.get::<_, i64>(4)?),
+        };
         let stored: Option<Vec<u8>> = row.get(2)?;
         let encoding: Option<i64> = row.get(3)?;
         let payload = match stored {

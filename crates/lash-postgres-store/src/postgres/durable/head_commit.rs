@@ -75,12 +75,12 @@ lash_store_sql::statements! {
         /// revision's config root, revision, leaf and checkpoint, the frame
         /// its leaf row names, and whether the store holds the config root
         /// as a graph node.
-        head = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id,
-                    revision.checkpoint_ref, leaf.frame_node_id, root.encoding = 1 AS root_held
+        head = "SELECT root.hash, head.head_revision, revision.leaf_node_id,
+                    (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref, leaf.frame_node_id, root.encoding = 1 AS root_held
              FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
              LEFT JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
-             LEFT JOIN blobs AS root ON root.hash = revision.config_ref
+             LEFT JOIN blobs AS root ON root.id = revision.config_ref
              WHERE head.session_id = ?1";
     }
 }

@@ -46,9 +46,9 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     -- The phase's PhaseRoot node and the post-cell working SessionExecution
     -- (FIG-5887 §6, §7), and the pinned call's receipt: its placed text,
     -- from model.answer until the next phase.
-    checkpoint_ref BLOB REFERENCES blobs(hash),
-    working_execution_ref BLOB REFERENCES blobs(hash),
-    answer_ref BLOB REFERENCES blobs(hash),
+    checkpoint_ref INTEGER REFERENCES blobs(id),
+    working_execution_ref INTEGER REFERENCES blobs(id),
+    answer_ref INTEGER REFERENCES blobs(id),
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
     entry TEXT NOT NULL,
     -- The namespace's NamespaceValue node; NULL exactly for base values
     -- (FIG-5887 §7).
-    graph_root_ref BLOB REFERENCES blobs(hash),
+    graph_root_ref INTEGER REFERENCES blobs(id),
     PRIMARY KEY (session_id, run, plugin)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
@@ -93,7 +93,7 @@ lash_store_sql::statements! {
     struct SqliteTurnStatements @ "durable_turn_sqlite" {
         /// Advance without rewriting an already empty answer root.
         advance_without_answer = "UPDATE turn_phases
-             SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
+             SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = COALESCE((SELECT id FROM blobs WHERE hash = ?6), CASE WHEN ?6 IS NOT NULL THEN -1 END),
                  model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
                  model_calls = COALESCE(?10, model_calls), model_stream_from = ?11
              WHERE session_id = ?1 AND run = ?2
@@ -1065,7 +1065,7 @@ mod ddl_tests {
             "INSERT INTO turn_phases (session_id, run, phase, phase_arg, iteration,
                  checkpoint_ref, model_request_ref, model_deadline_ms, model_stream_from,
                  written_epoch)
-             VALUES ('s', ?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, 1)",
+             VALUES ('s', ?1, ?2, ?3, 0, (SELECT id FROM blobs WHERE hash = ?4), ?5, ?6, ?7, 1)",
             params![
                 run,
                 phase,

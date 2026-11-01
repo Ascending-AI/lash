@@ -217,7 +217,7 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     );
     match &page.items[0].payload {
         DurablePayload::Missing { reason } => assert!(
-            reason.contains(missing.as_str()),
+            reason.contains("node 9000000000"),
             "the reason names the dangling reference: {reason}"
         ),
         other => panic!("a dangling checkpoint root is Missing, got {other:?}"),
@@ -407,7 +407,10 @@ async fn seed_session(scratch: &ScratchSchema, session_id: &str, checkpoint_ref:
              SET LOCAL session_replication_role = replica;
              WITH recorded AS (
                  INSERT INTO lash_session_revisions (session_id, head_revision, config_ref, checkpoint_ref)
-                 VALUES ('{session_id}', 1, decode(repeat('00', 32), 'hex'), decode('{checkpoint_ref}', 'hex')) RETURNING session_id, head_revision
+                 VALUES ('{session_id}', 1,
+                     COALESCE((SELECT id FROM lash_blobs WHERE hash = decode(repeat('00', 32), 'hex')), 0),
+                     COALESCE((SELECT id FROM lash_blobs WHERE hash = decode('{checkpoint_ref}', 'hex')), 9000000000))
+                 RETURNING session_id, head_revision
              ) INSERT INTO lash_session_head (session_id, head_revision)
                  SELECT session_id, head_revision FROM recorded;
              COMMIT"

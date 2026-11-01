@@ -20,7 +20,8 @@ pub(super) static SQL: LazyLock<ToolCallStatements> =
 lash_store_sql::statements! {
     lazy
     struct ToolCallPostgresStatements @ "durable_tool_call_postgres" {
-        selected = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
+        selected = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref,
+                answer_outcome, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id = ANY(?2)";
     }
 }

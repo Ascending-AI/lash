@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     session_id TEXT, turn_id TEXT,
     request_id TEXT, origin TEXT, reason TEXT,
     decision TEXT CHECK (decision IN ('final', 'cancel')),
-    decision_ref BLOB REFERENCES blobs(hash),
+    decision_ref INTEGER REFERENCES blobs(id),
     answer_outcome TEXT,
-    body_ref BLOB REFERENCES blobs(hash),
+    body_ref INTEGER REFERENCES blobs(id),
     PRIMARY KEY (owner_key, call_id),
     CHECK ((decision IS NULL) = (decision_ref IS NULL)),
     CHECK (body_ref IS NULL OR answer_outcome IS NOT NULL)
@@ -65,7 +65,8 @@ lash_store_sql::statements! {
             ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id
             WHERE (held.execution_owner, held.run_seq, held.member, held.cancellable, held.counted)
                 = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted)";
-        selected = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
+        selected = "SELECT call_id, execution_owner, run_seq, member, decision, (SELECT hash FROM blobs WHERE id = decision_ref) AS decision_ref,
+                answer_outcome, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))";
     }
 }

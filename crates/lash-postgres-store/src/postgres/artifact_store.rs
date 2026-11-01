@@ -24,7 +24,7 @@ lash_store_sql::statements! {
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
                AND NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
-             RETURNING artifact.graph_ref";
+             RETURNING (SELECT hash FROM blobs WHERE id = artifact.graph_ref) AS graph_ref";
     }
 }
 
@@ -49,10 +49,10 @@ lash_store_sql::statements! {
         /// A node-bodied artifact's row: its graph node, which the row roots
         /// through the bridge (FIG-6469).
         insert_node = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, storage_kind, graph_ref)
-             VALUES (?1, ?2, 1, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
+             VALUES (?1, ?2, 1, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END)) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         /// What artifact `?2` of namespace `?1` stores: its bytes, or the
         /// graph node its row roots.
-        select_stored = "SELECT artifact_bytes, graph_ref FROM lash_vm_artifacts
+        select_stored = "SELECT artifact_bytes, (SELECT hash FROM blobs WHERE id = graph_ref) AS graph_ref FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
         /// Each reference of `?2` in namespace `?1` that referrer `?3`/`?4`
         /// holds no edge to.
@@ -66,7 +66,7 @@ lash_store_sql::statements! {
         /// the encoded graph node its row roots.
         list_namespace_page = "SELECT artifact.artifact_ref, artifact.artifact_bytes, node.content
              FROM lash_vm_artifacts AS artifact
-             LEFT JOIN blobs AS node ON node.hash = artifact.graph_ref
+             LEFT JOIN blobs AS node ON node.id = artifact.graph_ref
              WHERE artifact.namespace = ?1 AND (?2::text IS NULL OR artifact.artifact_ref > ?2::text)
              ORDER BY artifact.artifact_ref LIMIT ?3";
     }

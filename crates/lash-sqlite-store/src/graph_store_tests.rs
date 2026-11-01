@@ -155,7 +155,8 @@ impl GraphTier for Tier {
             .connection_for_testing()
             .call(move |conn| {
                 conn.statement_once(
-                    "SELECT child_hash FROM blob_edges WHERE parent_hash = ?1 ORDER BY child_hash",
+                    "SELECT child.hash FROM blob_edges JOIN blobs AS child ON child.id = child_id
+                     WHERE parent_id = (SELECT id FROM blobs WHERE hash = ?1) ORDER BY child.hash",
                 )?
                 .query_map([crate::codec::SqlHash(&parent)], |row| {
                     crate::codec::hash_column(row, 0)
@@ -177,7 +178,7 @@ impl GraphTier for Tier {
     }
 
     async fn roots(&self) -> Vec<String> {
-        self.texts("SELECT root_ref FROM graph_root_catalog").await
+        self.texts("SELECT (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref FROM graph_root_catalog").await
     }
 
     async fn foreign(&self, write: ForeignWrite) {
@@ -214,7 +215,7 @@ impl GraphTier for Tier {
             } => (
                 "INSERT INTO session_revisions
                      (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
-                 VALUES (?1, ?2, NULL, ?3, ?4)",
+                 VALUES (?1, ?2, NULL, (SELECT id FROM blobs WHERE hash = ?3), (SELECT id FROM blobs WHERE hash = ?4))",
                 vec![
                     text(session.as_str()),
                     Value::Integer(i64::try_from(revision).expect("a small revision")),
@@ -240,7 +241,7 @@ impl GraphTier for Tier {
             } => (
                 "INSERT INTO session_meta
                      (session_id, relation_kind, retention_kind, admission_base_checkpoint_ref)
-                 VALUES (?1, 'root', 'until_gc', ?2)",
+                 VALUES (?1, 'root', 'until_gc', (SELECT id FROM blobs WHERE hash = ?2))",
                 vec![text(session.as_str()), hex(&root)],
             ),
             ForeignWrite::AdmissionBase {
@@ -255,7 +256,8 @@ impl GraphTier for Tier {
                 artifact,
                 root: Some(root),
             } => (
-                "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, ?3)",
+                "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+                 VALUES (?1, ?2, (SELECT id FROM blobs WHERE hash = ?3))",
                 vec![text(namespace), text(artifact), hex(&root)],
             ),
             ForeignWrite::ArtifactBridge {
@@ -270,7 +272,7 @@ impl GraphTier for Tier {
                 session,
                 root: Some(root),
             } => (
-                "INSERT INTO environment_heads(session_id,root_ref,written_epoch) VALUES (?1,?2,0)",
+                "INSERT INTO environment_heads(session_id,root_ref,written_epoch) VALUES (?1,(SELECT id FROM blobs WHERE hash = ?2),0)",
                 vec![text(session.as_str()), hex(&root)],
             ),
             ForeignWrite::EnvironmentHead {
@@ -288,7 +290,7 @@ impl GraphTier for Tier {
                 "INSERT INTO session_runs
                      (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
                       terminal_transcript_ref)
-                 VALUES (?1, ?2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1, ?3)",
+                 VALUES (?1, ?2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1, (SELECT id FROM blobs WHERE hash = ?3))",
                 vec![text(session.as_str()), text(run.as_str()), hex(&root)],
             ),
             ForeignWrite::TerminalTranscript {
@@ -347,7 +349,7 @@ impl PageTier for Tier {
     }
 
     async fn catalog(&self) -> Vec<NodeId> {
-        self.texts("SELECT root_ref FROM graph_root_catalog")
+        self.texts("SELECT (SELECT hash FROM blobs WHERE id = root_ref) AS root_ref FROM graph_root_catalog")
             .await
             .iter()
             .map(|hash| NodeId::from_hex(hash).expect("a stored root"))
@@ -358,7 +360,10 @@ impl PageTier for Tier {
         self.store
             .connection_for_testing()
             .call(|conn| {
-                conn.statement_once("SELECT parent_hash, child_hash FROM blob_edges")?
+                conn.statement_once(
+                    "SELECT parent.hash, child.hash FROM blob_edges
+                     JOIN blobs AS parent ON parent.id = parent_id JOIN blobs AS child ON child.id = child_id",
+                )?
                     .query_map([], |row| {
                         Ok((
                             crate::codec::hash_column(row, 0)?,
@@ -381,7 +386,7 @@ impl PageTier for Tier {
 
     async fn drop_blob(&self, node: &NodeId) {
         for sql in [
-            "DELETE FROM blob_edges WHERE parent_hash = ?1 OR child_hash = ?1",
+            "DELETE FROM blob_edges WHERE parent_id = (SELECT id FROM blobs WHERE hash = ?1) OR child_id = (SELECT id FROM blobs WHERE hash = ?1)",
             "DELETE FROM blobs WHERE hash = ?1",
         ] {
             self.raw(sql.to_owned(), vec![hex(node)]).await;

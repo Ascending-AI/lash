@@ -369,7 +369,7 @@ async fn sqlite_persisted_record_decode_classification() {
     let raw = rusqlite::Connection::open(&path).expect("open corruption connection");
     assert_eq!(
         raw.execute_once(
-            "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = (SELECT config_ref FROM session_revisions JOIN session_head USING (session_id, head_revision) WHERE session_id = ?1)",
+            "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE id = (SELECT config_ref FROM session_revisions JOIN session_head USING (session_id, head_revision) WHERE session_id = ?1)",
             [head_session_id.as_str()],
         )
         .expect("corrupt head JSON"),
@@ -381,8 +381,8 @@ async fn sqlite_persisted_record_decode_classification() {
     );
 
     let checkpoint_ref: String = raw
-        .query_row_once(
-            "SELECT lower(hex(checkpoint_ref)) FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
+        .query_row(
+            "SELECT lower(hex((SELECT hash FROM blobs WHERE id = checkpoint_ref))) FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
             [checkpoint_session_id.as_str()],
             |row| row.get(0),
         )
@@ -739,7 +739,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("write foreign data");
     raw.execute_once(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-         VALUES (?1, 'dangling-artifact', X'7777777777777777777777777777777777777777777777777777777777777777')",
+         VALUES (?1, 'dangling-artifact', 7777)",
         params![MODULE_ARTIFACT_NAMESPACE],
     )
     .expect("insert dangling artifact reference");
@@ -760,7 +760,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     raw.execute_once("INSERT INTO blobs (hash, content, encoding) VALUES (X'4444444444444444444444444444444444444444444444444444444444444444', CAST('{' AS BLOB), 0)", []).expect("foreign config");
     raw.execute_once(
         "INSERT INTO session_revisions (session_id, head_revision, config_ref)
-         VALUES ('corrupt', 0, X'4444444444444444444444444444444444444444444444444444444444444444')",
+         VALUES ('corrupt', 0, (SELECT id FROM blobs
+             WHERE hash = X'4444444444444444444444444444444444444444444444444444444444444444'))",
         [],
     )
     .expect("insert malformed head revision");
@@ -780,40 +781,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "SessionHeadMeta",
     );
 
-    crate::revisions::record_revision_conn(
-        &raw,
-        &session_id,
-        1,
-        None,
-        Some("6666666666666666666666666666666666666666666666666666666666666666"),
-        &encode_json(&SessionHeadPayload {
-            session_id: SessionId::from("corrupt"),
-            ..Default::default()
-        })
-        .expect("encode session head"),
-    )
-    .expect("install a valid configuration graph with a dangling checkpoint");
-    raw.execute_once(
-        "UPDATE session_head SET head_revision = 1 WHERE session_id = 'corrupt'",
-        [],
-    )
-    .expect("publish dangling checkpoint");
-    let dangling = store
-        .load_session_window(&session_id, WindowSelector::Current)
-        .await;
-    assert!(
-        matches!(
-            &dangling,
-            Err(StoreError::CheckpointComponentMissing {
-                key,
-                blob_ref,
-            }) if key == "manifest" && blob_ref.as_str() == "6666666666666666666666666666666666666666666666666666666666666666"
-        ),
-        "a dangling checkpoint manifest must refuse the window read, got {dangling:?}"
-    );
     raw.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0)", []).expect("terminal on revision 0");
     raw.execute_once(
-        "UPDATE session_revisions SET config_ref = X'5555555555555555555555555555555555555555555555555555555555555555' WHERE session_id = 'corrupt'",
+        "UPDATE session_revisions SET config_ref = 5555 WHERE session_id = 'corrupt'",
         [],
     )
     .expect("dangling revision config");

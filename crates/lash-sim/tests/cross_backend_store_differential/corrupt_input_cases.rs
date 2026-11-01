@@ -279,7 +279,7 @@ impl BackendRunner {
                     CorruptTarget::CheckpointManifestBlob => {
                         backup.bytes = connection
                             .query_row(
-                                "SELECT content FROM blobs WHERE hash =
+                                "SELECT content FROM blobs WHERE id =
                                      (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
                                       WHERE session_id = ?1)",
                                 [session_id.as_str()],
@@ -289,7 +289,7 @@ impl BackendRunner {
                             .expect("read SQLite checkpoint manifest before corruption");
                         let changed = connection
                             .execute(
-                                "UPDATE blobs SET content = ?2 WHERE hash =
+                                "UPDATE blobs SET content = ?2 WHERE id =
                                      (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
                                       WHERE session_id = ?1)",
                                 rusqlite::params![session_id.as_str(), CORRUPT_BYTES],
@@ -379,7 +379,7 @@ impl BackendRunner {
                 }
                 CorruptTarget::CheckpointManifestBlob => {
                     backup.bytes = sqlx::query_scalar(
-                        "SELECT content FROM lash_blobs WHERE hash =
+                        "SELECT content FROM lash_blobs WHERE id =
                              (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())
@@ -387,7 +387,7 @@ impl BackendRunner {
                     .await
                     .expect("read Postgres checkpoint manifest before corruption");
                     let result = sqlx::query(
-                        "UPDATE lash_blobs SET content = $2 WHERE hash =
+                        "UPDATE lash_blobs SET content = $2 WHERE id =
                              (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())
@@ -498,7 +498,7 @@ pub(super) async fn restore_corrupt_record_raw(
                     CorruptTarget::CheckpointManifestBlob => {
                         connection
                             .execute(
-                                "UPDATE blobs SET content = ?2 WHERE hash =
+                                "UPDATE blobs SET content = ?2 WHERE id =
                                      (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
                                       WHERE session_id = ?1)",
                                 rusqlite::params![
@@ -547,7 +547,7 @@ pub(super) async fn restore_corrupt_record_raw(
                 }
                 CorruptTarget::CheckpointManifestBlob => {
                     sqlx::query(
-                        "UPDATE lash_blobs SET content = $2 WHERE hash =
+                        "UPDATE lash_blobs SET content = $2 WHERE id =
                              (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1)",
                     )
                     .bind(session_id.as_str())

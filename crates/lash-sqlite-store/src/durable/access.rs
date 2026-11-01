@@ -159,9 +159,9 @@ lash_store_sql::statements! {
         /// read's column order, and the cancel request the turn accepted, in
         /// the cancel read's (FIG-6617): one statement, as the open's turn.
         turn = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                    (SELECT hash FROM blobs WHERE id = p.checkpoint_ref) AS checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                     p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                    p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                    p.model_stream_from, (SELECT hash FROM blobs WHERE id = p.working_execution_ref) AS working_execution_ref, (SELECT hash FROM blobs WHERE id = p.answer_ref) AS answer_ref,
                     COALESCE((SELECT admitted_count FROM tool_calls
                         WHERE session_id = r.session_id AND turn_id = r.run
                         ORDER BY admission_seq DESC LIMIT 1), 0),
@@ -175,7 +175,7 @@ lash_store_sql::statements! {
 
         /// Only the unfinished turn's root identities and fresh cancellation.
         /// The owner commit never decodes its own admission or phase JSON.
-        turn_frontier = "SELECT r.run, p.checkpoint_ref, p.answer_ref,
+        turn_frontier = "SELECT r.run, (SELECT hash FROM blobs WHERE id = p.checkpoint_ref) AS checkpoint_ref, (SELECT hash FROM blobs WHERE id = p.answer_ref) AS answer_ref,
                     c.request_id, c.origin, c.reason, c.disposition, c.mode
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
@@ -202,9 +202,9 @@ lash_store_sql::statements! {
 
         open = lash_store_sql::mailbox_query!("?3", "?4", ", t AS MATERIALIZED (
                  SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                        p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
+                        (SELECT hash FROM blobs WHERE id = p.checkpoint_ref) AS checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
                         p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                        p.model_stream_from, p.working_execution_ref, p.answer_ref,
+                        p.model_stream_from, (SELECT hash FROM blobs WHERE id = p.working_execution_ref) AS working_execution_ref, (SELECT hash FROM blobs WHERE id = p.answer_ref) AS answer_ref,
                     COALESCE((SELECT admitted_count FROM tool_calls
                         WHERE session_id = r.session_id AND turn_id = r.run
                         ORDER BY admission_seq DESC LIMIT 1), 0),

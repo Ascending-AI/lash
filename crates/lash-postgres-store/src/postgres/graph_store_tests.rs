@@ -130,7 +130,8 @@ impl GraphTier for Tier {
 
     async fn edges(&self, parent: &NodeId) -> Vec<NodeId> {
         let children: Vec<String> = sqlx::query_scalar(
-            "SELECT encode(child_hash, 'hex') FROM lash_blob_edges WHERE parent_hash = $1 ORDER BY child_hash",
+            "SELECT encode(child.hash, 'hex') FROM lash_blob_edges JOIN lash_blobs AS child ON child.id = child_id
+             WHERE parent_id = (SELECT id FROM lash_blobs WHERE hash = $1) ORDER BY child.hash",
         )
         .bind(crate::keys::key(hex(parent)))
         .fetch_all(&self.pool)
@@ -152,7 +153,7 @@ impl GraphTier for Tier {
     }
 
     async fn roots(&self) -> Vec<String> {
-        sqlx::query_scalar("SELECT encode(root_ref, 'hex') FROM lash_graph_root_catalog")
+        sqlx::query_scalar("SELECT encode((SELECT hash FROM lash_blobs WHERE id = root_ref), 'hex') FROM lash_graph_root_catalog")
             .fetch_all(&self.pool)
             .await
             .expect("a root listing")
@@ -192,7 +193,7 @@ impl GraphTier for Tier {
             } => sqlx::query(
                 "INSERT INTO lash_session_revisions
                      (session_id, head_revision, leaf_node_id, checkpoint_ref, config_ref)
-                 VALUES ($1, $2, NULL, $3, $4)",
+                 VALUES ($1, $2, NULL, (SELECT id FROM lash_blobs WHERE hash = $3), (SELECT id FROM lash_blobs WHERE hash = $4))",
             )
             .bind(session.as_str().to_owned())
             .bind(i64::try_from(*revision).expect("a small revision"))
@@ -218,7 +219,7 @@ impl GraphTier for Tier {
             } => sqlx::query(
                 "INSERT INTO lash_session_meta
                      (session_id, relation_kind, retention_kind, admission_base_checkpoint_ref)
-                 VALUES ($1, 'root', 'until_gc', $2)",
+                 VALUES ($1, 'root', 'until_gc', (SELECT id FROM lash_blobs WHERE hash = $2))",
             )
             .bind(session.as_str().to_owned())
             .bind(crate::keys::key(hex(root))),
@@ -234,7 +235,7 @@ impl GraphTier for Tier {
             } => sqlx::query(
                 "INSERT INTO lash_lash_vm_artifacts
                      (namespace, artifact_ref, storage_kind, graph_ref)
-                 VALUES ($1, $2, 1, $3)",
+                 VALUES ($1, $2, 1, (SELECT id FROM lash_blobs WHERE hash = $3))",
             )
             .bind(namespace.clone())
             .bind(artifact.clone())
@@ -249,7 +250,7 @@ impl GraphTier for Tier {
             .bind(namespace.clone())
             .bind(artifact.clone()),
             ForeignWrite::EnvironmentHead {session,root:Some(root)} => sqlx::query(
-                "INSERT INTO lash_environment_heads(session_id,root_ref,written_epoch) VALUES ($1,$2,0)")
+                "INSERT INTO lash_environment_heads(session_id,root_ref,written_epoch) VALUES ($1,(SELECT id FROM lash_blobs WHERE hash = $2),0)")
                 .bind(session.as_str().to_owned()).bind(crate::keys::key(hex(root))),
             ForeignWrite::EnvironmentHead {session,root:None} => sqlx::query(
                 "DELETE FROM lash_environment_heads WHERE session_id = $1").bind(session.as_str().to_owned()),
@@ -261,7 +262,7 @@ impl GraphTier for Tier {
                 "INSERT INTO lash_session_runs
                      (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms,
                       terminal_transcript_ref)
-                 VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1, $3)",
+                 VALUES ($1, $2, 'cancelled', '{\"cause\":\"operator_cancelled\"}', 1, (SELECT id FROM lash_blobs WHERE hash = $3))",
             )
             .bind(session.as_str().to_owned())
             .bind(run.as_str().to_owned())
@@ -442,7 +443,8 @@ impl PageTier for Tier {
 
     async fn edge_rows(&self) -> BTreeSet<(NodeId, NodeId)> {
         sqlx::query_as::<_, (String, String)>(
-            "SELECT encode(parent_hash, 'hex'), encode(child_hash, 'hex') FROM lash_blob_edges",
+            "SELECT encode(parent.hash, 'hex'), encode(child.hash, 'hex') FROM lash_blob_edges
+             JOIN lash_blobs AS parent ON parent.id = parent_id JOIN lash_blobs AS child ON child.id = child_id",
         )
         .fetch_all(&self.pool)
         .await
@@ -466,7 +468,7 @@ impl PageTier for Tier {
             .await
             .expect("foreign damage skips the foreign keys");
         for sql in [
-            "DELETE FROM lash_blob_edges WHERE parent_hash = $1 OR child_hash = $1",
+            "DELETE FROM lash_blob_edges WHERE parent_id = (SELECT id FROM lash_blobs WHERE hash = $1) OR child_id = (SELECT id FROM lash_blobs WHERE hash = $1)",
             "DELETE FROM lash_blobs WHERE hash = $1",
         ] {
             sqlx::query(sql)

@@ -34,7 +34,7 @@ lash_store_sql::statements! {
     struct RunFactBatchStatements @ "durable_run_fact_batch_postgres" {
         /// Validate the batch's ordinal chain and outcome uniqueness against
         /// both stored rows and its earlier rows before inserting the set.
-        append = "WITH incoming AS MATERIALIZED (SELECT position AS pos, value->>0 AS owner_key, (value->>1)::bigint AS run_seq, (value->>2)::bigint AS ordinal, value->>3 AS kind, value->>4 AS call_id, decode(value->>5, 'hex') AS record_ref, (value->>6)::bigint AS written_epoch FROM jsonb_array_elements(?1::jsonb) WITH ORDINALITY AS batch(value, position))
+        append = "WITH incoming AS MATERIALIZED (SELECT position AS pos, value->>0 AS owner_key, (value->>1)::bigint AS run_seq, (value->>2)::bigint AS ordinal, value->>3 AS kind, value->>4 AS call_id, COALESCE((SELECT id FROM blobs WHERE hash = decode(value->>5, 'hex')), CASE WHEN decode(value->>5, 'hex') IS NOT NULL THEN -1 END) AS record_ref, (value->>6)::bigint AS written_epoch FROM jsonb_array_elements(?1::jsonb) WITH ORDINALITY AS batch(value, position))
              INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
              SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
              WHERE NOT EXISTS (

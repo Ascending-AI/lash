@@ -90,7 +90,7 @@ async fn postgres_persisted_record_decode_classification_head_when_configured() 
 
     let (head_session_id, head_store) = persisted_record_decode_store(&storage, "head").await;
     assert_eq!(
-        sqlx::query("UPDATE lash_blobs SET content = '{'::bytea WHERE hash = (SELECT config_ref FROM lash_session_revisions JOIN lash_session_head USING (session_id, head_revision) WHERE session_id = $1)")
+        sqlx::query("UPDATE lash_blobs SET content = '{'::bytea WHERE id = (SELECT config_ref FROM lash_session_revisions JOIN lash_session_head USING (session_id, head_revision) WHERE session_id = $1)")
             .bind(head_session_id.as_str())
             .execute(storage.pool())
             .await
@@ -128,7 +128,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
     let (checkpoint_session_id, checkpoint_store) =
         persisted_record_decode_store(&storage, "checkpoint").await;
     let checkpoint_ref: Vec<u8> =
-        sqlx::query_scalar("SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1")
+        sqlx::query_scalar("SELECT (SELECT hash FROM lash_blobs WHERE id = checkpoint_ref) FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1")
             .bind(checkpoint_session_id.as_str())
             .fetch_one(storage.pool())
             .await
@@ -1221,14 +1221,14 @@ async fn a_commit_reuses_a_validated_configuration_only_where_its_snapshot_holds
         .expect("head");
     let mut raw = storage.pool().acquire().await.expect("raw connection");
     let root: Vec<u8> = sqlx::query_scalar(
-        "SELECT config_ref FROM lash_session_revisions WHERE session_id = $1
-         ORDER BY head_revision DESC LIMIT 1",
+        "SELECT (SELECT hash FROM lash_blobs WHERE id = config_ref) FROM lash_session_revisions
+         WHERE session_id = $1 ORDER BY head_revision DESC LIMIT 1",
     )
     .bind(owner.as_str())
     .fetch_one(&mut *raw)
     .await
     .expect("owner root");
-    sqlx::query("UPDATE lash_session_revisions SET config_ref = $1 WHERE session_id = $2")
+    sqlx::query("UPDATE lash_session_revisions SET config_ref = (SELECT id FROM lash_blobs WHERE hash = $1) WHERE session_id = $2")
         .bind(&root)
         .bind(foreign.as_str())
         .execute(&mut *raw)

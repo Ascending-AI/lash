@@ -36,35 +36,36 @@ lash_store_sql::statements! {
         record = "INSERT INTO prompt_snapshots (session_id, owner, call, snapshot, request, written_epoch)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT DO NOTHING RETURNING call";
         read_texts = "WITH RECURSIVE reached AS (
-                 SELECT hash, TRUE AS follow FROM blobs WHERE hash = ANY(?1::bytea[])
+                 SELECT id, TRUE AS follow FROM blobs WHERE hash = ANY(?1::bytea[])
                  AND CASE WHEN encoding = 1 AND octet_length(content) >= 5
                      THEN get_byte(content, 4) IN (53, 54) ELSE FALSE END
-                 UNION SELECT edge.child_hash,
+                 UNION SELECT edge.child_id,
                      CASE WHEN child.encoding = 1 AND octet_length(child.content) >= 5
                          THEN get_byte(child.content, 4) BETWEEN 1 AND 7 ELSE FALSE END
-                 FROM reached JOIN blob_edges edge ON edge.parent_hash = reached.hash
-                 JOIN blobs child ON child.hash = edge.child_hash
+                 FROM reached JOIN blob_edges edge ON edge.parent_id = reached.id
+                 JOIN blobs child ON child.id = edge.child_id
                  WHERE reached.follow
              ) SELECT blobs.hash, blobs.content,
                  CASE WHEN blobs.encoding = 1 AND octet_length(blobs.content) >= 5
                      THEN get_byte(blobs.content, 4) IN (53, 54) ELSE FALSE END
-             FROM reached JOIN blobs ON blobs.hash = reached.hash";
+             FROM reached JOIN blobs ON blobs.id = reached.id";
         read_edges = "WITH RECURSIVE closure AS (
-                 SELECT part, hash FROM prompt_snapshot_texts
+                 SELECT part, text_ref AS id FROM prompt_snapshot_texts
                  WHERE session_id = ?1 AND owner = ?2 AND call = ?3
-                 UNION SELECT closure.part, edge.child_hash FROM closure
-                 JOIN blob_edges edge ON edge.parent_hash = closure.hash
-             ) SELECT closure.part, closure.hash FROM closure JOIN blobs ON blobs.hash = closure.hash
-               WHERE CASE WHEN blobs.encoding = 1 AND octet_length(blobs.content) >= 5 THEN get_byte(blobs.content, 4) IN (53, 54) ELSE FALSE END ORDER BY closure.part, closure.hash";
+                 UNION SELECT closure.part, edge.child_id FROM closure
+                 JOIN blob_edges edge ON edge.parent_id = closure.id
+             ) SELECT closure.part, blobs.hash FROM closure JOIN blobs ON blobs.id = closure.id
+               WHERE CASE WHEN blobs.encoding = 1 AND octet_length(blobs.content) >= 5 THEN get_byte(blobs.content, 4) IN (53, 54) ELSE FALSE END ORDER BY closure.part, blobs.hash";
         reclaim = "SELECT lash_graph_retire(?1, ?2, ?3)";
-        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
-             SELECT ?1, ?2, ?3, part, hash
-               FROM unnest(?4::TEXT[], ?5::BYTEA[]) AS batch(part, hash)";
+        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, text_ref)
+             SELECT ?1, ?2, ?3, batch.part, text.id
+               FROM unnest(?4::TEXT[], ?5::BYTEA[]) AS batch(part, hash)
+               JOIN blobs AS text ON text.hash = batch.hash";
         settle = "WITH released AS (
                  DELETE FROM prompt_snapshot_texts
                   WHERE session_id = ?1 AND owner = ?2 AND part = 'request'
                     AND (?3::TEXT IS NULL OR call <> ?3::TEXT)
-                 RETURNING hash
+                 RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash
              ), bare AS (
                  DELETE FROM prompt_snapshots
                   WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NOT NULL
@@ -96,7 +97,7 @@ lash_store_sql::statements! {
                  DELETE FROM prompt_snapshot_texts
                  WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
                    AND part = 'snapshot'
-                 RETURNING hash
+                 RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash
              ), expired AS (
                  UPDATE prompt_snapshots SET snapshot = NULL
                  WHERE (session_id, owner, call) IN (SELECT * FROM candidates)
@@ -607,7 +608,7 @@ mod tests {
         for sql in [
             "INSERT INTO lash_blobs (hash, content, encoding) VALUES (decode(repeat('00', 32), 'hex'), decode('00', 'hex'), 0)",
             "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind) VALUES ('sql-work-owner', 'root', 'head_only')",
-            "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, decode(repeat('00', 32), 'hex')), ('sql-work-owner', 2, decode(repeat('00', 32), 'hex'))",
+            "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, (SELECT id FROM lash_blobs WHERE hash = decode(repeat('00', 32), 'hex'))), ('sql-work-owner', 2, (SELECT id FROM lash_blobs WHERE hash = decode(repeat('00', 32), 'hex')))",
             "INSERT INTO lash_session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)",
             "INSERT INTO lash_session_runs (session_id, run, terminal_kind, terminal_cause_json,
                 terminal_at_ms, terminal_head_revision, terminal_window_revision)

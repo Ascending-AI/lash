@@ -153,8 +153,8 @@ lash_store_sql::statements! {
 
         /// The commit's admission, current head, exact operation receipt and
         /// live parent facts, before any publication in its write transaction.
-        commit_preimage = "SELECT revision.config_ref, head.head_revision,
-                    revision.leaf_node_id, revision.checkpoint_ref, leaf.frame_node_id,
+        commit_preimage = "SELECT (SELECT hash FROM blobs WHERE id = revision.config_ref) AS config_ref, head.head_revision,
+                    revision.leaf_node_id, (SELECT hash FROM blobs WHERE id = revision.checkpoint_ref) AS checkpoint_ref, leaf.frame_node_id,
                     EXISTS (SELECT 1 FROM deleted_sessions WHERE session_id = ?1),
                     meta.session_id IS NOT NULL OR head.session_id IS NOT NULL,
                     receipt.turn_id IS NOT NULL,

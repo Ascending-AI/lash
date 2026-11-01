@@ -59,10 +59,10 @@ crate::statements! {
 
         /// The distinct transcripts session `?1`'s turn terminals root, in
         /// hash order: what its deletion may reclaim (FIG-6601).
-        select_session_transcripts = "SELECT DISTINCT terminal_transcript_ref
-             FROM session_runs
-             WHERE session_id = ?1 AND terminal_transcript_ref IS NOT NULL
-             ORDER BY terminal_transcript_ref";
+        select_session_transcripts = "SELECT hash FROM blobs WHERE id IN (
+                 SELECT terminal_transcript_ref FROM session_runs
+                 WHERE session_id = ?1 AND terminal_transcript_ref IS NOT NULL)
+             ORDER BY hash";
 
         /// The runs of session `?1` without terminal evidence, in run
         /// order: what its close ends.

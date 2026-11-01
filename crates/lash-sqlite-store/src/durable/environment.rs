@@ -132,7 +132,7 @@ fn retire(tx: &Connection, owner: &VersionOwnerId) -> rusqlite::Result<()> {
 }
 
 /// Same transaction as each deletion, including inline peel and orphan audit.
-pub(super) fn peeled(tx: &Connection, nodes: &BTreeSet<String>) -> rusqlite::Result<()> {
+pub(super) fn peeled(tx: &Connection, nodes: &BTreeSet<i64>) -> rusqlite::Result<()> {
     let rows = tx
         .statement(SQLITE.peeled.sql())?
         .query_map([graph::json_array(nodes)], |r| r.get::<_, String>(0))?
@@ -439,7 +439,7 @@ lash_store_sql::statements! {
                OR owner_id IN (SELECT value FROM json_each(?2))
             ORDER BY owner_id";
         peeled = "SELECT owner_id FROM environment_owners WHERE manifest_ref IN
-            (SELECT unhex(value) FROM json_each(?1)) ORDER BY owner_id";
+            (SELECT hash FROM blobs WHERE id IN (SELECT value FROM json_each(?1))) ORDER BY owner_id";
     }
 }
 static SQLITE: LazyLock<SqliteEnvironmentStatements> =

@@ -35,31 +35,32 @@ lash_store_sql::statements! {
     struct SqlitePromptStatements @ "durable_prompt_sqlite" {
         held_texts = "SELECT hash FROM blobs
              WHERE encoding = 1 AND hash IN (SELECT unhex(value) AS hash FROM json_each(?1))";
-        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
-             SELECT ?1, ?2, ?3, json_extract(value, '$[0]'), unhex(json_extract(value, '$[1]'))
+        insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, text_ref)
+             SELECT ?1, ?2, ?3, json_extract(value, '$[0]'),
+                    COALESCE((SELECT id FROM blobs WHERE hash = unhex(json_extract(value, '$[1]'))), CASE WHEN unhex(json_extract(value, '$[1]')) IS NOT NULL THEN -1 END)
                FROM json_each(?4)";
         read_texts = "WITH RECURSIVE reached AS (
-                 SELECT stored.hash, 1 AS follow FROM json_each(?1) AS wanted JOIN blobs AS stored ON stored.hash = unhex(wanted.value)
+                 SELECT stored.id, 1 AS follow FROM json_each(?1) AS wanted JOIN blobs AS stored ON stored.hash = unhex(wanted.value)
                  WHERE stored.encoding = 1 AND substr(stored.content, 5, 1) IN (x'35', x'36')
-                 UNION SELECT edge.child_hash,
+                 UNION SELECT edge.child_id,
                      child.encoding = 1 AND substr(child.content, 5, 1) IN (x'01', x'02', x'03', x'04', x'05', x'06', x'07')
-                 FROM reached JOIN blob_edges edge ON edge.parent_hash = reached.hash
-                 JOIN blobs child ON child.hash = edge.child_hash
+                 FROM reached JOIN blob_edges edge ON edge.parent_id = reached.id
+                 JOIN blobs child ON child.id = edge.child_id
                  WHERE reached.follow
              ) SELECT blobs.hash, blobs.content,
                  blobs.encoding = 1 AND substr(blobs.content, 5, 1) IN (x'35', x'36')
-             FROM reached JOIN blobs ON blobs.hash = reached.hash";
+             FROM reached JOIN blobs ON blobs.id = reached.id";
         read_edges = "WITH RECURSIVE closure AS (
-                 SELECT part, hash FROM prompt_snapshot_texts
+                 SELECT part, text_ref AS id FROM prompt_snapshot_texts
                  WHERE session_id = ?1 AND owner = ?2 AND call = ?3
-                 UNION SELECT closure.part, edge.child_hash FROM closure
-                 JOIN blob_edges edge ON edge.parent_hash = closure.hash
-             ) SELECT closure.part, closure.hash FROM closure JOIN blobs ON blobs.hash = closure.hash
-               WHERE substr(blobs.content, 5, 1) IN (x'35', x'36') ORDER BY closure.part, closure.hash";
+                 UNION SELECT closure.part, edge.child_id FROM closure
+                 JOIN blob_edges edge ON edge.parent_id = closure.id
+             ) SELECT closure.part, blobs.hash FROM closure JOIN blobs ON blobs.id = closure.id
+               WHERE substr(blobs.content, 5, 1) IN (x'35', x'36') ORDER BY closure.part, blobs.hash";
         settle_edges = "DELETE FROM prompt_snapshot_texts
              WHERE session_id = ?1 AND owner = ?2 AND part = 'request'
                AND (?3 IS NULL OR call <> ?3)
-             RETURNING hash";
+             RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash";
         settle_bare_roots = "DELETE FROM prompt_snapshots
              WHERE session_id = ?1 AND owner = ?2 AND snapshot IS NULL AND request IS NULL
                AND call IN (SELECT value FROM json_each(?3))";
@@ -67,7 +68,8 @@ lash_store_sql::statements! {
              WHERE session_id = ?1 AND owner = ?2 AND request IS NOT NULL
                AND (?3 IS NULL OR call <> ?3)
              RETURNING call, snapshot IS NOT NULL";
-        read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
+        read_prefix = "SELECT (SELECT hash FROM blobs WHERE id = root_ref) AS hash FROM prompt_prefixes
+             WHERE session_id = ?1";
 
 
     }
@@ -91,15 +93,15 @@ CREATE INDEX IF NOT EXISTS idx_prompt_snapshots_settled
 CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
     session_id TEXT NOT NULL, owner TEXT NOT NULL, call TEXT NOT NULL,
     part TEXT NOT NULL CONSTRAINT ck_prompt_snapshot_texts_part CHECK (part IN ('snapshot', 'request')),
-    hash BLOB NOT NULL REFERENCES blobs(hash),
-    PRIMARY KEY (session_id, owner, call, part, hash),
+    text_ref INTEGER NOT NULL REFERENCES blobs(id),
+    PRIMARY KEY (session_id, owner, call, part, text_ref),
     FOREIGN KEY (session_id, owner, call) REFERENCES prompt_snapshots(session_id, owner, call)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_hash ON prompt_snapshot_texts(hash);
+CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_text_ref ON prompt_snapshot_texts(text_ref);
 CREATE TABLE IF NOT EXISTS prompt_prefixes (
-    session_id TEXT PRIMARY KEY, hash BLOB NOT NULL REFERENCES blobs(hash)
+    session_id TEXT PRIMARY KEY, root_ref INTEGER NOT NULL REFERENCES blobs(id)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_prompt_prefixes_hash ON prompt_prefixes(hash);
+CREATE INDEX IF NOT EXISTS idx_prompt_prefixes_root_ref ON prompt_prefixes(root_ref);
 ";
 
 fn call_params(call: &PromptCallKey) -> (String, String, String) {
@@ -344,8 +346,9 @@ pub(crate) fn release_unretained(
 /// Any unfinished paths become the graph's ordinary retirement holds.
 fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()> {
     if !released.is_empty() {
-        let (_, _, next) = super::graph::peel_batch(tx, released, 4096)?;
-        super::graph::retire_roots(tx, &next, lash_durable::DurableInstant(0))?;
+        let (_, _, next) =
+            super::graph::peel_batch(tx, super::graph::Frontier::Digests(released), 4096)?;
+        super::pages::hold_nodes(tx, &next, true, lash_durable::DurableInstant(0))?;
     }
     Ok(())
 }
@@ -615,7 +618,7 @@ mod tests {
                     Some(1)
                 } else if sql.starts_with("insert into main.blob_edges ") {
                     Some(2)
-                } else if sql.starts_with("with recursive candidates as") {
+                } else if sql.starts_with("with recursive frontier as") {
                     Some(3)
                 } else if sql.starts_with("select hash from main.blobs ") {
                     Some(4)
@@ -892,12 +895,14 @@ mod tests {
                     }
                     super::super::graph::install_staged(connection, &nodes)?.unwrap();
                     connection.execute_once(
-                        "INSERT INTO prompt_prefixes(session_id, hash) VALUES ('live', ?1)",
+                        "INSERT INTO prompt_prefixes(session_id, root_ref) VALUES ('live', (SELECT id FROM blobs WHERE hash = ?1))",
                         [crate::codec::SqlHash(&hashes[depth])],
                     )?;
                     let retired = super::super::graph::peel_batch(
                         connection,
-                        &BTreeSet::from([hashes[depth - 1].clone()]),
+                        super::super::graph::Frontier::Digests(&BTreeSet::from([
+                            hashes[depth - 1].clone(),
+                        ])),
                         4096,
                     )?;
                     let steps = connection
@@ -969,7 +974,7 @@ mod tests {
                     super::super::graph::install_staged(connection, &nodes)?.unwrap();
                     for session in 0..size {
                         connection.execute_once(
-                            "INSERT INTO prompt_prefixes(session_id, hash) VALUES (?1, ?2)",
+                            "INSERT INTO prompt_prefixes(session_id, root_ref) VALUES (?1, (SELECT id FROM blobs WHERE hash = ?2))",
                             rusqlite::params![
                                 format!("unrelated-{session}"),
                                 crate::codec::SqlHash(&shared.hash)
@@ -979,7 +984,7 @@ mod tests {
                     assert_eq!(
                         super::super::graph::peel_batch(
                             connection,
-                            &BTreeSet::from([retired.hash]),
+                            super::super::graph::Frontier::Digests(&BTreeSet::from([retired.hash])),
                             256
                         )?,
                         (1, 1, BTreeSet::new())
@@ -1056,7 +1061,7 @@ mod tests {
                 VALUES ('sql-work-owner', 'root', 'head_only')", [])?;
             for revision in [1, 2] {
                 tx.execute_once("INSERT INTO session_revisions (session_id, head_revision, config_ref)
-                    VALUES ('sql-work-owner', ?1, zeroblob(32))", [revision])?;
+                    VALUES ('sql-work-owner', ?1, (SELECT id FROM blobs WHERE hash = zeroblob(32)))", [revision])?;
             }
             tx.execute_once("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
             tx.execute_once("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,

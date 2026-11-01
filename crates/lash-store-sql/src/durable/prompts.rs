@@ -74,22 +74,23 @@ crate::statements! {
         /// Sever only a settled call's audit edges; the compact identity stays.
         release_audit_edges = "DELETE FROM prompt_snapshot_texts
              WHERE session_id = ?1 AND owner = ?2 AND call = ?3 AND part = 'snapshot'
-             RETURNING hash";
+             RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash";
 
         /// Expire an audit without forgetting that the call was already admitted.
         expire_audit = "UPDATE prompt_snapshots SET snapshot = NULL
              WHERE session_id = ?1 AND owner = ?2 AND call = ?3 AND request IS NULL";
 
         /// Sever the session's reusable prefix, returning its former root.
-        release_prefix = "DELETE FROM prompt_prefixes WHERE session_id = ?1 RETURNING hash";
+        release_prefix = "DELETE FROM prompt_prefixes WHERE session_id = ?1
+             RETURNING (SELECT hash FROM blobs WHERE id = root_ref) AS hash";
 
         /// Replace the one reusable prefix of a session.
-        set_prefix = "INSERT INTO prompt_prefixes (session_id, hash) VALUES (?1, ?2)
-             ON CONFLICT (session_id) DO UPDATE SET hash = excluded.hash";
+        set_prefix = "INSERT INTO prompt_prefixes (session_id, root_ref) VALUES (?1, COALESCE((SELECT id FROM blobs WHERE hash = ?2), CASE WHEN ?2 IS NOT NULL THEN -1 END))
+             ON CONFLICT (session_id) DO UPDATE SET root_ref = excluded.root_ref";
 
         /// Release every edge of session `?1`, returning each text it named.
         release_session_edges = "DELETE FROM prompt_snapshot_texts WHERE session_id = ?1
-             RETURNING hash";
+             RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash";
 
         /// Release every root of session `?1`.
         release_session_snapshots = "DELETE FROM prompt_snapshots WHERE session_id = ?1";
@@ -98,7 +99,7 @@ crate::statements! {
         /// text it named.
         release_run_edges = "DELETE FROM prompt_snapshot_texts
              WHERE session_id = ?1 AND owner = ?2
-             RETURNING hash";
+             RETURNING (SELECT hash FROM blobs WHERE id = text_ref) AS hash";
 
         /// Release every root of owner `?2` in session `?1`.
         release_run_snapshots = "DELETE FROM prompt_snapshots

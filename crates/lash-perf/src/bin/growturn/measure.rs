@@ -217,10 +217,10 @@ fn store(path: &std::path::Path) -> Result<Value> {
     // CallOutcome roots include worker effects, which need not use the host
     // run_records table. UNION deduplicates shared descendants across roots.
     let outcome_bytes: i64 = db.query_row(
-        "WITH RECURSIVE owned(hash) AS (
-        SELECT value FROM json_each(?1)
-        UNION SELECT child_hash FROM blob_edges JOIN owned ON parent_hash=owned.hash
-    ) SELECT COALESCE(sum(length(content)),0) FROM blobs JOIN owned USING(hash)",
+        "WITH RECURSIVE owned(id) AS (
+        SELECT id FROM blobs WHERE hash IN (SELECT value FROM json_each(?1))
+        UNION SELECT child_id FROM blob_edges JOIN owned ON parent_id=owned.id
+    ) SELECT COALESCE(sum(length(content)),0) FROM blobs JOIN owned USING(id)",
         [serde_json::to_string(&outcome_refs)?],
         |r| r.get(0),
     )?;

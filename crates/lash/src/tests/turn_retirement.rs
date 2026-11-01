@@ -927,7 +927,7 @@ fn transcript(
     lash_sqlite_store::testing::read_rows_for_testing(
         stores,
         &format!(
-            "SELECT terminal_transcript_ref FROM session_runs \
+            "SELECT (SELECT hash FROM blobs WHERE id = terminal_transcript_ref) FROM session_runs \
              WHERE session_id = '{session}' AND run = '{run}'"
         ),
     )

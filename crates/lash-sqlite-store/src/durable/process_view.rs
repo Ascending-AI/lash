@@ -18,7 +18,7 @@ lash_store_sql::statements! {
                     p.cascade_cursor, p.written_epoch, p.published_event_sequence,
                     (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)),
                     t.terminal_label, t.pruned_at_ms,
-                    s.rev, s.root_ref, s.written_epoch, s.commit_id,
+                    s.rev, (SELECT hash FROM blobs WHERE id = s.root_ref) AS root_ref, s.written_epoch, s.commit_id,
                     (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page)
              FROM actors a
              LEFT JOIN processes p ON p.process_id = ?2
