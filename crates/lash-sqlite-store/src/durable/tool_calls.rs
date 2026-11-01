@@ -435,3 +435,32 @@ pub(super) fn finish_reads(
         ])?;
     Ok(())
 }
+
+/// Avoid serializing retirement work for roots this commit keeps on call rows.
+/// Expiry may follow publication in one commit, so leave that case to SQL.
+pub(super) fn retain_publications(retired: &super::Retired, writes: &[lash_durable::DomainWrite]) {
+    use lash_durable::DomainWrite;
+    if writes
+        .iter()
+        .any(|write| matches!(write, DomainWrite::ToolCall(ToolCallWrite::Expire { .. })))
+    {
+        return;
+    }
+    for write in writes {
+        match write {
+            DomainWrite::ToolCall(ToolCallWrite::Decide { fact, .. }) => retired.retained(fact),
+            DomainWrite::ToolCall(ToolCallWrite::Answer { answer, .. }) => {
+                if let Some(body) = &answer.body {
+                    retired.retained(body);
+                }
+            }
+            DomainWrite::ToolCall(ToolCallWrite::Complete { fact, answer, .. }) => {
+                retired.retained(fact);
+                if let Some(body) = &answer.body {
+                    retired.retained(body);
+                }
+            }
+            _ => {}
+        }
+    }
+}

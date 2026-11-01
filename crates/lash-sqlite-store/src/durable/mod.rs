@@ -353,6 +353,13 @@ impl Retired {
         self.closures.borrow_mut().insert(root.into());
     }
 
+    /// A publication in this same commit still owns this root.
+    pub(crate) fn retained(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
+        let root = root.to_hex();
+        self.closures.borrow_mut().remove(&root);
+        self.phase_ends.borrow_mut().remove(&root);
+    }
+
     /// An ended turn's PhaseRoot was retired: hold it alone.
     pub(crate) fn phase_end(&self, root: impl Into<String>) {
         self.phase_ends.borrow_mut().insert(root.into());

@@ -17,6 +17,11 @@
 
 use crate::conn::SqliteConnectionPolicy;
 
+/// New stores use 2 KiB pages to limit WAL amplification from narrow call
+/// directory and root-index updates. SQLite retains an existing file's size.
+/// This must precede WAL mode, which fixes a new file's page geometry.
+pub(crate) const CREATE_PAGE_SIZE: &str = "PRAGMA page_size=2048";
+
 /// PRAGMAs applied on the connection thread immediately after open.
 ///
 /// WAL is the reason this crate exists: it uses the `-wal`/`-shm` sidecars and

@@ -309,6 +309,7 @@ pub(super) fn apply_owner(
     for root in pages::release_many_in(tx, write.released_root_leases())? {
         committing.retired.stored(root);
     }
+    super::tool_calls::retain_publications(&committing.retired, write.domain());
     graph::hold_retired(tx, committing.retired, now)?;
     let requires = if write.requires().is_some()
         || write.domain().iter().any(|write| {

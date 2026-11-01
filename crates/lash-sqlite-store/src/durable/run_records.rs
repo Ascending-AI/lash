@@ -22,25 +22,22 @@ static SQL: LazyLock<RunRecordStatements> =
 
 macro_rules! append_sql {
     ($incoming:literal) => {
-        concat!("INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch) WITH incoming AS MATERIALIZED (", $incoming, ") SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
+        concat!("WITH incoming AS MATERIALIZED (", $incoming, ") INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch) SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
              WHERE NOT EXISTS (
                  SELECT 1 FROM incoming AS item WHERE
                    EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
                      AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal)
                    OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
-                     AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                      AND earlier.ordinal = item.ordinal)
                    OR (item.ordinal <> 0 AND NOT EXISTS (
                      SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
                        AND held.run_seq = item.run_seq AND held.ordinal = item.ordinal - 1)
                      AND NOT EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
-                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.ordinal = item.ordinal - 1))
                    OR (item.kind IN ('x_outcome', 'x_final_outcome') AND item.call_id IS NOT NULL AND (
                      EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
                        AND held.run_seq = item.run_seq AND held.kind IN ('x_outcome', 'x_final_outcome') AND held.call_id = item.call_id)
                      OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
-                       AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.kind IN ('x_outcome', 'x_final_outcome') AND earlier.call_id = item.call_id)))
              ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal")
     };
@@ -52,8 +49,7 @@ lash_store_sql::statements! {
         /// Validate the batch's ordinal chain and outcome uniqueness against
         /// both stored rows and its earlier rows before inserting the set.
         append = append_sql!("SELECT CAST(key AS INTEGER) AS pos, ?1 AS owner_key, ?2 AS run_seq, value->>0 AS ordinal, value->>1 AS kind, value->>2 AS call_id, unhex(value->>3) AS record_ref, ?3 AS written_epoch FROM json_each(?4)");
-        append_one = append_sql!("SELECT 0 AS pos, ?1 AS owner_key, ?2 AS run_seq, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref, ?3 AS written_epoch");
-        append_pair = append_sql!("SELECT i.pos, c.owner_key, c.run_seq, i.ordinal, i.kind, i.call_id, i.record_ref, c.written_epoch FROM (SELECT ?1 AS owner_key, ?2 AS run_seq, ?3 AS written_epoch) AS c CROSS JOIN (SELECT 0 AS pos, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref UNION ALL SELECT 1, ?8, ?9, ?10, ?11) AS i");
+        append_small = append_sql!("SELECT i.pos, c.owner_key, c.run_seq, i.ordinal, i.kind, i.call_id, i.record_ref, c.written_epoch FROM (SELECT ?1 AS owner_key, ?2 AS run_seq, ?3 AS written_epoch) AS c CROSS JOIN (SELECT 0 AS pos, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref UNION ALL SELECT 1, ?8, ?9, ?10, ?11 WHERE ?8 IS NOT NULL) AS i");
     }
 }
 static BATCH: LazyLock<RunFactBatchStatements> =
@@ -171,13 +167,11 @@ fn append_batch(tx: &Connection, epoch: Epoch, writes: &[&RunFactWrite]) -> Answ
                 record.0.to_vec().into(),
             ]);
         }
-        let sql = if writes.len() == 1 {
-            &BATCH.append_one
-        } else {
-            &BATCH.append_pair
-        };
+        if writes.len() == 1 {
+            values.resize(values.len() + 4, rusqlite::types::Value::Null);
+        }
         return Ok(Ok(tx
-            .prepare_cached(sql.sql())?
+            .prepare_cached(BATCH.append_small.sql())?
             .query_map(rusqlite::params_from_iter(values), |_| Ok(()))?
             .collect::<rusqlite::Result<Vec<_>>>()?
             .len()));

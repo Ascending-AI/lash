@@ -547,6 +547,7 @@ impl SqliteConnection {
                 );
                 // The WAL switch is not covered by the busy handler, so it gets
                 // its own bounded retry loop (see `set_wal_journal_mode`).
+                c.execute_batch(crate::connection_sql::CREATE_PAGE_SIZE)?;
                 set_wal_journal_mode(c, policy.busy_timeout, policy.operational)?;
                 c.execute_batch(&pragmas)?;
                 // The file's checkpoint worker replaces SQLite's own
