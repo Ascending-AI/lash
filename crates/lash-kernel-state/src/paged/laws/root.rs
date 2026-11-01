@@ -115,8 +115,13 @@ fn a_checkpoint_root_fits_its_root_bound() {
     }
 }
 
-/// S4/S7/K-BND-003: identity cursors add no PageValue header; tuple cursors
-/// retain their members. The frame's fixed 64-byte offset survives the codec.
+/// S4/S7/K-BND-003: a frame costs its fixed 64 bytes plus its iteration
+/// holding, priced by the memory ledger's LogicalHeldV1 algebra
+/// (memory-ledger.md, "Frame" and "Ordinary immutable value"): a list or map
+/// cursor holds one 16-byte reference occurrence (the entity's header and
+/// members are priced once with the entity), and a tuple cursor holds the
+/// tuple occurrence, 16 plus its Null and Bool occurrences of 16 each. The
+/// price survives the codec and the frame tree.
 #[test]
 fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
     use tree::{Cell, SealWork, Tree};
@@ -131,7 +136,7 @@ fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
         heap.tuple(vec![PageValue::Null, PageValue::Bool(true)])
             .unwrap(),
     );
-    for (value, expected) in [(list, 64), (map, 64), (tuple, 96)] {
+    for (value, expected) in [(list, 64 + 16), (map, 64 + 16), (tuple, 64 + 16 + 16 + 16)] {
         let mut frame = FrameRecord::fresh(
             lash_kernel_value::LinkId::from_bytes([1; 32]),
             SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap(),
