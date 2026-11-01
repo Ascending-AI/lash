@@ -337,8 +337,14 @@ impl KernelMachine {
                 }
                 completion = Some(departure);
             },
-        )?;
+        );
         drop(arena);
+        let published = match (published, &fee) {
+            (Err(halt), Some((lib, units))) => {
+                return Err(self.refused_at_body_return(running.exe, *lib, *units, halt));
+            }
+            (published, _) => published?,
+        };
         if published && let Some((lib, units)) = fee {
             self.in_formula(lib, true, |_| ());
             self.observe_paid(units);
@@ -366,5 +372,33 @@ impl KernelMachine {
         }
         debug_assert_eq!(published, completion.is_some());
         Ok(completion)
+    }
+
+    /// Exact source admission is the only memory authority: an operation
+    /// body whose return overflows the memory bound is refused at the
+    /// operation's Commit after its formula is paid, as a native that
+    /// answers is, and the refusal names the operation. A charge refusal
+    /// while paying the formula comes first.
+    #[cold]
+    #[inline(never)]
+    fn refused_at_body_return(
+        &mut self,
+        exe: &crate::compile::Executable,
+        lib: crate::compile::LibId,
+        units: u64,
+        halt: Halt,
+    ) -> Halt {
+        let Halt::Bound(mut exceeded) = halt else {
+            return halt;
+        };
+        if exceeded.bound != crate::interface::Bound::Memory {
+            return Halt::Bound(exceeded);
+        }
+        self.in_formula(lib, true, |_| ());
+        if let Err(charge) = self.charge_call(exe, lib, units) {
+            return charge;
+        }
+        exceeded.function = Some(exe.lib(lib).header.name.clone());
+        Halt::Bound(exceeded)
     }
 }

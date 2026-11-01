@@ -579,7 +579,7 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
     assert_eq!(run.machine.meters().charged, None);
 }
 
-pub(super) const MEMORY_CHURN: &str = r#"main {
+const MEMORY_CHURN: &str = r#"main {
   let i = 0
   while num.lt(i, 200) {
     let held = work.fill(1000)

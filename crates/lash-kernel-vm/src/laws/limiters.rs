@@ -342,35 +342,6 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
     assert_eq!(attempts[0].0[0].1, total / 2);
 }
 
-/// FIG-6768 law 3: a run whose conservative count passes the memory limit
-/// while the exact count of what it holds fits recounts, frees what
-/// nothing holds and runs on, and never asks its limiter.
-#[test]
-fn an_exact_count_that_fits_never_asks_the_memory_limiter() {
-    let limiter = Scripted::default();
-    let mut embedder = Embedder::with(
-        super::bounds::MEMORY_CHURN,
-        Setup {
-            bounds: Bounds {
-                memory: 64 << 10,
-                ..ROOMY
-            },
-            ..Setup::default()
-        },
-    );
-    limited(&mut embedder, Which::Memory, Some(&limiter));
-    crate::perf_witness::enable_work();
-    let end = embedder.run_to_end(&[]);
-    let work = crate::perf_witness::take_work().unwrap();
-    crate::perf_witness::disable_work();
-    assert_eq!(result(end), int(200));
-    assert!(
-        work.heap.refinement_attempts > 0,
-        "the conservative count must pass the limit"
-    );
-    assert_eq!(limiter.asked(), [], "the limiter was asked");
-}
-
 fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>) -> (Trace, End) {
     refused_in_layout(text, bounds, which, limiter, crate::Layout(0))
 }

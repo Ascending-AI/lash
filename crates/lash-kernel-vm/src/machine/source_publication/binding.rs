@@ -449,13 +449,25 @@ pub(super) fn native_commit_refusal(
     };
     if exceeded.bound == crate::interface::Bound::Memory
         && exceeded.function.is_none()
-        && let Some(Op::Call { lib, .. } | Op::Operator { lib, .. }) = running.stream.ops
-            [..pc as usize]
+        && let Some(lib) = running.stream.ops[..pc as usize]
             .iter()
             .rev()
             .find(|op| op.writes() == Some(src))
-            .copied()
-        && let function = running.exe.lib(crate::compile::LibId(lib.0))
+            .and_then(|op| match *op {
+                Op::Call { lib, .. } | Op::Operator { lib, .. } => {
+                    Some(crate::compile::LibId(lib.0))
+                }
+                Op::Nested { act, .. } => match running.stream.nested.get(act.ix())?.kind {
+                    crate::compile::NestedKind::Call(
+                        crate::compile::NestedCallee::Library(lib)
+                        | crate::compile::NestedCallee::Import(_, Some(lib)),
+                    )
+                    | crate::compile::NestedKind::Body(lib) => Some(lib),
+                    _ => None,
+                },
+                _ => None,
+            })
+        && let function = running.exe.lib(lib)
         && matches!(function.run, crate::compile::LibRun::Native { .. })
     {
         exceeded.function = Some(function.header.name.clone());

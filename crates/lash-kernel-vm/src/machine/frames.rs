@@ -849,6 +849,15 @@ impl Frame {
     /// frame stands.
     fn block_statement(&self, exe: &Executable, within: bool) -> Result<Option<Site>, HeapFault> {
         let (block, next) = match self.control.as_slice() {
+            // A block entered before its first statement stands where the
+            // statement that entered it does: a loop's body at its loop, a
+            // try's body at its try.
+            [
+                ..,
+                Control::Block { block, next },
+                _,
+                Control::Block { next: 0, .. },
+            ] if within => (*block, *next),
             [.., Control::Block { block, next }] => (*block, *next),
             [
                 ..,

@@ -353,11 +353,14 @@ fn a_closure_an_operation_applies_is_charged_as_it_runs() {
     }
 }
 
-/// K-BND-003, conservative: a list the operation builds past the memory
-/// bound ends every plan in a typed memory refusal at that bound, never a
-/// completion. Plans may observe the bound one declared slack apart; the
-/// 50000-item list is far past it, so whichever path builds it refuses at
-/// the same statement, with the same charge and nothing printed after it.
+/// K-BND-003: a list the operation builds past the memory bound ends every
+/// plan in a typed memory refusal at that bound, never a completion. Exact
+/// source admission is the only memory authority, and it decides at the
+/// operation's own Commit after the operation's formula is paid: when the
+/// native answers, the binding that takes its result refuses; when the
+/// native declines, the kernel body's return refuses. Either way the run
+/// ends at the same statement with the same charge, the refusal names the
+/// operation, and nothing is printed after it.
 #[test]
 fn an_operation_past_the_memory_bound_is_refused_under_every_plan() {
     let program = r#"
