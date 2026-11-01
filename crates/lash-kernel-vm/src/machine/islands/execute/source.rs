@@ -472,7 +472,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .ok_or_else(|| malformed("literal source owner is absent"))
         };
         let operand_selector = room::Owner::Operand(literal_site);
-        let departure_selector = room::Owner::Departure(return_site);
+        let departure_selector = room::Owner::ActiveDeparture(source.site.clone());
         let operand = owner(operand_selector.clone())?;
         let departure = owner(departure_selector.clone())?;
         let invocation = activation.invocation.id();

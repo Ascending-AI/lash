@@ -49,7 +49,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                 | doc::Stmt::Throw { .. }
                 | doc::Stmt::Finish { .. }
                 | doc::Stmt::Fail { .. },
-            ) => Some(Owner::Departure(site.clone())),
+            ) => Some(Owner::ActiveDeparture(source.clone())),
             _ => None,
         };
         let mut events = Vec::new();
@@ -73,7 +73,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     &site,
                     Phase::Fallthrough,
                     Box::new([]),
-                    Some(Owner::Departure(site.clone())),
+                    Some(Owner::ActiveDeparture(site.clone())),
                     n.clone(),
                     n,
                 ));

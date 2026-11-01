@@ -62,7 +62,7 @@ impl ReturnInput<'_> {
                 .ok_or_else(|| malformed("return has no canonical source owner"))
         };
         let input_selector = room::Owner::Operand(self.rhs.clone());
-        let departure_selector = room::Owner::Departure(at.site.clone());
+        let departure_selector = room::Owner::ActiveDeparture(source.site.clone());
         let input = root(input_selector.clone())?;
         if input != self.input {
             return Err(malformed("return has another source operand"));
@@ -114,7 +114,25 @@ impl ReturnInput<'_> {
         );
         let mut leave = None;
         for event in interval.events().skip(1) {
-            if event.point.phase != SourcePhase::Leave || leave.is_some() {
+            if leave.is_some() {
+                return Err(malformed("return suffix has another source departure"));
+            }
+            // The innermost cleanup holds the departure while it runs.
+            if event.point.phase == SourcePhase::Suspend {
+                let pending = root(room::Owner::PendingDeparture(event.point.site.clone()))?;
+                if ledger.holding(pending, heap.pages())?.is_some() {
+                    return Ok(None);
+                }
+                facts.0.insert(event.point.clone(), LeafFacts::default());
+                leave = Some(event.point.clone());
+                events.push(JournalEvent {
+                    inputs: vec![departure],
+                    outputs: vec![(pending, PV::Existing(departure))],
+                    ..Default::default()
+                });
+                continue;
+            }
+            if event.point.phase != SourcePhase::Leave {
                 return Err(malformed("return suffix has another source departure"));
             }
             let groups = vec![
@@ -193,7 +211,7 @@ impl ReturnInput<'_> {
         };
         let next = SourcePosition {
             at: leave,
-            unpaid: None,
+            unpaid: interval.resume().cloned(),
             ..start.clone()
         };
         let allowance = Allowance {

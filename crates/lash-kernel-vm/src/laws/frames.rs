@@ -105,6 +105,33 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.cleanup",
+        register(
+            "deep.cleanup",
+            "n: Any",
+            String::new(),
+            "try { let saved = n return saved } finally { let kept = n } return 0",
+        ),
+    ));
+    probes.push((
+        "deep.recover",
+        register(
+            "deep.recover",
+            "n: Any",
+            String::new(),
+            "try { throw 1 } catch e { let saved = n return saved } finally { let kept = n } return 0",
+        ),
+    ));
+    probes.push((
+        "deep.supersede",
+        register(
+            "deep.supersede",
+            "n: Any",
+            String::new(),
+            "try { return [9] } finally { let saved = n return saved } return 0",
+        ),
+    ));
+    probes.push((
         "deep.branch",
         register(
             "deep.branch",
@@ -225,7 +252,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
 
-    let scoped_observation = |name: &str, source_only: bool| {
+    let scoped_observation = |name: &str, source_only: bool, declined: bool| {
         crate::machine::islands::witness::begin();
         let bounds = Bounds {
             call_depth: 2,
@@ -236,8 +263,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
+        let suspended = matches!(name, "deep.cleanup" | "deep.recover" | "deep.supersede");
         if source_only {
             embedder.machine.force_source_execution();
+        }
+        // The reference source run takes the ordinary unwind into cleanup.
+        if declined {
+            crate::machine::islands::witness::decline_suspended_return();
         }
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
@@ -264,6 +296,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             );
         }
 
+        if suspended {
+            assert_eq!(
+                crate::machine::islands::witness::precise_suspended_returns(),
+                u64::from((source_only || name == "deep.recover") && !declined),
+                "the return must move into its cleanup's pending departure: {name}"
+            );
+        }
         if name == "deep.loop" || name == "deep.walk" {
             assert_eq!(
                 crate::machine::islands::witness::loop_returns()[usize::from(source_only)],
@@ -277,14 +316,25 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.branch",
         "deep.guard",
         "deep.rescue",
+        "deep.cleanup",
+        "deep.recover",
+        "deep.supersede",
         "deep.loop",
         "deep.walk",
     ] {
+        let observation = scoped_observation(name, false, false);
         assert_eq!(
-            scoped_observation(name, false),
-            scoped_observation(name, true),
+            observation,
+            scoped_observation(name, true, false),
             "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
         );
+        if matches!(name, "deep.cleanup" | "deep.recover" | "deep.supersede") {
+            assert_eq!(
+                observation,
+                scoped_observation(name, true, true),
+                "the suspended return must leave the ordinary unwind's observation: {name}"
+            );
+        }
     }
     // A declined packet return resumes before the same library completion fee.
     let completed = || {

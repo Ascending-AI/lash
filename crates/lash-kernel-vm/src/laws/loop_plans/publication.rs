@@ -91,7 +91,7 @@ pub(super) fn checked_source_publication() {
             .unwrap()
     };
     let operand = owner(room::Owner::Operand(source.site.child(0).child(0)));
-    let departure = owner(room::Owner::Departure(source.site.child(0)));
+    let departure = owner(room::Owner::ActiveDeparture(source.site.clone()));
     let make = || {
         Program::new(vec![
             JournalEvent {

@@ -37,7 +37,7 @@ impl KernelMachine {
                             | Control::Try { .. }
                     )
                 })
-                // A try body or catch leaves through its block suffix.
+                // A return inside cleanup supersedes a pending departure.
                 || frame.control.iter().any(|control| {
                     matches!(
                         control,
@@ -77,18 +77,41 @@ impl KernelMachine {
         }) else {
             return Ok(None);
         };
+        // A suspending suffix leaves the blocks inside its innermost cleanup.
+        let suspend = interval
+            .events()
+            .last()
+            .filter(|event| event.point.phase == room::Phase::Suspend)
+            .map(|event| event.point.site.clone());
+        #[cfg(test)]
+        if suspend.is_some() && crate::machine::islands::witness::take_suspended_return_decline() {
+            return Ok(None);
+        }
         {
             let frame = self.frame(running.task)?;
+            let cleanup = |control: &Control| {
+                matches!(control, Control::Try { stmt, .. }
+                    if suspend.as_ref() == Some(&running.exe.stmt(*stmt).site))
+            };
+            if suspend.is_some() && !frame.control.iter().any(cleanup) {
+                return Err(malformed("precise return has no entered cleanup").into());
+            }
             if !interval
                 .events()
                 .skip(1)
+                .filter(|event| event.point.phase == room::Phase::Leave)
                 .map(|event| &event.point.site)
-                .eq(frame.control.iter().rev().filter_map(|control| {
-                    let Control::Block { block, .. } = control else {
-                        return None;
-                    };
-                    Some(&running.exe.block(*block).site)
-                }))
+                .eq(frame
+                    .control
+                    .iter()
+                    .rev()
+                    .take_while(|control| !cleanup(control))
+                    .filter_map(|control| {
+                        let Control::Block { block, .. } = control else {
+                            return None;
+                        };
+                        Some(&running.exe.block(*block).site)
+                    }))
             {
                 return Err(
                     malformed("precise return differs from its entered source blocks").into(),
@@ -103,10 +126,13 @@ impl KernelMachine {
         };
         // A library body's formula bills its charged caller. The accepted
         // return pays it, so a refused fee leaves the invocation entered.
+        // A suspended return stays in its invocation and pays nothing yet.
         let metered = self.bounds.charge == crate::Charge::Exact;
         let caller = self.task(running.task)?.frames.caller_charging()?;
         let fee = match &self.frame(running.task)?.library {
-            Some(call) if caller.unwrap_or(metered) => Some((call.lib, call.args.clone())),
+            Some(call) if suspend.is_none() && caller.unwrap_or(metered) => {
+                Some((call.lib, call.args.clone()))
+            }
             _ => None,
         };
         let fee = match fee {
@@ -214,7 +240,11 @@ impl KernelMachine {
             |_, _, edits, (bank, result)| {
                 debug_assert!(edits.is_empty());
                 bank.publish();
-                *logical = None;
+                // The ordinary unwind then takes the physical blocks and
+                // records the same pending holding the journal transferred.
+                if suspend.is_none() {
+                    *logical = None;
+                }
                 if fee.is_some() {
                     *library = None;
                 }
@@ -226,8 +256,12 @@ impl KernelMachine {
             self.in_formula(lib, true, |_| ());
             self.observe_paid(units);
         }
+        #[cfg(test)]
+        if published && suspend.is_some() {
+            crate::machine::islands::witness::precise_suspended_returned();
+        }
         #[cfg(any(test, feature = "testing"))]
-        if published {
+        if published && suspend.is_none() {
             crate::machine::islands::witness::precise_return_published(run_root);
             #[cfg(test)]
             if let Some(ordinal) = loop_ordinal {

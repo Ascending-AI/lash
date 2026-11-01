@@ -79,7 +79,6 @@ pub(crate) enum Owner {
     Sessions(Site),
     SessionCell { at: Site, name: Name },
     Atom { at: Site, index: u32 },
-    Departure(Site),
     PendingDeparture(Site),
     ActiveDeparture(Site),
     LoopCursor(Site),
@@ -725,7 +724,7 @@ impl Source {
                 }
                 let (scopes, aliases, binding_slots) = root_owners::form(self, &owners)?;
                 let controls = owners.iter().filter(|owner| matches!(owner,
-                    Owner::LoopCursor(_) | Owner::LoopHeader(_) | Owner::Departure(_)
+                    Owner::LoopCursor(_) | Owner::LoopHeader(_)
                     | Owner::PendingDeparture(_) | Owner::ActiveDeparture(_))).cloned().collect();
                 let slots = owners
                     .into_iter()

@@ -218,9 +218,7 @@ impl OwnerSlots {
             Owner::HookArgument { .. } => Slot::Argument(index),
             Owner::HookResult { .. } => Slot::Control(index),
             Owner::LoopCursor(_) | Owner::LoopHeader(_) => Slot::Control(index),
-            Owner::Departure(_) | Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => {
-                Slot::Departure(index)
-            }
+            Owner::PendingDeparture(_) | Owner::ActiveDeparture(_) => Slot::Departure(index),
             _ => return None,
         };
         Some(Root::Value {
@@ -251,9 +249,7 @@ impl OwnerSlots {
             ) => at.unit == site.unit && site.path.starts_with(&at.path),
             (
                 Owner::Departures(at),
-                Owner::Departure(site)
-                | Owner::PendingDeparture(site)
-                | Owner::ActiveDeparture(site),
+                Owner::PendingDeparture(site) | Owner::ActiveDeparture(site),
             ) => at.unit == site.unit && site.path.starts_with(&at.path),
             (Owner::Sessions(_), Owner::SessionCell { .. }) => true,
             _ => false,

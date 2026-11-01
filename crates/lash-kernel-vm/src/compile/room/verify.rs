@@ -116,14 +116,14 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
                     | doc::Stmt::Throw { .. }
                     | doc::Stmt::Finish { .. }
                     | doc::Stmt::Fail { .. },
-                ) => Some(Owner::Departure(site.clone())),
+                ) => Some(Owner::ActiveDeparture(source.site.clone())),
                 _ => None,
             };
             match (node, phase) {
                 (doc::Node::Block(_), _) => {
                     expected_inputs = Box::new([]);
                     output = if phase == Phase::Fallthrough {
-                        Some(Owner::Departure(site.clone()))
+                        Some(Owner::ActiveDeparture(site.clone()))
                     } else {
                         None
                     };

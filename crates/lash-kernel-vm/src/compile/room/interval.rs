@@ -173,14 +173,15 @@ pub(crate) struct CompiledInterval {
     exit: ExitKind,
     whole: bool,
     return_loops: Option<Box<[Site]>>,
+    resume: Option<Point>,
 }
 impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
     /// completed. Entered loop bodies carry their actual occurrence; their
-    /// cursor/header prefix has completed. A try without cleanup is left by
-    /// its entered body or catch block; an entered catch follows a raised body.
-    /// Cleanup needs its departure recipe.
+    /// cursor/header prefix has completed. A try is left by its entered body
+    /// or catch block; an entered catch follows a raised body. The innermost
+    /// cleanup ends the suffix at its Suspend, which holds the departure.
     pub(crate) fn compile_return_suffix(
         &self,
         at: &Point,
@@ -200,6 +201,7 @@ impl Source {
         let mut return_loops = Vec::new();
         let mut for_sites = std::collections::BTreeSet::new();
         let mut raised = std::collections::BTreeSet::new();
+        let mut suspend = None;
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
@@ -215,13 +217,18 @@ impl Source {
                     return_loops.push(path.clone());
                     for_sites.insert(path.clone());
                 }
-                doc::Node::Stmt(doc::Stmt::Try(t)) if t.finally.is_none() && *index == 0 => {}
                 doc::Node::Stmt(doc::Stmt::Try(t))
-                    if t.finally.is_none() && t.catch.is_some() && *index == 1 =>
+                    if *index == 0 || (t.catch.is_some() && *index == 1) =>
                 {
-                    raised.insert(path.clone());
+                    if *index == 1 {
+                        raised.insert(path.clone());
+                    }
+                    if t.finally.is_some() {
+                        let cleanup = path.child(if t.catch.is_some() { 2 } else { 1 });
+                        suspend = Some((path.clone(), cleanup));
+                    }
                 }
-                // Cleanup regions need their actual pending departure recipe.
+                // A return inside cleanup supersedes its pending departure.
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -230,19 +237,44 @@ impl Source {
         if !matches!(node, doc::Node::Stmt(doc::Stmt::Return { .. })) {
             return Err(Refused::Path);
         }
-        let leave = Point {
-            site: self.site.clone(),
-            phase: Phase::Leave,
+        let resume = match &suspend {
+            Some((_, cleanup)) => Some(self.first_event(cleanup)?),
+            None => None,
+        };
+        let suspend = suspend.map(|(try_site, _)| try_site);
+        let end = match &suspend {
+            Some(try_site) => Point {
+                site: try_site.clone(),
+                phase: Phase::Suspend,
+            },
+            None => Point {
+                site: self.site.clone(),
+                phase: Phase::Leave,
+            },
         };
         let route: Box<[_]> = std::iter::once(Selection::Event {
             at: at.clone(),
             exit: ExitKind::Return,
         })
-        .chain(blocks.iter().rev().map(|site| Selection::Event {
-            at: Point {
-                site: site.clone(),
-                phase: Phase::Leave,
-            },
+        .chain(
+            blocks
+                .iter()
+                .rev()
+                .take_while(|site| {
+                    suspend
+                        .as_ref()
+                        .is_none_or(|try_site| site.path.len() > try_site.path.len())
+                })
+                .map(|site| Selection::Event {
+                    at: Point {
+                        site: site.clone(),
+                        phase: Phase::Leave,
+                    },
+                    exit: ExitKind::Normal,
+                }),
+        )
+        .chain(suspend.is_some().then(|| Selection::Event {
+            at: end.clone(),
             exit: ExitKind::Normal,
         }))
         .collect();
@@ -250,7 +282,7 @@ impl Source {
             event: true,
             join: None,
             at: at.site.clone(),
-            bounds: Some((at.clone(), leave)),
+            bounds: Some((at.clone(), end)),
             selected: route.clone(),
         };
         let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
@@ -355,6 +387,7 @@ impl Source {
             exit,
             whole: false,
             return_loops: Some(return_loops.into()),
+            resume,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -438,6 +471,7 @@ impl Source {
             exit,
             whole: false,
             return_loops: None,
+            resume: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -567,6 +601,7 @@ impl Source {
             exit: selected,
             whole: false,
             return_loops: None,
+            resume: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -621,6 +656,7 @@ impl Source {
             exit,
             whole: at == &self.site,
             return_loops: None,
+            resume: None,
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -671,6 +707,10 @@ impl evaluate::Events for Trace<'_> {
 impl CompiledInterval {
     pub(crate) fn return_loops(&self) -> Option<&[Site]> {
         self.return_loops.as_deref()
+    }
+    /// A suspended return resumes at its cleanup block's first event.
+    pub(crate) fn resume(&self) -> Option<&Point> {
+        self.resume.as_ref()
     }
 
     pub(crate) fn owner(&self) -> doc::constant_pool::PoolOwner {

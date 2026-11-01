@@ -120,6 +120,8 @@ pub(crate) fn begin() {
     #[cfg(test)]
     PRECISE_SCOPED_RETURNS.set(0);
     #[cfg(test)]
+    PRECISE_SUSPENDED_RETURNS.set(0);
+    #[cfg(test)]
     LOOP_RETURNS.set([0; 2]);
     PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
     PACKET_FRAME_ENTRIES.with(|count| count.set([0; 2]));
@@ -812,6 +814,29 @@ pub(crate) fn decline_body_return() {
 #[cfg(test)]
 pub(crate) fn take_body_return_decline() -> bool {
     DECLINE_BODY_RETURN.replace(false)
+}
+
+#[cfg(test)]
+thread_local! {
+    static DECLINE_SUSPENDED_RETURN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PRECISE_SUSPENDED_RETURNS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// The next return into a cleanup takes the ordinary unwind.
+#[cfg(test)]
+pub(crate) fn decline_suspended_return() {
+    DECLINE_SUSPENDED_RETURN.set(true);
+}
+#[cfg(test)]
+pub(in crate::machine) fn take_suspended_return_decline() -> bool {
+    DECLINE_SUSPENDED_RETURN.replace(false)
+}
+#[cfg(test)]
+pub(crate) fn precise_suspended_returns() -> u64 {
+    PRECISE_SUSPENDED_RETURNS.replace(0)
+}
+#[cfg(test)]
+pub(in crate::machine) fn precise_suspended_returned() {
+    PRECISE_SUSPENDED_RETURNS.set(PRECISE_SUSPENDED_RETURNS.get() + 1);
 }
 
 #[cfg(test)]

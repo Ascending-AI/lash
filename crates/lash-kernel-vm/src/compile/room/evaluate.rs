@@ -340,8 +340,9 @@ impl<E: Events> Run<'_, E> {
                 }
                 if t.finally.is_some() {
                     let suspended = exit != ExitKind::Normal;
+                    // A selected Suspend ends a suffix carrying its departure.
                     if suspended {
-                        self.step(site, Phase::Suspend)?;
+                        self.step_departure(site, Phase::Suspend, Some(exit))?;
                     }
                     let cleanup = self.child(node, site, if t.catch.is_some() { 2 } else { 1 })?;
                     if cleanup == ExitKind::Action {
