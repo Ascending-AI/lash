@@ -210,10 +210,8 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect_err("a changed outcome under the same effect key is refused");
     assert!(
-        error
-            .to_string()
-            .contains("conflicts with an existing event"),
-        "{error}"
+        crate::is_durable_identity_conflict(&error),
+        "a changed outcome under the same effect key is the durable-identity refusal, got {error:?}"
     );
     assert_eq!(
         registry
