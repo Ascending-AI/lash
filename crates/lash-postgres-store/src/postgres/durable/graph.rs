@@ -929,7 +929,12 @@ pub(super) fn admission_steps(
             vec![
                 Value::text(exec.stored()),
                 Value::Bytes(Some(effect.0.to_vec())),
-                Value::Text(member.as_ref().map(|member| member.owner.stored())),
+                Value::Text(
+                    member
+                        .as_ref()
+                        .map(|member| member.owner.stored())
+                        .filter(|owner| *owner != exec.stored()),
+                ),
                 Value::Int(
                     member
                         .as_ref()

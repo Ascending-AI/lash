@@ -43,10 +43,14 @@ crate::statements! {
 
         /// Admit effect `?2` of execution `?1`, member `?3`/`?4`/`?5`, to
         /// Admission node `?6` at epoch `?7`; nothing when it is admitted.
+        /// A member with no explicit `?3` shares the execution's owner key.
         admission_put = "INSERT INTO effect_admissions
                  (exec_key, effect_id, owner_key, run_seq, member_ordinal, admission_ref,
                   written_epoch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             SELECT i.exec, i.effect, CASE WHEN i.run IS NULL THEN NULL ELSE COALESCE(i.owner, i.exec) END,
+                 i.run, i.member, i.admission, i.epoch
+             FROM (SELECT ?1 AS exec, ?2 AS effect, ?3 AS owner, ?4 AS run,
+                 ?5 AS member, ?6 AS admission, ?7 AS epoch) AS i WHERE TRUE
              ON CONFLICT (exec_key, effect_id) DO NOTHING
              RETURNING exec_key";
 

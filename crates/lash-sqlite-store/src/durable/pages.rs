@@ -57,14 +57,19 @@ lash_store_sql::statements! {
              WHERE blobs.hash IN (SELECT unhex(value) FROM json_each(?1))
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
-        /// Mixed closure and node-only holds from one owner commit.
+        /// Mixed closure and node-only holds from one owner commit. A retained
+        /// call keeps its roots until logical expiry, which queues them after
+        /// deleting the row. SQLite's single writer makes that check atomic.
         hold_set = "WITH retired AS (
              SELECT unhex(value) AS hash, 1 AS closure FROM json_each(?1)
              UNION ALL SELECT unhex(value), 0 FROM json_each(?2))
              INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
              SELECT blobs.hash, retired.closure, ?3 FROM retired
-             JOIN blobs ON blobs.hash = retired.hash WHERE true
-             ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
+             JOIN blobs ON blobs.hash = retired.hash
+             WHERE NOT EXISTS (SELECT 1 FROM tool_calls WHERE decision_ref = retired.hash)
+               AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE body_ref = retired.hash)
+             ON CONFLICT (root_ref) DO UPDATE SET closure = excluded.closure
+             WHERE retirement_holds.closure < excluded.closure";
 
         /// Release the complete owner handoff, returning roots for holds.
         release_leases = "DELETE FROM root_leases

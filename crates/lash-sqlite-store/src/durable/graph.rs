@@ -1134,7 +1134,10 @@ pub(super) fn apply_admission(
                     rusqlite::params![
                         exec.stored(),
                         &effect.0[..],
-                        member.as_ref().map(|member| member.owner.stored()),
+                        member
+                            .as_ref()
+                            .map(|member| member.owner.stored())
+                            .filter(|owner| *owner != exec.stored()),
                         member
                             .as_ref()
                             .map(|member| integer::<i64>(member.run.0))

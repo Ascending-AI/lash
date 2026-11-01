@@ -20,13 +20,9 @@ use super::{Answer, Committing, corrupt, integer, node_ref};
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(crate::schema_layout::MAIN));
 
-lash_store_sql::statements! {
-    struct RunFactBatchStatements @ "durable_run_fact_batch_sqlite" {
-        /// Validate the batch's ordinal chain and outcome uniqueness against
-        /// both stored rows and its earlier rows before inserting the set.
-        append = "WITH incoming AS MATERIALIZED (SELECT CAST(key AS INTEGER) AS pos, value->>0 AS owner_key, value->>1 AS run_seq, value->>2 AS ordinal, value->>3 AS kind, value->>4 AS call_id, unhex(value->>5) AS record_ref, value->>6 AS written_epoch FROM json_each(?1))
-             INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch)
-             SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
+macro_rules! append_sql {
+    ($incoming:literal) => {
+        concat!("INSERT INTO run_records (owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch) WITH incoming AS MATERIALIZED (", $incoming, ") SELECT owner_key, run_seq, ordinal, kind, call_id, record_ref, written_epoch FROM incoming
              WHERE NOT EXISTS (
                  SELECT 1 FROM incoming AS item WHERE
                    EXISTS (SELECT 1 FROM run_records AS held WHERE held.owner_key = item.owner_key
@@ -46,34 +42,41 @@ lash_store_sql::statements! {
                      OR EXISTS (SELECT 1 FROM incoming AS earlier WHERE earlier.pos < item.pos
                        AND earlier.owner_key = item.owner_key AND earlier.run_seq = item.run_seq
                        AND earlier.kind IN ('x_outcome', 'x_final_outcome') AND earlier.call_id = item.call_id)))
-             ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal";
+             ) ORDER BY pos ON CONFLICT DO NOTHING RETURNING ordinal")
+    };
+}
+
+lash_store_sql::statements! {
+    lazy
+    struct RunFactBatchStatements @ "durable_run_fact_batch_sqlite" {
+        /// Validate the batch's ordinal chain and outcome uniqueness against
+        /// both stored rows and its earlier rows before inserting the set.
+        append = append_sql!("SELECT CAST(key AS INTEGER) AS pos, ?1 AS owner_key, ?2 AS run_seq, value->>0 AS ordinal, value->>1 AS kind, value->>2 AS call_id, unhex(value->>3) AS record_ref, ?3 AS written_epoch FROM json_each(?4)");
+        append_one = append_sql!("SELECT 0 AS pos, ?1 AS owner_key, ?2 AS run_seq, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref, ?3 AS written_epoch");
+        append_pair = append_sql!("SELECT i.pos, c.owner_key, c.run_seq, i.ordinal, i.kind, i.call_id, i.record_ref, c.written_epoch FROM (SELECT ?1 AS owner_key, ?2 AS run_seq, ?3 AS written_epoch) AS c CROSS JOIN (SELECT 0 AS pos, ?4 AS ordinal, ?5 AS kind, ?6 AS call_id, ?7 AS record_ref UNION ALL SELECT 1, ?8, ?9, ?10, ?11) AS i");
     }
 }
 static BATCH: LazyLock<RunFactBatchStatements> =
     LazyLock::new(|| RunFactBatchStatements::render(crate::schema_layout::MAIN));
 
-fn append_rows(epoch: Epoch, writes: &[&RunFactWrite]) -> Result<String, DurableError> {
+fn append_rows(writes: &[&RunFactWrite]) -> Result<String, DurableError> {
     let mut rows = Vec::with_capacity(writes.len());
     for write in writes {
         let RunFactWrite::Append {
-            owner,
-            run,
             ordinal,
             kind,
             call,
             record,
+            ..
         } = write
         else {
             return Err(corrupt("run fact batch", "contains a prune"));
         };
         rows.push(serde_json::json!([
-            owner.stored(),
-            integer::<i64>(run.0).map_err(super::store_failure)?,
             integer::<i64>(ordinal.0).map_err(super::store_failure)?,
             kind.as_str(),
             call.as_ref().map(ToolCallId::as_str),
-            record.to_hex(),
-            epoch.0
+            record.to_hex()
         ]));
     }
     serde_json::to_string(&rows).map_err(|error| corrupt("run fact batch", &error.to_string()))
@@ -110,11 +113,11 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             call,
             record: _,
         } => {
-            let rows = match append_rows(commit.epoch, &[write]) {
-                Ok(rows) => rows,
+            let count = match append_batch(tx, commit.epoch, &[write])? {
+                Ok(count) => count,
                 Err(error) => return Ok(Err(error)),
             };
-            if append_batch(tx, &rows)? == 1 {
+            if count == 1 {
                 return Ok(Ok(()));
             }
             let call = call
@@ -138,12 +141,59 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
     }
 }
 
-fn append_batch(tx: &Connection, rows: &str) -> rusqlite::Result<usize> {
-    Ok(tx
+fn append_batch(tx: &Connection, epoch: Epoch, writes: &[&RunFactWrite]) -> Answer<usize> {
+    let Some(RunFactWrite::Append { owner, run, .. }) = writes.first() else {
+        return Ok(Err(corrupt("run fact batch", "empty or pruned batch")));
+    };
+    if writes.len() <= 2 {
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            owner.stored().into(),
+            integer::<i64>(run.0)?.into(),
+            epoch.0.into(),
+        ];
+        for write in writes {
+            let RunFactWrite::Append {
+                ordinal,
+                kind,
+                call,
+                record,
+                ..
+            } = write
+            else {
+                return Ok(Err(corrupt("run fact batch", "contains a prune")));
+            };
+            values.extend([
+                integer::<i64>(ordinal.0)?.into(),
+                kind.as_str().to_owned().into(),
+                call.as_ref().map_or(rusqlite::types::Value::Null, |call| {
+                    call.as_str().to_owned().into()
+                }),
+                record.0.to_vec().into(),
+            ]);
+        }
+        let sql = if writes.len() == 1 {
+            &BATCH.append_one
+        } else {
+            &BATCH.append_pair
+        };
+        return Ok(Ok(tx
+            .prepare_cached(sql.sql())?
+            .query_map(rusqlite::params_from_iter(values), |_| Ok(()))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .len()));
+    }
+    let rows = match append_rows(writes) {
+        Ok(rows) => rows,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(Ok(tx
         .prepare_cached(BATCH.append.sql())?
-        .query_map([rows], |_| Ok(()))?
+        .query_map(
+            rusqlite::params![owner.stored(), integer::<i64>(run.0)?, epoch.0, rows],
+            |_| Ok(()),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?
-        .len())
+        .len()))
 }
 
 /// Contiguous appends share one insert. A refused set is classified in the
@@ -161,14 +211,26 @@ pub(super) fn apply_appends(
             _ => None,
         })
         .collect();
-    let rows = match append_rows(commit.epoch, &facts) {
-        Ok(rows) => rows,
-        Err(error) => return Ok(Err(error)),
-    };
-    if append_batch(tx, &rows)? == facts.len() {
+    let mut remaining = facts.as_slice();
+    while let Some((first, rest)) = remaining.split_first() {
+        let RunFactWrite::Append { owner, run, .. } = first else {
+            return Ok(Err(corrupt("run fact batch", "contains a prune")));
+        };
+        let count = 1 + rest.iter().take_while(|fact| matches!(fact,
+            RunFactWrite::Append { owner: other, run: other_run, .. } if other == owner && other_run == run)).count();
+        let inserted = match append_batch(tx, commit.epoch, &remaining[..count])? {
+            Ok(inserted) => inserted,
+            Err(error) => return Ok(Err(error)),
+        };
+        if inserted != count {
+            break;
+        }
+        remaining = &remaining[count..];
+    }
+    if remaining.is_empty() {
         return Ok(Ok(()));
     }
-    for fact in facts {
+    for fact in remaining {
         if let Err(error) = apply(tx, commit, fact)? {
             return Ok(Err(error));
         }
