@@ -38,6 +38,21 @@ struct CallContinuation<'e> {
     occurrence: Option<u64>,
 }
 
+/// A checked library formula, unpaid until the selected return commits.
+struct LibraryCompletion {
+    units: u64,
+}
+
+impl LibraryCompletion {
+    fn record(self, tape: Option<&ChargeTape>) {
+        if self.units != 0
+            && let Some(tape) = tape
+        {
+            tape.push(Weight::Atomic(self.units));
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ReturnOperand {
     statement: StmtId,
@@ -536,15 +551,43 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     self.activate(&mut slab.view(active));
                 }
                 Ok(Next::Return(value)) => {
-                    if !active.callee.plan.charged || active.boundary.is_some() {
-                        let completion = if let Some(caller) = callers.last_mut() {
-                            let (caller, current) = slab.pair(caller, active);
-                            self.complete_library(&current, Some(&caller), value)
-                        } else {
-                            self.complete_library(&slab.view(active), None, value)
-                        };
-                        if let Err(stop) = completion {
+                    let completion = if let Some(caller) = callers.last_mut() {
+                        let (caller, current) = slab.pair(caller, active);
+                        self.prepare_library_completion(&current, Some(&caller), value)
+                    } else {
+                        self.prepare_library_completion(&slab.view(active), None, value)
+                    };
+                    let completion = match completion {
+                        Ok(completion) => completion,
+                        Err(stop) => {
                             return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
+                    };
+                    if active.resident && callers.is_empty() {
+                        // Its source frame still owns the bindings through
+                        // completion charging. Transfer them before recycling.
+                        self.charged += completion.units;
+                        completion.record(self.recorder);
+                        self.depth = 0;
+                        return Ok(value);
+                    }
+                    match self
+                        .publish_return_suffix(&mut slab.view(active), value, &completion)
+                        .map_err(|error| self.halt(error.into()))?
+                    {
+                        source::ValuePublication::Declined => {
+                            let Some(returned) = active.returned else {
+                                return Err(
+                                    self.halt(fault("a declined return lost its source operand"))
+                                );
+                            };
+                            let stop = self.at_held(returned.pc, returned.reg, value);
+                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                        }
+                        source::ValuePublication::Published(_) => completion.record(self.recorder),
+                        source::ValuePublication::Unavailable => {
+                            self.charged += completion.units;
+                            completion.record(self.recorder);
                         }
                     }
                     if OBSERVING
@@ -557,28 +600,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         && let Some(sampling) = self.sampling
                     {
                         sampling.pop();
-                    }
-                    if active.resident && callers.is_empty() {
-                        // Its source frame still owns the bindings through
-                        // completion charging. Transfer them before recycling.
-                        self.depth = 0;
-                        return Ok(value);
-                    }
-                    match self
-                        .publish_return_suffix(&mut slab.view(active), value)
-                        .map_err(|error| self.halt(error.into()))?
-                    {
-                        source::ValuePublication::Declined => {
-                            let Some(returned) = active.returned else {
-                                return Err(
-                                    self.halt(fault("a declined return lost its source operand"))
-                                );
-                            };
-                            let stop = self.at_held(returned.pc, returned.reg, value);
-                            return self.slow_exit(active, &mut callers, slab, recovery, stop);
-                        }
-                        source::ValuePublication::Published(_)
-                        | source::ValuePublication::Unavailable => {}
                     }
                     if let Some(activation) = &active.source
                         && !activation
@@ -606,9 +627,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         return Err(self.halt(fault("a caller has no call continuation")));
                     };
                     let site = continuation.site;
-                    slab.view(active).regs[site.reg as usize] = value;
-                    self.source_returned(&slab.view(active), site, value)
-                        .map_err(|error| self.halt(error.into()))?;
+                    if !self
+                        .publish_call_resume(&mut slab.view(active), continuation, value)
+                        .map_err(|error| self.halt(error.into()))?
+                    {
+                        slab.view(active).regs[site.reg as usize] = value;
+                        self.source_returned(&slab.view(active), site, value)
+                            .map_err(|error| self.halt(error.into()))?;
+                    }
                     if site.after != 0 {
                         self.admit(site.after);
                     }

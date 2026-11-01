@@ -170,7 +170,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         units: 0,
                         close: None,
                         strict: false,
-                        depth: 0,
+                        depth: 1,
                         safe_point,
                     },
                 },

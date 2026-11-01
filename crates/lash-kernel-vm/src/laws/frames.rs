@@ -72,6 +72,24 @@ fn probes(
             probes.push((name, below));
         }
     }
+    probes.push((
+        "deep.forward",
+        register(
+            "deep.forward",
+            "n: Any",
+            format!("use deep.d100 = @{below}\n"),
+            "return deep.d100(n)",
+        ),
+    ));
+    probes.push((
+        "deep.hold",
+        register(
+            "deep.hold",
+            "n: Any",
+            format!("{}use deep.d100 = @{below}\n", uses(&["num.add"])),
+            "return num.add(n[0], deep.d100(0))",
+        ),
+    ));
     probes
 }
 
@@ -135,6 +153,19 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         crate::machine::islands::witness::begin();
         let end = Embedder::with(program, setup(bounds, u64::MAX)).run_to_end(&[]);
         let frames = crate::machine::islands::witness::packet_frame_entries();
+        let resumes = crate::machine::islands::witness::packet_call_resumes();
+        if matches!(end, End::Finished(_)) {
+            assert!(
+                resumes[0] > 0,
+                "the uncounted body chain must restore actual Incoming and continuation owners under source acceptance: {resumes:?}"
+            );
+            if program.contains("deep.hold") {
+                assert!(
+                    resumes[1] > 0,
+                    "the member read must keep its saved source role across the uncounted call: {resumes:?}"
+                );
+            }
+        }
         assert!(
             frames[0] > 0,
             "the expression body chain must install real packet frames under bounded prospective entry: {frames:?}"
@@ -151,6 +182,31 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     let under_a_call = "definition \"function g() -> Any\\nkernel 1\\nmetering statements\\nbody {  let r = deep.d100(0) return r  }\"\n main { let r = call g() return r }";
     assert_eq!(result(run(under_a_call, 102)), int(100));
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
+    assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
+    // A declined packet return resumes before the same library completion fee.
+    let completed = || {
+        let bounds = Bounds {
+            call_depth: 102,
+            ..ROOMY
+        };
+        let mut embedder =
+            Embedder::with("main { return deep.forward(0) }", setup(bounds, u64::MAX));
+        let tape = crate::ChargeTape::new();
+        embedder.machine.record_charges(tape.clone());
+        let end = embedder.run_to_end(&[]);
+        (result(end), embedder.machine.meters().charged, tape.steps())
+    };
+    let reference = completed();
+    crate::machine::islands::witness::decline_body_return();
+    assert_eq!(
+        completed(),
+        reference,
+        "a return miss must leave its completion fee unpaid"
+    );
+    assert!(
+        !crate::machine::islands::witness::take_body_return_decline(),
+        "the bounded packet return must actually decline"
+    );
 }
 
 /// The callee's prints `[tag, 0]` to `[tag, 3]`.

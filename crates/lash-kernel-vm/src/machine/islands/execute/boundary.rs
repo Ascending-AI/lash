@@ -403,36 +403,38 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         })
     }
 
-    /// A paid library body completes under its caller's original formula.
-    /// Refusal leaves the return in its source owner, before the fee commits.
+    /// Prepare the caller's original completion formula without paying it.
+    /// A return publication miss must reconstruct with that fee still unpaid.
     #[inline(always)]
-    pub(super) fn complete_library(
+    pub(super) fn prepare_library_completion(
         &mut self,
         frame: &Values<'_, 'e>,
         caller: Option<&Values<'_, 'e>>,
         value: Value,
-    ) -> Result<(), Stop> {
+    ) -> Result<LibraryCompletion, Stop> {
         if let Some(lib) = frame.state.boundary
             && !crate::compile::import_result_fits(
                 &self.exe.lib(lib).header.signature.result,
                 value,
             )
         {
-            return self.library_return(frame, value);
+            return self
+                .library_return(frame, value)
+                .map(|()| LibraryCompletion { units: 0 });
         }
         if frame.state.callee.plan.charged {
-            return Ok(());
+            return Ok(LibraryCompletion { units: 0 });
         }
         let Some(caller) =
             caller.filter(|caller| caller.state.callee.plan.charged && self.exe.charging())
         else {
-            return Ok(());
+            return Ok(LibraryCompletion { units: 0 });
         };
         let Some(CallContinuation { site, args, .. }) = caller.state.continuation else {
-            return Ok(());
+            return Ok(LibraryCompletion { units: 0 });
         };
         let Some(lib) = site.library else {
-            return Ok(());
+            return Ok(LibraryCompletion { units: 0 });
         };
         let args: Vec<_> = args
             .iter()
@@ -442,19 +444,20 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .collect();
         let units = measured_formula(self.arena, &self.exe.lib(lib).charge, &args, Some(&value));
         if let Some(units) = units.filter(|units| self.root_fits(0, *units, site.root.is_some())) {
-            self.charged += units;
             if units != 0
                 && let Some(tape) = self.recorder
             {
-                tape.push(Weight::Atomic(units));
+                tape.prepare_push()
+                    .map_err(|error| self.halt(error.into()))?;
             }
-            return Ok(());
+            return Ok(LibraryCompletion { units });
         }
         #[cfg(any(test, feature = "perf-witness"))]
         {
             self.scratch.exit.reason = Some(Reason::Charge);
         }
         self.library_return(frame, value)
+            .map(|()| LibraryCompletion { units: 0 })
     }
 
     fn library_return(&mut self, frame: &Values<'_, 'e>, value: Value) -> Result<(), Stop> {

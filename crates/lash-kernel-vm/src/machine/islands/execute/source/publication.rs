@@ -60,7 +60,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 counters: self.counters,
                 bound: self.bound,
                 slice: self.slice_end,
-                depth: self.base + u64::from(self.depth),
+                // The current frame was admitted on entry. Pure events add no
+                // call; only the allowance's helper frames need new depth room.
+                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
                 limit: self.call_depth,
                 safe_point,
             },

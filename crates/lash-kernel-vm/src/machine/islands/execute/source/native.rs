@@ -308,8 +308,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             strict: false,
             depth: match site.depth {
                 Depth::None => 0,
-                Depth::Operation(extra) => u64::from(extra.saturating_sub(1)),
-                Depth::Template(extra) => u64::from(extra),
+                Depth::Operation(extra) if extra <= 1 => 1,
+                Depth::Operation(extra) | Depth::Template(extra) => u64::from(extra) + 1,
             },
             safe_point: self.charged,
         };

@@ -203,6 +203,15 @@ impl ChargeTape {
         self.lock().steps.is_empty()
     }
 
+    pub(crate) fn prepare_push(&self) -> Result<(), lash_kernel_doc::heap::HeapFault> {
+        self.lock()
+            .steps
+            .try_reserve(1)
+            .map_err(|_| lash_kernel_doc::heap::HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })
+    }
+
     pub(crate) fn push(&self, weight: Weight) {
         // A one-unit atomic charge and one unit have the same event boundary
         // (Weight::expand). Author that event once where facts enter the tape,

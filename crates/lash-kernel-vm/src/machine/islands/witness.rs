@@ -101,6 +101,7 @@ thread_local! {
     static PREPARED_FRAME_ENTRIES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static CALLEE_READ_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_RESUME_PUBLICATIONS: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
+    static PACKET_CALL_RESUMES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PACKET_FRAME_ENTRIES: std::cell::Cell<[u64; 2]> = const { std::cell::Cell::new([0; 2]) };
     static PACKET_CALL_ENTERS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static CALL_ENTER_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -114,6 +115,7 @@ thread_local! {
 }
 
 pub(crate) fn begin() {
+    PACKET_CALL_RESUMES.with(|count| count.set([0; 2]));
     PACKET_FRAME_ENTRIES.with(|count| count.set([0; 2]));
     PACKET_CALL_ENTERS.with(|count| count.set(0));
     PREPARED_FRAME_CAPTURES.with(|count| count.set([0; 2]));
@@ -775,4 +777,33 @@ pub(in crate::machine) fn packet_frame_entered(shared: bool) {
         frames[usize::from(shared)] += 1;
         count.set(frames);
     });
+}
+
+#[cfg(test)]
+pub(crate) fn packet_call_resumes() -> [u64; 2] {
+    PACKET_CALL_RESUMES.with(|count| count.replace([0; 2]))
+}
+
+pub(in crate::machine) fn packet_call_resumed(roles: usize) {
+    PACKET_CALL_RESUMES.with(|count| {
+        let mut counts = count.get();
+        counts[0] += 1;
+        counts[1] += roles as u64;
+        count.set(counts);
+    });
+}
+
+#[cfg(test)]
+thread_local! {
+    static DECLINE_BODY_RETURN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn decline_body_return() {
+    DECLINE_BODY_RETURN.set(true);
+}
+
+#[cfg(test)]
+pub(crate) fn take_body_return_decline() -> bool {
+    DECLINE_BODY_RETURN.replace(false)
 }

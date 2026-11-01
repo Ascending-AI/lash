@@ -15,6 +15,7 @@ pub(in crate::machine::islands::execute) enum ValuePublication {
 }
 mod publication;
 mod read;
+mod resuming;
 mod returning;
 mod scope;
 mod session;
@@ -34,8 +35,7 @@ pub(in crate::machine::islands) struct Activation {
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     fn source_return_frame(&self, frame: &storage::Values<'_, '_>) -> bool {
         if frame.state.resident
-            || !frame.state.callee.plan.charged
-            || frame.state.boundary.is_some()
+            || (frame.state.callee.plan.charged && frame.state.boundary.is_some())
             || frame.state.callee.compiled.cleanups
             || frame.state.control.len() != 1
         {

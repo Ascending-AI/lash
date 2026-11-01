@@ -324,6 +324,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         self.register_bytes += target.compiled.register_bytes();
         self.depth += 1;
         self.activate(&mut slab.view(active));
+        #[cfg(not(any(test, feature = "testing")))]
+        let _ = shared;
         #[cfg(any(test, feature = "testing"))]
         crate::machine::islands::witness::packet_frame_entered(shared);
         Ok(true)

@@ -239,7 +239,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             units: if self.accounting { units } else { 0 },
             close: if self.accounting { site.close } else { None },
             strict: false,
-            depth: 0,
+            depth: 1,
             safe_point: self.charged,
         };
         drop(ledger);

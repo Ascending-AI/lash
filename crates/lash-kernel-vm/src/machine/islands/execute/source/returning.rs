@@ -7,6 +7,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         &mut self,
         frame: &mut Values<'_, '_>,
         value: Value,
+        completion: &LibraryCompletion,
     ) -> Result<ValuePublication, HeapFault> {
         if !self.source_return_frame(frame)
             || self.tape.is_some()
@@ -77,9 +78,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Declined);
         };
-        let crate::machine::source_publication::return_storage::ReturnRecipe { prefix, program } =
-            recipe;
+        let crate::machine::source_publication::return_storage::ReturnRecipe {
+            mut prefix,
+            program,
+        } = recipe;
         drop(ledger);
+        prefix.allowance.units = completion.units;
+        #[cfg(test)]
+        if !frame.state.callee.plan.charged
+            && self.base + u64::from(self.depth) == 2
+            && crate::machine::islands::witness::take_body_return_decline()
+        {
+            return Ok(ValuePublication::Declined);
+        }
         let published = self.publish_source(
             frame.state.callee,
             activation,
