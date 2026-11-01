@@ -1,7 +1,7 @@
 //! The round trips the owner's commits pay on PostgreSQL (FIG-5275,
 //! FIG-5936), counted on an isolated database: the acceptance of one
-//! input, a turn's admission, `model.start`, a round's outcome, a VM park
-//! and `turn.commit`.
+//! input, a turn's admission, `model.start`, a round's outcome, a VM park,
+//! `turn.commit` and every boundary of a five-tool turn (FIG-7576).
 
 // Test code: the server comes from the environment the target's runner
 // hands it.
@@ -816,6 +816,141 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
             }
         };
         assert_eq!(error, lash_durable::DurableError::Domain(expected));
+    }
+}
+
+/// How many tool rounds the five-tool turn law drives.
+const TOOL_ROUNDS: u32 = 5;
+
+/// The most round trips each commit of a tool turn pays (FIG-7576): the
+/// open, which reads the owner's fence, the turn's cancel and the clock in
+/// one statement, and the one call. Every commit of the turn writes its
+/// rows, its graph and its tool calls inside that call, so neither number
+/// grows with the turn's tool calls: a five-tool turn's opens and commits
+/// are each one round trip, and the turn pays two per commit.
+const TOOL_TURN_OPEN_ROUND_TRIPS: u64 = 1;
+const TOOL_TURN_COMMIT_ROUND_TRIPS: u64 = 1;
+
+/// A five-tool turn's every open and commit stays within its budget: each
+/// round's `model.done`, which seals the model call, advances to the tools
+/// phase and admits the call, and its `round.outcome+present+model.start`,
+/// which completes the call, appends its outcome and starts the next model
+/// call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_five_tool_turn_commits_each_boundary_in_one_call() {
+    use lash_durable::domain::{
+        CallOwner, ModelCallId, ModelCallPinWrite, ModelCallWrite, PromptCallKey, ToolCallAnswer,
+        ToolCallDecision, ToolCallWrite, tool_calls::ToolCallSettlement,
+    };
+    use lash_protocol_types::llm::types::LlmCallId;
+    let Some(owned) = owned("round-trips-five-tools").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "five-tools").await;
+    let run = TurnId::from("round-trips-turn");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    admit(&mut tx, &owned, &run, input);
+    store
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("admit");
+    let pin = |ordinal: u32| PromptCallKey {
+        session: owned.session.clone(),
+        call: ModelCallId::Turn {
+            run: run.clone(),
+            ordinal,
+        },
+    };
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch, u64::MAX)
+        .await
+        .expect("open");
+    model_start(&mut tx, &owned, &run, 1);
+    tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Reserve {
+        key: pin(1),
+        call_id: LlmCallId("five-tools-1".into()),
+        attempt: 1,
+        enclosing: None,
+    }));
+    store
+        .commit(tx, CommitLabel::MODEL_START)
+        .await
+        .expect("model.start");
+    let execution = OwnerKey::Turn(owned.session.clone(), run.clone());
+    let mut trips = Vec::new();
+    for round in 1..=TOOL_ROUNDS {
+        let call =
+            lash_protocol_types::ToolCallId::parse(&format!("tc_{round:064x}")).expect("call id");
+        let (tx, open) = round_trips(store.begin(&owned.actor, owned.epoch, u64::MAX)).await;
+        let mut tx = tx.expect("open");
+        let record = staged(&mut tx, NodeKind::TURN_CONTENT, &format!("sealed {round}"));
+        tx.write(DomainWrite::ModelCall(ModelCallWrite {
+            key: pin(round),
+            call_id: LlmCallId(format!("five-tools-{round}")),
+            record,
+        }));
+        let checkpoint = staged(&mut tx, NodeKind::TURN_CONTENT, &format!("tools {round}"));
+        tx.write(DomainWrite::Turn(TurnWrite::Advance {
+            session: owned.session.clone(),
+            run: run.clone(),
+            phase: PhaseAdvance::Tools {
+                run: RunSeq(u64::from(round)),
+                checkpoint,
+            },
+            iteration: 0,
+        }));
+        tx.write(DomainWrite::ToolCall(ToolCallWrite::Admit {
+            counted: true,
+            logical: CallOwner::Turn(owned.session.clone(), run.clone()),
+            execution: execution.clone(),
+            run: RunSeq(u64::from(round)),
+            member: 0,
+            call: call.clone(),
+            cancellable: true,
+        }));
+        let (done, commit) = round_trips(store.commit(tx, CommitLabel::MODEL_DONE)).await;
+        done.expect("model.done");
+        trips.push(("model.done", open, commit));
+        let (tx, open) = round_trips(store.begin(&owned.actor, owned.epoch, u64::MAX)).await;
+        let mut tx = tx.expect("open");
+        let fact = staged(&mut tx, NodeKind::FROZEN_VALUE, &format!("answer {round}"));
+        tx.write(DomainWrite::ToolCall(ToolCallWrite::Complete {
+            owner: execution.clone(),
+            call: call.clone(),
+            fact,
+            answer: ToolCallAnswer {
+                outcome: ToolCallSettlement::Materialized(ToolCallDecision::Final),
+                body: Some(fact),
+            },
+        }));
+        let outcome = staged(&mut tx, NodeKind::ROUND_FACT, &format!("outcome {round}"));
+        tx.write(DomainWrite::RunFact(RunFactWrite::Append {
+            owner: execution.clone(),
+            run: RunSeq(u64::from(round)),
+            ordinal: Ordinal(0),
+            kind: RunFactKind::XOutcome,
+            call: Some(call),
+            record: outcome,
+        }));
+        model_start(&mut tx, &owned, &run, round + 1);
+        tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Reserve {
+            key: pin(round + 1),
+            call_id: LlmCallId(format!("five-tools-{}", round + 1)),
+            attempt: 1,
+            enclosing: None,
+        }));
+        let (next, commit) =
+            round_trips(store.commit(tx, CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START)).await;
+        next.expect("round.outcome+present+model.start");
+        trips.push(("round.outcome+present+model.start", open, commit));
+    }
+    for (label, open, commit) in &trips {
+        within(&format!("{label} open"), *open, TOOL_TURN_OPEN_ROUND_TRIPS);
+        within(label, *commit, TOOL_TURN_COMMIT_ROUND_TRIPS);
     }
 }
 
