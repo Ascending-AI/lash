@@ -150,6 +150,24 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.fault",
+        register(
+            "deep.fault",
+            "n: Any",
+            String::new(),
+            "try { try { let saved = n throw saved } finally { let kept = n } } catch e { return e } return 0",
+        ),
+    ));
+    probes.push((
+        "deep.rethrow",
+        register(
+            "deep.rethrow",
+            "n: Any",
+            String::new(),
+            "try { try { throw 1 } catch e { let saved = n throw saved } finally { let kept = n } } catch f { return f } return 0",
+        ),
+    ));
+    probes.push((
         "deep.branch",
         register(
             "deep.branch",
@@ -283,7 +301,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         );
         let suspended = matches!(
             name,
-            "deep.cleanup" | "deep.recover" | "deep.supersede" | "deep.brake" | "deep.skip"
+            "deep.cleanup"
+                | "deep.recover"
+                | "deep.supersede"
+                | "deep.brake"
+                | "deep.skip"
+                | "deep.fault"
+                | "deep.rethrow"
         );
         if source_only {
             embedder.machine.force_source_execution();
@@ -320,7 +344,11 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         if suspended {
             assert_eq!(
                 crate::machine::islands::witness::precise_suspended_departures(),
-                u64::from((source_only || name == "deep.recover") && !declined),
+                // A raise leaves the packet; the precise machine runs its statement.
+                u64::from(
+                    (source_only || matches!(name, "deep.recover" | "deep.fault" | "deep.rethrow"))
+                        && !declined
+                ),
                 "the departure must move into its cleanup's pending departure: {name}"
             );
         }
@@ -342,6 +370,8 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.supersede",
         "deep.brake",
         "deep.skip",
+        "deep.fault",
+        "deep.rethrow",
         "deep.loop",
         "deep.walk",
     ] {
@@ -353,7 +383,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         );
         if matches!(
             name,
-            "deep.cleanup" | "deep.recover" | "deep.supersede" | "deep.brake" | "deep.skip"
+            "deep.cleanup"
+                | "deep.recover"
+                | "deep.supersede"
+                | "deep.brake"
+                | "deep.skip"
+                | "deep.fault"
+                | "deep.rethrow"
         ) {
             assert_eq!(
                 observation,

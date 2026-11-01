@@ -12,7 +12,7 @@ impl KernelMachine {
         pc: u32,
     ) -> Result<Option<Completion>, Halt> {
         let src = match running.stream.ops[pc as usize] {
-            Op::Return { src } => Some(src),
+            Op::Return { src } | Op::Throw { src } => Some(src),
             Op::Break | Op::Continue => None,
             _ => return Ok(None),
         };
@@ -179,6 +179,7 @@ impl KernelMachine {
         };
         let departure = match (&bank, departing) {
             (Some((bank, _)), room::ExitKind::Return) => Completion::Return(Box::new(bank.value())),
+            (Some((bank, _)), room::ExitKind::Raise) => Completion::Throw(Box::new(bank.value())),
             (None, room::ExitKind::Break) => Completion::Break,
             (None, room::ExitKind::Continue) => Completion::Continue,
             _ => return Err(malformed("source departure differs from its statement").into()),

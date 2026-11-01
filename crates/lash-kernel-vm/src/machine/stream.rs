@@ -361,6 +361,17 @@ impl KernelMachine {
                         return self.source_done(running, source_pc, ran);
                     }
                 }
+                Op::Throw { .. } => {
+                    self.close_region(running.stream);
+                    if let Some(completion) = self.publish_source_departure(running, source_pc)? {
+                        // The raise is born here, as an ordinary throw's is.
+                        self.raise_born(task)?;
+                        return Ok(Ran::Depart(completion));
+                    }
+                    if let Some(ran) = self.run_rare(host, running, op)? {
+                        return self.source_done(running, source_pc, ran);
+                    }
+                }
                 Op::Break | Op::Continue => {
                     self.close_region(running.stream);
                     if let Some(completion) = self.publish_source_departure(running, source_pc)? {

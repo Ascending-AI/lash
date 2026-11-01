@@ -183,7 +183,8 @@ impl Source {
     /// or catch block; an entered catch follows a raised body. The innermost
     /// cleanup ends the suffix at its Suspend, which holds the departure.
     /// A Break or Continue departs the same way toward its innermost loop;
-    /// only a cleanup inside that loop suspends it.
+    /// only a cleanup inside that loop suspends it. A Throw publishes only
+    /// when the innermost try it reaches suspends it in cleanup.
     pub(crate) fn compile_departure_suffix(
         &self,
         at: &Point,
@@ -205,6 +206,8 @@ impl Source {
         let mut raised = std::collections::BTreeSet::new();
         let mut suspend: Option<(Site, Site)> = None;
         let mut target: Option<Site> = None;
+        // The innermost try a raise reaches takes it: true by its catch.
+        let mut handler: Option<(Site, bool)> = None;
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
@@ -228,6 +231,11 @@ impl Source {
                     if *index == 1 {
                         raised.insert(path.clone());
                     }
+                    if *index == 0 && t.catch.is_some() {
+                        handler = Some((path.clone(), true));
+                    } else if t.finally.is_some() {
+                        handler = Some((path.clone(), false));
+                    }
                     if t.finally.is_some() {
                         let cleanup = path.child(if t.catch.is_some() { 2 } else { 1 });
                         suspend = Some((path.clone(), cleanup));
@@ -243,9 +251,17 @@ impl Source {
             doc::Node::Stmt(doc::Stmt::Return { .. }) => ExitKind::Return,
             doc::Node::Stmt(doc::Stmt::Break) => ExitKind::Break,
             doc::Node::Stmt(doc::Stmt::Continue) => ExitKind::Continue,
+            doc::Node::Stmt(doc::Stmt::Throw { .. }) => ExitKind::Raise,
             _ => return Err(Refused::Path),
         };
-        if departing != ExitKind::Return {
+        // A raise publishes only into the cleanup that suspends it; a catch
+        // or the caller takes the others.
+        if departing == ExitKind::Raise
+            && !matches!((&handler, &suspend), (Some((at, false)), Some((try_site, _))) if at == try_site)
+        {
+            return Err(Refused::Path);
+        }
+        if matches!(departing, ExitKind::Break | ExitKind::Continue) {
             // A cleanup outside the target loop does not take its departure;
             // the loop's own Catch is the unsuspended suffix.
             let suspended = match (&suspend, &target) {
