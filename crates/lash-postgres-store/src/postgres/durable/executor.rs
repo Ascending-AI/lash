@@ -464,6 +464,7 @@ fn step_json(step: &Step) -> serde_json::Value {
 impl Call {
     pub(super) fn of(
         tx: &ActorTx,
+        riding: Option<&lash_durable::domain::graph_commit::CheckedGraph>,
         held: &HeldTexts,
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
@@ -601,6 +602,7 @@ impl Call {
             || !prompt_reads.is_empty()
             || !publications.is_empty()
             || !checkpoint_nodes.is_empty()
+            || riding.is_some()
             || tx
                 .domain()
                 .iter()
@@ -619,12 +621,16 @@ impl Call {
                 staged = checkpoint_nodes;
                 &staged
             };
-            let checked = lash_durable::domain::graph_commit::check_graph(
+            let mut checked = lash_durable::domain::graph_commit::check_graph(
                 graph,
                 &prompt_reads,
                 &publications,
             )
             .ok()?;
+            // A candidate of one batch installs with the commit's graph.
+            if let Some(riding) = riding {
+                checked = super::pages::with_riding(checked, riding);
+            }
             // The server locks every named or supplied version owner before
             // graph locks, as the explicit transaction does. Refusals fall
             // back there for their typed classification.

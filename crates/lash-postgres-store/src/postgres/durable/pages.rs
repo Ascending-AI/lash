@@ -323,6 +323,106 @@ async fn frontier_put(
     Ok(())
 }
 
+/// Owner `tx`'s `candidate` as the commit's own graph, when the commit's
+/// graph and the candidate together are one install batch of
+/// [`CandidateBuffers::DEFAULT`] and their edges one edge batch (FIG-7576):
+/// that batch rides in the commit, which installs it with its graph, so
+/// the commit is one round trip. A node and its edges commit in one
+/// transaction (a stored node has its edges; a child must be stored), and
+/// the edge pass follows every node, so a candidate of more batches cannot
+/// split across the commit: it installs ahead ([`install_owned_candidate`])
+/// and the commit names its root. `None` for those, which the manifest's
+/// summary predicts, so a large candidate is still swept once; a stream
+/// that outgrows its summary is installed ahead too.
+pub(super) fn riding_candidate(
+    owner: &ActorTx,
+    candidate: &mut CandidatePublication,
+) -> Result<Option<CheckedGraph>, GraphRefusal> {
+    let buffers = CandidateBuffers::DEFAULT;
+    let publications: Vec<_> = owner
+        .domain()
+        .iter()
+        .flat_map(DomainWrite::publications)
+        .collect();
+    let checked = lash_durable::domain::graph_commit::check_graph(
+        owner.graph(),
+        owner.reads(),
+        &publications,
+    )?;
+    let summary = candidate.manifest.summary();
+    check_candidate(owner.domain(), &checked, &candidate.owner, &summary)?;
+    let own_entries = checked.nodes.len() + checked.external.len() + checked.external_roots.len();
+    let own_bytes: u64 = checked
+        .nodes
+        .iter()
+        .map(|node| node.bytes.len() as u64)
+        .sum();
+    let own_edges: usize = checked.nodes.iter().map(|node| node.children.len()).sum();
+    let predicted = summary.fresh_nodes + summary.external + own_entries as u64
+        <= buffers.entries as u64
+        && summary.fresh_bytes + own_bytes < buffers.bytes
+        && summary.fresh_edges + own_edges as u64 <= buffers.edges as u64;
+    if !predicted {
+        return Ok(None);
+    }
+    let mut install = CandidateInstall::new(&checked, &mut *candidate.manifest, buffers);
+    let batch = install.next_batch()?.unwrap_or_default();
+    if install.next_batch()?.is_some() {
+        return Ok(None);
+    }
+    // The edge pass checks the manifest's edge log as an install ahead
+    // does, so a damaged or cut stream is refused alike.
+    let mut pass = install.edges()?;
+    if pass.next_batch()?.is_some() && pass.next_batch()?.is_some() {
+        return Ok(None);
+    }
+    #[cfg(any(test, feature = "testing"))]
+    CANDIDATE_PEAK_BUFFERED.store(pass.peak_buffered(), std::sync::atomic::Ordering::SeqCst);
+    let mut riding = CheckedGraph::default();
+    for entry in batch {
+        match entry {
+            InstallEntry::Supplied(node) => riding.nodes.push(node),
+            InstallEntry::Named { id, root: false } => {
+                riding.external.insert(id);
+            }
+            InstallEntry::Named { id, root: true } => {
+                riding.external_roots.insert(id);
+            }
+        }
+    }
+    // A child neither supplied nor named is still a reference the store
+    // must hold.
+    let supplied: BTreeSet<NodeId> = riding.nodes.iter().map(|node| node.id).collect();
+    let children: Vec<NodeId> = riding
+        .nodes
+        .iter()
+        .flat_map(|node| node.children.iter().copied())
+        .filter(|child| !supplied.contains(child))
+        .collect();
+    riding.external.extend(children);
+    Ok(Some(riding))
+}
+
+/// `checked` with a [`riding_candidate`]'s graph: every node either
+/// supplies, in digest order, and every reference neither supplies.
+pub(super) fn with_riding(mut checked: CheckedGraph, riding: &CheckedGraph) -> CheckedGraph {
+    let mut nodes: BTreeMap<NodeId, CheckedNode> = std::mem::take(&mut checked.nodes)
+        .into_iter()
+        .map(|node| (node.id, node))
+        .collect();
+    for node in &riding.nodes {
+        nodes.entry(node.id).or_insert_with(|| node.clone());
+    }
+    checked.external.extend(riding.external.iter().copied());
+    checked.external.retain(|id| !nodes.contains_key(id));
+    checked
+        .external_roots
+        .extend(riding.external_roots.iter().copied());
+    checked.external_roots.retain(|id| !nodes.contains_key(id));
+    checked.nodes = nodes.into_values().collect();
+    checked
+}
+
 /// Installs owner `tx`'s `candidate` ahead of its commit, in the caller's
 /// transaction of its own: the owner's actor row share-locked at its epoch
 /// first, the fence an ownership transfer's epoch bump waits behind, so a

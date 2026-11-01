@@ -1185,32 +1185,46 @@ async fn a_session_close_commits_each_step_in_one_call() {
 }
 
 /// The round trips a candidate's page installation pays ahead of its
-/// owner commit (FIG-6191, FIG-7576): the transaction's `BEGIN`, its fence
-/// and clock read and the owner's share-locked fence row; for each batch of
-/// [`CandidateBuffers::DEFAULT`] manifest entries the key-share lock of its
-/// nodes and the insert of the absent ones (a third read of what another
-/// writer inserted meanwhile has no writer to race here); for each batch of
-/// edges the lock of their children and their insert; and `COMMIT`. The
-/// commit itself then names only the candidate's root, and is one call
-/// whatever else it writes.
-fn page_round_trips(summary: &lash_core_store::checkpoint_graph::stage::ManifestSummary) -> u64 {
+/// owner commit (FIG-6191, FIG-7576). A candidate whose entries, with the
+/// commit's own graph, fit one batch of [`CandidateBuffers::DEFAULT`]
+/// entries and its edges one edge batch rides in the commit's one call and
+/// pays none. A larger one installs ahead in one transaction: its `BEGIN`,
+/// its fence and clock read and the owner's share-locked fence row; for
+/// each batch of manifest entries the key-share lock of its nodes and the
+/// insert of the absent ones (a third read of what another writer inserted
+/// meanwhile has no writer to race here); for each batch of edges the lock
+/// of their children and their insert; and `COMMIT`. The commit then names
+/// only the candidate's root, and is one call whatever else it writes.
+///
+/// [`CandidateBuffers::DEFAULT`]: lash_durable::domain::graph_commit::CandidateBuffers::DEFAULT
+fn page_round_trips(
+    summary: &lash_core_store::checkpoint_graph::stage::ManifestSummary,
+    own_entries: u64,
+    own_edges: u64,
+) -> u64 {
     let buffers = lash_durable::domain::graph_commit::CandidateBuffers::DEFAULT;
-    let entries = summary.fresh_nodes + summary.external;
+    let entries = summary.fresh_nodes + summary.external + own_entries;
+    let edges = summary.fresh_edges + own_edges;
+    if entries <= buffers.entries as u64 && edges <= buffers.edges as u64 {
+        return 0;
+    }
     let node_batches = entries.div_ceil(buffers.entries as u64);
-    let edge_batches = summary.fresh_edges.div_ceil(buffers.edges as u64);
+    let edge_batches = edges.div_ceil(buffers.edges as u64);
     3 + 2 * node_batches + 2 * edge_batches + 1
 }
 
-/// A round outcome publishing a candidate of many pages, with the next
-/// model call's start, commits in one call beside its page installation,
-/// whose round trips grow with the candidate's batches alone, and the store
-/// holds the record over the candidate's root.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_candidate_commit_is_one_call_beside_its_page_batches() {
+/// A round outcome publishing a candidate of `leaves` pages with the next
+/// model call's start: the candidate's summary and the commit's round
+/// trips.
+async fn candidate_commit(
+    name: &'static str,
+    leaves: u32,
+) -> Option<(
+    lash_core_store::checkpoint_graph::stage::ManifestSummary,
+    u64,
+)> {
     use lash_durable::domain::pages::{CandidateOwner, CandidatePublication, PageStore as _};
-    let Some(owned) = owned("round-trips-candidate").await else {
-        return;
-    };
+    let owned = owned(name).await?;
     let store = owned.storage.durable_store();
     let input = accept(&owned, "candidate").await;
     let run = TurnId::from("round-trips-turn");
@@ -1224,12 +1238,8 @@ async fn a_candidate_commit_is_one_call_beside_its_page_batches() {
         .commit(tx, CommitLabel::TURN_ADMIT)
         .await
         .expect("admit");
-    let manifest = lash_durable::laws::pages::GeneratedManifest::new(
-        "round-trips-candidate",
-        600,
-        64,
-        CommitId::mint(),
-    );
+    let manifest =
+        lash_durable::laws::pages::GeneratedManifest::new(name, leaves, 64, CommitId::mint());
     let summary = lash_core_store::checkpoint_graph::stage::CandidateManifest::summary(&manifest);
     let owner = OwnerKey::Turn(owned.session.clone(), run.clone());
     let mut tx = store
@@ -1282,11 +1292,29 @@ async fn a_candidate_commit_is_one_call_beside_its_page_batches() {
     ))
     .await;
     assert_eq!(receipt.expect("round.outcome").root, summary.root);
-    within(
-        "round.outcome+model.start with a candidate",
-        trips,
-        page_round_trips(&summary) + 1,
-    );
+    Some((summary, trips))
+}
+
+/// A round outcome publishing a candidate commits in one call: a candidate
+/// of one batch rides in it, and a candidate of many pages installs ahead
+/// in round trips that grow with its batches alone. The commit's own graph
+/// is two nodes (the record, which names the candidate's root, and the
+/// model call's checkpoint), with the record's one edge.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_candidate_commit_is_one_call_beside_its_page_batches() {
+    for (name, leaves) in [
+        ("round-trips-candidate-small", 8),
+        ("round-trips-candidate", 600),
+    ] {
+        let Some((summary, trips)) = candidate_commit(name, leaves).await else {
+            return;
+        };
+        within(
+            &format!("round.outcome+model.start with a candidate of {leaves} leaves"),
+            trips,
+            page_round_trips(&summary, 2, 1) + 1,
+        );
+    }
 }
 
 /// PREFIX-DELTA on the server-call boundary: a carried immutable prefix

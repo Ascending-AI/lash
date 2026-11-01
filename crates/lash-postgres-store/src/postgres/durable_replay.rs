@@ -52,8 +52,10 @@ impl PostgresDurableStore {
     }
 
     /// [`commit_owner`](Self::commit_owner) publishing `candidate`
-    /// (FIG-6191): each attempt first installs the candidate's pages, then
-    /// commits the owner's write, which names only the candidate's root.
+    /// (FIG-6191, FIG-7576): the candidate's pages stream in bounded batches.
+    /// A candidate of one batch rides in the commit beside the owner's own
+    /// graph ([`pages::riding_candidate`]); a larger one installs ahead, each
+    /// attempt first, and the owner's write then names only its root.
     /// Pages are immutable and content-addressed, so installing them ahead
     /// of the commit is idempotent: an attempt that never commits leaves
     /// pages no root or edge reaches, which the orphan audit collects.
@@ -68,6 +70,15 @@ impl PostgresDurableStore {
             Some(candidate) => Some(candidate.lock().await.manifest.summary().root),
             None => None,
         };
+        // A candidate of one batch rides in the commit; a larger one
+        // installs ahead of it, every attempt.
+        let riding = match candidate {
+            Some(candidate) => pages::riding_candidate(&tx, &mut *candidate.lock().await)
+                .map_err(DurableError::Graph)?,
+            None => None,
+        };
+        let ahead = candidate.filter(|_| riding.is_none());
+        let riding = riding.as_ref();
         self.within(
             label.capacity(),
             lash_core_ids::operational_metrics::sql::with_owner(
@@ -88,13 +99,14 @@ impl PostgresDurableStore {
                             let tx = &tx;
                             let call = executor::Call::of(
                                 tx,
+                                riding,
                                 &self.pools.held_texts,
                                 &self.pools.session_hints,
                                 self.fence.fleet(),
                             );
                             let call = &call;
                             self.replay(label, deadline, || async move {
-                                if let Some(candidate) = candidate {
+                                if let Some(candidate) = ahead {
                                     self.install_pages(label, tx, &mut *candidate.lock().await)
                                         .await?;
                                 }
@@ -109,6 +121,7 @@ impl PostgresDurableStore {
                                 let outcome = Box::pin(apply_owner(
                                     &mut guarded,
                                     tx,
+                                    riding,
                                     fence,
                                     now,
                                     self.fence.fleet(),
@@ -342,6 +355,7 @@ impl PostgresDurableStore {
 pub(super) async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
+    riding: Option<&lash_durable::domain::graph_commit::CheckedGraph>,
     fence: Option<FenceRead>,
     now: DurableInstant,
     fleet: lash_core_store::store::FleetFormat,
@@ -380,12 +394,16 @@ pub(super) async fn apply_owner(
         || !write.graph().is_empty()
         || !write.reads().is_empty()
         || !publications.is_empty()
+        || riding.is_some()
     {
-        let checked = lash_durable::domain::graph_commit::check_graph(
+        let mut checked = lash_durable::domain::graph_commit::check_graph(
             write.graph(),
             write.reads(),
             &publications,
         )?;
+        if let Some(riding) = riding {
+            checked = pages::with_riding(checked, riding);
+        }
         let publishing = write
             .domain()
             .iter()
