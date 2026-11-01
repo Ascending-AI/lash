@@ -304,6 +304,7 @@ impl Slots {
 pub(super) struct Pending {
     pub(super) site: Suffix,
     pub(super) phase: PhaseRecord,
+    pub(super) occurrence: Option<u64>,
     pub(super) roles: Vec<Role>,
 }
 
@@ -376,6 +377,12 @@ impl Continuation {
     }
 }
 
+impl Pending {
+    pub(super) fn with_occurrence(mut self, occurrence: Option<u64>) -> Self {
+        self.occurrence = occurrence;
+        self
+    }
+}
 impl KernelMachine {
     /// The continuation a frame saves where it stands at the action nested
     /// in its statement whose site is `site`, in `phase` (`K-EVAL-008`),
@@ -400,6 +407,7 @@ impl KernelMachine {
         Ok(Pending {
             site: Arc::clone(site),
             phase,
+            occurrence: None,
             roles,
         })
     }
@@ -765,12 +773,15 @@ impl Frame {
         }
         if !self.pending.projected() {
             stored.pending = match &self.pending.pending {
-                Some(pending) => Some(PendingRecord::new(
-                    pending.site.to_vec(),
-                    pending.phase,
-                    role_records(arena, access, &pending.roles)?,
-                    access,
-                )?),
+                Some(pending) => Some(
+                    PendingRecord::new(
+                        pending.site.to_vec(),
+                        pending.phase,
+                        role_records(arena, access, &pending.roles)?,
+                        access,
+                    )?
+                    .with_occurrence(pending.occurrence),
+                ),
                 None => None,
             };
             self.pending.saved = if self.pending.pending.is_some() {
@@ -1194,12 +1205,15 @@ impl Frames {
         if let Some((_, frame)) = self.cache.iter_mut().find(|(at, _)| *at == index) {
             let mut arena = self.arena.borrow_mut();
             let mut record = match frame.pending.take() {
-                Some(pending) => Some(PendingRecord::new(
-                    pending.site.to_vec(),
-                    pending.phase,
-                    role_records(&mut arena, &access, &pending.roles)?,
-                    &access,
-                )?),
+                Some(pending) => Some(
+                    PendingRecord::new(
+                        pending.site.to_vec(),
+                        pending.phase,
+                        role_records(&mut arena, &access, &pending.roles)?,
+                        &access,
+                    )?
+                    .with_occurrence(pending.occurrence),
+                ),
                 None => None,
             };
             edit(&mut record, &access);
@@ -1208,6 +1222,7 @@ impl Frames {
                     roles: admit_roles(&mut arena, &access, record.roles(&access)?)?,
                     site: record.site.into(),
                     phase: record.phase,
+                    occurrence: record.occurrence,
                 });
             }
             frame.pending.saved = Saved::Another;

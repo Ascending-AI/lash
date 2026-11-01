@@ -25,14 +25,13 @@ impl KernelMachine {
     ) -> Result<Option<(StmtId, u32)>, Halt> {
         self.logical_flush_controls(task_id, exe)?;
         self.logical_flush()?;
-        let (source, link, invocation, roots, id, pc, at, occurrence, saved) = {
+        let (source, link, invocation, roots, id, pc, at, occurrence, saved, cold, index, ordinal) = {
             let frame = self.frame(task_id)?;
-            let (Some(id), Some(act), Some(pending), Some(logical), Some(frontier)) = (
+            let (Some(id), Some(act), Some(pending), Some(logical)) = (
                 frame.awaiting,
                 frame.nested,
                 frame.pending.peek(),
                 frame.logical.as_ref(),
-                frame.source_frontier.as_ref(),
             ) else {
                 return Ok(None);
             };
@@ -54,21 +53,29 @@ impl KernelMachine {
             let Some(loops) = source_loops(frame, exe)? else {
                 return Ok(None);
             };
-            let position = frontier.position();
-            if position.unpaid.is_none()
-                || position.occurrence.invocation != logical.invocation().id()
-                || position.occurrence.task != task_id
-                || position.occurrence.loops != loops
-                || !position
-                    .occurrence
-                    .action
-                    .as_ref()
-                    .is_some_and(|(point, _)| {
-                        point.site == entry.site && point.phase == Phase::Enter
-                    })
-            {
+            let Some(ordinal) = pending.occurrence else {
                 return Ok(None);
+            };
+            if frame
+                .source_frontier
+                .as_ref()
+                .is_some_and(|frontier| frontier.position().unpaid.is_none())
+            {
+                return Err(malformed("a terminal caller cannot resume an action").into());
             }
+            let occurrence = room::publication::Occurrence {
+                task: task_id,
+                invocation: logical.invocation().id(),
+                loops,
+                action: Some((
+                    Point {
+                        site: entry.site.clone(),
+                        phase: Phase::Enter,
+                    },
+                    ordinal,
+                )),
+                departure: None,
+            };
             let mut saved = Vec::new();
             saved
                 .try_reserve(entry.roles.len() + 1)
@@ -115,10 +122,21 @@ impl KernelMachine {
                     site: entry.site.clone(),
                     phase: Phase::Restore,
                 },
-                position.occurrence.clone(),
+                occurrence,
                 saved,
+                frame.source_frontier.is_none(),
+                entry.occurrence,
+                ordinal,
             )
         };
+        if self
+            .task(task_id)?
+            .counters
+            .current(index)
+            .is_none_or(|count| ordinal >= count)
+        {
+            return Err(malformed("a saved call occurrence was not admitted by its task").into());
+        }
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(None);
         };
@@ -306,10 +324,12 @@ impl KernelMachine {
                 pending.take();
             },
         )?;
+        #[cfg(not(any(test, feature = "testing")))]
+        let _ = cold;
         if published {
             self.regs.bind_source_resume(&store.borrow());
             #[cfg(any(test, feature = "testing"))]
-            crate::machine::islands::witness::call_resume_published();
+            crate::machine::islands::witness::call_resume_published(cold);
         }
         Ok(published.then_some((id, pc)))
     }

@@ -23,6 +23,8 @@ pub struct PendingRecord {
     /// The action's site, as the path suffix under the frame's statement.
     pub site: Vec<u32>,
     pub phase: PhaseRecord,
+    /// The actual ordinal counted before this call entered its callee.
+    pub occurrence: Option<u64>,
     pub roles: RolesRecord,
 }
 
@@ -81,7 +83,18 @@ impl PendingRecord {
             }
             RolesRecord::Spilled(tree)
         };
-        Ok(Self { site, phase, roles })
+        Ok(Self {
+            site,
+            phase,
+            occurrence: None,
+            roles,
+        })
+    }
+
+    /// Retains the original action ordinal with its source continuation.
+    pub fn with_occurrence(mut self, occurrence: Option<u64>) -> Self {
+        self.occurrence = occurrence;
+        self
     }
 
     /// The roles, in the order they were saved.
@@ -193,6 +206,7 @@ impl Cell for PendingRecord {
     fn same_version(&self, other: &Self) -> bool {
         self.site == other.site
             && self.phase == other.phase
+            && self.occurrence == other.occurrence
             && self.roles.same_version(&other.roles)
     }
     fn task_edges(&self) -> u64 {
@@ -320,16 +334,18 @@ impl TokenCodec for RolesRecord {
 
 impl TokenCodec for PendingRecord {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(4);
         self.site.encode(out);
         self.phase.encode(out);
+        self.occurrence.encode(out);
         self.roles.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(4)?;
         Ok(Self {
             site: <Vec<u32>>::decode(input)?,
             phase: <PhaseRecord>::decode(input)?,
+            occurrence: <Option<u64>>::decode(input)?,
             roles: <RolesRecord>::decode(input)?,
         })
     }

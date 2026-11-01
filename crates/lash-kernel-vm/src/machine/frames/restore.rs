@@ -31,6 +31,7 @@ pub(super) fn frame(
         Some(pending) => Some(Pending {
             site: pending.site.as_slice().into(),
             phase: pending.phase,
+            occurrence: pending.occurrence,
             roles: admit_roles(arena, access, pending.roles(access)?)?,
         }),
         None => None,
@@ -305,6 +306,7 @@ pub(super) fn frame(
     }
     Ok(Box::new(Frame {
         source_frontier: None,
+        source_action: None,
         invocation: record.invocation,
         logical: None,
         link: record.link,

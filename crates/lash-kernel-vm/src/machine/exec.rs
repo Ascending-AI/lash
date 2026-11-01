@@ -675,6 +675,7 @@ impl KernelMachine {
     /// Drop all guest holdings before retaining the activation's storage.
     pub(super) fn recycle(&mut self, mut frame: Box<Frame>) {
         frame.source_frontier = None;
+        frame.source_action = None;
         frame.invocation = 0;
         frame.logical = None;
         frame.control.reset();
@@ -873,6 +874,7 @@ impl KernelMachine {
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
                     source_frontier: None,
+                    source_action: None,
                     invocation: 0,
                     logical: None,
                     link: self.program.link,

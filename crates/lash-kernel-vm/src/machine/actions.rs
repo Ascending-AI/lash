@@ -262,7 +262,13 @@ impl KernelMachine {
         site: &Site,
         index: usize,
     ) -> Result<(), Halt> {
-        let occurrence = self.task(task)?.counters.advance(index)?;
+        let occurrence = {
+            let state = self.task(task)?;
+            let frame = state.frames.last_mut()?.ok_or_else(|| fault("no frame"))?;
+            let occurrence = state.counters.advance(index)?;
+            frame.source_action = Some((index, occurrence));
+            occurrence
+        };
         self.observe_entry(task, host, site, occurrence)
     }
 
@@ -293,7 +299,22 @@ impl KernelMachine {
         act: lash_kernel_exec::ActIx,
         phase: PhaseRecord,
     ) -> Result<(), Halt> {
-        let pending =
+        let occurrence = self
+            .frame(task)?
+            .source_action
+            .take()
+            .filter(|(index, _)| *index == entry.occurrence)
+            .map(|(_, count)| count);
+        if entry.guest
+            && matches!(entry.kind, NestedKind::Call(_))
+            && phase == PhaseRecord::Called
+            && occurrence.is_none()
+        {
+            return Err(fault(
+                "a called source continuation lost its admitted occurrence",
+            ));
+        }
+        let mut pending =
             self.continuation(&entry.suffix, phase, entry.roles.len(), |machine, at| {
                 let role = &entry.roles[at];
                 let held = machine.take_source_role(role.reg, &role.site)?;
@@ -304,6 +325,7 @@ impl KernelMachine {
                     holding: held.holding,
                 })
             })?;
+        pending.occurrence = occurrence;
         self.frame(task)?.stand_at(act, pending);
         Ok(())
     }

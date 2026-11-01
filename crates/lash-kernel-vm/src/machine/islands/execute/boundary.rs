@@ -324,7 +324,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             let site = continuation.site;
             if self.scratch.exit.halt.is_none() {
                 if let Some(act) = site.act {
-                    self.scratch.exit.suspended = Some(act);
+                    self.scratch.exit.suspended = Some((act, continuation.occurrence));
                 } else if let Some(stmt) = caller.statement {
                     self.scratch.exit.stands = Some(Stands::Action { stmt });
                 }

@@ -158,6 +158,7 @@ pub(super) enum Stands {
         stmt: StmtId,
         act: ActIx,
         roles: Vec<(crate::compile::Suffix, Value)>,
+        occurrence: Option<u64>,
     },
 }
 
@@ -190,7 +191,7 @@ pub(super) struct Exit {
     control: Vec<Control>,
     stands: Option<Stands>,
     /// The call it stands at, when its callee stopped.
-    suspended: Option<ActIx>,
+    suspended: Option<(ActIx, Option<u64>)>,
     /// The frames left, innermost first.
     levels: Vec<Level>,
     #[cfg(any(test, feature = "perf-witness"))]
@@ -576,18 +577,17 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
     }
 
     #[inline(always)]
-    fn count(&mut self, occurrence: usize) -> Result<(), Stop> {
-        match self.counters.advance(occurrence) {
+    fn count(&mut self, occurrence: usize) -> Result<u64, Stop> {
+        let count = match self.counters.advance(occurrence) {
             Err(halt) => return Err(self.halt(halt)),
-            Ok(count) => {
-                if let Some(watching) = &self.projection()
-                    && let Err(halt) = watching.action(self.exe, occurrence, count)
-                {
-                    return Err(self.halt(halt));
-                }
-            }
+            Ok(count) => count,
+        };
+        if let Some(watching) = &self.projection()
+            && let Err(halt) = watching.action(self.exe, occurrence, count)
+        {
+            return Err(self.halt(halt));
         }
-        Ok(())
+        Ok(count)
     }
 
     /// Root actions keep their canonical occurrence and atomic argument
@@ -1424,7 +1424,7 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
             return stop;
         }
         let regs = std::mem::take(&mut exit.regs);
-        let stands = if let Some(act) = exit.suspended.take() {
+        let stands = if let Some((act, occurrence)) = exit.suspended.take() {
             let entry = &self.stream.nested[act.ix()];
             let mut roles = Vec::with_capacity(entry.roles.len());
             for role in &entry.roles {
@@ -1433,7 +1433,12 @@ impl<'a, const OBSERVING: bool> Island<'a, OBSERVING> {
                 };
                 roles.push((std::sync::Arc::clone(&role.suffix), *value));
             }
-            Stands::Called { stmt, act, roles }
+            Stands::Called {
+                stmt,
+                act,
+                roles,
+                occurrence,
+            }
         } else if let Some(pc) = exit.at {
             if std::mem::take(&mut exit.scheduling) {
                 Stands::Scheduling { stmt, pc, regs }

@@ -35,6 +35,7 @@ struct CallContinuation<'e> {
     site: &'e compiled::CallSite,
     args: &'e [u32],
     live: &'e [u32],
+    occurrence: Option<u64>,
 }
 
 #[derive(Clone, Copy)]

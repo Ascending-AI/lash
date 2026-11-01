@@ -108,6 +108,7 @@ impl KernelMachine {
             ..Default::default()
         }]);
         let safe_point = self.charged;
+        let source_action = &mut frame.source_action;
         let published = Context {
             admission: Admission::Exact,
             source: &source,
@@ -164,6 +165,7 @@ impl KernelMachine {
             Reserve(move |_: &mut Arena| Ok(Some(bank))),
             |_, _, edits, _bank| {
                 debug_assert!(edits.is_empty());
+                *source_action = Some((entry.occurrence, occurrence));
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

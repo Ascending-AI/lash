@@ -175,6 +175,7 @@ impl KernelMachine {
             _ => return Ok(None),
         };
         let given = start + args.len as usize - first;
+        let occurrence = self.task(running.task)?.counters.current(nested.occurrence);
         let ran = self.island(
             host,
             running.task,
@@ -184,6 +185,10 @@ impl KernelMachine {
             (first, given),
             Some(nested.occurrence),
         )?;
+        if matches!(&ran, Some(Ran::Exited(_))) {
+            self.frame(running.task)?.source_action =
+                occurrence.map(|count| (nested.occurrence, count));
+        }
         self.island_ended(host, running, Caller::Nested(act), start, ran)
     }
 
@@ -783,7 +788,12 @@ impl KernelMachine {
             Stands::Iteration { stmt } => Some(RunsOn::Iteration(stmt)),
             Stands::Departure(departure) => Some(RunsOn::Departure(departure)),
             Stands::Scheduling { stmt, pc, regs } => Some(RunsOn::Scheduling(stmt, pc, regs)),
-            Stands::Called { stmt, act, roles } => {
+            Stands::Called {
+                stmt,
+                act,
+                roles,
+                occurrence,
+            } => {
                 let entry = &exe.statement(stmt).0.nested[act.ix()];
                 pending = Some((
                     stmt,
@@ -800,7 +810,8 @@ impl KernelMachine {
                                 holding: held.holding,
                             })
                         },
-                    )?,
+                    )?
+                    .with_occurrence(occurrence),
                 ));
                 None
             }

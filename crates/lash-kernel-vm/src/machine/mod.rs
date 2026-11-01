@@ -312,6 +312,7 @@ struct Storage {
 }
 
 struct Frame {
+    source_action: Option<(usize, u64)>,
     source_frontier: Option<crate::compile::room::publication::Frontier>,
     invocation: u64,
     logical: Option<logical_held::FrameRoots>,

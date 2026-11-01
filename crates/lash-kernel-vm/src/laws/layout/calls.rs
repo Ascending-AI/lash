@@ -541,13 +541,26 @@ fn observe_source_or_register(
     if mode == Mode::Source
         && layout == Layout(0)
         && !taped
+        && cold_slices
+        && slice == 3
+        && bounds == super::super::embedder::ROOMY
+        && source.contains(SOURCE_CONSTRUCTION)
+    {
+        assert!(
+            call_resumes[1] > 0,
+            "a restored caller must retain its original action occurrence and adopt the accepted result bank: {call_resumes:?}"
+        );
+    }
+    if mode == Mode::Source
+        && layout == Layout(0)
+        && !taped
         && slice == u64::MAX
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
         assert!(
-            call_resumes > 0,
-            "the returned call must restore its actual Incoming and continuation owners through prospective acceptance: {call_resumes}"
+            call_resumes[0] > 0,
+            "the returned call must restore its actual Incoming and continuation owners through prospective acceptance: {call_resumes:?}"
         );
         assert!(
             call_enters > 0,

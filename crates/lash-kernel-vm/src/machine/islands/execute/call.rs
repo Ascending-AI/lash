@@ -197,19 +197,27 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 {
                     return Err(self.at(site.pc));
                 }
-                if let Some(at) = site.occurrence.or(root_occurrence) {
-                    self.count(at)?;
-                } else if let Some(watching) = &self.projection() {
-                    if let Some(act) = site.act {
-                        watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
-                    } else if let Some(stmt) = frame.state.statement {
-                        watching.root_call(self.exe, stmt, args.len());
+                let occurrence = if let Some(at) = site.occurrence.or(root_occurrence) {
+                    Some(self.count(at)?)
+                } else {
+                    if let Some(watching) = &self.projection() {
+                        if let Some(act) = site.act {
+                            watching.action_start(self.exe, &self.stream.nested[act.ix()].site);
+                        } else if let Some(stmt) = frame.state.statement {
+                            watching.root_call(self.exe, stmt, args.len());
+                        }
                     }
-                }
+                    None
+                };
                 self.root_arguments(before);
                 // The call owns its frame transition. No resolved callee
                 // crosses the instruction result or is decoded by the loop.
-                frame.state.continuation = Some(CallContinuation { site, args, live });
+                frame.state.continuation = Some(CallContinuation {
+                    site,
+                    args,
+                    live,
+                    occurrence,
+                });
                 (frame.state.admitted, frame.state.swift, frame.state.covered) =
                     (self.admitted, self.swift, self.covered);
                 self.record_entry(
