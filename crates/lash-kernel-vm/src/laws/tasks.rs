@@ -1103,6 +1103,14 @@ main {
 /// names it as an unobserved failure; a reachable task's retained null
 /// joins as null before and after. Holding the raising task's handle
 /// instead keeps its result, and the same bound refuses the run.
+///
+/// The bound comes from the logical algebra, where each holding pays
+/// `REFERENCE` (16) plus its immutable payload. `grown`'s 524,288-byte text
+/// is held twice at its peak (the binding and the operand that reads it):
+/// 2 × 524,304 = 1,048,608, plus 225 bytes of frames and handles, gives
+/// 1,048,833 once the dropped result is retired. Keeping the raised list
+/// adds one more holding of the text and the list (524,304 + 32), giving
+/// 1,573,169. 1.25 MiB sits between the two, about 256 KiB clear of each.
 #[test]
 fn a_retired_task_result_keeps_how_the_task_ended() {
     const GROW: &str = r#"
@@ -1116,7 +1124,7 @@ definition "function quiet() -> Any\nkernel 1\nmetering statements\nbody {  retu
     let bounded = |main: &str| {
         let setup = Setup {
             bounds: crate::Bounds {
-                memory: 1 << 20,
+                memory: 5 << 18,
                 ..Setup::default().bounds
             },
             ..Setup::default()
