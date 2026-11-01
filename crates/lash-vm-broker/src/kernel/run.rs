@@ -882,16 +882,16 @@ struct CellKernelOwner<'a, 'b, S: Machines> {
 }
 
 /// The delivery batches a run's journal holds since its last checkpoint
-/// before its next park takes a checkpoint (FIG-7585). A machine that gave
-/// its worker back runs again from its last checkpoint, re-running every
-/// park since: with a checkpoint every `B` batches a run whose worker is
-/// released at every park re-runs `B / 2` parks per park on average, at
-/// ~13.2M instructions each (a 200-call TypeScript cell released at every
-/// park, 2026-11-01), against a checkpoint's ~36M over a journaled park
-/// (the parent's sealed park, 46.6M, less the journaled park's base,
-/// 10.6M). `36M / B + 13.2M * B / 2` is least at `B = sqrt(2 * 36 / 13.2)`
-/// ~= 2.3; 3 costs 3% more there and checkpoints a third less often.
-const CHECKPOINT_BATCHES: usize = 3;
+/// before its next park takes a checkpoint (FIG-7585), besides the
+/// checkpoint its owner's commit takes at its end. The bound is a resume
+/// budget: a run re-runs only after a crash or after its worker was
+/// released (no quiet release in 310 corpus parks, 2026-11-01), and then
+/// re-runs every park since its last checkpoint at ~13.2M worker and host
+/// instructions each (a 200-call TypeScript cell released at every park).
+/// One second of CPU on the measuring host is ~8.1G instructions (the
+/// parent's 200-call turn: 9.32G host instructions in 1155 ms), so 600
+/// batches (~7.9G) keep the worst re-run within that second.
+const CHECKPOINT_BATCHES: usize = 600;
 
 /// A run's journal as one activation follows and extends it (FIG-7585):
 /// its last checkpoint, the committed facts since, then what this
@@ -987,6 +987,7 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
             // knows of its run since.
             self.journal.restart();
             self.broker.effects.restart();
+            self.broker.store.reload_records().await;
             let base = self.journal.base.as_ref();
             self.ledger = base.map(|(_, ledger)| ledger.clone()).unwrap_or_default();
             let state = base.map(|(state, _)| state);

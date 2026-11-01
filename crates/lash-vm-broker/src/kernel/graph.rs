@@ -727,6 +727,13 @@ impl AdmissionBook {
         })
     }
 
+    /// Takes `effects` out: admissions whose commit did not land.
+    pub fn forget(&mut self, effects: &[EffectId]) {
+        for effect in effects {
+            self.admitted.remove(effect);
+        }
+    }
+
     /// The admission node of `effect`.
     #[must_use]
     pub fn get(&self, effect: &EffectId) -> Option<NodeId> {

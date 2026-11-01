@@ -815,23 +815,39 @@ impl DurableSnapshotStore {
             tx.append(held)?;
         }
         let mut staging = staging();
-        let mut book = self
-            .book
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
         let admits = !requests.is_empty();
-        let (calls, admitted) = self.admit_requests(
-            &mut tx,
-            &mut staging,
-            &mut book,
-            &mut ledger,
-            requests,
-            Some(RunFingerprint {
-                document,
-                closure: closure.reference(),
-            }),
-        )?;
+        // The book takes this park's admissions in place, not a copy of
+        // every admission so far: a commit that does not land takes them
+        // out again, so each park's work is its own (FIG-7585).
+        let (calls, admitted, mut booked) = {
+            let mut book = self
+                .book
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let booked = Booked {
+                book: &self.book,
+                added: Some(
+                    requests
+                        .requested
+                        .iter()
+                        .filter(|requested| book.get(&requested.identity).is_none())
+                        .map(|requested| requested.identity.clone())
+                        .collect(),
+                ),
+            };
+            let (calls, admitted) = self.admit_requests(
+                &mut tx,
+                &mut staging,
+                &mut book,
+                &mut ledger,
+                requests,
+                Some(RunFingerprint {
+                    document,
+                    closure: closure.reference(),
+                }),
+            )?;
+            (calls, admitted, booked)
+        };
         for (effect, delivery) in delivered {
             tx.write(DomainWrite::EffectAdmission(
                 EffectAdmissionWrite::Deliver {
@@ -892,7 +908,11 @@ impl DurableSnapshotStore {
             owed,
             requirements,
         };
-        let update = members.prepare_update(&tx).await.map_err(refused)?;
+        let horizon = RunSeq(ledger.oldest_reachable());
+        let update = members
+            .prepare_update(&tx, Some(horizon))
+            .await
+            .map_err(refused)?;
         let committed = match self.cx.commit_owing(tx, label, &owing).await {
             Ok(committed) => committed,
             Err(error) => {
@@ -900,6 +920,7 @@ impl DurableSnapshotStore {
                 return Err(error.into());
             }
         };
+        booked.keep();
         members.apply_update(update).map_err(refused)?;
         if let Some(response) = response {
             response.committed(label);
@@ -912,10 +933,6 @@ impl DurableSnapshotStore {
                 .map(|call| (call.call.clone(), call.admission))
                 .collect::<Vec<_>>(),
         );
-        *self
-            .book
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
         if admits && !admitted.is_empty() && !stopped {
             members.admitted(&admitted).map_err(refused)?;
         }
@@ -923,6 +940,30 @@ impl DurableSnapshotStore {
             return Ok(Journaled::Stopped);
         }
         Ok(Journaled::Committed(ledger))
+    }
+}
+
+/// The admissions one in-turn park added to its execution's book: unless
+/// its commit lands ([`keep`](Self::keep)), they leave the book again.
+struct Booked<'a> {
+    book: &'a std::sync::Mutex<super::graph::AdmissionBook>,
+    added: Option<Vec<EffectId>>,
+}
+
+impl Booked<'_> {
+    fn keep(&mut self) {
+        self.added = None;
+    }
+}
+
+impl Drop for Booked<'_> {
+    fn drop(&mut self) {
+        if let Some(added) = self.added.take() {
+            self.book
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .forget(&added);
+        }
     }
 }
 
@@ -1295,7 +1336,7 @@ impl DurableSnapshotStore {
         pages: &SharedPages,
         published: (NodeId, CommitId),
     ) -> Result<lash_durable::ActorCommit, QuietPointRefusal> {
-        let update = members.prepare_update(&tx).await.map_err(refused)?;
+        let update = members.prepare_update(&tx, None).await.map_err(refused)?;
         *self
             .latest
             .lock()
@@ -1537,6 +1578,12 @@ impl DurableSnapshotStore {
             }))
             .collect()
     }
+    /// Read the owner's records from the store again: a run that starts
+    /// again follows records its commits left out of the cache.
+    pub async fn reload_records(&self) {
+        self.members.lock().await.forget();
+    }
+
     /// Observe the saved cancellation decisions and signal their bodies before
     /// the guest is allowed to run its cleanup stretch.
     pub async fn apply_cancellations(&self) -> Result<(), QuietPointRefusal> {

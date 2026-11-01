@@ -136,9 +136,15 @@ impl Members {
         self.rows = None;
     }
 
+    /// The update `tx` makes to the cached records once it commits. Records
+    /// before `horizon`, the oldest run the host still stands on, leave the
+    /// cache though the store keeps them: an in-turn cell's journal
+    /// (FIG-7585), which only a run that starts again reads, from the
+    /// store. Each commit then folds what is open, not the turn so far.
     pub(crate) async fn prepare_update(
         &mut self,
         tx: &lash_durable::ActorTx,
+        horizon: Option<RunSeq>,
     ) -> Result<Option<MemberUpdate>, Undriven> {
         use lash_durable::domain::{DomainWrite, RunFactWrite, WaitLifecycle, WaitRow, WaitWrite};
         let mut appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
@@ -154,7 +160,8 @@ impl Members {
                 }
                 _ => None,
             })
-            .max();
+            .max()
+            .max(horizon);
         if appended.is_empty() && before.is_none() {
             return Ok(None);
         }
