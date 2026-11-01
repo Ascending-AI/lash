@@ -1,5 +1,6 @@
 //! The source frontier, resource admission and semantic journal share one commit.
 mod binding;
+mod calling;
 mod cell;
 mod closure;
 mod end;

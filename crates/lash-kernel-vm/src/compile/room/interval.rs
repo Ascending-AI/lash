@@ -41,6 +41,7 @@ impl Linear {
     }
 }
 pub(super) struct PublicationSite {
+    pub(super) borrowed_inputs: bool,
     pub(super) assignment: Option<lash_kernel_value::Name>,
     pub(super) member: bool,
     pub(super) field: Option<Arc<str>>,
@@ -80,6 +81,8 @@ impl Step {
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
         }
         let publication = PublicationSite {
+            borrowed_inputs: event.point.phase == Phase::Enter
+                && matches!(node, doc::Node::Expr(doc::Expr::Act(_))),
             assignment: match node {
                 doc::Node::Stmt(doc::Stmt::Assign {
                     place: doc::Place::Variable(name),

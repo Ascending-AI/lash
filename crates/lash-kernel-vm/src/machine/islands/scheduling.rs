@@ -325,6 +325,7 @@ impl KernelMachine {
             .nested
             .get(act.ix())
             .ok_or_else(|| fault("a nested op names no resume entry"))?;
+        let argument_range = args;
         let count = args.len as usize;
         let args = args.start.0 as usize;
         let site = &entry.site;
@@ -335,7 +336,13 @@ impl KernelMachine {
         match &entry.kind {
             NestedKind::Call(callee) => {
                 if !library {
-                    self.enter(task, host, site, entry.occurrence)?;
+                    if let Some(occurrence) =
+                        self.publish_source_call_enter(running, entry, argument_range)?
+                    {
+                        self.observe_entry(task, host, site, occurrence)?;
+                    } else {
+                        self.enter(task, host, site, entry.occurrence)?;
+                    }
                 }
                 let (target, at) = self.nested_target(exe, callee, args)?;
                 let count = count - (at - args);

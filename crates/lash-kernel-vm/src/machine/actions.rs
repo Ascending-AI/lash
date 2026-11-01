@@ -263,6 +263,16 @@ impl KernelMachine {
         index: usize,
     ) -> Result<(), Halt> {
         let occurrence = self.task(task)?.counters.advance(index)?;
+        self.observe_entry(task, host, site, occurrence)
+    }
+
+    pub(in crate::machine) fn observe_entry(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        site: &Site,
+        occurrence: u64,
+    ) -> Result<(), Halt> {
         if host.observes_sites() {
             let identity = self.action_location(task, site, occurrence)?;
             host.enter_site(&identity);

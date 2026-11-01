@@ -541,6 +541,31 @@ impl EventContext<'_> {
         let root = |owner: &Owner| slots.root(owner, occurrence.task, occurrence.invocation);
         let mut reads = BTreeSet::new();
         let mut writes = BTreeSet::new();
+        if site.borrowed_inputs {
+            let expected: BTreeSet<_> = event
+                .inputs
+                .iter()
+                .map(|owner| root(owner).ok_or(Refused::Source))
+                .collect::<Result<_, _>>()?;
+            let borrowed: BTreeSet<_> = actual.borrowed.iter().copied().collect();
+            return if borrowed == expected
+                && borrowed.len() == actual.borrowed.len()
+                && actual.inputs.is_empty()
+                && actual.outputs.is_empty()
+                && actual.member.is_none()
+                && actual.entities.is_empty()
+                && actual.frame.is_none()
+                && actual.scratch.is_empty()
+                && actual.native.is_none()
+            {
+                Ok(())
+            } else {
+                Err(Refused::Retained)
+            };
+        }
+        if !actual.borrowed.is_empty() {
+            return Err(Refused::Retained);
+        }
         for owner in &event.inputs {
             if let Some(owner) = root(owner) {
                 reads.insert(owner);

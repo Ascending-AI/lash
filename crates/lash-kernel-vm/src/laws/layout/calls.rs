@@ -237,6 +237,7 @@ fn observe_source_or_register(
     let members = crate::machine::islands::witness::member_publications();
     let removals = crate::machine::islands::witness::list_removal_publications();
     let table_members = crate::machine::islands::witness::table_member_publications();
+    let call_enters = crate::machine::islands::witness::call_enters();
     let precise_returns = crate::machine::islands::witness::precise_returns();
     let try_scopes = crate::machine::islands::witness::precise_try_scopes();
     let try_reads = crate::machine::islands::witness::precise_try_reads();
@@ -543,6 +544,10 @@ fn observe_source_or_register(
         && bounds == super::super::embedder::ROOMY
         && source.contains(SOURCE_MEMBER)
     {
+        assert!(
+            call_enters > 0,
+            "nested call entry must preserve its borrowed source operands and publish its actual occurrence: {call_enters}"
+        );
         assert!(
             precise_returns > 0,
             "the precise callee return must transfer its actual operand and close the same source Invocation: {precise_returns}"

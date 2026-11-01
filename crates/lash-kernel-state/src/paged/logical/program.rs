@@ -238,6 +238,8 @@ pub enum ScratchEvent {
 pub struct JournalEvent {
     /// The bound input-evaluated native event schedule, when preparing an exact native exit.
     pub native: Option<lash_kernel_doc::NativeResourceContract>,
+    /// Existing owners observed without transfer by this event.
+    pub borrowed: Vec<Owner>,
     pub inputs: Vec<Owner>,
     pub outputs: Vec<(Owner, PublicationValue)>,
     pub member: Option<MemberEdit>,
@@ -248,6 +250,7 @@ pub struct JournalEvent {
 impl JournalEvent {
     fn same(&self, other: &Self) -> bool {
         self.native == other.native
+            && self.borrowed == other.borrowed
             && self.inputs == other.inputs
             && self.frame == other.frame
             && self.scratch == other.scratch
@@ -476,6 +479,16 @@ impl EvaluatedProgram {
                         inputs.extend(draft.invocation_owners(&frame, access)?);
                         if outputs.iter().any(|(owner,_)|matches!(owner,Owner::Frame {task:t,invocation:i}|Owner::Value {task:t,invocation:i,..} if *t==task&&*i==invocation)) { return Err(invalid("leaving frame retains its owner").into()); }
                     }
+                }
+            }
+            let mut borrowed = BTreeSet::new();
+            for owner in &event.borrowed {
+                if !borrowed.insert(*owner)
+                    || inputs.contains(owner)
+                    || outputs.iter().any(|(output, _)| output == owner)
+                    || draft.holding(*owner, access)?.is_none()
+                {
+                    return Err(invalid("borrowed source input is absent or edited").into());
                 }
             }
             let mut headers = Vec::new();

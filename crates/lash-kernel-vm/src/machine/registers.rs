@@ -449,6 +449,32 @@ impl Registers {
         Ok(())
     }
 
+    /// Pin the actual nested opcode argument bank while its source entry only
+    /// observes the operands. The following callee transfer still owns them.
+    pub(super) fn prepare_source_arguments(
+        &mut self,
+        range: lash_kernel_exec::RegRange,
+    ) -> Result<Option<PreparedInputs<'_>>, HeapFault> {
+        let mut inputs = Vec::new();
+        inputs
+            .try_reserve(range.len as usize)
+            .map_err(|_| HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })?;
+        for index in 0..range.len {
+            let Some(input) =
+                self.checked_source_transfer(lash_kernel_exec::Reg(range.start.0 + index))?
+            else {
+                return Ok(None);
+            };
+            inputs.push(input);
+        }
+        Ok(Some(PreparedInputs {
+            registers: self,
+            inputs,
+        }))
+    }
+
     pub(super) fn prepare_source_inputs(
         &mut self,
         stream: &crate::compile::Stream,
