@@ -1,4 +1,5 @@
 //! Values owned by source occurrences, independent of register mirrors.
+mod resume;
 use crate::compile::{Stmt, Stream};
 use crate::machine::logical_held::{BankRoots, Held, Projection};
 use lash_kernel_doc::{Value, heap::HeapFault};

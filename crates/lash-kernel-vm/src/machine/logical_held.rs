@@ -125,6 +125,14 @@ impl KernelMachine {
         stmt: &Stmt,
         pc: u32,
     ) -> Result<(), super::Halt> {
+        let invocation = self.frame(task)?.invocation;
+        let store = self.logical.ledger();
+        if self
+            .regs
+            .begin_source_resume(task, invocation, &stmt.site, pc, &store.borrow())?
+        {
+            return Ok(());
+        }
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
         self.logical_flush()?;

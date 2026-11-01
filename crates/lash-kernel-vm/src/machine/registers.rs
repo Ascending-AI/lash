@@ -1,7 +1,9 @@
 //! Initialized scratch survives a statement; its logical values do not.
 use std::ops::Index;
 use std::slice::SliceIndex;
+mod resume;
 mod source;
+pub(super) use resume::{ResumeAt, ResumeValue};
 
 use super::logical_held::{Held, Projection};
 use lash_kernel_doc::{Value, heap::HeapFault};
@@ -216,6 +218,7 @@ pub(super) struct Registers {
     kill: usize,
     owns_values: bool,
     source: source::Operands,
+    ready: Option<resume::Ready>,
     #[cfg(test)]
     pub(super) initializations: usize,
 }
@@ -304,6 +307,7 @@ impl Registers {
         })
     }
     pub(super) fn source_context(&mut self, roots: Option<super::logical_held::BankRoots>) {
+        self.ready = None;
         self.source.context(roots);
     }
     pub(super) fn source_entry_roots(
@@ -329,6 +333,7 @@ impl Registers {
     /// Releases the prepared set at every exit of its statement's step.
     #[inline]
     pub(super) fn kill_statement(&mut self) {
+        self.ready = None;
         self.source.clear();
         let end = std::mem::take(&mut self.kill).min(self.extent);
         #[cfg(any(test, feature = "perf-witness"))]
@@ -412,6 +417,7 @@ impl Registers {
     }
 
     pub(super) fn clear(&mut self) {
+        self.ready = None;
         self.source.clear();
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::record(|work| work.register_slots_cleared += self.extent as u64);
@@ -695,6 +701,7 @@ impl From<Vec<Value>> for Registers {
             kill: 0,
             owns_values,
             source: source::Operands::default(),
+            ready: None,
             #[cfg(test)]
             initializations: 0,
         }

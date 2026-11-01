@@ -151,6 +151,7 @@ impl KernelMachine {
         let gate = self.gate(task, host.observes_sites())?;
         let suffix = Some(super::ActionSuffix {
             stmt: running.id,
+            source_pc: pc as u32,
             after,
             defer,
         });

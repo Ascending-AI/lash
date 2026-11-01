@@ -1459,6 +1459,16 @@ impl KernelMachine {
         value: Value,
         origin: ResultOrigin,
     ) -> Eval<(StmtId, Ran)> {
+        if matches!(origin, ResultOrigin::Returned)
+            && let Some((id, pc)) = self.publish_source_call_resume(task, exe, value)?
+        {
+            let running = Running::new(task, exe, id);
+            let ran = match self.register_action_suffix(host, &running, pc as usize)? {
+                Some(ran) => ran,
+                None => self.run(host, &running, pc as usize)?,
+            };
+            return Ok((id, ran));
+        }
         self.logical.replace(
             lash_kernel_state::kernel_internals::logical::Owner::Incoming(task),
             None,

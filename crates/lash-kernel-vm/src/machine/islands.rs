@@ -1576,6 +1576,7 @@ fn record(tape: &ChargeTape, stream: &Stream, region: u32) {
 /// Validated source coordinates and evaluated operands of a paid action.
 struct ActionSuffix {
     stmt: StmtId,
+    source_pc: u32,
     after: usize,
     defer: bool,
 }

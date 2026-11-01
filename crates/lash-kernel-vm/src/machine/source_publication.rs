@@ -16,6 +16,7 @@ mod native;
 pub(in crate::machine) mod native_storage;
 mod occurrence;
 mod read;
+mod resuming;
 pub(in crate::machine) mod return_storage;
 mod returning;
 use occurrence::source_loops;

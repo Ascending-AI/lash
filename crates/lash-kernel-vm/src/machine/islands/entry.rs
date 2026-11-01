@@ -1089,6 +1089,13 @@ impl KernelMachine {
         };
         let defer = suffix.as_ref().is_some_and(|suffix| suffix.defer);
         if let Some(suffix) = suffix {
+            self.regs.transfer_source_resume(
+                task,
+                frame.invocation,
+                &exe.stmt(suffix.stmt).site,
+                suffix.source_pc,
+                &self.logical.ledger().borrow(),
+            )?;
             executor.action_suffix(&mut active, &suffix, &self.regs);
         }
         let ran = executor.execute(&mut active);
