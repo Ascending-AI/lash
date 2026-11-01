@@ -852,7 +852,7 @@ fn usage_session() -> SessionId {
 /// the compaction threshold, cut at every label, commits that call's prompt
 /// and total usage. The next turn's pressure hook compacts, and a pass that
 /// resumes the turn after the commit of its model response, which its
-/// cell's first save carries (`model.done+cell.snapshot+admit`, FIG-6000),
+/// cell's first save carries (`model.done+cell.admit`, FIG-6000),
 /// keeps the usage its checkpoint carries.
 #[tokio::test]
 async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {

@@ -221,13 +221,13 @@ fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()>
         ("model.answer", 2),
         ("turn.commit", 1),
     ]);
-    expected.insert("model.done+cell.snapshot+admit", 1);
+    expected.insert("model.done+cell.admit", 1);
     let admissions = match variant {
         Variant::Recorded | Variant::Read => READS - 1,
         Variant::Mixed => 2,
     };
     if admissions > 0 {
-        expected.insert("cell.snapshot+admit", admissions);
+        expected.insert("cell.admit", admissions);
     }
     let mut expected_facts = BTreeMap::from([("cell_report".to_owned(), 1)]);
     if recorded > 0 {
@@ -524,7 +524,7 @@ async fn measure_with_stores(
         let plan = if matches!(variant, Variant::Read | Variant::Mixed) {
             transactions
                 .iter()
-                .find(|tx| tx.label == "model.done+cell.snapshot+admit")
+                .find(|tx| tx.label == "model.done+cell.admit")
         } else {
             None
         };

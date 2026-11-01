@@ -64,17 +64,14 @@ async fn a_cell_settles_every_scripted_await_and_reports_each_park() {
         .iter()
         .map(|block| block["label"].as_str().unwrap().to_owned())
         .collect();
-    let mut parks = vec!["cell.snapshot+admit".to_owned(); 10];
-    parks[0] = "model.done+cell.snapshot+admit".to_owned();
+    let mut parks = vec!["cell.admit".to_owned(); 10];
+    parks[0] = "model.done+cell.admit".to_owned();
     assert_eq!(labels, parks);
     let batches = records(dir.path(), "batch").unwrap();
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0]["transactions"]["round.outcome"], 10);
-    assert_eq!(
-        batches[0]["transactions"]["model.done+cell.snapshot+admit"],
-        1
-    );
-    assert_eq!(batches[0]["transactions"]["cell.snapshot+admit"], 9);
+    assert_eq!(batches[0]["transactions"]["model.done+cell.admit"], 1);
+    assert_eq!(batches[0]["transactions"]["cell.admit"], 9);
     let summaries = records(dir.path(), "summary").unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0]["blocks"], 10);

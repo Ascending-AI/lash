@@ -11,7 +11,7 @@
 //!
 //! A [`TurnScript::Cell`] session's cell reaches its first save within its
 //! first slice, so that save commits the model response that asked for the
-//! cell (`model.done+cell.snapshot+admit`, FIG-6000). Its call races a sleep
+//! cell (`model.done+cell.admit`, FIG-6000). Its call races a sleep
 //! longer than the matrix horizon: the call wins, leaving the sleep pending,
 //! so its end must commit on its own (`cell.snapshot`). A [`TurnScript::CellKilled`]
 //! session's cell first computes past its slice, so the response commits on

@@ -285,7 +285,7 @@ fn sleep_cancel_decision(
 
 /// A stale-epoch cut at the cell's first save, which commits the model
 /// response that asked for it with the call's admission
-/// (`model.done+cell.snapshot+admit`, FIG-6000), runs no body on the old
+/// (`model.done+cell.admit`, FIG-6000), runs no body on the old
 /// owner: its admission commits, its node pauses past its lease, and the new owner
 /// restores from the snapshot and settles the started `Once` `Interrupted`.
 /// The old owner's acknowledged admission reaches it only past its

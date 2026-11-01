@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 /// checkpoint that re-delivers the cell, its run changes and the model
 /// call's settlement), handed to the cell's executor so its first save
 /// commits them in the same transaction, as
-/// `model.done+cell.snapshot+admit`.
+/// `model.done+cell.admit`.
 ///
 /// The hold is bounded: it lasts while a worker is ready and the machine
 /// runs its first slice. A cell that must wait for a worker, or whose first

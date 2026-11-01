@@ -581,7 +581,7 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
 /// FIG-7084 / FIG-7314: five sequential code calls share root-lease commits
 /// with checkpoints and acquire all seven execution package holds together.
 /// Warm turn: admission + model.start 1, model.answer 1,
-/// model.done+cell.snapshot+admit 1, cell.snapshot+admit 5, round.outcome 6,
+/// model.done+cell.admit 1, cell.snapshot+admit 5, round.outcome 6,
 /// turn.commit 1, pages.lease 2, package batch 1, ingress 1: exactly 19 commits.
 /// The session reader's two standalone lease commits remain pinned separately.
 /// Labeled pruning, reap and heartbeat work belongs to maintenance, not this

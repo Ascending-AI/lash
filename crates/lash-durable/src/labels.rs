@@ -121,11 +121,6 @@ impl CommitLabel {
     // VM (V0, then L7).
     /// `cell.snapshot+admit`: A snapshot, its broker ledger and the admission of the operations it issued.
     pub const CELL_SNAPSHOT_ADMIT: Self = Self::new("cell.snapshot+admit");
-    /// `model.done+cell.snapshot+admit`: A model response and the first
-    /// snapshot of the cell it asked for, with its ledger and admissions,
-    /// fused (FIG-6000). A cell that reads saves its start first, admitting
-    /// nothing (ADR 0144).
-    pub const MODEL_DONE_CELL_SNAPSHOT_ADMIT: Self = Self::new("model.done+cell.snapshot+admit");
     /// `cell.admit`: An in-turn cell's park: the admission of the
     /// operations it issued, its cancel decisions, and the reads and
     /// deliveries since its last commit, with no state (FIG-7585).
@@ -193,7 +188,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 54] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -234,7 +229,6 @@ impl CommitLabel {
         Self::PROCESS_TERMINAL,
         Self::CASCADE_BATCH,
         Self::CELL_SNAPSHOT_ADMIT,
-        Self::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
         Self::CELL_ADMIT,
         Self::MODEL_DONE_CELL_ADMIT,
         Self::CELL_INJECT,

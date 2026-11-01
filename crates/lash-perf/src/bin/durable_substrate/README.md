@@ -166,7 +166,7 @@ successful appends before terminal pruning, not rows left at the end. Installed
 bytes count actual new canonical graph payloads, including content deduplication;
 SQL metadata/index/WAL bytes are separate units and are not inferred. Worker
 pool counters give both IPC directions and bytes. The first read-plan commit
-is timed separately; its `model.done+cell.snapshot+admit` receipt also includes
+is timed separately; its `model.done+cell.admit` receipt also includes
 the fused model response and initial snapshot, so it is not an estimate of an
 exclusive plan CPU cost. Trace admission/export uses the production OpenTelemetry
 adapter with a local in-memory exporter and omitted content.

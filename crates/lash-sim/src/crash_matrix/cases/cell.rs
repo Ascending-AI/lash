@@ -2,7 +2,7 @@
 //! whose model writes a TypeScript cell that calls the `Once` tool
 //! `ext_write`, raced against a sleep longer than the matrix horizon; the
 //! cell snapshots with the model response that asked for it and both
-//! admissions (`model.done+cell.snapshot+admit`,
+//! admissions (`model.done+cell.admit`,
 //! FIG-6000), the body runs, its outcome
 //! commits (`round.outcome`), the cell finishes from its snapshot with the
 //! sleep still pending, and its end commits on its own (`cell.snapshot`).

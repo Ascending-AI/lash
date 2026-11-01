@@ -41,8 +41,8 @@ pub use run::{
 pub use state::EndRecord;
 pub use store::{
     AdmitAs, AdmittedCall, Checkpoint, EFFECT_CANCELLED, EFFECT_FAILED, EFFECT_INTERRUPTED,
-    EFFECT_RESULT, EFFECT_TIMED_OUT, EffectAdmission, EndSave, FirstPark, HostParts, OutcomeOf,
-    ParkSave, ParkedState, RootRead, Saved, SealedPark, Settled, outcome_of,
+    EFFECT_RESULT, EFFECT_TIMED_OUT, EffectAdmission, EndSave, HostParts, OutcomeOf, ParkSave,
+    ParkedState, RootRead, Saved, SealedPark, Settled, outcome_of,
 };
 pub use value::{
     InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_from_json_with_limits,

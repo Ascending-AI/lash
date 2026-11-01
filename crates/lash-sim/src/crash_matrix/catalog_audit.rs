@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 55] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 54] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -163,13 +163,6 @@ pub const COVERAGE: [(CommitLabel, Coverage); 55] = [
     (
         CommitLabel::CELL_SNAPSHOT_ADMIT,
         Coverage::Cases(&[Case::Process]),
-    ),
-    (
-        CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-        Coverage::Unemitted(
-            "a held response rides only an in-turn cell's first park, which journals \
-             (`DurableSnapshotStore::commit_journaled`)",
-        ),
     ),
     (
         CommitLabel::CELL_ADMIT,

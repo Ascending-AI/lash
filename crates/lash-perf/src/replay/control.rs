@@ -488,7 +488,7 @@ pub fn run(args: &Args) -> Result<()> {
         durability: serde_json::json!({
             "settings": format!("{:?}", lash_durable::DurableSettings::standard()),
             "sqlite_options": format!("{:?}", lash_sqlite_store::StoreOptions::standard(lash::sqlite::SqliteSynchronous::Full)),
-            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.snapshot+admit (admission writes x_start; model.answer retains the paid response, with no resend)",
+            "execution_policy": "Once", "owner_crash": "SIGKILL after committed round.outcome; k=floor(N/2); k=0 before first cell admission, including model.done+cell.admit (admission writes x_start; model.answer retains the paid response, with no resend)",
         }),
         repeat_count: args.repeats,
         n: args.n.clone(),

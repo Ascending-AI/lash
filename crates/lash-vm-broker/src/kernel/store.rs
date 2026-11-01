@@ -222,19 +222,6 @@ pub struct Saved {
     pub ledger: EffectLedger,
 }
 
-/// How a run's first save that carried its turn's held model response
-/// ended (FIG-6000).
-#[derive(Debug)]
-pub enum FirstPark {
-    /// The save committed with the response.
-    Saved(Saved),
-    /// The turn accepted an `Immediate` cancel (or its session's close)
-    /// before the save: either the save's open read it, and nothing
-    /// committed, or the commit read it under its fence, and nothing it
-    /// admitted starts. The turn stops on the cell.
-    Stopped,
-}
-
 /// A run's state at its latest park, as a machine resumes from it.
 #[derive(Clone, Debug)]
 pub struct ParkedState {
@@ -386,8 +373,6 @@ enum SavePhase<'a> {
     Parked {
         state: SealedPark,
         closure: &'a Closure,
-        /// The model response a fresh run's first park commits (FIG-6000).
-        response: Option<&'a lash_core_execution::HeldResponse>,
     },
     Ended {
         end: End,
@@ -442,14 +427,6 @@ fn ledger_of(
     }
     EffectLedger::restored(pending, cancelling, membership.next_park, membership.growth)
         .map_err(refused)
-}
-
-/// The save a commit that carried no held response made.
-fn saved(park: FirstPark) -> Result<Saved, QuietPointRefusal> {
-    match park {
-        FirstPark::Saved(saved) => Ok(saved),
-        FirstPark::Stopped => Err(refused("a save that carries no response stopped")),
-    }
 }
 
 fn staging() -> GraphStaging {
@@ -950,34 +927,14 @@ impl DurableSnapshotStore {
         save: ParkSave<'_>,
         host: &dyn KernelEffects,
     ) -> Result<Saved, QuietPointRefusal> {
-        self.commit_parked(save, host, None).await.and_then(saved)
-    }
-
-    /// Commit `save`, a fresh run's first park, with the model response
-    /// its turn holds for it (FIG-6000), in one transaction labelled
-    /// `model.done+cell.snapshot+admit`. The save's open reads the turn's
-    /// accepted cancel: an `Immediate` one, or the session's close, stops
-    /// the cell with nothing committed. One its commit reads under its
-    /// fence leaves the save committed and starts nothing it admitted.
-    ///
-    /// # Errors
-    ///
-    /// As [`commit_park`](Self::commit_park); the response stays held.
-    pub async fn commit_first_park(
-        &self,
-        save: ParkSave<'_>,
-        host: &dyn KernelEffects,
-        response: &lash_core_execution::HeldResponse,
-    ) -> Result<FirstPark, QuietPointRefusal> {
-        self.commit_parked(save, host, Some(response)).await
+        self.commit_parked(save, host).await
     }
 
     async fn commit_parked(
         &self,
         save: ParkSave<'_>,
         host: &dyn KernelEffects,
-        response: Option<&lash_core_execution::HeldResponse>,
-    ) -> Result<FirstPark, QuietPointRefusal> {
+    ) -> Result<Saved, QuietPointRefusal> {
         let ParkSave {
             document,
             state,
@@ -992,11 +949,7 @@ impl DurableSnapshotStore {
             host,
             &document,
             ledger,
-            SavePhase::Parked {
-                state,
-                closure,
-                response,
-            },
+            SavePhase::Parked { state, closure },
             (pages, carried),
             admit,
             with,
@@ -1029,7 +982,6 @@ impl DurableSnapshotStore {
             save.with,
         )
         .await
-        .and_then(saved)
     }
 
     /// The root the execution's row holds, if any.
@@ -1055,12 +1007,10 @@ impl DurableSnapshotStore {
         (pages, carried): (&SharedPages, &[Closure]),
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
-    ) -> Result<FirstPark, QuietPointRefusal> {
-        let (response, own) = match &phase {
-            SavePhase::Parked {
-                response, closure, ..
-            } => (*response, Some(closure.reference())),
-            SavePhase::Ended { .. } => (None, None),
+    ) -> Result<Saved, QuietPointRefusal> {
+        let own = match &phase {
+            SavePhase::Parked { closure, .. } => Some(closure.reference()),
+            SavePhase::Ended { .. } => None,
         };
         let mut members = self.members.lock().await;
         if matches!(phase, SavePhase::Ended { .. }) {
@@ -1106,17 +1056,6 @@ impl DurableSnapshotStore {
         // Guest state and target identities commit together. No cleanup body
         // can be entered until the owner observes these decisions committed.
         self.cancel_in(&mut tx, &mut members, &ledger).await?;
-        // The response the turn held commits first, as `model.done` would
-        // have, in this transaction: unless the turn stops at once.
-        if let Some(response) = response {
-            if response.stops_at(&tx) {
-                return Ok(FirstPark::Stopped);
-            }
-            let held = response
-                .writes()
-                .ok_or_else(|| refused("a first save carries a response its turn holds"))?;
-            tx.append(held)?;
-        }
         // A sleep is a timer wait of the run's scope, pinned with the park
         // that admits it: the owner that holds only sleeps releases until
         // the earliest, and the scope's end revokes them.
@@ -1291,47 +1230,35 @@ impl DurableSnapshotStore {
             tx.require(read);
         }
         tx.write(write);
-        let label = if response.is_some() {
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT
-        } else if admitted.is_empty() {
+        let label = if admitted.is_empty() {
             CommitLabel::CELL_SNAPSHOT
         } else {
             CommitLabel::CELL_SNAPSHOT_ADMIT
         };
-        let committed = self
-            .commit_candidate(
-                tx,
-                CandidatePublication {
-                    owner: CandidateOwner::ExecRootPut(self.exec.clone()),
-                    manifest,
-                },
-                label,
-                &owing,
-                &mut members,
-                pages,
-                (root, commit),
-            )
-            .await?;
-        // What the cell published while the response was held is
-        // published now, before anything it admitted starts.
-        if let Some(response) = response {
-            response.committed(label);
-        }
-        let stopped = response.is_some_and(|response| response.stops_in(&committed));
+        self.commit_candidate(
+            tx,
+            CandidatePublication {
+                owner: CandidateOwner::ExecRootPut(self.exec.clone()),
+                manifest,
+            },
+            label,
+            &owing,
+            &mut members,
+            pages,
+            (root, commit),
+        )
+        .await?;
         host.host_committed();
         *self
             .book
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = book;
-        if !admitted.is_empty() && !stopped {
+        if !admitted.is_empty() {
             members.admitted(&admitted).map_err(refused)?;
         }
         let rev = SnapshotRev(expected.map_or(1, |held| held.rev.0 + 1));
         *self.held() = Some(Some(HeldRoot { rev, root }));
-        if stopped {
-            return Ok(FirstPark::Stopped);
-        }
-        Ok(FirstPark::Saved(Saved { rev, root, ledger }))
+        Ok(Saved { rev, root, ledger })
     }
 
     /// Commits `tx` with `candidate`, which publishes the execution's root

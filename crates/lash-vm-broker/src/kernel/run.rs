@@ -50,8 +50,8 @@ use super::pages::{
 };
 use super::state::{GraphStateFailure, checkpoint_header};
 use super::store::{
-    AdmitAs, AdmittedCall, CellJournal, Checkpoint, EffectAdmission, FirstPark, HostParts,
-    ParkSave, ParkedState, SealedPark,
+    AdmitAs, AdmittedCall, CellJournal, Checkpoint, EffectAdmission, HostParts, ParkSave,
+    ParkedState, SealedPark,
 };
 use crate::effects::{MemberDraft, ParentFault};
 use crate::identity::CodeCallIdentities;
@@ -703,17 +703,7 @@ impl KernelBroker<'_> {
                 admit: Vec::new(),
                 with: Vec::new(),
             };
-            let committed = match self.commit_save(save, &mut held).await? {
-                Ok(committed) => committed,
-                Err(response) => {
-                    if let Some(stopped) = machine.take() {
-                        stopped.release().await?;
-                    }
-                    self.end_activation(activation).await;
-                    response.stop();
-                    return std::future::pending().await;
-                }
-            };
+            let committed = self.store.commit_park(save, self.effects).await?;
             saved = true;
             ledger = committed.ledger;
             resting = Some(self.resting(committed.root, state, &ledger)?);
@@ -869,28 +859,6 @@ impl KernelBroker<'_> {
             root: state.root,
             header: state.header,
             admissions: self.store.admitted_waits(ledger)?,
-        })
-    }
-
-    /// Commits `save`, with the response the turn still holds for the run
-    /// when it holds one. `Err` is that response, when the turn's cancel
-    /// stopped the cell at this, its first save.
-    async fn commit_save<'h>(
-        &self,
-        save: ParkSave<'_>,
-        held: &mut Option<&'h lash_core_execution::HeldResponse>,
-    ) -> Result<Result<super::store::Saved, &'h lash_core_execution::HeldResponse>, KernelFailure>
-    {
-        Ok(match held.take() {
-            Some(response) => match self
-                .store
-                .commit_first_park(save, self.effects, response)
-                .await?
-            {
-                FirstPark::Saved(saved) => Ok(saved),
-                FirstPark::Stopped => Err(response),
-            },
-            None => Ok(self.store.commit_park(save, self.effects).await?),
         })
     }
 
@@ -1169,23 +1137,11 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
                 admit,
                 with: Vec::new(),
             };
-            let committed = match self.broker.commit_save(save, &mut self.held).await? {
-                Ok(committed) => committed,
-                // The turn's cancel stopped the cell at its first save:
-                // nothing it admitted starts, and the turn, which drops
-                // this run, stops where it would have before the cell
-                // started.
-                Err(response) => {
-                    if let Some(stopped) = self.machine.take() {
-                        stopped.release().await?;
-                    }
-                    if let Ok(store) = self.broker.store.context().pages() {
-                        end_activation(store.as_ref(), &self.activation.pages).await;
-                    }
-                    response.stop();
-                    return std::future::pending().await;
-                }
-            };
+            let committed = self
+                .broker
+                .store
+                .commit_park(save, self.broker.effects)
+                .await?;
             self.saved = true;
             self.ledger = committed.ledger;
             self.resting = Some(self.broker.resting(committed.root, state, &self.ledger)?);
