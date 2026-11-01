@@ -87,6 +87,24 @@ fn probes(
         ),
     ));
     probes.push((
+        "deep.guard",
+        register(
+            "deep.guard",
+            "n: Any",
+            String::new(),
+            "try { let saved = n return saved } catch e { return 0 } return 0",
+        ),
+    ));
+    probes.push((
+        "deep.rescue",
+        register(
+            "deep.rescue",
+            "n: Any",
+            String::new(),
+            "try { throw 1 } catch e { let saved = n return saved } return 0",
+        ),
+    ));
+    probes.push((
         "deep.branch",
         register(
             "deep.branch",
@@ -232,15 +250,17 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
                 vec![int(7)]
             })
         );
-        if name == "deep.branch" && source_only {
+        // A raise leaves the packet; the precise machine runs the catch.
+        let scoped = matches!(name, "deep.branch" | "deep.guard");
+        if (scoped && source_only) || name == "deep.rescue" {
             assert!(
                 crate::machine::islands::witness::precise_scoped_returns() > 0,
-                "the precise source must publish the same entered block suffix"
+                "the precise source must publish the same entered block suffix: {name}"
             );
-        } else if name == "deep.branch" {
+        } else if scoped {
             assert!(
                 crate::machine::islands::witness::packet_scoped_returns() > 0,
-                "the entered if block must leave through its accepted return suffix"
+                "the entered block must leave through its accepted return suffix: {name}"
             );
         }
 
@@ -253,7 +273,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         }
         (value, embedder.machine.meters(), tape.steps())
     };
-    for name in ["deep.branch", "deep.loop", "deep.walk"] {
+    for name in [
+        "deep.branch",
+        "deep.guard",
+        "deep.rescue",
+        "deep.loop",
+        "deep.walk",
+    ] {
         assert_eq!(
             scoped_observation(name, false),
             scoped_observation(name, true),

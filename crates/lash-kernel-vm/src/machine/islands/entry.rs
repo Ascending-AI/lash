@@ -1142,8 +1142,15 @@ impl KernelMachine {
                 // The register loop carried the return through every
                 // enclosing `try` and ran each `finally` once. The source
                 // owner only leaves the frame; its stale positions would
-                // run those cleanups again.
-                self.frame(task)?.control.clear();
+                // run those cleanups again. Packet reads published their
+                // operands before consumers that ran physically; the returned
+                // statement leaves none live under a refused completion fee.
+                let access = self.heap.pages().clone();
+                let frame = self.frame(task)?;
+                frame.control.clear();
+                if let Some(roots) = &frame.logical {
+                    roots.clear_operands(&access)?;
+                }
                 Ok(Some(super::super::Completion::Return(Box::new(value))))
             }
             Some(Ran::Exited(mut levels)) => {

@@ -233,6 +233,14 @@ impl KernelMachine {
         )
     }
 
+    /// Observes `units` an accepted source publication paid, as [`Self::charge`]
+    /// observes them.
+    pub(super) fn observe_paid(&self, units: u64) {
+        if let Some(observer) = self.observer.as_deref() {
+            observe_scheduled(observer, units);
+        }
+    }
+
     /// A verdict point with `bytes` about to be allocated: a native's
     /// reservation, or what it built beyond what it reserved. What the
     /// run holds and `bytes` that fit pass at once; otherwise the capacity

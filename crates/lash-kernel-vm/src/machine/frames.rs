@@ -1242,6 +1242,26 @@ impl Frames {
         Ok(Some(statement.as_ref().clone()))
     }
 
+    /// Whether the top frame's caller is charged code; `None` at a task root.
+    pub(super) fn caller_charging(&self) -> Result<Option<bool>, HeapFault> {
+        let Some(index) = self.len.checked_sub(2) else {
+            return Ok(None);
+        };
+        Ok(Some(self.exe.code(self.code_at(index)?).charging))
+    }
+
+    /// The code of the frame at `index`: resident, or resolved from its row.
+    fn code_at(&self, index: u64) -> Result<crate::compile::CodeId, HeapFault> {
+        match self.cache.iter().find(|(at, _)| *at == index) {
+            Some((_, frame)) => Ok(frame.code),
+            None => code_of(
+                &row(&self.rows, index, &self.access)?,
+                &self.exe,
+                &self.access,
+            ),
+        }
+    }
+
     /// The operation the guest called, where the top of the stack runs
     /// its body: the outermost of the uncharged library bodies above the
     /// topmost charged frame. A bound passed there is the operation's, as
@@ -1249,15 +1269,7 @@ impl Frames {
     pub(super) fn operation(&self) -> Result<Option<LibId>, HeapFault> {
         let mut operation = None;
         for index in (0..self.len).rev() {
-            let resident = self.cache.iter().find(|(at, _)| *at == index);
-            let code = match resident {
-                Some((_, frame)) => frame.code,
-                None => {
-                    let record = row(&self.rows, index, &self.access)?;
-                    code_of(&record, &self.exe, &self.access)?
-                }
-            };
-            let code = self.exe.code(code);
+            let code = self.exe.code(self.code_at(index)?);
             match (&code.site.unit, code.charged || !code.site.path.is_empty()) {
                 (Unit::Library(function), false) => operation = self.exe.lib_of(function),
                 _ => break,

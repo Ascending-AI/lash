@@ -178,7 +178,9 @@ impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
     /// completed. Entered loop bodies carry their actual occurrence; their
-    /// cursor/header prefix has completed. Cleanup needs its departure recipe.
+    /// cursor/header prefix has completed. A try without cleanup is left by
+    /// its entered body or catch block; an entered catch follows a raised body.
+    /// Cleanup needs its departure recipe.
     pub(crate) fn compile_return_suffix(
         &self,
         at: &Point,
@@ -197,6 +199,7 @@ impl Source {
         let mut choices = BTreeMap::new();
         let mut return_loops = Vec::new();
         let mut for_sites = std::collections::BTreeSet::new();
+        let mut raised = std::collections::BTreeSet::new();
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
@@ -212,7 +215,13 @@ impl Source {
                     return_loops.push(path.clone());
                     for_sites.insert(path.clone());
                 }
-                // Try regions need their actual pending departure recipe.
+                doc::Node::Stmt(doc::Stmt::Try(t)) if t.finally.is_none() && *index == 0 => {}
+                doc::Node::Stmt(doc::Stmt::Try(t))
+                    if t.finally.is_none() && t.catch.is_some() && *index == 1 =>
+                {
+                    raised.insert(path.clone());
+                }
+                // Cleanup regions need their actual pending departure recipe.
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -253,17 +262,32 @@ impl Source {
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
             for_sites: &'a std::collections::BTreeSet<Site>,
+            raised: &'a std::collections::BTreeSet<Site>,
             route: &'a [Selection],
             cursor: usize,
         }
         impl evaluate::Events for Suffix<'_> {
             fn completed(&mut self, site: &Site) -> Option<ExitKind> {
-                (!self.returning.path.starts_with(&site.path)).then_some(ExitKind::Normal)
+                if self.returning.path.starts_with(&site.path) {
+                    return None;
+                }
+                // The body of an entered catch has already raised.
+                Some(match site.path.split_last() {
+                    Some((0, parent))
+                        if self.raised.iter().any(|try_site| {
+                            try_site.unit == site.unit && try_site.path == parent
+                        }) =>
+                    {
+                        ExitKind::Raise
+                    }
+                    _ => ExitKind::Normal,
+                })
             }
             fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
                 if self.cursor == 0
                     && ((phase == Phase::Enter && self.blocks.contains(site))
                         || (phase == Phase::Test && self.choices.contains_key(site))
+                        || (phase == Phase::Catch && self.raised.contains(site))
                         || (self.for_sites.contains(site)
                             && matches!(
                                 phase,
@@ -293,6 +317,7 @@ impl Source {
             blocks: &blocks,
             choices: &choices,
             for_sites: &for_sites,
+            raised: &raised,
             route: &route,
             cursor: 0,
         };
@@ -300,7 +325,7 @@ impl Source {
             self,
             &self.site,
             &mut suffix,
-            route.len() + blocks.len() + choices.len() + 4 * for_sites.len(),
+            route.len() + blocks.len() + choices.len() + 4 * for_sites.len() + raised.len(),
         )?;
         if exit != ExitKind::Return || suffix.cursor != route.len() {
             return Err(Refused::Path);

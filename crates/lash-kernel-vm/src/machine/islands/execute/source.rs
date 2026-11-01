@@ -52,6 +52,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                             _ => false,
                         }
                 }
+                // A function with cleanup is excluded above; its suffix
+                // authenticates the entered body or catch block.
+                Position::Try {
+                    phase: Phase::Body | Phase::Catch,
+                    ..
+                } => true,
                 _ => false,
             })
         {

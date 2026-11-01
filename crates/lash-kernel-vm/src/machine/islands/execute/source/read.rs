@@ -153,16 +153,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement_id) = frame.state.statement else {
             return Ok(false);
         };
-        if frame
+        // Body and catch reads of a try without cleanup leave by their
+        // ordinary raise or block suffix; a pending departure needs its recipe.
+        if frame.state.control.iter().any(|control| match control {
+            Position::Try { phase, .. } => {
+                frame.state.callee.compiled.cleanups || matches!(phase, Phase::Finally(_))
+            }
+            _ => false,
+        }) || frame
             .state
-            .control
-            .iter()
-            .any(|control| matches!(control, Position::Try { .. }))
-            || frame
-                .state
-                .source
-                .as_ref()
-                .is_some_and(|source| source.cleaning.is_some())
+            .source
+            .as_ref()
+            .is_some_and(|source| source.cleaning.is_some())
         {
             return Ok(false);
         }

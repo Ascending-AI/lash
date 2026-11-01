@@ -34,6 +34,17 @@ impl KernelMachine {
                                 header: crate::machine::loops::Header::Body,
                                 ..
                             }
+                            | Control::Try { .. }
+                    )
+                })
+                // A try body or catch leaves through its block suffix.
+                || frame.control.iter().any(|control| {
+                    matches!(
+                        control,
+                        Control::Try {
+                            phase: crate::machine::TryPhase::Finally(_),
+                            ..
+                        }
                     )
                 })
                 || frame
@@ -90,6 +101,29 @@ impl KernelMachine {
         let Some((_, rhs)) = roles.iter().find(|(reg, _)| *reg == src) else {
             return Ok(None);
         };
+        // A library body's formula bills its charged caller. The accepted
+        // return pays it, so a refused fee leaves the invocation entered.
+        let metered = self.bounds.charge == crate::Charge::Exact;
+        let caller = self.task(running.task)?.frames.caller_charging()?;
+        let fee = match &self.frame(running.task)?.library {
+            Some(call) if caller.unwrap_or(metered) => Some((call.lib, call.args.clone())),
+            _ => None,
+        };
+        let fee = match fee {
+            Some((lib, args)) => {
+                // A failing formula leaves its refusal to the ordinary leave.
+                let plan = &running.exe.lib(lib).charge;
+                let value = self.regs[src.0 as usize];
+                let Ok(units) = self
+                    .warm_values(plan, &args, Some(&value))
+                    .and_then(|()| self.formula(plan, &args, Some(&value)))
+                else {
+                    return Ok(None);
+                };
+                Some((lib, units))
+            }
+            None => None,
+        };
         self.logical_flush_controls(running.task, running.exe)?;
         self.logical_flush()?;
         let Some(bank) = self.regs.prepare_source_return(src, rhs)? else {
@@ -102,7 +136,10 @@ impl KernelMachine {
         let mut arena = self.arena.borrow_mut();
         #[cfg(test)]
         let loop_ordinal = loops.last().map(|(_, ordinal)| *ordinal);
-        let Some(ReturnRecipe { prefix, program }) = (ReturnInput {
+        let Some(ReturnRecipe {
+            mut prefix,
+            program,
+        }) = (ReturnInput {
             source: &source,
             invocation: &invocation,
             task: running.task,
@@ -118,6 +155,7 @@ impl KernelMachine {
             return Ok(None);
         };
         drop(ledger);
+        prefix.allowance.units = fee.as_ref().map_or(0, |(_, units)| *units);
         let document = running
             .exe
             .instances
@@ -139,6 +177,7 @@ impl KernelMachine {
         #[cfg(test)]
         let scoped = frame.control.len() > 1;
         let logical = &mut frame.logical;
+        let library = &mut frame.library;
         let mut completion = None;
         let safe_point = self.charged;
         let published = Context {
@@ -153,7 +192,7 @@ impl KernelMachine {
             resources: SourceResources {
                 charged: &mut self.charged,
                 counters: &mut task.counters,
-                bound: if self.charging {
+                bound: if self.charging || fee.is_some() {
                     self.bounds.charge_limit
                 } else {
                     u64::MAX
@@ -176,9 +215,17 @@ impl KernelMachine {
                 debug_assert!(edits.is_empty());
                 bank.publish();
                 *logical = None;
+                if fee.is_some() {
+                    *library = None;
+                }
                 completion = Some(Completion::Return(result));
             },
         )?;
+        drop(arena);
+        if published && let Some((lib, units)) = fee {
+            self.in_formula(lib, true, |_| ());
+            self.observe_paid(units);
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::precise_return_published(run_root);
