@@ -556,14 +556,20 @@ impl TurnDrive for BenchDrive {
     }
 
     /// The scenario composes no sections: its request is lowered as its
-    /// canonical encoding.
+    /// canonical encoding. As the runtime's drive does, the call's request id
+    /// names its turn, so each call of the session has its own id.
     async fn prepare_call(
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        _call: u32,
+        call: u32,
         request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
+        let mut request = (*request).clone();
+        request.edit_envelope(|request| {
+            request.scope.request_id = format!("{}:turn:{}:llm:{call}", self.session, self.run);
+        });
+        let request = Arc::new(request);
         let route = ProviderRouteIdentity {
             provider: "perf".into(),
             endpoint: "https://perf.test/v1".into(),
