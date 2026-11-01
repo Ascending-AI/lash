@@ -73,6 +73,11 @@ fn probes(
         }
     }
     probes.push((
+        "deep.walk",
+        register("deep.walk", "n: Any", String::new(),
+            "let first = true for item in n { if first { set first = false } else { let saved = n return saved } } return 0"),
+    ));
+    probes.push((
         "deep.loop",
         register(
             "deep.loop",
@@ -208,8 +213,9 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             call_depth: 2,
             ..ROOMY
         };
+        let args = if name == "deep.walk" { "[7, 8]" } else { "[7]" };
         let mut embedder = Embedder::with(
-            &format!("main {{ return {name}([7]) }}"),
+            &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
         if source_only {
@@ -218,7 +224,14 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         let tape = crate::ChargeTape::new();
         embedder.machine.record_charges(tape.clone());
         let value = result(embedder.run_to_end(&[]));
-        assert_eq!(value, Datum::List(vec![int(7)]));
+        assert_eq!(
+            value,
+            Datum::List(if name == "deep.walk" {
+                vec![int(7), int(8)]
+            } else {
+                vec![int(7)]
+            })
+        );
         if name == "deep.branch" && source_only {
             assert!(
                 crate::machine::islands::witness::precise_scoped_returns() > 0,
@@ -231,7 +244,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             );
         }
 
-        if name == "deep.loop" {
+        if name == "deep.loop" || name == "deep.walk" {
             assert_eq!(
                 crate::machine::islands::witness::loop_returns()[usize::from(source_only)],
                 2,
@@ -240,7 +253,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         }
         (value, embedder.machine.meters(), tape.steps())
     };
-    for name in ["deep.branch", "deep.loop"] {
+    for name in ["deep.branch", "deep.loop", "deep.walk"] {
         assert_eq!(
             scoped_observation(name, false),
             scoped_observation(name, true),

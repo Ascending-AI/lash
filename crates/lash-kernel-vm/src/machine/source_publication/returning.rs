@@ -27,7 +27,13 @@ impl KernelMachine {
                 || !frame.control.iter().all(|control| {
                     matches!(
                         control,
-                        Control::Block { .. } | Control::While { started: 1.., .. }
+                        Control::Block { .. }
+                            | Control::While { started: 1.., .. }
+                            | Control::For {
+                                started: 1..,
+                                header: crate::machine::loops::Header::Body,
+                                ..
+                            }
                     )
                 })
                 || frame

@@ -177,8 +177,8 @@ pub(crate) struct CompiledInterval {
 impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
     /// Its authored path proves enclosing if choices; earlier children have
-    /// completed. Entered while bodies carry their actual loop occurrence;
-    /// protocol cursors and cleanup departures require separate recipes.
+    /// completed. Entered loop bodies carry their actual occurrence; their
+    /// cursor/header prefix has completed. Cleanup needs its departure recipe.
     pub(crate) fn compile_return_suffix(
         &self,
         at: &Point,
@@ -196,6 +196,7 @@ impl Source {
         let mut blocks = Vec::new();
         let mut choices = BTreeMap::new();
         let mut return_loops = Vec::new();
+        let mut for_sites = std::collections::BTreeSet::new();
         for index in &at.site.path[self.site.path.len()..] {
             match node {
                 doc::Node::Block(_) => blocks.push(path.clone()),
@@ -206,7 +207,12 @@ impl Source {
                     choices.insert(path.clone(), true);
                     return_loops.push(path.clone());
                 }
-                // Protocol cursors and try regions need their own departure recipe.
+                doc::Node::Stmt(doc::Stmt::For { .. }) if *index == 1 => {
+                    choices.insert(path.clone(), true);
+                    return_loops.push(path.clone());
+                    for_sites.insert(path.clone());
+                }
+                // Try regions need their actual pending departure recipe.
                 _ => return Err(Refused::Path),
             }
             node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
@@ -246,6 +252,7 @@ impl Source {
             returning: &'a Site,
             blocks: &'a [Site],
             choices: &'a BTreeMap<Site, bool>,
+            for_sites: &'a std::collections::BTreeSet<Site>,
             route: &'a [Selection],
             cursor: usize,
         }
@@ -256,7 +263,12 @@ impl Source {
             fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
                 if self.cursor == 0
                     && ((phase == Phase::Enter && self.blocks.contains(site))
-                        || (phase == Phase::Test && self.choices.contains_key(site)))
+                        || (phase == Phase::Test && self.choices.contains_key(site))
+                        || (self.for_sites.contains(site)
+                            && matches!(
+                                phase,
+                                Phase::Open | Phase::Next | Phase::Check | Phase::Item
+                            )))
                 {
                     return Ok(ExitKind::Normal);
                 }
@@ -280,6 +292,7 @@ impl Source {
             returning: &at.site,
             blocks: &blocks,
             choices: &choices,
+            for_sites: &for_sites,
             route: &route,
             cursor: 0,
         };
@@ -287,7 +300,7 @@ impl Source {
             self,
             &self.site,
             &mut suffix,
-            route.len() + blocks.len() + choices.len(),
+            route.len() + blocks.len() + choices.len() + 4 * for_sites.len(),
         )?;
         if exit != ExitKind::Return || suffix.cursor != route.len() {
             return Err(Refused::Path);

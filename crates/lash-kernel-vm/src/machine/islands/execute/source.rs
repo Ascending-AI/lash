@@ -42,11 +42,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 Position::Loop {
                     id,
                     started,
-                    cursor: None,
+                    cursor,
                     ..
                 } => {
                     *started > 0
-                        && matches!(self.exe.stmt(*id).form, crate::compile::Form::While { .. })
+                        && match self.exe.stmt(*id).form {
+                            crate::compile::Form::While { .. } => cursor.is_none(),
+                            crate::compile::Form::For { .. } => cursor.is_some(),
+                            _ => false,
+                        }
                 }
                 _ => false,
             })
