@@ -77,6 +77,7 @@ pub(crate) use reclaim::{audit_page, graph_counts, peel};
 pub(super) use reclaim::{reclaim, retirement_mechanics};
 
 lash_store_sql::statements! {
+    lazy
     /// Graph statements only PostgreSQL issues: the artifact bridge's
     /// column, the row locks a writer and a peel take, the array binding of
     /// a node list, and the one-statement hydration of each root source.

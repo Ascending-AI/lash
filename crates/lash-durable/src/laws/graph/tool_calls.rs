@@ -19,6 +19,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
     let logical = crate::domain::tool_calls::logical_owner(&execution);
     let mut nodes = staging();
     let mut writes = Vec::new();
+    let mut answers = Vec::new();
     let mut body_nodes = BTreeMap::new();
     let mut calls = Vec::new();
     let mut selected_nodes = BTreeSet::new();
@@ -40,7 +41,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
             call: call.clone(),
             cancellable: false,
         }));
-        writes.push(DomainWrite::ToolCall(ToolCallWrite::Answer {
+        answers.push(DomainWrite::ToolCall(ToolCallWrite::Answer {
             owner: execution.clone(),
             call: call.clone(),
             answer: ToolCallAnswer {
@@ -50,6 +51,7 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         }));
         calls.push((call, root));
     }
+    writes.extend(answers);
     let pending = ToolCallId::fixture("directory-pending");
     writes.push(DomainWrite::ToolCall(ToolCallWrite::Admit {
         counted: true,
@@ -229,6 +231,41 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
             && before.rows[0].decision.is_none()
             && before.graph.nodes.is_empty(),
         "admission did not publish exactly Pending"
+    );
+
+    let duplicate_probe = ToolCallId::fixture("directory-after-duplicate");
+    owner_commit(
+        tier,
+        &owner,
+        BTreeMap::new(),
+        vec![
+            DomainWrite::ToolCall(ToolCallWrite::Admit {
+                counted: true,
+                logical: logical.clone(),
+                execution: execution.clone(),
+                run: RunSeq(0),
+                member: 0,
+                call: calls[0].0.clone(),
+                cancellable: false,
+            }),
+            DomainWrite::ToolCall(ToolCallWrite::Admit {
+                counted: true,
+                logical: logical.clone(),
+                execution: execution.clone(),
+                run: RunSeq(0),
+                member: 100,
+                call: duplicate_probe.clone(),
+                cancellable: false,
+            }),
+        ],
+    )
+    .await?;
+    let after_duplicate = peer
+        .tool_calls(&logical, &ToolCallSelection::Calls(vec![duplicate_probe]))
+        .await?;
+    ensure!(
+        after_duplicate.rows[0].sequence == before.rows[0].sequence + 1,
+        "a repeated admission allocated another admission-order position"
     );
 
     let mut decision = staging();

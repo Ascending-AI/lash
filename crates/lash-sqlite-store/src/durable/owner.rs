@@ -232,6 +232,17 @@ pub(super) fn apply_owner(
     let mut remaining = write.domain();
     while let Some((domain, rest)) = remaining.split_first() {
         remaining = rest;
+        let start = write.domain().len() - rest.len() - 1;
+        let admissions = super::tool_calls::admission_group_len(&write.domain()[start..]);
+        if admissions > 1 {
+            if let Err(error) =
+                super::tool_calls::apply_admissions(tx, &write.domain()[start..start + admissions])?
+            {
+                return refuse(error);
+            }
+            remaining = &rest[admissions - 1..];
+            continue;
+        }
         if matches!(
             domain,
             DomainWrite::RunFact(lash_durable::domain::RunFactWrite::Append { .. })

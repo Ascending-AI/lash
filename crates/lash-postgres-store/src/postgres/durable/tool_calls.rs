@@ -353,11 +353,8 @@ pub(super) async fn delete_session(
         .collect())
 }
 
-pub(super) static FINISH_READS: Entry = Entry::new(
-    || &SQL.finish_reads,
-    &[Ty::Text, Ty::Text, Ty::Text],
-    Shape::Exec,
-);
+pub(super) static FINISH_READS: Entry =
+    Entry::new(|| &SQL.finish_reads, &[Ty::Text, Ty::Text], Shape::Exec);
 pub(super) fn finish_reads_step(
     session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
@@ -367,8 +364,7 @@ pub(super) fn finish_reads_step(
     Ok(Step::any(
         &FINISH_READS,
         vec![
-            Value::text(session.as_str()),
-            Value::text(run.as_str()),
+            Value::text(OwnerKey::Turn(session.clone(), run.clone()).stored()),
             Value::text(outcome),
         ],
     ))

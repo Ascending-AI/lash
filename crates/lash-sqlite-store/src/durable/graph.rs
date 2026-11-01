@@ -182,6 +182,7 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
 ";
 
 lash_store_sql::statements! {
+    lazy
     /// Graph statements only SQLite issues: the artifact bridge's pointer
     /// table and the
     /// `json_each` binding of a node list.

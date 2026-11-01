@@ -24,6 +24,7 @@ pub const TABLE: &str = "turn_phases";
 pub const NAMESPACES_TABLE: &str = "turn_namespaces";
 
 crate::statements! {
+    lazy
     /// `turn_phases`, `session_runs` and `turn_cancel_requests` statements
     /// both backends issue verbatim. The session head is written by the
     /// session store's own commit, applied in the same transaction.
@@ -150,7 +151,7 @@ crate::statements! {
                     p.turn_deadline_ms, p.written_epoch, p.model_calls, p.model_stream_from,
                     p.working_execution_ref, p.answer_ref,
                     COALESCE((SELECT admitted_count FROM tool_calls
-                        WHERE session_id = r.session_id AND turn_id = r.run
+                        WHERE owner_key = 't/' || REPLACE(REPLACE(r.session_id, '%', '%25'), '/', '%2F') || '/' || REPLACE(REPLACE(r.run, '%', '%25'), '/', '%2F')
                         ORDER BY admission_seq DESC LIMIT 1), 0)
              FROM session_runs AS r
              JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run

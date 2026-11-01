@@ -33,10 +33,8 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tool_calls_execution ON tool_calls(execution_owner, call_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_order ON tool_calls(owner_key, admission_seq, call_id);
-CREATE INDEX IF NOT EXISTS idx_tool_calls_turn_order ON tool_calls(session_id, turn_id, admission_seq DESC) WHERE turn_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tool_calls_unanswered_reads ON tool_calls(session_id, turn_id) WHERE NOT cancellable AND answer_outcome IS NULL;
 CREATE INDEX IF NOT EXISTS idx_tool_calls_requests ON tool_calls(session_id, turn_id, call_id) WHERE request_id IS NOT NULL AND answer_outcome IS NULL;
-CREATE INDEX IF NOT EXISTS idx_tool_calls_reads ON tool_calls(owner_key, admission_seq, call_id) WHERE answer_outcome = '\"Read\"';
+CREATE INDEX IF NOT EXISTS idx_tool_calls_reads ON tool_calls(owner_key, answer_outcome, admission_seq, call_id) WHERE NOT cancellable;
 CREATE INDEX IF NOT EXISTS idx_tool_calls_body ON tool_calls(body_ref) WHERE body_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tool_calls_decision ON tool_calls(decision_ref) WHERE decision_ref IS NOT NULL;
 ";
@@ -46,12 +44,106 @@ pub(super) static SQL: LazyLock<ToolCallStatements> =
 lash_store_sql::statements! {
     lazy
     struct ToolCallSqliteStatements @ "durable_tool_call_sqlite" {
+        admit_many = "INSERT INTO tool_calls AS held
+            (owner_key, call_id, execution_owner, run_seq, member, cancellable, session_id, turn_id, counted, admission_seq, admitted_count)
+            SELECT owner, call, execution, run, member, cancellable, session, turn, counted, admission_seq, admitted_count
+            FROM (
+                WITH context AS MATERIALIZED (SELECT ?1 AS owner, ?2 AS execution, ?3 AS run, ?4 AS session, ?5 AS turn, ?6 AS calls),
+                prior AS MATERIALIZED (SELECT admission_seq, admitted_count FROM tool_calls WHERE owner_key = (SELECT owner FROM context) ORDER BY admission_seq DESC LIMIT 1),
+                source AS MATERIALIZED (SELECT CAST(j.key AS INTEGER) AS pos, c.owner, c.execution, c.run, c.session, c.turn,
+                    j.value->>0 AS call, j.value->>1 AS member, j.value->>2 AS cancellable, j.value->>3 AS counted
+                    FROM context AS c, json_each(c.calls) AS j),
+                incoming AS MATERIALIZED (SELECT source.*,
+                    CASE WHEN pos = MIN(pos) OVER (PARTITION BY call)
+                        AND NOT EXISTS (SELECT 1 FROM tool_calls WHERE owner_key = source.owner AND call_id = source.call)
+                        THEN 1 ELSE 0 END AS fresh FROM source)
+                SELECT i.*, COALESCE(p.admission_seq, -1) + SUM(i.fresh) OVER (ORDER BY i.pos) AS admission_seq,
+                    COALESCE(p.admitted_count, 0) + SUM(i.fresh * i.counted) OVER (ORDER BY i.pos) AS admitted_count
+                FROM incoming AS i LEFT JOIN prior AS p ON TRUE
+            ) AS batch WHERE TRUE ORDER BY pos
+            ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id
+            WHERE (held.execution_owner, held.run_seq, held.member, held.cancellable, held.counted)
+                = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted)";
         selected = "SELECT call_id, execution_owner, run_seq, member, decision, decision_ref, answer_outcome, body_ref, admission_seq
             FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))";
     }
 }
 static SQLITE: LazyLock<ToolCallSqliteStatements> =
     LazyLock::new(|| ToolCallSqliteStatements::render(crate::schema_layout::MAIN));
+
+/// Only consecutive admissions with one context can share that context's bind.
+pub(super) fn admission_group_len(writes: &[lash_durable::DomainWrite]) -> usize {
+    let Some(lash_durable::DomainWrite::ToolCall(ToolCallWrite::Admit {
+        logical,
+        execution,
+        run,
+        ..
+    })) = writes.first()
+    else {
+        return 0;
+    };
+    writes.iter().take_while(|write| matches!(write,
+        lash_durable::DomainWrite::ToolCall(ToolCallWrite::Admit { logical: other_logical, execution: other_execution, run: other_run, .. })
+            if other_logical == logical && other_execution == execution && other_run == run)).count()
+}
+
+pub(super) fn apply_admissions(
+    tx: &Connection,
+    writes: &[lash_durable::DomainWrite],
+) -> Answer<()> {
+    let Some(lash_durable::DomainWrite::ToolCall(ToolCallWrite::Admit {
+        logical,
+        execution,
+        run,
+        ..
+    })) = writes.first()
+    else {
+        return Ok(Err(corrupt("tool admissions", "empty or mixed batch")));
+    };
+    let mut rows = Vec::with_capacity(writes.len());
+    for write in writes {
+        let lash_durable::DomainWrite::ToolCall(ToolCallWrite::Admit {
+            call,
+            member,
+            cancellable,
+            counted,
+            ..
+        }) = write
+        else {
+            return Ok(Err(corrupt("tool admissions", "mixed batch")));
+        };
+        rows.push((
+            call.as_str(),
+            integer::<i64>(*member)?,
+            *cancellable,
+            *counted,
+        ));
+    }
+    let (session, turn) = match logical {
+        lash_durable::domain::CallOwner::Turn(session, turn) => {
+            (Some(session.as_str()), Some(turn.as_str()))
+        }
+        lash_durable::domain::CallOwner::Operation(session, _) => (Some(session.as_str()), None),
+        lash_durable::domain::CallOwner::Process(_) => (None, None),
+    };
+    let rows = serde_json::to_string(&rows)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    let changed = tx
+        .prepare_cached(SQLITE.admit_many.sql())?
+        .execute(rusqlite::params![
+            logical.stored(),
+            execution.stored(),
+            integer::<i64>(run.0)?,
+            session,
+            turn,
+            rows
+        ])?;
+    Ok(if changed == writes.len() {
+        Ok(())
+    } else {
+        Err(corrupt("tool admissions", "conflicting identity in batch"))
+    })
+}
 
 pub(super) fn apply(
     tx: &Connection,
@@ -79,7 +171,7 @@ pub(super) fn apply(
             call,
             cancellable,
         } => {
-            let owner = logical.clone();
+            let owner = logical;
             let (session, turn) = match &owner {
                 lash_durable::domain::CallOwner::Turn(session, turn) => {
                     (Some(session.as_str()), Some(turn.as_str()))
@@ -337,6 +429,9 @@ pub(super) fn finish_reads(
     let outcome = serde_json::to_string(&lash_durable::domain::tool_calls::interrupted_read())
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     tx.prepare_cached(SQL.finish_reads.sql())?
-        .execute(rusqlite::params![session.as_str(), run.as_str(), outcome])?;
+        .execute(rusqlite::params![
+            OwnerKey::Turn(session.clone(), run.clone()).stored(),
+            outcome
+        ])?;
     Ok(())
 }

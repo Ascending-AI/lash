@@ -1058,10 +1058,8 @@ CREATE TABLE IF NOT EXISTS lash_tool_calls (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_tool_calls_execution ON lash_tool_calls(execution_owner, call_id);
 CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_order ON lash_tool_calls(owner_key, admission_seq, call_id);
-CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_turn_order ON lash_tool_calls(session_id, turn_id, admission_seq DESC) WHERE turn_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_unanswered_reads ON lash_tool_calls(session_id, turn_id) WHERE NOT cancellable AND answer_outcome IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_requests ON lash_tool_calls(session_id, turn_id, call_id) WHERE request_id IS NOT NULL AND answer_outcome IS NULL;
-CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_reads ON lash_tool_calls(owner_key, admission_seq, call_id) WHERE answer_outcome = '"Read"';
+CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_reads ON lash_tool_calls(owner_key, answer_outcome, admission_seq, call_id) WHERE NOT cancellable;
 CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_body ON lash_tool_calls(body_ref) WHERE body_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_decision ON lash_tool_calls(decision_ref) WHERE decision_ref IS NOT NULL;
 

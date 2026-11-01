@@ -11,6 +11,7 @@
 pub const TABLE: &str = "run_records";
 
 crate::statements! {
+    lazy
     /// `run_records` statements both backends issue verbatim.
     pub struct RunRecordStatements @ "durable_run_record" {
         /// Resolve an admitted call in a turn or any of its cells.

@@ -26,6 +26,7 @@ pub const ADMISSIONS_TABLE: &str = "effect_admissions";
 pub const CATALOG_VIEW: &str = "graph_root_catalog";
 
 crate::statements! {
+    lazy
     /// Graph statements both backends issue verbatim.
     pub struct GraphStatements @ "durable_graph" {
         /// Install blob `?1` with bytes `?2` under encoding `?3`; nothing
