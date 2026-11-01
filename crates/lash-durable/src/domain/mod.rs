@@ -107,7 +107,7 @@ pub enum DomainWrite {
     RegisterExecution(crate::resolutions::ExecutionRegistration),
     /// Retire execution claim debt while preserving immutable history.
     EndExecution(crate::resolutions::ExecutionId),
-    /// Extend use membership during validated adoption; prior uses stay pinned.
+    /// Replace current use membership during validated adoption; prior winners stay pinned.
     AdoptExecution(crate::resolutions::ExecutionRegistration),
     /// Inherited or adopted pin recorded in the same admitting owner commit.
     SeedResolution(crate::resolutions::ResolutionRecord),

@@ -63,25 +63,46 @@ pub(super) async fn register(
             lash_durable::packages::PackageRefusal::ReferrerEnded(record.referrer.clone()).into(),
         );
     }
-    let json = serde_json::to_string(record)
-        .map_err(|error| super::corrupt("execution registration", &error.to_string()))?;
-    crate::observed_sql::query(SQL.register_execution.sql())
+    let (referrer, requirements, uses) = record.storage_rows()?;
+    let inserted = crate::observed_sql::query(SQL.register_execution.sql())
         .bind(&record.execution.0)
         .bind(actor.as_str())
-        .bind(&json)
+        .bind(&referrer)
+        .bind(&requirements)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?
+        .rows_affected();
+    if inserted != 0 {
+        replace_uses(tx, &record.execution, &uses).await?;
+    }
+    if registration_rows(tx, &record.execution)
+        .await?
+        .is_some_and(|(owner, stored, _live)| owner == actor.as_str() && stored == *record)
+    {
+        Ok(())
+    } else {
+        Err(lash_durable::packages::PackageRefusal::ExecutionUse.into())
+    }
+}
+
+async fn replace_uses(
+    tx: &mut PgConnection,
+    execution: &lash_durable::resolutions::ExecutionId,
+    rows: &str,
+) -> Result<(), DurableError> {
+    crate::observed_sql::query(SQL.clear_uses.sql())
+        .bind(&execution.0)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let found: Option<String> = crate::observed_sql::query_scalar(SQL.registration_matches.sql())
-        .bind(&record.execution.0)
-        .bind(actor.as_str())
-        .bind(&json)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    crate::observed_sql::query(POSTGRES.insert_uses.sql())
+        .bind(&execution.0)
+        .bind(rows)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    found
-        .map(|_| ())
-        .ok_or_else(|| lash_durable::packages::PackageRefusal::ExecutionUse.into())
+    Ok(())
 }
 
 async fn load(
@@ -114,6 +135,9 @@ lash_store_sql::statements! {
     /// Lock ownership before classifying a resolution or reading its winner.
     struct ResolutionPostgresStatements @ "durable_resolutions_postgres" {
         owner = "SELECT epoch, state, state_revision, base_requires FROM actors WHERE actor_key = ?1 FOR UPDATE";
+        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json)
+             SELECT ?1, item ->> 0, item ->> 1, item ->> 2
+             FROM jsonb_array_elements(?2::jsonb) AS declarations(item)";
     }
 }
 static POSTGRES: LazyLock<ResolutionPostgresStatements> =
@@ -179,30 +203,15 @@ async fn commit_resolution(
             current: Some(lash_durable::Epoch(epoch)),
         }));
     }
-    let row: Option<(String, String)> = crate::observed_sql::query_as(SQL.registration.sql())
-        .bind(&candidate.key.execution.0)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    let referrer = registered_use(tx, &owner.actor, &candidate).await?;
+    crate::artifact_store::lock_referrer_tx(tx, &referrer)
         .await
         .map_err(sqlx_failure)?;
-    let Some((actor, json)) = row else {
-        return Err(lash_durable::packages::PackageRefusal::ExecutionUse.into());
-    };
-    if actor != owner.actor.as_str() {
-        return Err(lash_durable::packages::PackageRefusal::ExecutionUse.into());
-    }
-    let registration: ExecutionRegistration =
-        serde_json::from_str(&json).map_err(|_| super::corrupt("execution registration", &json))?;
-    registration.validate(&candidate)?;
-    crate::artifact_store::lock_referrer_tx(tx, &registration.referrer)
-        .await
-        .map_err(sqlx_failure)?;
-    if crate::artifact_store::is_fenced_tx(tx, &registration.referrer)
+    if crate::artifact_store::is_fenced_tx(tx, &referrer)
         .await
         .map_err(DurableError::from)?
     {
-        return Err(
-            lash_durable::packages::PackageRefusal::ReferrerEnded(registration.referrer).into(),
-        );
+        return Err(lash_durable::packages::PackageRefusal::ReferrerEnded(referrer).into());
     }
     if revision != owner.expected_revision.0 {
         return Err(DurableError::ResolutionRevisionConflict {
@@ -280,17 +289,13 @@ async fn requirements(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,
 ) -> Result<lash_durable::resolutions::ClaimRequirements, DurableError> {
-    let rows: Vec<(String, i32)> = crate::observed_sql::query_as(SQL.requirements_rows.sql())
-        .bind(actor.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    let (registrations, resolutions): (Vec<_>, Vec<_>) =
-        rows.into_iter().partition(|(_, resolved)| *resolved == 0);
-    lash_durable::resolutions::requirements_of(
-        registrations.into_iter().map(|(json, _)| json).collect(),
-        resolutions.into_iter().map(|(json, _)| json).collect(),
-    )
+    let rows: Vec<lash_durable::resolutions::ExecutionDebtRow> =
+        crate::observed_sql::query_as(SQL.requirements_rows.sql())
+            .bind(actor.as_str())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    lash_durable::resolutions::requirements_of(rows)
 }
 
 pub(super) async fn owner_requires(
@@ -325,23 +330,56 @@ pub(super) async fn owner_requires(
     Ok(requires)
 }
 
+// Metadata and membership stay under the actor's existing write lock, or
+// the new actor insertion, for the whole reconstruction and replacement.
+async fn registration_rows(
+    tx: &mut PgConnection,
+    execution: &lash_durable::resolutions::ExecutionId,
+) -> Result<Option<(String, ExecutionRegistration, bool)>, DurableError> {
+    let row: Option<(String, String, String, bool)> =
+        crate::observed_sql::query_as(SQL.registration.sql())
+            .bind(&execution.0)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    let Some((owner, referrer, requirements, live)) = row else {
+        return Ok(None);
+    };
+    let uses: Vec<(String, String, String)> = crate::observed_sql::query_as(SQL.current_uses.sql())
+        .bind(&execution.0)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let record =
+        ExecutionRegistration::from_storage(execution.clone(), &referrer, &requirements, uses)?;
+    Ok(Some((owner, record, live)))
+}
+
 async fn registered(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,
     execution: &lash_durable::resolutions::ExecutionId,
 ) -> Result<ExecutionRegistration, DurableError> {
-    let row: Option<(String, String)> = crate::observed_sql::query_as(SQL.registration.sql())
-        .bind(&execution.0)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    let Some((owner, json)) = row else {
-        return Err(lash_durable::packages::PackageRefusal::ExecutionUse.into());
-    };
-    if owner != actor.as_str() {
-        return Err(lash_durable::packages::PackageRefusal::ExecutionUse.into());
+    match registration_rows(tx, execution).await? {
+        Some((owner, record, true)) if owner == actor.as_str() => Ok(record),
+        _ => Err(lash_durable::packages::PackageRefusal::ExecutionUse.into()),
     }
-    serde_json::from_str(&json).map_err(|_| super::corrupt("execution registration", &json))
+}
+
+async fn registered_use(
+    tx: &mut PgConnection,
+    actor: &lash_durable::ActorKey,
+    candidate: &ResolutionRecord,
+) -> Result<lash_core_store::artifact_referrer::ArtifactReferrer, DurableError> {
+    let row: Option<(String, String, String)> =
+        crate::observed_sql::query_as(SQL.registration_use.sql())
+            .bind(&candidate.key.execution.0)
+            .bind(candidate.key.use_.link.to_string())
+            .bind(candidate.key.use_.slot.to_string())
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    lash_durable::resolutions::validate_current_use(actor, candidate, row)
 }
 
 pub(super) async fn adopt(
@@ -357,15 +395,15 @@ pub(super) async fn adopt(
     if crate::artifact_store::is_fenced_tx(tx, &record.referrer).await? {
         return Err(lash_durable::packages::PackageRefusal::ReferrerEnded(record.referrer).into());
     }
-    let json = serde_json::to_string(&record)
-        .map_err(|error| super::corrupt("execution registration", &error.to_string()))?;
+    let (_, requirements, uses) = record.storage_rows()?;
     crate::observed_sql::query(SQL.adopt_execution.sql())
         .bind(&record.execution.0)
         .bind(actor.as_str())
-        .bind(json)
+        .bind(&requirements)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
+    replace_uses(tx, &record.execution, &uses).await?;
     Ok(())
 }
 
@@ -374,15 +412,12 @@ pub(super) async fn seed(
     actor: &lash_durable::ActorKey,
     record: &ResolutionRecord,
 ) -> Result<(), DurableError> {
-    let registration = registered(tx, actor, &record.key.execution).await?;
-    registration.validate(record)?;
-    crate::artifact_store::lock_referrer_tx(tx, &registration.referrer)
+    let referrer = registered_use(tx, actor, record).await?;
+    crate::artifact_store::lock_referrer_tx(tx, &referrer)
         .await
         .map_err(sqlx_failure)?;
-    if crate::artifact_store::is_fenced_tx(tx, &registration.referrer).await? {
-        return Err(
-            lash_durable::packages::PackageRefusal::ReferrerEnded(registration.referrer).into(),
-        );
+    if crate::artifact_store::is_fenced_tx(tx, &referrer).await? {
+        return Err(lash_durable::packages::PackageRefusal::ReferrerEnded(referrer).into());
     }
     if let Some(stored) = load(tx, &record.key).await? {
         return if stored == *record {

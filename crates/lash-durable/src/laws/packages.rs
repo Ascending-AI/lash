@@ -693,6 +693,24 @@ pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
             .all(|(key, debt)| key != &actor || debt.is_empty()),
         "effective actor projection retained dead target debt"
     );
+    let mut readd = store.begin(&actor, epoch, u64::MAX).await?;
+    readd.adopt_execution(registration.clone());
+    store
+        .commit(readd, CommitLabel::new("law.resolution.readd"))
+        .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == target
+            && resolutions.load(&winner.key).await? == Some(winner.clone()),
+        "re-adding a use did not restore its immutable winner and target debt"
+    );
+    super::ensure!(
+        store
+            .actor_requirements(None, 8)
+            .await?
+            .iter()
+            .any(|(key, debt)| key == &actor && *debt == expected),
+        "re-adding a use did not restore the actor's scheduling debt"
+    );
     let mut ended = store.begin(&actor, epoch, u64::MAX).await?;
     ended
         .end_execution(registration.execution.clone())

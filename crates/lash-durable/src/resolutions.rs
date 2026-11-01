@@ -76,20 +76,117 @@ pub trait ExecutionResolutions: Send + Sync {
     ) -> Result<AcknowledgedResolution, DurableError>;
 }
 
-impl ExecutionRegistration {
-    /// The recorded use, requested name and owning actor are checked together.
-    pub fn validate(&self, candidate: &ResolutionRecord) -> Result<(), DurableError> {
-        if self.execution != candidate.key.execution
-            || self
-                .uses
-                .get(&candidate.key.use_)
-                .map(|use_| &use_.requested)
-                != Some(&candidate.requested)
-        {
-            return Err(crate::packages::PackageRefusal::ExecutionUse.into());
-        }
-        validate_resolution(candidate)
+fn corrupt(detail: impl std::fmt::Display) -> DurableError {
+    DurableError::Store(crate::StoreFailure {
+        code: None,
+        kind: crate::StoreFailureKind::Corrupt,
+        message: format!("execution membership: {detail}"),
+    })
+}
+
+fn decode<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, DurableError> {
+    serde_json::from_str(json).map_err(corrupt)
+}
+
+fn json<T: Serialize>(value: &T) -> Result<String, DurableError> {
+    serde_json::to_string(value).map_err(corrupt)
+}
+
+fn use_key(execution: &ExecutionId, link: &str, slot: &str) -> Result<ResolutionKey, DurableError> {
+    use lash_kernel_value::names::{ImportSlot, OperationSlot};
+    let link = link.parse().map_err(corrupt)?;
+    let parsed = if let Some(slot) = slot.strip_prefix("import:") {
+        OperationSlot::Import(ImportSlot(slot.parse().map_err(corrupt)?))
+    } else if let Some(slot) = slot.strip_prefix("helper:") {
+        OperationSlot::Helper(slot.parse().map_err(corrupt)?)
+    } else {
+        return Err(corrupt("unknown operation slot"));
+    };
+    if parsed.to_string() != slot {
+        return Err(corrupt("noncanonical operation slot"));
     }
+    Ok(ResolutionKey {
+        execution: execution.clone(),
+        use_: OperationUse { link, slot: parsed },
+    })
+}
+
+fn validate_use(
+    key: &ResolutionKey,
+    declaration: &DeferredUse,
+    candidate: &ResolutionRecord,
+) -> Result<(), DurableError> {
+    if candidate.key != *key || candidate.requested != declaration.requested {
+        return Err(crate::packages::PackageRefusal::ExecutionUse.into());
+    }
+    validate_resolution(candidate)
+}
+
+impl ExecutionRegistration {
+    /// Referrer, stable debt and a bulk array of keyed current declarations.
+    /// The array is an insertion parameter, never a second stored membership.
+    pub fn storage_rows(&self) -> Result<(String, String, String), DurableError> {
+        let uses = self
+            .uses
+            .iter()
+            .map(|(key, declaration)| {
+                Ok((
+                    key.link.to_string(),
+                    key.slot.to_string(),
+                    json(declaration)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, DurableError>>()?;
+        Ok((
+            json(&self.referrer)?,
+            json(&self.requirements)?,
+            json(&uses)?,
+        ))
+    }
+
+    /// Reconstruct current membership under the store's protected transaction.
+    /// Ended registrations retain these rows for exact registration replay.
+    pub fn from_storage(
+        execution: ExecutionId,
+        referrer: &str,
+        requirements: &str,
+        rows: Vec<(String, String, String)>,
+    ) -> Result<Self, DurableError> {
+        let mut uses = BTreeMap::new();
+        for (link, slot, declaration) in rows {
+            let key = use_key(&execution, &link, &slot)?;
+            if uses
+                .insert(key.use_, decode::<DeferredUse>(&declaration)?)
+                .is_some()
+            {
+                return Err(corrupt("duplicate current use"));
+            }
+        }
+        Ok(Self {
+            execution,
+            uses,
+            referrer: decode(referrer)?,
+            requirements: decode(requirements)?,
+        })
+    }
+}
+
+/// Validate one keyed current declaration before a candidate can win or seed.
+/// Its actor, referrer and declaration come from one joined store observation.
+pub fn validate_current_use(
+    actor: &ActorKey,
+    candidate: &ResolutionRecord,
+    row: Option<(String, String, String)>,
+) -> Result<ArtifactReferrer, DurableError> {
+    let Some((owner, referrer, declaration)) = row else {
+        return Err(crate::packages::PackageRefusal::ExecutionUse.into());
+    };
+    if owner != actor.as_str() {
+        return Err(crate::packages::PackageRefusal::ExecutionUse.into());
+    }
+    let declaration = decode(&declaration)?;
+    validate_use(&candidate.key, &declaration, candidate)?;
+    decode(&referrer)
 }
 
 /// Contradictory repeated route/definition facts are refused on writes and reads.
@@ -117,45 +214,45 @@ pub fn validate_resolution(candidate: &ResolutionRecord) -> Result<(), DurableEr
     Ok(())
 }
 
-/// Fold source records, never a second claim registry.
-pub fn requirements_of(
-    registrations: Vec<String>,
-    resolutions: Vec<String>,
-) -> Result<ClaimRequirements, DurableError> {
+/// A stable-debt row, or a current keyed declaration with its optional winner.
+/// Only current use rows are joined; inactive resolution history is not read.
+pub type ExecutionDebtRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// Fold stable debt and the winners of current membership directly, without
+/// constructing a historical winner map or another claim registry.
+pub fn requirements_of(rows: Vec<ExecutionDebtRow>) -> Result<ClaimRequirements, DurableError> {
     let mut requirements = ClaimRequirements::default();
-    let corrupt = |error: serde_json::Error| {
-        DurableError::Store(crate::StoreFailure {
-            code: None,
-            kind: crate::StoreFailureKind::Corrupt,
-            message: format!("execution requirements: {error}"),
-        })
-    };
-    let mut winners = BTreeMap::new();
-    for json in resolutions {
-        let record: ResolutionRecord = serde_json::from_str(&json).map_err(corrupt)?;
-        validate_resolution(&record)?;
-        winners.insert(record.key.clone(), record);
-    }
-    for json in registrations {
-        let registration: ExecutionRegistration = serde_json::from_str(&json).map_err(corrupt)?;
-        requirements.extend(&registration.requirements);
-        for (use_, discovery) in &registration.uses {
-            match winners.get(&ResolutionKey {
-                execution: registration.execution.clone(),
-                use_: *use_,
-            }) {
-                Some(record) => {
-                    registration.validate(record)?;
-                    if let ResolutionEntry::Resolved {
-                        requirements: target,
-                        ..
-                    } = &record.entry
-                    {
-                        requirements.extend(target);
-                    }
-                }
-                None => requirements.extend(&discovery.discovery),
+    for row in rows {
+        match row {
+            (Some(stable), None, None, None, None, None) => {
+                requirements.extend(&decode::<ClaimRequirements>(&stable)?)
             }
+            (None, Some(execution), Some(link), Some(slot), Some(declaration), winner) => {
+                let key = use_key(&ExecutionId(execution), &link, &slot)?;
+                let declaration: DeferredUse = decode(&declaration)?;
+                match winner {
+                    Some(json) => {
+                        let record: ResolutionRecord = decode(&json)?;
+                        validate_use(&key, &declaration, &record)?;
+                        if let ResolutionEntry::Resolved {
+                            requirements: target,
+                            ..
+                        } = &record.entry
+                        {
+                            requirements.extend(target);
+                        }
+                    }
+                    None => requirements.extend(&declaration.discovery),
+                }
+            }
+            _ => return Err(corrupt("incomplete execution debt row")),
         }
     }
     Ok(requirements)

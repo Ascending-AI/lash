@@ -98,6 +98,7 @@ pub const TABLES: &[&str] = &[
     durable::environment::HEADS_TABLE,
     durable::packages::LABELS_TABLE,
     durable::packages::EXECUTIONS_TABLE,
+    durable::packages::USES_TABLE,
     durable::packages::RESOLUTIONS_TABLE,
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,

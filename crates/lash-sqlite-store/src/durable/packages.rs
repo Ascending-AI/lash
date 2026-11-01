@@ -11,6 +11,28 @@ use rusqlite::{Connection, OptionalExtension};
 static SQL: LazyLock<PackageStatements> =
     LazyLock::new(|| PackageStatements::render(crate::schema_layout::MAIN));
 
+lash_store_sql::statements! {
+    struct SqlitePackageStatements @ "durable_sqlite_packages" {
+        insert_uses = "INSERT INTO execution_uses (execution, link, slot, use_json)
+             SELECT ?1, json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
+             FROM json_each(?2)";
+    }
+}
+static SQLITE: LazyLock<SqlitePackageStatements> =
+    LazyLock::new(|| SqlitePackageStatements::render(crate::schema_layout::MAIN));
+
+fn replace_uses(
+    tx: &Connection,
+    execution: &lash_durable::resolutions::ExecutionId,
+    rows: &str,
+) -> rusqlite::Result<()> {
+    tx.prepare_cached(SQL.clear_uses.sql())?
+        .execute([&execution.0])?;
+    tx.prepare_cached(SQLITE.insert_uses.sql())?
+        .execute(rusqlite::params![execution.0, rows])?;
+    Ok(())
+}
+
 /// Every node live at `now`, by node id.
 pub(super) fn live_nodes(
     tx: &Connection,
@@ -64,18 +86,34 @@ pub(super) fn register(
         )
         .into()));
     }
-    let json = serde_json::to_string(record)
-        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-    tx.prepare_cached(SQL.register_execution.sql())?
-        .execute(rusqlite::params![record.execution.0, actor.as_str(), json])?;
-    let matches = tx
-        .prepare_cached(SQL.registration_matches.sql())?
-        .query_row(
-            rusqlite::params![record.execution.0, actor.as_str(), json],
-            |_| Ok(()),
-        )
-        .optional()?;
-    Ok(matches.ok_or_else(|| lash_durable::packages::PackageRefusal::ExecutionUse.into()))
+    let (referrer, requirements, uses) = match record.storage_rows() {
+        Ok(rows) => rows,
+        Err(error) => return Ok(Err(error)),
+    };
+    let inserted = tx
+        .prepare_cached(SQL.register_execution.sql())?
+        .execute(rusqlite::params![
+            record.execution.0,
+            actor.as_str(),
+            referrer,
+            requirements
+        ])?;
+    if inserted != 0 {
+        replace_uses(tx, &record.execution, &uses)?;
+    }
+    let observed = match registration_rows(tx, &record.execution)? {
+        Ok(observed) => observed,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(
+        if observed
+            .is_some_and(|(owner, stored, _live)| owner == actor.as_str() && stored == *record)
+        {
+            Ok(())
+        } else {
+            Err(lash_durable::packages::PackageRefusal::ExecutionUse.into())
+        },
+    )
 }
 
 fn load(tx: &Connection, key: &ResolutionKey) -> Answer<Option<ResolutionRecord>> {
@@ -156,31 +194,13 @@ impl ExecutionResolutions for SqliteDurableStore {
                         owner.expected_revision,
                     )?);
                 }
-                let registration = tx
-                    .prepare_cached(SQL.registration.sql())?
-                    .query_row([&candidate.key.execution.0], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })
-                    .optional()?;
-                let Some((actor, json)) = registration else {
-                    return refuse(lash_durable::packages::PackageRefusal::ExecutionUse.into());
+                let referrer = match registered_use(tx, &owner.actor, &candidate)? {
+                    Ok(referrer) => referrer,
+                    Err(error) => return refuse(error),
                 };
-                if actor != owner.actor.as_str() {
-                    return refuse(lash_durable::packages::PackageRefusal::ExecutionUse.into());
-                }
-                let registration: ExecutionRegistration = match serde_json::from_str(&json) {
-                    Ok(record) => record,
-                    Err(_) => return refuse(super::corrupt("execution registration", &json)),
-                };
-                if let Err(error) = registration.validate(&candidate) {
-                    return refuse(error);
-                }
-                if crate::artifact_store::artifact_fenced_tx(tx, &registration.referrer)? {
+                if crate::artifact_store::artifact_fenced_tx(tx, &referrer)? {
                     return refuse(
-                        lash_durable::packages::PackageRefusal::ReferrerEnded(
-                            registration.referrer,
-                        )
-                        .into(),
+                        lash_durable::packages::PackageRefusal::ReferrerEnded(referrer).into(),
                     );
                 }
                 if revision != owner.expected_revision.0 {
@@ -278,16 +298,20 @@ fn requirements(
     tx: &Connection,
     actor: &lash_durable::ActorKey,
 ) -> Answer<lash_durable::resolutions::ClaimRequirements> {
-    let rows: Vec<(String, i64)> = tx
+    let rows = tx
         .prepare_cached(SQL.requirements_rows.sql())?
-        .query_map([actor.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
-    let (registrations, resolutions): (Vec<_>, Vec<_>) =
-        rows.into_iter().partition(|(_, resolved)| *resolved == 0);
-    Ok(lash_durable::resolutions::requirements_of(
-        registrations.into_iter().map(|(json, _)| json).collect(),
-        resolutions.into_iter().map(|(json, _)| json).collect(),
-    ))
+        .query_map([actor.as_str()], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<lash_durable::resolutions::ExecutionDebtRow>>>()?;
+    Ok(lash_durable::resolutions::requirements_of(rows))
 }
 
 pub(super) fn owner_requires(
@@ -318,28 +342,69 @@ pub(super) fn owner_requires(
     }
 }
 
+// The owner fence (or new actor insertion) protects metadata and membership
+// throughout these reads, as it protects their replacement on adoption.
+fn registration_rows(
+    tx: &Connection,
+    execution: &lash_durable::resolutions::ExecutionId,
+) -> Answer<Option<(String, ExecutionRegistration, bool)>> {
+    let row = tx
+        .prepare_cached(SQL.registration.sql())?
+        .query_row([&execution.0], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, bool>(3)?,
+            ))
+        })
+        .optional()?;
+    let Some((owner, referrer, requirements, live)) = row else {
+        return Ok(Ok(None));
+    };
+    let uses = tx
+        .prepare_cached(SQL.current_uses.sql())?
+        .query_map([&execution.0], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(
+        ExecutionRegistration::from_storage(execution.clone(), &referrer, &requirements, uses)
+            .map(|record| Some((owner, record, live))),
+    )
+}
+
 fn registered(
     tx: &Connection,
     actor: &lash_durable::ActorKey,
     execution: &lash_durable::resolutions::ExecutionId,
 ) -> Answer<ExecutionRegistration> {
+    Ok(match registration_rows(tx, execution)? {
+        Ok(Some((owner, record, true))) if owner == actor.as_str() => Ok(record),
+        Ok(_) => Err(lash_durable::packages::PackageRefusal::ExecutionUse.into()),
+        Err(error) => Err(error),
+    })
+}
+
+fn registered_use(
+    tx: &Connection,
+    actor: &lash_durable::ActorKey,
+    candidate: &ResolutionRecord,
+) -> Answer<lash_core_store::artifact_referrer::ArtifactReferrer> {
     let row = tx
-        .prepare_cached(SQL.registration.sql())?
-        .query_row([&execution.0], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
+        .prepare_cached(SQL.registration_use.sql())?
+        .query_row(
+            rusqlite::params![
+                candidate.key.execution.0,
+                candidate.key.use_.link.to_string(),
+                candidate.key.use_.slot.to_string()
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
         .optional()?;
-    let Some((owner, json)) = row else {
-        return Ok(Err(
-            lash_durable::packages::PackageRefusal::ExecutionUse.into()
-        ));
-    };
-    if owner != actor.as_str() {
-        return Ok(Err(
-            lash_durable::packages::PackageRefusal::ExecutionUse.into()
-        ));
-    }
-    Ok(serde_json::from_str(&json).map_err(|_| super::corrupt("execution registration", &json)))
+    Ok(lash_durable::resolutions::validate_current_use(
+        actor, candidate, row,
+    ))
 }
 
 pub(super) fn adopt(
@@ -361,10 +426,17 @@ pub(super) fn adopt(
         )
         .into()));
     }
-    let json = serde_json::to_string(&record)
-        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    let (_, requirements, uses) = match record.storage_rows() {
+        Ok(rows) => rows,
+        Err(error) => return Ok(Err(error)),
+    };
     tx.prepare_cached(SQL.adopt_execution.sql())?
-        .execute(rusqlite::params![record.execution.0, actor.as_str(), json])?;
+        .execute(rusqlite::params![
+            record.execution.0,
+            actor.as_str(),
+            requirements
+        ])?;
+    replace_uses(tx, &record.execution, &uses)?;
     Ok(Ok(()))
 }
 
@@ -373,16 +445,13 @@ pub(super) fn seed(
     actor: &lash_durable::ActorKey,
     record: &ResolutionRecord,
 ) -> Answer<()> {
-    let registration = match registered(tx, actor, &record.key.execution)? {
-        Ok(registration) => registration,
+    let referrer = match registered_use(tx, actor, record)? {
+        Ok(referrer) => referrer,
         Err(error) => return Ok(Err(error)),
     };
-    if let Err(error) = registration.validate(record) {
-        return Ok(Err(error));
-    }
-    if crate::artifact_store::artifact_fenced_tx(tx, &registration.referrer)? {
+    if crate::artifact_store::artifact_fenced_tx(tx, &referrer)? {
         return Ok(Err(lash_durable::packages::PackageRefusal::ReferrerEnded(
-            registration.referrer,
+            referrer,
         )
         .into()));
     }
@@ -503,8 +572,8 @@ mod tests {
                         let execution = format!("ended-{ordinal}");
                         connection.execute(
                             "INSERT INTO package_executions
-                             (execution, actor_key, registration_json, ended) VALUES (?1, ?2, ?3, 1)",
-                            rusqlite::params![execution, seed_actor.as_str(), "ended registration"],
+                             (execution, actor_key, referrer_json, requirements_json, ended) VALUES (?1, ?2, ?3, ?4, 1)",
+                            rusqlite::params![execution, seed_actor.as_str(), "ended referrer", "ended requirements"],
                         )?;
                         // An ended resolution must be excluded by the join too.
                         connection.execute(

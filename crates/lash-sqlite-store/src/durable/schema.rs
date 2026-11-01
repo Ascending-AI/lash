@@ -57,17 +57,25 @@ CREATE TABLE IF NOT EXISTS package_labels (
     FOREIGN KEY (namespace, package_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
 );
 
--- Immutable execution membership and terminal deferred-use outcomes.
+-- Current execution membership and immutable deferred-use outcomes.
 CREATE TABLE IF NOT EXISTS package_executions (
     execution TEXT PRIMARY KEY,
     actor_key TEXT NOT NULL REFERENCES actors(actor_key) ON DELETE CASCADE,
-    registration_json TEXT NOT NULL,
+    referrer_json TEXT NOT NULL,
+    requirements_json TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_package_executions_actor ON package_executions(actor_key);
 -- Actor termination and claim debt visit only live membership, never ended history.
 CREATE INDEX IF NOT EXISTS idx_package_executions_open_actor ON package_executions(actor_key)
     WHERE ended = 0;
+CREATE TABLE IF NOT EXISTS execution_uses (
+    execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    use_json TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot)
+);
 CREATE TABLE IF NOT EXISTS execution_resolutions (
     execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,

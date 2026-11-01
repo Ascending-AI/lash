@@ -1,9 +1,10 @@
-//! Package sidecars, immutable execution registrations and per-use resolution outcomes.
+//! Package sidecars, current execution uses and immutable resolution outcomes.
 pub const LABELS_TABLE: &str = "package_labels";
 pub const EXECUTIONS_TABLE: &str = "package_executions";
+pub const USES_TABLE: &str = "execution_uses";
 pub const RESOLUTIONS_TABLE: &str = "execution_resolutions";
-/// Owner and immutable membership, without duplicate execution key.
-pub const REGISTRATION_COLUMNS: &str = "actor_key, registration_json";
+/// Owner and metadata, without duplicate execution or use membership.
+pub const REGISTRATION_COLUMNS: &str = "actor_key, referrer_json, requirements_json, ended = 0";
 /// The actor's fence, revision and debt inspected before a resolution write.
 pub const OWNER_COLUMNS: &str = "epoch, state, state_revision, base_requires";
 
@@ -30,23 +31,32 @@ crate::statements! {
              ORDER BY actor_key
              LIMIT ?2";
 
-        /// Register an execution once; replay must match its actor and record.
-        register_execution = "INSERT INTO package_executions (execution, actor_key, registration_json)
-             VALUES (?1, ?2, ?3) ON CONFLICT (execution) DO NOTHING";
-        registration = "SELECT actor_key, registration_json FROM package_executions WHERE execution = ?1 AND ended = 0";
-        adopt_execution = "UPDATE package_executions SET registration_json = ?3
+        /// Register metadata once; replay compares the reconstructed current record.
+        register_execution = "INSERT INTO package_executions (execution, actor_key, referrer_json, requirements_json)
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (execution) DO NOTHING";
+        registration = "SELECT actor_key, referrer_json, requirements_json, ended = 0
+             FROM package_executions WHERE execution = ?1";
+        current_uses = "SELECT link, slot, use_json FROM execution_uses
+             WHERE execution = ?1 ORDER BY link, slot";
+        registration_use = "SELECT e.actor_key, e.referrer_json, u.use_json
+             FROM package_executions e JOIN execution_uses u ON u.execution = e.execution
+             WHERE e.execution = ?1 AND e.ended = 0 AND u.link = ?2 AND u.slot = ?3";
+        clear_uses = "DELETE FROM execution_uses WHERE execution = ?1";
+        adopt_execution = "UPDATE package_executions SET requirements_json = ?3
              WHERE execution = ?1 AND actor_key = ?2 AND ended = 0";
         end_execution = "UPDATE package_executions SET ended = 1 WHERE execution = ?1 AND actor_key = ?2";
         end_actor_executions = "UPDATE package_executions SET ended = 1 WHERE actor_key = ?1 AND ended = 0";
-        /// One snapshot of all live execution debt, tagged by source record kind.
-        requirements_rows = "SELECT registration_json AS record_json, 0 AS resolved FROM package_executions
-             WHERE actor_key = ?1 AND ended = 0
+        /// Stable debt once per live execution, then current declarations joined
+        /// only to their exact immutable winners, all in one snapshot.
+        requirements_rows = "SELECT requirements_json AS stable, NULL AS execution, NULL AS link,
+                    NULL AS slot, NULL AS use_json, NULL AS record_json
+             FROM package_executions WHERE actor_key = ?1 AND ended = 0
              UNION ALL
-             SELECT r.record_json, 1 AS resolved FROM execution_resolutions AS r
-             JOIN package_executions AS e ON e.execution = r.execution
+             SELECT NULL, u.execution, u.link, u.slot, u.use_json, r.record_json
+             FROM package_executions e JOIN execution_uses u ON u.execution = e.execution
+             LEFT JOIN execution_resolutions r
+                 ON r.execution = u.execution AND r.link = u.link AND r.slot = u.slot
              WHERE e.actor_key = ?1 AND e.ended = 0";
-        registration_matches = "SELECT execution FROM package_executions
-             WHERE execution = ?1 AND actor_key = ?2 AND registration_json = ?3";
         load_resolution = "SELECT record_json FROM execution_resolutions
              WHERE execution = ?1 AND link = ?2 AND slot = ?3";
         insert_resolution = "INSERT INTO execution_resolutions (execution, link, slot, record_json)

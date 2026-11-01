@@ -116,6 +116,7 @@ DROP TABLE IF EXISTS lash_nodes CASCADE;
 
 DROP TABLE IF EXISTS lash_actors CASCADE;
 
+DROP TABLE IF EXISTS lash_execution_uses CASCADE;
 DROP TABLE IF EXISTS lash_package_executions CASCADE;
 
 DROP TABLE IF EXISTS lash_execution_resolutions CASCADE;

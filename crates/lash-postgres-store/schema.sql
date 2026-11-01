@@ -953,11 +953,12 @@ CREATE INDEX IF NOT EXISTS ix_lash_actors_due ON lash_actors (next_due_ms)
 CREATE INDEX IF NOT EXISTS ix_lash_actors_owner ON lash_actors (owner_node, owner_boot)
     WHERE state = 'owned';
 
--- Immutable execution membership and terminal deferred-use outcomes.
+-- Current execution membership and immutable deferred-use outcomes.
 CREATE TABLE IF NOT EXISTS lash_package_executions (
     execution TEXT PRIMARY KEY,
     actor_key TEXT NOT NULL REFERENCES lash_actors(actor_key) ON DELETE CASCADE,
-    registration_json TEXT NOT NULL,
+    referrer_json TEXT NOT NULL,
+    requirements_json TEXT NOT NULL,
     ended INTEGER NOT NULL DEFAULT 0 CONSTRAINT lash_package_executions_ended_check
         CHECK (ended IN (0, 1))
 );
@@ -965,6 +966,13 @@ CREATE INDEX IF NOT EXISTS idx_lash_package_executions_actor ON lash_package_exe
 -- Actor termination and claim debt visit only live membership, never ended history.
 CREATE INDEX IF NOT EXISTS idx_lash_package_executions_open_actor ON lash_package_executions(actor_key)
     WHERE ended = 0;
+CREATE TABLE IF NOT EXISTS lash_execution_uses (
+    execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    use_json TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot)
+);
 CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
     execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
     link TEXT NOT NULL,
