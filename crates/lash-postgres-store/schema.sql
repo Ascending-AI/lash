@@ -1002,7 +1002,7 @@ CREATE TABLE IF NOT EXISTS lash_model_call_records (
     run TEXT NOT NULL,
     call TEXT NOT NULL,
     call_id TEXT NOT NULL,
-    attempt BIGINT CHECK (attempt > 0),
+    attempt BIGINT CONSTRAINT ck_model_call_records_attempt CHECK (attempt > 0),
     answered BOOLEAN NOT NULL DEFAULT FALSE,
     enclosing_owner TEXT, enclosing_run BIGINT, enclosing_call TEXT,
     record_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
@@ -1011,10 +1011,10 @@ CREATE TABLE IF NOT EXISTS lash_model_call_records (
     PRIMARY KEY (session_id, call_id),
     UNIQUE (session_id, run, call),
     CONSTRAINT ck_model_call_records_enclosing CHECK ((enclosing_owner IS NULL AND enclosing_run IS NULL AND enclosing_call IS NULL) OR (enclosing_owner IS NOT NULL AND enclosing_run IS NOT NULL AND enclosing_run >= 0 AND enclosing_call IS NOT NULL)),
-    CHECK ((record_ref IS NULL) = (ended_at_ms IS NULL)),
-    CHECK ((record_ref IS NULL) = (written_epoch IS NULL)),
-    CHECK (record_ref IS NOT NULL OR attempt IS NOT NULL),
-    CHECK (record_ref IS NULL OR answered)
+    CONSTRAINT ck_model_call_records_ended CHECK ((record_ref IS NULL) = (ended_at_ms IS NULL)),
+    CONSTRAINT ck_model_call_records_written CHECK ((record_ref IS NULL) = (written_epoch IS NULL)),
+    CONSTRAINT ck_model_call_records_reserved CHECK (record_ref IS NOT NULL OR attempt IS NOT NULL),
+    CONSTRAINT ck_model_call_records_answered CHECK (record_ref IS NULL OR answered)
 );
 CREATE INDEX IF NOT EXISTS idx_model_call_records_record_ref ON lash_model_call_records(record_ref) WHERE record_ref IS NOT NULL;
 
@@ -1044,17 +1044,17 @@ CREATE TABLE IF NOT EXISTS lash_tool_calls (
     execution_owner TEXT NOT NULL, run_seq BIGINT NOT NULL, member BIGINT NOT NULL,
     admission_seq BIGINT NOT NULL,
     counted BOOLEAN NOT NULL,
-    admitted_count BIGINT NOT NULL CHECK (admitted_count >= 0),
+    admitted_count BIGINT NOT NULL CONSTRAINT ck_tool_calls_admitted_count CHECK (admitted_count >= 0),
     cancellable BOOLEAN NOT NULL,
     session_id TEXT, turn_id TEXT,
     request_id TEXT, origin TEXT, reason TEXT,
-    decision TEXT CHECK (decision IN ('final', 'cancel')),
+    decision TEXT CONSTRAINT ck_tool_calls_decision CHECK (decision IN ('final', 'cancel')),
     decision_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     answer_outcome TEXT,
     body_ref BYTEA REFERENCES lash_blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (owner_key, call_id),
-    CHECK ((decision IS NULL) = (decision_ref IS NULL)),
-    CHECK (body_ref IS NULL OR answer_outcome IS NOT NULL)
+    CONSTRAINT ck_tool_calls_decided CHECK ((decision IS NULL) = (decision_ref IS NULL)),
+    CONSTRAINT ck_tool_calls_answered CHECK (body_ref IS NULL OR answer_outcome IS NOT NULL)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_tool_calls_execution ON lash_tool_calls(execution_owner, call_id);
 CREATE INDEX IF NOT EXISTS idx_lash_tool_calls_order ON lash_tool_calls(owner_key, admission_seq, call_id);
