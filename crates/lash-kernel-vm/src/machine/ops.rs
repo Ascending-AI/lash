@@ -597,15 +597,15 @@ impl KernelMachine {
         let super::exec::Invocation {
             args,
             owners,
+            count,
             awaiting,
             export,
             ..
         } = invocation;
-        let function = exe.lib(lib);
         let AdmittedBody { code, entry } = admitted;
         // An argument the call leaves out is absent: the body binds every
         // parameter.
-        let call = Call::new(code, args, function.arity)
+        let call = Call::new(code, args, count)
             .with_owners(owners)
             .in_link(self.current_link())
             .of_library(lib)
@@ -669,7 +669,7 @@ impl KernelMachine {
         let entry = function
             .operation()
             .then(|| {
-                self.operation_entry(task, exe, function, args)
+                self.operation_entry(task)
                     .map_err(|interrupt| interrupt.in_function(&function.header.name))
             })
             .transpose()?;
@@ -702,7 +702,7 @@ impl KernelMachine {
         let function = exe.lib(lib);
         let entry = if function.operation() {
             Some(
-                self.operation_entry(task, exe, function, args)
+                self.operation_entry(task)
                     .map_err(|interrupt| interrupt.in_function(&function.header.name))?,
             )
         } else {

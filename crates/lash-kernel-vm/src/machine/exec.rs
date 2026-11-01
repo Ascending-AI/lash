@@ -951,7 +951,7 @@ impl KernelMachine {
         }
         // An operation checked this unit at admission. Its fallback frame
         // represents that same active call, not a second one.
-        if !library.is_some_and(|lib| exe.lib(lib).operation()) {
+        if admission.is_none() || !library.is_some_and(|lib| exe.lib(lib).operation()) {
             self.check_call_depth(task)?;
         }
         // SiteRef contains page-access-local trees. Prepare each body's
@@ -978,7 +978,20 @@ impl KernelMachine {
             // formula even when an uncharged library body spawned it.
             let keep_arguments = self.charging || self.task(task)?.frames.is_empty();
             let args = if keep_arguments {
-                self.regs[base..base + given].into()
+                let mut values = Vec::new();
+                values
+                    .try_reserve(code.params.len())
+                    .map_err(|_| HeapFault::Exhausted {
+                        resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+                    })?;
+                values.extend((0..code.params.len()).map(|index| {
+                    if index < given {
+                        self.regs[base + index]
+                    } else {
+                        Value::Absent
+                    }
+                }));
+                values.into_boxed_slice()
             } else {
                 Box::default()
             };
@@ -990,24 +1003,22 @@ impl KernelMachine {
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
         }
-        if admission.is_none() {
-            frame = match self.publish_prepared_frame_entry(
-                task,
-                exe,
-                super::source_publication::frame_entry::EntryCall {
-                    code: code_id,
-                    args: base,
-                    owners,
-                    given,
-                    awaited_by,
-                    capture,
-                },
-                frame,
-            )? {
-                None => return Ok(()),
-                Some(frame) => frame,
-            };
-        }
+        frame = match self.publish_prepared_frame_entry(
+            task,
+            exe,
+            super::source_publication::frame_entry::EntryCall {
+                code: code_id,
+                args: base,
+                owners,
+                given,
+                awaited_by,
+                capture,
+            },
+            frame,
+        )? {
+            None => return Ok(()),
+            Some(frame) => frame,
+        };
         if let Some(act) = capture {
             let statement =
                 awaited_by.ok_or_else(|| fault("prepared capture has no caller statement"))?;
@@ -1041,15 +1052,7 @@ impl KernelMachine {
                 true => self.regs.take(base + index, Value::Absent),
                 false => Value::Absent,
             };
-            if let Some(admission) = &admission {
-                let state = match admission.shared.get(index).copied().flatten() {
-                    Some(cell) => SlotState::Cell(cell),
-                    None => SlotState::Value(value),
-                };
-                self.frame(task)?.set_slot(param.at, state);
-            } else {
-                self.bind(task, param.at, param.shared, value)?;
-            }
+            self.bind(task, param.at, param.shared, value)?;
         }
         let inputs = match owners {
             ArgumentOwners::Operands => self.regs.take_source_arguments(base, given),

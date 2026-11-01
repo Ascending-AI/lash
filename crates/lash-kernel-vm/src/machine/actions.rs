@@ -192,7 +192,13 @@ impl KernelMachine {
             .map_err(|interrupt| interrupt.answering(running.exe.lib(lib)))?;
         match answer {
             super::ops::Answer::Done => Ok(Flow::Done),
-            answer => self.body_answered(running, act, lib, args, answer),
+            answer => self.body_answered(
+                running,
+                act,
+                lib,
+                (args, running.exe.lib(lib).arity),
+                answer,
+            ),
         }
     }
 
@@ -242,7 +248,7 @@ impl KernelMachine {
             self.operator(running.task, running.exe, lib, args, args)
         }
         .map_err(|interrupt| interrupt.answering(function))?;
-        self.body_answered(running, act, lib, args, answer)
+        self.body_answered(running, act, lib, (args, count), answer)
     }
 
     pub(in crate::machine) fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {

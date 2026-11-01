@@ -306,12 +306,26 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         charge_limit: 10_000,
         ..ROOMY
     };
-    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
-    match machine.run(&mut World::default(), u64::MAX).unwrap() {
-        Step::Ended(End::Error(RunError::Bound(exceeded))) => {
-            assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
+    for source in [true, false] {
+        crate::machine::islands::witness::begin();
+        let mut machine =
+            super::embedder::start_machine(program.clone(), bounds, start.clone()).unwrap();
+        if source {
+            machine.force_source_execution();
         }
-        other => panic!("the escaped closure's loop was not charged: {other:?}"),
+        match machine.run(&mut World::default(), u64::MAX).unwrap() {
+            Step::Ended(End::Error(RunError::Bound(exceeded))) => {
+                assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
+            }
+            other => panic!("the escaped closure's loop was not charged: {other:?}"),
+        }
+        let entries = crate::machine::islands::witness::prepared_frame_entries();
+        if source {
+            assert!(
+                entries[1] > 0,
+                "the operation's body must install its captured parameter cell with the accepted frame: {entries:?}"
+            );
+        }
     }
 }
 

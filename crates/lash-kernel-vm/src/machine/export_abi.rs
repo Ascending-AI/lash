@@ -229,7 +229,7 @@ impl KernelMachine {
         running: &Running<'_>,
         act: lash_kernel_exec::ActIx,
         lib: LibId,
-        args: Reg,
+        (args, given): (Reg, usize),
         answer: super::ops::Answer,
     ) -> Status {
         let (task, exe, stmt) = (running.task, running.exe, running.id);
@@ -262,7 +262,7 @@ impl KernelMachine {
                     exe,
                     lib,
                     code,
-                    super::exec::Invocation::new(args, exe.lib(lib).arity)
+                    super::exec::Invocation::new(args, given)
                         .awaited_by(Some(stmt))
                         .with_boundary(boundary),
                 )

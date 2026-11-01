@@ -562,14 +562,11 @@ impl Prepared {
                     deepest: Default::default(),
                 },
             },
-            shared_params,
         }
     }
 }
 
-/// A library function as one preparation runs it, with the parameters its
-/// body's closures share, which admission reads outside the hot call table.
+/// A library function as one preparation runs it.
 pub(super) struct LibSlot {
     pub(super) lib: Lib,
-    pub(super) shared_params: Vec<usize>,
 }

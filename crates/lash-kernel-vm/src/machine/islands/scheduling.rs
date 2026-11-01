@@ -362,7 +362,7 @@ impl KernelMachine {
                                     exe,
                                     lib,
                                     code,
-                                    crate::machine::exec::Invocation::new(at, exe.lib(lib).arity)
+                                    crate::machine::exec::Invocation::new(at, count)
                                         .awaited_by(Some(stmt))
                                         .with_boundary(None),
                                 )?
@@ -413,7 +413,7 @@ impl KernelMachine {
                 let answer = self
                     .answer(task, exe, *lib, args, count, args)
                     .map_err(|interrupt| interrupt.answering(exe.lib(*lib)))?;
-                self.body_answered(running, act, *lib, args, answer)
+                self.body_answered(running, act, *lib, (args, count), answer)
             }
             NestedKind::Spawn(callee) => {
                 let (target, at) = self.nested_target(exe, callee, args)?;

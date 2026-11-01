@@ -616,11 +616,6 @@ impl Executable {
         self.library.0.lib(id)
     }
 
-    #[inline]
-    pub(crate) fn shared_params(&self, id: LibId) -> &[usize] {
-        &self.library.0.slot(id).shared_params
-    }
-
     /// Resolves a source statement inside one admitted code body.
     pub(crate) fn stmt_at(&self, code: CodeId, site: &Site) -> Option<StmtId> {
         let code = self.code(code);
