@@ -731,6 +731,29 @@ impl BackendRunner {
                         .map_err(|error| StoreError::Backend(error.to_string()))?
                         .is_none()
                 );
+                // The law leaves its two helper executions live: their debt
+                // merges to the archive at its highest generation (5) and one
+                // release token naming every function reached (63, 64, 65).
+                let function = |n: u8| lash_kernel_value::names::FunctionId::from_bytes([n; 32]);
+                let left_helper_debt =
+                    lash_durable::packages::vocabulary::claims::ClaimRequirements {
+                        machine: lash_kernel_value::claims::NodeRequirements {
+                            helpers: lash_kernel_value::claims::HelperRequirements::new(
+                                [(
+                                    lash_kernel_value::HelperLibraryId::of_members([function(61)]),
+                                    5,
+                                )]
+                                .into(),
+                                [(
+                                    lash_kernel_value::HelperLibraryId::of_members([function(62)]),
+                                    [function(63), function(64), function(65)].into(),
+                                )]
+                                .into(),
+                            ),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    };
                 assert_eq!(
                     resolutions
                         .requirements(
@@ -739,7 +762,7 @@ impl BackendRunner {
                         )
                         .await
                         .map_err(|error| StoreError::Backend(error.to_string()))?,
-                    lash_durable::packages::vocabulary::claims::ClaimRequirements::default()
+                    left_helper_debt
                 );
                 let refused = Box::pin(
                     resolutions.commit_acknowledged(
