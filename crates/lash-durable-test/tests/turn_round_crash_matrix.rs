@@ -1223,14 +1223,7 @@ impl Scenario for L4 {
         let ids = fold
             .rounds()
             .flat_map(|view| view.members())
-            .map(|member| {
-                (
-                    member.call().clone(),
-                    member
-                        .outcome()
-                        .map(lash_core_store::tool_run::SettledOutput::outcome),
-                )
-            })
+            .map(|member| (member.call().clone(), member.outcome().cloned()))
             .collect::<Vec<_>>();
         violations.extend(
             call_directory::check(

@@ -1,14 +1,31 @@
 //! Call lookup agreement across the existing crash matrices.
 use lash_core_execution::call_store::{self, CallRead};
-use lash_core_store::tool_run::AttemptOutcome;
+use lash_core_execution::runtime::actor::round::{CompletedCall, graph::ArchivalCall};
+use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::tool_calls::ToolCallSettlement;
 use lash_durable::domain::{CallOwner, ToolCallDecision};
-use lash_protocol_types::{ToolCallId, ToolCallOutcome};
+use lash_protocol_types::{ToolCallId, ToolCallRecord};
+
+/// Whether `record`, read from the directory's canonical body, holds the
+/// answer `expected` names. The fold reads `expected` from the run facts and
+/// checks its payload against the material digest, so it is the oracle.
+fn holds(expected: &SettledOutput, record: &ToolCallRecord) -> bool {
+    if let Some(ArchivalCall(archived)) = expected.typed::<ArchivalCall>() {
+        return archived == record;
+    }
+    expected.typed::<CompletedCall>().is_some_and(|completed| {
+        completed.call_id == record.call_id
+            && completed.provider_call_id == record.provider_call_id
+            && completed.tool_name == record.tool
+            && completed.args == record.args
+            && completed.output == record.output
+    })
+}
 
 pub async fn check(
     reads: &dyn lash_durable::DurableReads,
     owner: &CallOwner,
-    expected: &[(ToolCallId, Option<AttemptOutcome>)],
+    expected: &[(ToolCallId, Option<SettledOutput>)],
 ) -> Vec<String> {
     let checked = async {
         let ids = expected.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
@@ -31,16 +48,11 @@ pub async fn check(
         for (id, outcome) in expected {
             let answer = call_store::call(reads, owner, id).await.map_err(|e| e.to_string())?;
             let valid = match (outcome, &answer) {
-                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Execution(actual), record: None }) => expected == actual.as_ref(),
+                (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Execution(actual), record: None }) => expected.outcome() == *actual.as_ref(),
                 // A materialized answer lives in its canonical body; the row keeps only the winner.
+                // Only an output naming material has a body, so its winner is Final.
                 (Some(expected), CallRead::Settled { outcome: ToolCallSettlement::Materialized(decision), record: Some(record) }) => {
-                    let cancelled = matches!(expected, AttemptOutcome::Cancelled { .. });
-                    *decision == if cancelled { ToolCallDecision::Cancel } else { ToolCallDecision::Final }
-                        && match expected {
-                            AttemptOutcome::Completed(_) => matches!(record.output.outcome, ToolCallOutcome::Success(_)),
-                            AttemptOutcome::Cancelled { .. } => matches!(record.output.outcome, ToolCallOutcome::Cancelled(_)),
-                            _ => matches!(record.output.outcome, ToolCallOutcome::Failure(_)),
-                        }
+                    *decision == ToolCallDecision::Final && holds(expected, record)
                 }
                 (None, CallRead::Pending { .. }) => true,
                 _ => false,
