@@ -33,8 +33,9 @@ could not fail its zero budget.
 ## Physical turn breakdown
 
 `just profile-turn <replay-workload> --turn N --store sqlite` prints a
-send-through-outcome phase table and SQL shape/store-origin rows. Its sidecar
-retains the physical profile used for the table. `--store postgres` is accepted
+send-through-outcome phase table and SQL shape/store-origin rows, then the
+turn's store bytes per window (turn, retirement) and per table and index. Its
+sidecars retain the physical profile and every window's write attribution. `--store postgres` is accepted
 only inside `kiln gate`, against the gate's private server. Each PostgreSQL
 statement is reported as an attempted statement round trip; pool validation,
 protocol control and wire bytes are excluded.

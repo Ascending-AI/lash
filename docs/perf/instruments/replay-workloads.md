@@ -317,7 +317,7 @@ not individual session-turn latency samples:
 | `sql_rows_read` | rows | result rows the trace saw |
 | `sql_rows_written` | rows | SQLite `total_changes` across each connection call |
 | `sql_bytes_written` | bytes | the values bound to statements that write: a text's or blob's own bytes, eight per number |
-| `store_bytes_written` | bytes | pages written to the WAL (`SQLITE_DBSTATUS_CACHE_WRITE`) times the page size |
+| `store_bytes_written` | bytes | WAL bytes of the round and the retirement after it: SQLite pages (`SQLITE_DBSTATUS_CACHE_WRITE`) times the page size; PostgreSQL insert-LSN advance (server-wide, so a private server) |
 | `graph_nodes_written` | nodes | net growth of `graph_nodes` rows, read on a side connection |
 | `graph_nodes_decoded` | nodes | the store's `decoded_graph_node_bodies` counter |
 | `allocations`, `allocated_bytes` | count, bytes | the host's `stats_alloc` allocator (not the workers') |
@@ -325,6 +325,16 @@ not individual session-turn latency samples:
 | `worker_executions`, `workers_killed` | count | the pool; the crash fixture |
 | `model_calls` | calls | the scripted provider |
 | `host_cpu_ms`, `worker_cpu_ms`, `wall_ms` | ms | `/proc/self/stat`; the pool's charged CPU; the round's wall clock |
+
+`store_bytes_written` is the one physical-write figure. Its after-cut is taken
+once artifact cleanup has settled and page retirement has run, so a turn
+carries the deletes it causes; a compaction record likewise carries the
+retirement after the compaction (FIG-7583). Every other metric keeps the
+send-through-outcome cut. `replay --store-writes <path>` (SQLite with
+`--traffic`), and `profile-turn`, split those bytes per window (turn,
+retirement, compaction, compaction retirement) and per table and index:
+SQLite by each written page's `dbstat` owner, PostgreSQL by each WAL record's
+relation (`pg_walinspect`). That split is profiling output, never gated.
 
 `store_bytes_written` is the physical cost, and it moves by a few percent
 between runs of one commit: rows keyed by content hashes that hold run ids

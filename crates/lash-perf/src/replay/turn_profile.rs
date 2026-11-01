@@ -34,6 +34,7 @@ pub async fn run(args: &Args) -> Result<()> {
         "PostgreSQL profiling requires kiln gate"
     );
     let profiles_path = args.out.with_extension("turns.json");
+    let writes_path = args.out.with_extension("writes.json");
     super::run(&ReplayArgs {
         instructions: false,
         worker_resources: false,
@@ -45,11 +46,13 @@ pub async fn run(args: &Args) -> Result<()> {
         out: args.out.clone(),
         history: None,
         sql_shapes: None,
-        traffic: false,
+        // SQLite store-write attribution reads the write observer's pages.
+        traffic: args.store == StoreKind::Sqlite,
         effect_phases: None,
         effect_phases_off: false,
         heap: ReplayHeapArgs::default(),
         turn_report: Some(profiles_path.clone()),
+        store_writes: Some(writes_path.clone()),
     })
     .await?;
     let profiles: Vec<lash::tracing::TurnProfile> =
@@ -66,7 +69,9 @@ pub async fn run(args: &Args) -> Result<()> {
         "SQL rows do not conserve the turn total"
     );
     print!("{}", table(profile));
+    print!("{}", super::store_writes::table(&writes_path, args.turn)?);
     println!("profile-turn: {}", profiles_path.display());
+    println!("profile-turn: {}", writes_path.display());
     Ok(())
 }
 

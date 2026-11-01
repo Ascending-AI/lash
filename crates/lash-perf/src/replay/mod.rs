@@ -17,6 +17,7 @@ pub mod recorder;
 pub mod runner;
 pub mod script;
 mod sql_work;
+mod store_writes;
 pub mod traffic;
 pub mod turn_profile;
 mod workers;
@@ -111,6 +112,10 @@ pub struct ReplayArgs {
     pub traffic: bool,
     #[arg(long)]
     pub turn_report: Option<PathBuf>,
+    /// Profiling: store bytes per window (turn, retirement, compaction) and
+    /// per table and index, as JSON (one workload; SQLite needs --traffic).
+    #[arg(long)]
+    pub store_writes: Option<PathBuf>,
     /// Count qualified hardware instructions on this local host, including worker receipts.
     #[arg(long)]
     pub instructions: bool,
@@ -175,6 +180,7 @@ pub struct GateArgs {
 struct Observers<'a> {
     sql_shapes: Option<&'a std::path::Path>,
     turn_report: Option<&'a std::path::Path>,
+    store_writes: Option<&'a std::path::Path>,
     worker_resources: bool,
     instructions: bool,
     traffic: bool,
@@ -193,6 +199,7 @@ async fn run_workloads(
     let Observers {
         sql_shapes,
         turn_report,
+        store_writes,
         worker_resources,
         instructions,
         traffic,
@@ -223,6 +230,7 @@ async fn run_workloads(
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
             heap: heap.clone(),
             turn_report: turn_report.map(std::path::Path::to_path_buf),
+            store_writes: store_writes.map(std::path::Path::to_path_buf),
             traffic,
             effect_phases: effect_phases.map(|(path, _)| path.to_path_buf()),
             effect_phases_off: effect_phases.is_some_and(|(_, off)| off),
@@ -280,6 +288,7 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     if args.sql_shapes.is_some()
         || args.turn_report.is_some()
+        || args.store_writes.is_some()
         || args.heap.dhat_out.is_some()
         || args.effect_phases.is_some()
     {
@@ -329,6 +338,7 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         Observers {
             sql_shapes: args.sql_shapes.as_deref(),
             turn_report: args.turn_report.as_deref(),
+            store_writes: args.store_writes.as_deref(),
             worker_resources: args.worker_resources || args.instructions,
             instructions: args.instructions,
             traffic: args.traffic,

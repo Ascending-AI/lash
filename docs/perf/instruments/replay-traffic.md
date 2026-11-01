@@ -55,7 +55,8 @@ underlying VFS to identify page sizes and addresses. Rewriting one page twice
 counts both writes, including header rewrites. `write_calls` counts successful
 underlying `xWrite` calls, while rows partition their bytes; one call can cross
 several rows. Row bytes sum exactly to `total_bytes`. `wal_body` bytes must also
-equal the existing `store_bytes_written` (`CACHE_WRITE × page_size`). Headers,
+equal the existing `store_bytes_written` (`CACHE_WRITE × page_size`); both
+span the round and the retirement after it. Headers,
 checkpoint and other file bytes are additional physical traffic. This is VFS
 traffic, excluding shared-memory stores, `-shm` mmap writes, syncs, truncates,
 filesystem block amplification and bytes written outside the process.

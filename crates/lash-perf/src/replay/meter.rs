@@ -89,7 +89,7 @@ pub const METRICS: [MetricDef; 40] = [
     counted(
         "store_bytes_written",
         "bytes",
-        "database pages written to the WAL times the page size (SQLite DBSTATUS_CACHE_WRITE)",
+        "WAL bytes the store wrote through the round and the retirement after it: SQLite pages (DBSTATUS_CACHE_WRITE) times the page size; PostgreSQL insert-LSN advance, server-wide",
     ),
     counted(
         "graph_nodes_written",
@@ -312,6 +312,21 @@ impl StoreProbe {
         }
     }
 
+    /// The server's WAL insert position in bytes. It counts every database
+    /// on the server, so a measured run needs a private one.
+    async fn wal_position(&self) -> Option<f64> {
+        match self {
+            Self::Sqlite { .. } => None,
+            Self::Postgres { pool } => sqlx::query_scalar::<_, i64>(
+                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(), '0/0')::bigint",
+            )
+            .fetch_one(pool)
+            .await
+            .ok()
+            .map(|position| position as f64),
+        }
+    }
+
     pub fn backend(&self) -> &'static str {
         match self {
             Self::Sqlite { .. } => "sqlite-file",
@@ -430,6 +445,9 @@ impl Meter {
         }
         if let Some(nodes) = self.probe.graph_nodes().await {
             reading.insert("graph_nodes_written", nodes);
+        }
+        if let Some(position) = self.probe.wal_position().await {
+            reading.insert("store_bytes_written", position);
         }
         {
             let work = if let Some(observer) = &self.traffic {

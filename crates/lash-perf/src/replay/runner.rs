@@ -39,6 +39,8 @@ pub struct RunOptions {
     pub worker_profile_dir: std::path::PathBuf,
     pub sql_shapes: Option<std::path::PathBuf>,
     pub turn_report: Option<std::path::PathBuf>,
+    /// Profile-only store writes per window and table (`store_writes.rs`).
+    pub store_writes: Option<std::path::PathBuf>,
     pub traffic: bool,
     pub effect_phases: Option<std::path::PathBuf>,
     pub effect_phases_off: bool,
@@ -327,6 +329,22 @@ fn replay_settings() -> lash_durable::DurableSettings {
     settings
 }
 
+/// Settles artifact cleanup and retires the pages a round left behind. A
+/// round's physical writes (`store_bytes_written` and traffic) run through
+/// this, so they include the retirement the round causes (FIG-7583).
+async fn maintain(
+    cleanup: &lash::testing::ArtifactCleanupFence,
+    pages: Option<&dyn lash_durable::domain::pages::PageStore>,
+) -> Result<()> {
+    cleanup
+        .settle()
+        .await
+        .context("settle between-round artifact cleanup")?;
+    retire(pages)
+        .await
+        .context("retire the pages the last round left behind")
+}
+
 /// Runs page retirement until a step finds nothing left to do.
 async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> Result<()> {
     let Some(pages) = pages else {
@@ -342,6 +360,55 @@ async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> R
         != lash_durable::domain::pages::RetirementProgress::default()
     {}
     Ok(())
+}
+
+/// Run the retirement after a turn or compaction and read the store again.
+/// Returns the post-retirement reading and the traffic the round reports:
+/// both span the round and its retirement. Profiling attributes the round
+/// and the retirement as separate windows.
+async fn retire_round(
+    meter: &Meter,
+    model_calls: u64,
+    (cleanup, pages): (
+        &lash::testing::ArtifactCleanupFence,
+        Option<&dyn lash_durable::domain::pages::PageStore>,
+    ),
+    (turn, window, mut store_writes): (
+        usize,
+        &'static str,
+        Option<&mut super::store_writes::StoreWrites>,
+    ),
+    before: super::store_writes::Cut<'_>,
+    after: super::store_writes::Cut<'_>,
+) -> Result<(super::meter::Reading, Option<super::traffic::Reading>)> {
+    if let Some(writes) = &mut store_writes {
+        writes.window(turn, window, before, after).await?;
+    }
+    lash_core::perf_witness::sql_shapes::work::set_window(Some(turn), "retirement");
+    maintain(cleanup, pages).await?;
+    let (retired, _, traffic) = meter.read_with_shapes(model_calls).await;
+    if let Some(writes) = store_writes {
+        let retirement = match window {
+            "turn" => "retirement",
+            _ => "compaction retirement",
+        };
+        writes
+            .window(turn, retirement, after, (&retired, traffic.as_ref()))
+            .await?;
+    }
+    Ok((retired, traffic))
+}
+
+/// The physical-write metrics from `before` through the post-retirement
+/// reading `retired`.
+fn physical_writes(
+    before: &super::meter::Reading,
+    retired: &super::meter::Reading,
+) -> std::collections::BTreeMap<String, f64> {
+    difference(before, retired)
+        .into_iter()
+        .filter(|(name, _)| name == "store_bytes_written")
+        .collect()
 }
 
 /// Run `workload` once and return its receipt.
@@ -420,6 +487,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 )
             )
         }
+    };
+    let mut store_writes = match &options.store_writes {
+        Some(_) => Some(super::store_writes::StoreWrites::new(&probe, options.traffic).await?),
+        None => None,
     };
     let mut meter = Meter::install(probe, None, options.sql_shapes.is_some(), traffic)?;
     let mut sql_spool = options
@@ -637,6 +708,8 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         row["phase"] = serde_json::json!("session_start");
         shape_rounds.push(row);
     }
+    lash_core::perf_witness::sql_shapes::work::set_window(None, "retirement");
+    maintain(&cleanup, pages.as_deref()).await?;
     let mut heap_window = None;
     let profile_end = options
         .heap
@@ -645,17 +718,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut profiled = false;
     let off_cpu_marks = std::env::var_os("LASH_OFF_CPU_MARKS").is_some();
     for turn in 0..turns {
-        lash_core::perf_witness::sql_shapes::work::set_window(Some(turn + 1), "maintenance");
         if let Some(spool) = &mut sql_spool {
             spool.flush_completed()?;
         }
-        cleanup
-            .settle()
-            .await
-            .context("settle between-round artifact cleanup")?;
-        retire(pages.as_deref())
-            .await
-            .context("retire the pages the last round left behind")?;
         if options.heap.dhat_out.is_some() && options.heap.profile_turn == Some(turn + 1) {
             heap_window = Some(crate::perf_support::dhat::ProfileWindow::start(
                 "replay-host",
@@ -817,7 +882,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             std::fs::write(path, serde_json::to_vec_pretty(&receipt)?)?;
             profiled = true;
         }
+        let (retired, traffic_after) = retire_round(
+            &meter,
+            model_calls,
+            (&cleanup, pages.as_deref()),
+            (turn + 1, "turn", store_writes.as_mut()),
+            (&before, traffic_before.as_ref()),
+            (&after, traffic_after.as_ref()),
+        )
+        .await?;
         let mut metrics = difference(&before, &after);
+        metrics.extend(physical_writes(&before, &retired));
         if let Some(bodies) = metrics.get("tool_bodies").copied().filter(|n| *n > 0.0) {
             for name in [
                 "provider_snapshots",
@@ -912,7 +987,17 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             }
             finish_counted_work(options, &lanes).await?;
             let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
+            let (retired, traffic_after) = retire_round(
+                &meter,
+                model_calls,
+                (&cleanup, pages.as_deref()),
+                (turn + 1, "compaction", store_writes.as_mut()),
+                (&before, traffic_before.as_ref()),
+                (&after, traffic_after.as_ref()),
+            )
+            .await?;
             let mut metrics = difference(&before, &after);
+            metrics.extend(physical_writes(&before, &retired));
             if let Some(bodies) = metrics.get("tool_bodies").copied().filter(|n| *n > 0.0) {
                 for name in [
                     "provider_snapshots",
@@ -1005,6 +1090,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             turns,
             (&work, &reference),
         )?;
+    }
+    if let (Some(path), Some(writes)) = (&options.store_writes, store_writes) {
+        writes.finish(path)?;
     }
     if let (Some(path), Some(sink)) = (&options.turn_report, turn_sink) {
         core.flush_trace_sink()
