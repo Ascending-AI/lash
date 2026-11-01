@@ -1454,9 +1454,9 @@ DECLARE
     v_frame TEXT;
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 89f3b819548ff594); a call
+    -- Generated from this build's statements (registry 8363d8ad26ce3796); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '89f3b819548ff594'
+    IF p_registry IS DISTINCT FROM '8363d8ad26ce3796'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1534,11 +1534,7 @@ BEGIN
              ON CONFLICT (hash) DO NOTHING;
     END IF;
     IF cardinality(p_named) > 0 THEN
-        PERFORM hash, encoding, CASE WHEN hash = ANY((p_named)::bytea[]) THEN NULL ELSE content END
-             FROM lash_blobs
-             WHERE hash = ANY((p_named)::bytea[])
-                OR hash = ANY(ARRAY(SELECT digest FROM UNNEST((p_digests)::bytea[]) AS digest))
-             ORDER BY hash FOR KEY SHARE;
+        PERFORM hash, encoding, CASE WHEN hash = ANY((p_named)::bytea[]) THEN NULL ELSE content END FROM lash_blobs WHERE hash = ANY((p_named)::bytea[]) OR hash = ANY(ARRAY(SELECT digest FROM UNNEST((p_digests)::bytea[]) AS digest)) ORDER BY hash FOR KEY SHARE;
         SELECT count(*) FROM unnest((p_named)::bytea[]) AS named(hash)
              LEFT JOIN lash_blobs AS stored ON stored.hash = named.hash
              WHERE stored.hash IS NULL
@@ -1548,18 +1544,12 @@ BEGIN
         END IF;
     END IF;
     IF cardinality(p_digests) > 0 THEN
-        WITH inserted AS (INSERT INTO lash_blobs (hash, content, encoding)
-             SELECT staged.digest, staged.content, 1
-             FROM UNNEST((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
-             ORDER BY staged.digest
-             ON CONFLICT (hash) DO NOTHING
-             RETURNING hash)
+        WITH inserted AS (INSERT INTO lash_blobs (hash, content, encoding) SELECT staged.digest, staged.content, 1 FROM UNNEST((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content) ORDER BY staged.digest ON CONFLICT (hash) DO NOTHING RETURNING hash)
         SELECT COALESCE(array_agg(hash), '{}') INTO v_inserted FROM inserted;
         -- A staged node another writer stored is held against a peel; one a
         -- peel took first is a conflict, which the explicit form installs
         -- again (FIG-5949).
-        PERFORM hash, content, encoding FROM lash_blobs WHERE hash = ANY((ARRAY(SELECT staged.digest FROM unnest(p_digests) AS staged(digest) WHERE NOT (staged.digest = ANY(v_inserted))))::bytea[])
-             ORDER BY hash FOR KEY SHARE;
+        PERFORM hash, content, encoding FROM lash_blobs WHERE hash = ANY((ARRAY(SELECT staged.digest FROM unnest(p_digests) AS staged(digest) WHERE NOT (staged.digest = ANY(v_inserted))))::bytea[]) ORDER BY hash FOR KEY SHARE;
         SELECT count(*)
              FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
              LEFT JOIN lash_blobs AS stored ON stored.hash = staged.digest
@@ -1574,9 +1564,7 @@ BEGIN
         FROM unnest(p_parents, p_children) AS staged(parent, child)
         WHERE staged.parent = ANY(v_inserted);
         IF cardinality(v_parents) > 0 THEN
-            INSERT INTO lash_blob_edges (parent_hash, child_hash)
-             SELECT parent, child
-             FROM UNNEST((v_parents)::bytea[], (v_children)::bytea[]) AS staged(parent, child);
+            INSERT INTO lash_blob_edges (parent_hash, child_hash) SELECT parent, child FROM UNNEST((v_parents)::bytea[], (v_children)::bytea[]) AS staged(parent, child);
         END IF;
         SELECT COALESCE(sum(octet_length(staged.content)), 0)::bigint
              FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
@@ -1600,65 +1588,31 @@ BEGIN
         v_first := NULL;
         CASE v_step->>'s'
         WHEN 'durable_tool_call.finish_reads' THEN
-            UPDATE lash_tool_calls SET answer_outcome = (v_p->>2)
-            WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1) AND NOT cancellable AND answer_outcome IS NULL;
+            UPDATE lash_tool_calls SET answer_outcome = (v_p->>1) WHERE owner_key = (v_p->>0) AND NOT cancellable AND answer_outcome IS NULL;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_tool_call.admit' THEN
-            INSERT INTO lash_tool_calls
-            (owner_key, call_id, execution_owner, run_seq, member, cancellable, session_id, turn_id, counted, admission_seq, admitted_count)
-            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), ((v_p->>5)::BOOLEAN), (v_p->>6), (v_p->>7), ((v_p->>8)::BOOLEAN),
-                COALESCE((SELECT admission_seq + 1 FROM lash_tool_calls WHERE owner_key = (v_p->>0) ORDER BY admission_seq DESC LIMIT 1), 0),
-                COALESCE((SELECT admitted_count FROM lash_tool_calls WHERE owner_key = (v_p->>0) ORDER BY admission_seq DESC LIMIT 1), 0) + CASE WHEN ((v_p->>8)::BOOLEAN) THEN 1 ELSE 0 END)
-            ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id
-            WHERE lash_tool_calls.execution_owner = excluded.execution_owner
-              AND lash_tool_calls.run_seq = excluded.run_seq AND lash_tool_calls.member = excluded.member
-              AND lash_tool_calls.cancellable = excluded.cancellable AND lash_tool_calls.counted = excluded.counted;
+            INSERT INTO lash_tool_calls AS held (owner_key, call_id, execution_owner, run_seq, member, cancellable, session_id, turn_id, counted, admission_seq, admitted_count) SELECT i.owner, i.call, i.execution, i.run, i.member, i.cancellable, i.session, i.turn, i.counted, COALESCE(p.admission_seq + 1, 0), COALESCE(p.admitted_count, 0) + CASE WHEN i.counted THEN 1 ELSE 0 END FROM (SELECT (v_p->>0) AS owner, (v_p->>1) AS call, (v_p->>2) AS execution, ((v_p->>3)::BIGINT) AS run, ((v_p->>4)::BIGINT) AS member, ((v_p->>5)::BOOLEAN) AS cancellable, (v_p->>6) AS session, (v_p->>7) AS turn, ((v_p->>8)::BOOLEAN) AS counted) AS i LEFT JOIN lash_tool_calls AS p ON p.owner_key = i.owner AND p.admission_seq = (SELECT admission_seq FROM lash_tool_calls WHERE owner_key = i.owner ORDER BY admission_seq DESC LIMIT 1) WHERE TRUE ON CONFLICT (owner_key, call_id) DO UPDATE SET call_id = excluded.call_id WHERE (held.execution_owner, held.run_seq, held.member, held.cancellable, held.counted) = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_tool_call.decide' THEN
-            UPDATE lash_tool_calls SET decision = (v_p->>2), decision_ref = (decode(v_p->>3, 'hex'))
-            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1)
-              AND ((decision IS NULL AND answer_outcome IS NULL) OR (decision = (v_p->>2) AND decision_ref = (decode(v_p->>3, 'hex'))));
+            UPDATE lash_tool_calls AS held SET decision = i.decision, decision_ref = i.fact FROM (SELECT (v_p->>0) AS owner, (v_p->>1) AS call, (v_p->>2) AS decision, (decode(v_p->>3, 'hex')) AS fact) AS i WHERE held.execution_owner = i.owner AND held.call_id = i.call AND ((held.decision IS NULL AND held.answer_outcome IS NULL) OR (held.decision, held.decision_ref) IS NOT DISTINCT FROM (i.decision, i.fact));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_tool_call.answer' THEN
-            UPDATE lash_tool_calls SET answer_outcome = (v_p->>2), body_ref = (decode(v_p->>3, 'hex'))
-            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1)
-              AND (decision IS NULL OR (decision = 'cancel' AND ((v_p->>4)::BOOLEAN)) OR (decision = 'final' AND NOT ((v_p->>4)::BOOLEAN)))
-              AND (answer_outcome IS NULL OR (answer_outcome = (v_p->>2)
-                AND (body_ref = (decode(v_p->>3, 'hex')) OR (body_ref IS NULL AND (decode(v_p->>3, 'hex')) IS NULL))));
+            UPDATE lash_tool_calls AS held SET answer_outcome = i.outcome, body_ref = i.body FROM (SELECT (v_p->>0) AS owner, (v_p->>1) AS call, (v_p->>2) AS outcome, (decode(v_p->>3, 'hex')) AS body, ((v_p->>4)::BOOLEAN) AS cancelled) AS i WHERE held.execution_owner = i.owner AND held.call_id = i.call AND (i.outcome <> '"Read"' OR NOT held.cancellable) AND (held.decision IS NULL OR held.decision = CASE WHEN i.cancelled THEN 'cancel' ELSE 'final' END) AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_tool_call.complete' THEN
-            UPDATE lash_tool_calls SET decision = 'final', decision_ref = (decode(v_p->>2, 'hex')),
-                answer_outcome = (v_p->>3), body_ref = (decode(v_p->>4, 'hex'))
-            WHERE execution_owner = (v_p->>0) AND call_id = (v_p->>1) AND NOT ((v_p->>5)::BOOLEAN)
-              AND ((decision IS NULL AND answer_outcome IS NULL)
-                OR (decision = 'final' AND decision_ref = (decode(v_p->>2, 'hex'))
-                  AND (answer_outcome IS NULL OR (answer_outcome = (v_p->>3)
-                    AND (body_ref = (decode(v_p->>4, 'hex')) OR (body_ref IS NULL AND (decode(v_p->>4, 'hex')) IS NULL))))));
+            UPDATE lash_tool_calls AS held SET decision = 'final', decision_ref = i.fact, answer_outcome = i.outcome, body_ref = i.body FROM (SELECT (v_p->>0) AS owner, (v_p->>1) AS call, (decode(v_p->>2, 'hex')) AS fact, (v_p->>3) AS outcome, (decode(v_p->>4, 'hex')) AS body, ((v_p->>5)::BOOLEAN) AS cancelled) AS i WHERE held.execution_owner = i.owner AND held.call_id = i.call AND NOT i.cancelled AND (i.outcome <> '"Read"' OR NOT held.cancellable) AND ((held.decision IS NULL AND held.answer_outcome IS NULL) OR ((held.decision, held.decision_ref) IS NOT DISTINCT FROM ('final', i.fact) AND (held.answer_outcome IS NULL OR (held.answer_outcome, held.body_ref) IS NOT DISTINCT FROM (i.outcome, i.body))));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.append' THEN
-            INSERT INTO lash_model_call_records
-            (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered)
-            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT), TRUE)
-            ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref,
-                ended_at_ms = COALESCE(lash_model_call_records.ended_at_ms, excluded.ended_at_ms),
-                written_epoch = COALESCE(lash_model_call_records.written_epoch, excluded.written_epoch), answered = TRUE
-            WHERE lash_model_call_records.call_id = excluded.call_id
-              AND (lash_model_call_records.record_ref IS NULL OR lash_model_call_records.record_ref = excluded.record_ref);
+            INSERT INTO lash_model_call_records (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch, answered) VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT), TRUE) ON CONFLICT (session_id, run, call) DO UPDATE SET record_ref = excluded.record_ref, ended_at_ms = COALESCE(lash_model_call_records.ended_at_ms, excluded.ended_at_ms), written_epoch = COALESCE(lash_model_call_records.written_epoch, excluded.written_epoch), answered = TRUE WHERE lash_model_call_records.call_id = excluded.call_id AND (lash_model_call_records.record_ref IS NULL OR lash_model_call_records.record_ref = excluded.record_ref);
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.reserve' THEN
-            INSERT INTO lash_model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call)
-            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), ((v_p->>4)::BIGINT), FALSE, (v_p->>5), ((v_p->>6)::BIGINT), (v_p->>7))
-            ON CONFLICT (session_id, run, call) DO UPDATE SET attempt = CASE WHEN lash_model_call_records.attempt < excluded.attempt THEN excluded.attempt ELSE lash_model_call_records.attempt END
-            WHERE lash_model_call_records.record_ref IS NULL AND lash_model_call_records.call_id = excluded.call_id
-              AND lash_model_call_records.enclosing_owner IS NOT DISTINCT FROM excluded.enclosing_owner
-              AND lash_model_call_records.enclosing_run IS NOT DISTINCT FROM excluded.enclosing_run
-              AND lash_model_call_records.enclosing_call IS NOT DISTINCT FROM excluded.enclosing_call;
+            INSERT INTO lash_model_call_records (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call) VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), ((v_p->>4)::BIGINT), FALSE, (v_p->>5), ((v_p->>6)::BIGINT), (v_p->>7)) ON CONFLICT (session_id, run, call) DO UPDATE SET attempt = CASE WHEN lash_model_call_records.attempt < excluded.attempt THEN excluded.attempt ELSE lash_model_call_records.attempt END WHERE lash_model_call_records.record_ref IS NULL AND lash_model_call_records.call_id = excluded.call_id AND lash_model_call_records.enclosing_owner IS NOT DISTINCT FROM excluded.enclosing_owner AND lash_model_call_records.enclosing_run IS NOT DISTINCT FROM excluded.enclosing_run AND lash_model_call_records.enclosing_call IS NOT DISTINCT FROM excluded.enclosing_call;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_model_call.answered' THEN
@@ -1697,8 +1651,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_run_record.prune' THEN
             v_rows := 0;
-            FOR v_row IN DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) AND run_seq < ((v_p->>1)::BIGINT)
-             RETURNING record_ref LOOP
+            FOR v_row IN DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) AND run_seq < ((v_p->>1)::BIGINT) RETURNING record_ref LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1747,34 +1700,19 @@ BEGIN
             END LOOP;
         WHEN 'durable_turn.admit_run' THEN
             v_rows := 0;
-            FOR v_row IN INSERT INTO lash_session_runs (session_id, run, admission_json)
-             SELECT (v_p->>0), (v_p->>1), (v_p->>2)
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM lash_session_runs
-                 WHERE session_id = (v_p->>0) AND admission_json IS NOT NULL
-                   AND terminal_kind IS NULL)
-             RETURNING run LOOP
+            FOR v_row IN INSERT INTO lash_session_runs (session_id, run, admission_json) SELECT (v_p->>0), (v_p->>1), (v_p->>2) WHERE NOT EXISTS ( SELECT 1 FROM lash_session_runs WHERE session_id = (v_p->>0) AND admission_json IS NOT NULL AND terminal_kind IS NULL) RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
         WHEN 'durable_turn.insert_phase' THEN
-            INSERT INTO lash_turn_phases
-                 (session_id, run, phase, phase_arg, iteration, checkpoint_ref,
-                  model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch)
-             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (decode(v_p->>5, 'hex')), (v_p->>6), ((v_p->>7)::BIGINT), ((v_p->>8)::BIGINT), ((v_p->>9)::BIGINT));
+            INSERT INTO lash_turn_phases (session_id, run, phase, phase_arg, iteration, checkpoint_ref, model_request_ref, model_deadline_ms, turn_deadline_ms, written_epoch) VALUES ((v_p->>0), (v_p->>1), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (decode(v_p->>5, 'hex')), (v_p->>6), ((v_p->>7)::BIGINT), ((v_p->>8)::BIGINT), ((v_p->>9)::BIGINT));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_turn.advance_phase' THEN
             v_rows := 0;
-            FOR v_row IN UPDATE lash_turn_phases
-             SET phase = (v_p->>2), phase_arg = ((v_p->>3)::BIGINT), iteration = ((v_p->>4)::BIGINT), checkpoint_ref = (decode(v_p->>5, 'hex')),
-                 model_request_ref = (v_p->>6), model_deadline_ms = ((v_p->>7)::BIGINT), written_epoch = ((v_p->>8)::BIGINT),
-                 model_calls = COALESCE(((v_p->>9)::BIGINT), model_calls), model_stream_from = (v_p->>10),
-                 answer_ref = NULL
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
-             RETURNING run LOOP
+            FOR v_row IN UPDATE lash_turn_phases SET phase = (v_p->>2), phase_arg = ((v_p->>3)::BIGINT), iteration = ((v_p->>4)::BIGINT), checkpoint_ref = (decode(v_p->>5, 'hex')), model_request_ref = (v_p->>6), model_deadline_ms = ((v_p->>7)::BIGINT), written_epoch = ((v_p->>8)::BIGINT), model_calls = COALESCE(((v_p->>9)::BIGINT), model_calls), model_stream_from = (v_p->>10), answer_ref = NULL WHERE session_id = (v_p->>0) AND run = (v_p->>1) RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1782,9 +1720,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_turn.answer_set' THEN
             v_rows := 0;
-            FOR v_row IN UPDATE lash_turn_phases SET answer_ref = (decode(v_p->>2, 'hex')), written_epoch = ((v_p->>3)::BIGINT)
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND phase = 'model' AND answer_ref IS NULL
-             RETURNING run LOOP
+            FOR v_row IN UPDATE lash_turn_phases SET answer_ref = (decode(v_p->>2, 'hex')), written_epoch = ((v_p->>3)::BIGINT) WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND phase = 'model' AND answer_ref IS NULL RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1792,9 +1728,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_turn.open_named_run' THEN
             v_rows := 0;
-            FOR v_row IN SELECT run FROM lash_session_runs
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
-               AND admission_json IS NOT NULL AND terminal_kind IS NULL LOOP
+            FOR v_row IN SELECT run FROM lash_session_runs WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND admission_json IS NOT NULL AND terminal_kind IS NULL LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1818,10 +1752,7 @@ BEGIN
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_turn.working_set' THEN
             v_rows := 0;
-            FOR v_row IN UPDATE lash_turn_phases SET working_execution_ref = (decode(v_p->>2, 'hex')), written_epoch = ((v_p->>4)::BIGINT)
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
-               AND working_execution_ref IS NOT DISTINCT FROM (decode(v_p->>3, 'hex'))
-             RETURNING run LOOP
+            FOR v_row IN UPDATE lash_turn_phases SET working_execution_ref = (decode(v_p->>2, 'hex')), written_epoch = ((v_p->>4)::BIGINT) WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND working_execution_ref IS NOT DISTINCT FROM (decode(v_p->>3, 'hex')) RETURNING run LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1829,8 +1760,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_turn.phase_roots' THEN
             v_rows := 0;
-            FOR v_row IN SELECT checkpoint_ref, answer_ref FROM lash_turn_phases
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1) LOOP
+            FOR v_row IN SELECT checkpoint_ref, answer_ref FROM lash_turn_phases WHERE session_id = (v_p->>0) AND run = (v_p->>1) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1887,12 +1817,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_graph.admission_put' THEN
             v_rows := 0;
-            FOR v_row IN INSERT INTO lash_effect_admissions
-                 (exec_key, effect_id, owner_key, run_seq, member_ordinal, admission_ref,
-                  written_epoch)
-             VALUES ((v_p->>0), (decode(v_p->>1, 'hex')), (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (decode(v_p->>5, 'hex')), ((v_p->>6)::BIGINT))
-             ON CONFLICT (exec_key, effect_id) DO NOTHING
-             RETURNING exec_key LOOP
+            FOR v_row IN INSERT INTO lash_effect_admissions (exec_key, effect_id, owner_key, run_seq, member_ordinal, admission_ref, written_epoch) SELECT i.exec, i.effect, CASE WHEN i.run IS NULL THEN NULL ELSE COALESCE(i.owner, i.exec) END, i.run, i.member, i.admission, i.epoch FROM (SELECT (v_p->>0) AS exec, (decode(v_p->>1, 'hex')) AS effect, (v_p->>2) AS owner, ((v_p->>3)::BIGINT) AS run, ((v_p->>4)::BIGINT) AS member, (decode(v_p->>5, 'hex')) AS admission, ((v_p->>6)::BIGINT) AS epoch) AS i WHERE TRUE ON CONFLICT (exec_key, effect_id) DO NOTHING RETURNING exec_key LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1900,9 +1825,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_graph.admission_remove' THEN
             v_rows := 0;
-            FOR v_row IN DELETE FROM lash_effect_admissions
-             WHERE exec_key = (v_p->>0) AND effect_id = (decode(v_p->>1, 'hex')) AND admission_ref = (decode(v_p->>2, 'hex'))
-             RETURNING exec_key LOOP
+            FOR v_row IN DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0) AND effect_id = (decode(v_p->>1, 'hex')) AND admission_ref = (decode(v_p->>2, 'hex')) RETURNING exec_key LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1919,8 +1842,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_graph.admissions_clear' THEN
             v_rows := 0;
-            FOR v_row IN DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0)
-             RETURNING admission_ref LOOP
+            FOR v_row IN DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0) RETURNING admission_ref LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -1945,20 +1867,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_turn.end_run' THEN
             v_rows := 0;
-            FOR v_row IN UPDATE lash_session_runs
-             SET terminal_kind = (v_p->>2), terminal_cause_json = (v_p->>3),
-                 terminal_head_revision = ((v_p->>4)::BIGINT), terminal_at_ms = (v_now),
-                 terminal_transcript_ref = (decode(v_p->>6, 'hex')),
-                 terminal_window_revision = (
-                     SELECT revision.head_revision FROM lash_session_head AS head
-                     JOIN lash_session_revisions AS revision
-                       ON revision.session_id = head.session_id
-                      AND revision.head_revision = head.head_revision
-                     WHERE head.session_id = (v_p->>0))
-             WHERE session_id = (v_p->>0) AND run = (v_p->>1)
-               AND admission_json IS NOT NULL AND terminal_kind IS NULL
-             RETURNING run, EXISTS (SELECT 1 FROM lash_tool_calls
-                 WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1) AND NOT cancellable AND answer_outcome IS NULL) AS has_pending_reads LOOP
+            FOR v_row IN UPDATE lash_session_runs SET terminal_kind = (v_p->>2), terminal_cause_json = (v_p->>3), terminal_head_revision = ((v_p->>4)::BIGINT), terminal_at_ms = (v_now), terminal_transcript_ref = (decode(v_p->>6, 'hex')), terminal_window_revision = ( SELECT revision.head_revision FROM lash_session_head AS head JOIN lash_session_revisions AS revision ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision WHERE head.session_id = (v_p->>0)) WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND admission_json IS NOT NULL AND terminal_kind IS NULL RETURNING run, EXISTS (SELECT 1 FROM lash_tool_calls WHERE session_id = (v_p->>0) AND turn_id = (v_p->>1) AND NOT cancellable AND answer_outcome IS NULL) AS has_pending_reads LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2042,9 +1951,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_graph.admissions_clear_under' THEN
             v_rows := 0;
-            FOR v_row IN DELETE FROM lash_effect_admissions
-             WHERE substr(exec_key, 1, length(CAST((v_p->>0) AS TEXT))) = CAST((v_p->>0) AS TEXT)
-             RETURNING admission_ref LOOP
+            FOR v_row IN DELETE FROM lash_effect_admissions WHERE substr(exec_key, 1, length(CAST((v_p->>0) AS TEXT))) = CAST((v_p->>0) AS TEXT) RETURNING admission_ref LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2053,9 +1960,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_run_record.delete_turn' THEN
             v_rows := 0;
-            FOR v_row IN DELETE FROM lash_run_records
-             WHERE owner_key = (v_p->>0) OR substr(owner_key, 1, length(CAST((v_p->>1) AS TEXT))) = CAST((v_p->>1) AS TEXT)
-             RETURNING record_ref LOOP
+            FOR v_row IN DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) OR substr(owner_key, 1, length(CAST((v_p->>1) AS TEXT))) = CAST((v_p->>1) AS TEXT) RETURNING record_ref LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -3028,31 +2933,15 @@ RETURNS TABLE(candidates BYTEA[], locked BYTEA[], gone BYTEA[], deferred BYTEA[]
 LANGUAGE plpgsql VOLATILE AS $lash_graph_peel_plan$
 DECLARE v_candidates BYTEA[]; v_eligible BYTEA[]; v_lockable BYTEA[]; v_locked BYTEA[]; v_owner RECORD; v_id TEXT;
 BEGIN
-    v_candidates := ARRAY(WITH RECURSIVE candidates AS (
-             SELECT unnest((p_roots)::BYTEA[]) AS hash UNION
-             SELECT edge.child_hash AS hash FROM candidates JOIN lash_blob_edges AS edge ON edge.parent_hash = candidates.hash
-              WHERE (p_closure)::BOOLEAN AND NOT EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
-                AND (NOT (candidates.hash = ANY((p_roots)::BYTEA[]))
-                     OR NOT EXISTS (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash))
-                AND (SELECT count(*) FROM (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
-         ) SELECT hash FROM candidates LIMIT (p_limit));
-    v_eligible := ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_candidates)::BYTEA[]) AS hash), protected AS (
-             SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
-                OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_candidates)::BYTEA[])))
-             UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_candidates)::BYTEA[])
-         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected));
+    v_candidates := ARRAY(WITH RECURSIVE candidates AS ( SELECT unnest((p_roots)::BYTEA[]) AS hash UNION SELECT edge.child_hash AS hash FROM candidates JOIN lash_blob_edges AS edge ON edge.parent_hash = candidates.hash WHERE (p_closure)::BOOLEAN AND NOT EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash) AND (NOT (candidates.hash = ANY((p_roots)::BYTEA[])) OR NOT EXISTS (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash)) AND (SELECT count(*) FROM (SELECT 1 FROM lash_blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1 ) SELECT hash FROM candidates LIMIT (p_limit));
+    v_eligible := ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_candidates)::BYTEA[]) AS hash), protected AS ( SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash) OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_candidates)::BYTEA[]))) UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_candidates)::BYTEA[]) ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected));
     v_lockable := v_eligible;
     FOR v_owner IN SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_lockable)) ORDER BY owner_id LOOP
         SELECT owner_id FROM lash_environment_owners WHERE owner_id = (v_owner.owner_id) FOR UPDATE SKIP LOCKED INTO v_id;
         IF v_id IS NULL THEN v_lockable := array_remove(v_lockable, v_owner.manifest_ref); END IF;
     END LOOP;
-    SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_lockable)::bytea[])
-             ORDER BY hash FOR UPDATE SKIP LOCKED) INTO v_locked;
-    RETURN QUERY SELECT v_candidates, v_locked, ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_locked)::BYTEA[]) AS hash), protected AS (
-             SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash)
-                OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_locked)::BYTEA[])))
-             UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_locked)::BYTEA[])
-         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)),
+    SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_lockable)::bytea[]) ORDER BY hash FOR UPDATE SKIP LOCKED) INTO v_locked;
+    RETURN QUERY SELECT v_candidates, v_locked, ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_locked)::BYTEA[]) AS hash), protected AS ( SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM lash_graph_root_catalog WHERE root_ref = candidates.hash) OR EXISTS (SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY((v_locked)::BYTEA[]))) UNION SELECT edge.child_hash AS hash FROM protected JOIN lash_blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY((v_locked)::BYTEA[]) ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)),
         ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY(v_eligible) AND NOT (hash = ANY(v_locked)));
 END
 $lash_graph_peel_plan$;
@@ -3070,9 +2959,7 @@ RETURNS VOID LANGUAGE plpgsql VOLATILE AS $lash_graph_retire$
 DECLARE v_plan RECORD; v_next BYTEA[]; v_children BYTEA[]; v_held BYTEA[];
 BEGIN
     IF cardinality(p_roots) = 0 THEN RETURN; END IF;
-    DELETE FROM lash_retirement_holds WHERE root_ref IN (
-             SELECT root_ref FROM lash_retirement_holds WHERE root_ref = ANY((p_roots)::bytea[])
-             ORDER BY root_ref FOR UPDATE SKIP LOCKED);
+    DELETE FROM lash_retirement_holds WHERE root_ref IN ( SELECT root_ref FROM lash_retirement_holds WHERE root_ref = ANY((p_roots)::bytea[]) ORDER BY root_ref FOR UPDATE SKIP LOCKED);
     SELECT * FROM lash_graph_peel_plan((p_roots), (p_limit), (TRUE)) INTO v_plan;
     IF EXISTS (SELECT owner_id, manifest_ref FROM lash_environment_owners WHERE manifest_ref = ANY((v_plan.gone)) ORDER BY owner_id) THEN RAISE EXCEPTION 'graph retirement needs the explicit environment bridge' USING ERRCODE = 'LX004'; END IF;
     SELECT lash_graph_peel_delete((v_plan.gone)) INTO v_children;
