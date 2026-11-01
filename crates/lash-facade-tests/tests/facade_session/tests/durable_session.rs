@@ -1289,24 +1289,15 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
     // The turn reports each call once it completes, with the record's own
     // fields: its id, tool, arguments and output.
     let mut record_ids = Vec::new();
-    for activity in events.snapshot().await {
-        if let lash::TurnEvent::ToolCallCompleted {
-            call_id,
-            name,
-            args,
-            output,
-            ..
-        } = activity.event
-        {
-            // The cell's last call is its `control.finish`.
-            if name != "control.finish" {
-                assert_eq!(name, "tools.app_lookup");
-                assert_eq!(args, serde_json::json!({}));
-            }
-            assert!(output.is_success());
-            if !record_ids.contains(&Some(call_id.clone())) {
-                record_ids.push(Some(call_id));
-            }
+    for call in lash::testing::committed_tool_calls(&events.snapshot().await) {
+        // The cell's last call is its `control.finish`.
+        if call.tool != "control.finish" {
+            assert_eq!(call.tool, "tools.app_lookup");
+            assert_eq!(call.args, serde_json::json!({}));
+        }
+        assert!(call.output.is_success());
+        if !record_ids.contains(&Some(call.call_id.clone())) {
+            record_ids.push(Some(call.call_id));
         }
     }
     assert_eq!(
@@ -1392,19 +1383,17 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
         .output_into(&events)
         .await?;
     let mut streamed = Vec::new();
-    for activity in events.snapshot().await {
-        if let lash::TurnEvent::ToolCallCompleted {
-            call_id,
-            name,
-            args,
-            output,
-            ..
-        } = activity.event
-            && !streamed
-                .iter()
-                .any(|(id, ..): &(lash::ToolCallId, _, _, _)| *id == call_id)
+    for call in lash::testing::committed_tool_calls(&events.snapshot().await) {
+        if !streamed
+            .iter()
+            .any(|(id, ..): &(lash::ToolCallId, _, _, _)| *id == call.call_id)
         {
-            streamed.push((call_id, name, args, output.value_for_projection()));
+            streamed.push((
+                call.call_id,
+                call.tool,
+                call.args,
+                call.output.value_for_projection(),
+            ));
         }
     }
     assert_eq!(

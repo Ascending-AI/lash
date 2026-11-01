@@ -75,8 +75,12 @@ function streamTurn(view, time, turnId, { nonce = "nonce-1", text = "what is the
   }));
   time.advance(100);
   timeline.applyObservation(activity(turnId, {
-    type: "tool_call_completed", call_id: `tc-${turnId}`, name: "mcp__parallel__web_search_x", args: { q: "weather" },
+    type: "tool_call_returned", call_id: `tc-${turnId}`, name: "mcp__parallel__web_search_x", args: { q: "weather" },
     output: { outcome: { status: "success", payload: { results: [1] } } }, duration_ms: 12
+  }));
+  timeline.applyObservation(activity(turnId, {
+    type: "tool_call_completed", call_id: `tc-${turnId}`, name: "mcp__parallel__web_search_x",
+    commit: { kind: "returned" }, duration_ms: 12
   }));
   timeline.applyObservation(activity(turnId, {
     type: "code_block_completed", language: "typescript", prints: [{ text: "sunny", value: "sunny", projection: {} }], result: { kind: "completed" }, duration_ms: 30, tool_call_ids: [`tc-${turnId}`]
@@ -125,8 +129,8 @@ export const laws = [
         const turn = `duration-${duration}`;
         view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: "await tool()" }));
         view.timeline.applyObservation(activity(turn, {
-          type: "tool_call_completed", call_id: "duration-call", name: "tool", args: null,
-          output: { outcome: { status: "success", payload: null } },
+          type: "tool_call_completed", call_id: "duration-call", name: "tool",
+          commit: { kind: "output", output: { outcome: { status: "success", payload: null } } },
           ...(duration === undefined ? {} : { duration_ms: duration })
         }));
         view.timeline.applyObservation(activity(turn, {
@@ -179,7 +183,7 @@ export const laws = [
         time.advance(100);
         view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: `await greeting(${index})` }));
         view.timeline.applyObservation(activity(turn, { type: "tool_call_started", call_id: `tc-${index}`, name: "greeting", args: { index } }));
-        view.timeline.applyObservation(activity(turn, { type: "tool_call_completed", call_id: `tc-${index}`, name: "greeting", output: {}, duration_ms: 1 }));
+        view.timeline.applyObservation(activity(turn, { type: "tool_call_completed", call_id: `tc-${index}`, name: "greeting", commit: { kind: "output", output: {} }, duration_ms: 1 }));
         view.timeline.applyObservation(activity(turn, { type: "code_block_completed", language: "typescript", prints: [{ text: "hello", value: "hello", projection: {} }], result: { kind: "completed" }, tool_call_ids: [`tc-${index}`] }));
       }
       const expected = [`input:${turn}`, `thinking:${turn}:0`, `code:${turn}:0`, `code:${turn}:1`, `reply:${turn}`];

@@ -223,14 +223,9 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
             .send(TurnInput::text("use tool"))
             .output_into(&standard_events)
             .await?;
-        let standard_view = standard_events
-            .snapshot()
-            .await
-            .into_iter()
-            .find_map(|event| match event.event {
-                TurnEvent::ToolCallCompleted { output, .. } => Some(output.value_for_projection()),
-                _ => None,
-            })
+        let standard_view = lash::testing::committed_tool_calls(&standard_events.snapshot().await)
+            .first()
+            .map(|call| call.output.value_for_projection())
             .expect("standard tool completion");
         assert_eq!(
             standard_view,
@@ -271,16 +266,9 @@ await control.finish("done");"#,
                 .send(TurnInput::text("use tool"))
                 .output_into(&rlm_events)
                 .await?;
-            let rlm_view = rlm_events
-                .snapshot()
-                .await
-                .into_iter()
-                .find_map(|event| match event.event {
-                    TurnEvent::ToolCallCompleted { output, .. } => {
-                        Some(output.value_for_projection())
-                    }
-                    _ => None,
-                })
+            let rlm_view = lash::testing::committed_tool_calls(&rlm_events.snapshot().await)
+                .first()
+                .map(|call| call.output.value_for_projection())
                 .expect("rlm tool completion");
 
             assert_eq!(rlm_view, standard_view);

@@ -650,6 +650,7 @@ pub mod tools {
     pub use lash_core::ToolAttachmentClient;
     pub use lash_core::ToolAttemptOutcome;
     pub use lash_core::ToolCall;
+    pub use lash_core::ToolCallCommit;
     pub use lash_core::ToolCallOutcome;
     pub use lash_core::ToolCallOutput;
     pub use lash_core::ToolCallRecord;

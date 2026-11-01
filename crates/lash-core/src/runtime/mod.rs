@@ -444,6 +444,7 @@ pub use lash_core_execution::runtime::NOOP_TURN_ACTIVITY_SINK;
 pub use lash_core_execution::runtime::NoopEventSink;
 pub use lash_core_execution::runtime::NoopTurnActivitySink;
 pub use lash_core_execution::runtime::ProtocolSessionExtension;
+pub use lash_core_execution::runtime::ToolCallCommit;
 pub use lash_core_execution::runtime::ToolIntentActivityOutcome;
 pub use lash_core_execution::runtime::ToolIntentRealizedRef;
 pub use lash_core_execution::runtime::TurnActivity;

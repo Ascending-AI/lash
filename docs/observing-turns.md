@@ -204,9 +204,13 @@ checkpoint, and never feeds it back
   choice, as ordinary input. Tool arguments are not streamed, and a tool's
   provisional output arrives with `ToolCallReturned`. Only
   `ToolCallCompleted` reports an outcome accepted by the owning round or cell
-  commit. A return may never complete after an Immediate stop or worker loss;
+  commit. It names the call and its `commit`: `returned` when the commit holds
+  the output the call's `ToolCallReturned` carried, or `output` with the
+  committed output when no live return carried it or the commit replaced it.
+  Read a call's arguments from its `ToolCallStarted` or `ToolCallReturned`.
+  A return may never complete after an Immediate stop or worker loss;
   a restored Once member can complete with Interrupted instead of its lost
-  success. `CodeBlockReturned` and `CodeBlockCompleted` make the same split
+  success, carried as a committed `output`. `CodeBlockReturned` and `CodeBlockCompleted` make the same split
   for cells: completion follows the commit consuming the cell answer and
   carries its committed `CellOutcome`. Use returns for live progress and
   completions for done state.

@@ -56,29 +56,7 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
         "the full retained call ledger shrinks: {sizes:?}"
     );
 
-    let live = events
-        .snapshot()
-        .await
-        .into_iter()
-        .filter_map(|activity| match activity.event {
-            crate::TurnEvent::ToolCallCompleted {
-                call_id,
-                provider_call_id,
-                name,
-                args,
-                output,
-                ..
-            } => Some(lash_core::ToolCallRecord {
-                classification: Default::default(),
-                call_id,
-                provider_call_id,
-                tool: name,
-                args,
-                output: std::sync::Arc::unwrap_or_clone(output),
-            }),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let live = crate::testing::committed_tool_calls(&events.snapshot().await);
     drop(session);
     // Stop aborts the node rather than draining it or invoking plugin shutdown,
     // the same crash cut used by the facade recovery laws.

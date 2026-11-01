@@ -88,16 +88,32 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
 /// The output of every tool call a turn's activity reports completed.
 #[derive(Default)]
 struct CompletedToolCalls {
+    returned: Mutex<
+        std::collections::BTreeMap<lash::ToolCallId, std::sync::Arc<lash::tools::ToolCallOutput>>,
+    >,
     outputs: Mutex<Vec<lash::tools::ToolCallOutput>>,
 }
 
 #[async_trait]
 impl TurnActivitySink for CompletedToolCalls {
     async fn emit(&self, activity: lash::TurnActivity) {
-        if let lash::TurnEvent::ToolCallCompleted { output, .. } = activity.event {
-            self.outputs
-                .lock_recover()
-                .push(std::sync::Arc::unwrap_or_clone(output));
+        match activity.event {
+            lash::TurnEvent::ToolCallReturned {
+                call_id, output, ..
+            } => {
+                self.returned.lock_recover().insert(call_id, output);
+            }
+            lash::TurnEvent::ToolCallCompleted {
+                call_id, commit, ..
+            } => {
+                let returned = self.returned.lock_recover().remove(&call_id);
+                let output = commit
+                    .output(returned.as_deref())
+                    .expect("a confirmed completion follows its call's live return")
+                    .clone();
+                self.outputs.lock_recover().push(output);
+            }
+            _ => {}
         }
     }
 }

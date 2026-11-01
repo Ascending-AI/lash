@@ -1100,6 +1100,7 @@ pub use runtime::SleepSpec;
 pub use runtime::StagedProcessStart;
 pub use runtime::StoredDataCorruption;
 pub use runtime::ToolAttemptLaunch;
+pub use runtime::ToolCallCommit;
 pub use runtime::ToolIntentActivityOutcome;
 pub use runtime::ToolIntentRealizedRef;
 pub use runtime::TurnActivity;

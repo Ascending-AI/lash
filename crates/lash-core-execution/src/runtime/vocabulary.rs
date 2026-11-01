@@ -321,8 +321,8 @@ pub enum TurnEvent {
         provider_call_id: Option<String>,
         name: String,
         args: serde_json::Value,
-        // Shared with the call's other activity that carries the same
-        // output, so a buffer retaining both holds it once.
+        // Shared with the execution's record of the call's live return,
+        // which its completion compares the committed output against.
         #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
         output: std::sync::Arc<crate::ToolCallOutput>,
         /// The observed call window, absent when unmeasured.
@@ -333,7 +333,9 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
-    /// The accepted commit holds this outcome, including Interrupted on recovery.
+    /// The accepted commit holds this call's outcome, including Interrupted
+    /// on recovery. The call's arguments are on its `ToolCallStarted` and
+    /// `ToolCallReturned`; `commit` names the committed output.
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
         call_id: crate::ToolCallId,
@@ -341,11 +343,7 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provider_call_id: Option<String>,
         name: String,
-        args: serde_json::Value,
-        // Shared with the call's other activity that carries the same
-        // output, so a buffer retaining both holds it once.
-        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
-        output: std::sync::Arc<crate::ToolCallOutput>,
+        commit: ToolCallCommit,
         /// The observed call window, absent when unmeasured.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u64>,
@@ -551,6 +549,37 @@ pub async fn admit_session_state_generation(
     match store.read_session_state_version(session_id).await {
         Ok(_) | Err(crate::StoreError::SessionDeleted { .. }) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+/// The output the owning commit holds for a tool call, against the call's
+/// live `ToolCallReturned` in the same execution.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToolCallCommit {
+    /// The commit holds the output the call's `ToolCallReturned` carried.
+    Returned,
+    /// The commit holds this output: no live return of the call carried it
+    /// (a call refused before dispatch, Interrupted on recovery) or the
+    /// commit replaced the returned one (a successor's fold).
+    Output {
+        #[serde(serialize_with = "lash_protocol_types::durable_serde::serialize")]
+        output: Box<crate::ToolCallOutput>,
+    },
+}
+
+impl ToolCallCommit {
+    /// The committed output, given the output the same call's
+    /// `ToolCallReturned` carried, when the reader saw one.
+    #[must_use]
+    pub fn output<'a>(
+        &'a self,
+        returned: Option<&'a crate::ToolCallOutput>,
+    ) -> Option<&'a crate::ToolCallOutput> {
+        match self {
+            Self::Returned => returned,
+            Self::Output { output } => Some(output),
+        }
     }
 }
 

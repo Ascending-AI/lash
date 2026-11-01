@@ -1244,6 +1244,18 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     }
   }
 
+  /* A call's row event after `event`. A completion names its call and
+     either confirms the output the call's live return carried or carries
+     the committed output itself; its arguments stay those the call's
+     earlier events carried. */
+  function toolEvent(prior, event) {
+    if (event.type === "tool_call_started") return { ...event, phase: "running" };
+    if (event.type !== "tool_call_completed") return event;
+    const { commit, ...completed } = event;
+    const output = commit?.kind === "output" ? commit.output : prior?.output;
+    return { args: prior?.args, ...completed, output };
+  }
+
   function applyTool(turnId, event) {
     const state = turn(turnId);
     const codeKey = (event.graph_key ? `code:${turnId}:${event.graph_key}` : state.openCode);
@@ -1251,15 +1263,15 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
       liveRow(turnId, codeKey, "code", live => {
         const tools = [...(live?.tools || [])];
         const index = tools.findIndex(tool => tool.event.call_id === event.call_id);
-        const next = { event: event.type === "tool_call_started" ? { ...event, phase: "running" } : event };
+        const next = { event: toolEvent(index >= 0 ? tools[index].event : null, event) };
         if (index >= 0) tools[index] = next;
         else tools.push(next);
         return { ...live, tools };
       });
       return;
     }
-    liveRow(turnId, `tool:${turnId}:${event.call_id}`, "tool", () => ({
-      event: event.type === "tool_call_started" ? { ...event, phase: "running" } : event
+    liveRow(turnId, `tool:${turnId}:${event.call_id}`, "tool", live => ({
+      event: toolEvent(live?.event, event)
     }));
   }
 

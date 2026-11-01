@@ -5,7 +5,7 @@
 
 use super::*;
 
-use lash::{TurnEvent, TurnInput};
+use lash::TurnInput;
 use lash_core::facade_support::{TurnFinish, TurnOutcome};
 
 /// `answer.submit`: the host's own finish tool, whose value
@@ -364,16 +364,9 @@ async fn run_submit_turn(
         .send(TurnInput::text("submit the answer"))
         .output_into(&events)
         .await?;
-    let completed = events
-        .snapshot()
-        .await
+    let completed = lash::testing::committed_tool_calls(&events.snapshot().await)
         .into_iter()
-        .filter_map(|activity| match activity.event {
-            TurnEvent::ToolCallCompleted { output, .. } => {
-                Some(std::sync::Arc::unwrap_or_clone(output))
-            }
-            _ => None,
-        })
+        .map(|call| call.output)
         .collect();
     drop(session);
     core.shutdown().await?;

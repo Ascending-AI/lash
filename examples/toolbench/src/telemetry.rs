@@ -310,6 +310,7 @@ fn execution_fields(activities: &[TurnActivity], standard: bool) -> Value {
     let mut code = Vec::new();
     let mut observations = Vec::new();
     let mut tool_calls = Vec::new();
+    let mut returned = std::collections::BTreeMap::new();
     for activity in activities {
         match &activity.event {
             TurnEvent::CodeBlockStarted { code: source, .. } if !standard => {
@@ -332,7 +333,18 @@ fn execution_fields(activities: &[TurnActivity], standard: bool) -> Value {
             TurnEvent::ToolCallStarted { name, args, .. } if standard => {
                 tool_calls.push(serde_json::json!({"name":name,"arguments":args}));
             }
-            TurnEvent::ToolCallCompleted { output, .. } if standard => {
+            TurnEvent::ToolCallReturned {
+                call_id, output, ..
+            } if standard => {
+                returned.insert(call_id, output);
+            }
+            TurnEvent::ToolCallCompleted {
+                call_id, commit, ..
+            } if standard => {
+                let Some(output) = commit.output(returned.get(call_id).map(|output| &***output))
+                else {
+                    continue;
+                };
                 let value = output.value_for_projection();
                 observations.push(match value {
                     Value::String(text) => text,

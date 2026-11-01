@@ -1547,10 +1547,14 @@ impl Crash {
                     );
                 }
                 for event in activities {
-                    if let lash_core::TurnEvent::ToolCallCompleted { output, .. } = event
-                        && !matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_interrupted")
+                    // The completion carries the committed Interrupted
+                    // output itself: it never confirms the lost worker's
+                    // provisional return.
+                    if let lash_core::TurnEvent::ToolCallCompleted { commit, .. } = event
+                        && !matches!(commit, lash_core::ToolCallCommit::Output { output }
+                            if matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_interrupted"))
                     {
-                        violations.push(format!("the lost worker's completion disagreed with the committed Interrupted outcome: {output:?}"));
+                        violations.push(format!("the lost worker's completion disagreed with the committed Interrupted outcome: {commit:?}"));
                     }
                 }
             }

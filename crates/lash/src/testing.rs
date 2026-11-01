@@ -446,3 +446,66 @@ pub async fn tool_calls_for_activity(
 
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::test_support::execute_code;
+
+/// Each tool call `activities` report committed, in completion order: its
+/// arguments come from the call's `ToolCallStarted` or `ToolCallReturned`
+/// (`null` when neither was observed), and its output is the completion's
+/// commit resolved against the call's `ToolCallReturned`.
+///
+/// # Panics
+///
+/// When a completion confirms a live return `activities` do not hold.
+#[must_use]
+pub fn committed_tool_calls(
+    activities: &[crate::TurnActivity],
+) -> Vec<crate::tools::ToolCallRecord> {
+    let mut args = std::collections::BTreeMap::new();
+    let mut returned = std::collections::BTreeMap::new();
+    let mut committed = Vec::new();
+    for activity in activities {
+        match &activity.event {
+            crate::TurnEvent::ToolCallStarted {
+                call_id,
+                args: call_args,
+                ..
+            } => {
+                args.insert(call_id, call_args);
+            }
+            crate::TurnEvent::ToolCallReturned {
+                call_id,
+                args: call_args,
+                output,
+                ..
+            } => {
+                args.insert(call_id, call_args);
+                returned.insert(call_id, output.as_ref());
+            }
+            crate::TurnEvent::ToolCallCompleted {
+                call_id,
+                provider_call_id,
+                name,
+                commit,
+                ..
+            } => {
+                let output = commit
+                    .output(returned.get(call_id).copied())
+                    .unwrap_or_else(|| {
+                        panic!("{call_id}'s completion confirms a live return the activity lacks")
+                    })
+                    .clone();
+                committed.push(crate::tools::ToolCallRecord {
+                    classification: Default::default(),
+                    call_id: call_id.clone(),
+                    provider_call_id: provider_call_id.clone(),
+                    tool: name.clone(),
+                    args: args
+                        .get(call_id)
+                        .map_or(serde_json::Value::Null, |args| (*args).clone()),
+                    output,
+                });
+            }
+            _ => {}
+        }
+    }
+    committed
+}

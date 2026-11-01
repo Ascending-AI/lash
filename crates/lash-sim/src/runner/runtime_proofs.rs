@@ -468,16 +468,9 @@ impl RuntimeProofRecordingEvents {
     }
 
     pub(super) async fn tool_completed_outputs(&self) -> Vec<(String, Value)> {
-        self.events
-            .lock()
-            .await
-            .iter()
-            .filter_map(|activity| match &activity.event {
-                lash::TurnEvent::ToolCallCompleted { name, output, .. } => {
-                    Some((name.clone(), output.value_for_projection()))
-                }
-                _ => None,
-            })
+        lash::testing::committed_tool_calls(&self.events.lock().await)
+            .into_iter()
+            .map(|call| (call.tool, call.output.value_for_projection()))
             .collect()
     }
 

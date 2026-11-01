@@ -340,8 +340,8 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         bench.activity(turn, {"type": "stream_block", "phase": "delta", "kind": "reasoning", "text": "Checking the forecast.", "correlation_id": "r1"})
         bench.activity(turn, {"type": "code_block_started", "language": "typescript", "code": "await weather.forecast()"})
         bench.activity(turn, {"type": "tool_call_started", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"}})
-        bench.activity(turn, {"type": "tool_call_completed", "call_id": "tc_1", "name": "mcp__parallel__web_search_x", "args": {"q": "weather"},
-                              "output": {"outcome": {"status": "success", "payload": {"results": [1, 2]}}}})
+        bench.activity(turn, {"type": "tool_call_completed", "call_id": "tc_1", "name": "mcp__parallel__web_search_x",
+                              "commit": {"kind": "output", "output": {"outcome": {"status": "success", "payload": {"results": [1, 2]}}}}})
         bench.activity(turn, {"type": "code_block_completed", "language": "typescript", "prints": [{"text": "sunny", "value": "sunny", "projection": {}}],
                               "result": {"kind": "completed"}, "duration_ms": 30,
                               "tool_call_ids": ["tc_1"]})

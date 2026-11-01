@@ -372,8 +372,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 call_id: lash_core::ToolCallId::fixture("call-1"),
                 provider_call_id: Some("provider-1".to_string()),
                 name: "read_file".to_string(),
-                args: json!({ "path": "x" }),
-                output: ToolCallOutput::success("ok").into(),
+                commit: lash_core::ToolCallCommit::Returned,
                 duration_ms: Some(7),
                 graph_key: Some("effect:s:e".to_string()),
             },
@@ -382,16 +381,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "provider_call_id": "provider-1",
                 "name": "read_file",
-                "args": { "path": "x" },
-                "output": {
-                    "outcome": {
-                        "status": "success",
-                        "payload": {
-                            "$lash_tool_value": "untrusted_json",
-                            "value": "ok",
-                        },
-                    },
-                },
+                "commit": { "kind": "returned" },
                 "duration_ms": 7,
                 "graph_key": "effect:s:e",
             }),
@@ -402,13 +392,13 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 call_id: lash_core::ToolCallId::fixture("call-2"),
                 provider_call_id: None,
                 name: "read_file".to_string(),
-                args: json!({ "path": "x" }),
-                output: ToolCallOutput::failure(ToolFailure::tool(
-                    ToolFailureClass::Execution,
-                    "boom",
-                    "kaboom",
-                ))
-                .into(),
+                commit: lash_core::ToolCallCommit::Output {
+                    output: Box::new(ToolCallOutput::failure(ToolFailure::tool(
+                        ToolFailureClass::Execution,
+                        "boom",
+                        "kaboom",
+                    ))),
+                },
                 duration_ms: None,
                 graph_key: None,
             },
@@ -416,15 +406,17 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "type": "tool_call_completed",
                 "call_id": lash_core::ToolCallId::fixture("call-2").as_str(),
                 "name": "read_file",
-                "args": { "path": "x" },
-                "output": {
-                    "outcome": {
-                        "status": "failure",
-                        "payload": {
-                            "class": "execution",
-                            "code": "boom",
-                            "message": "kaboom",
-                            "source": "tool",
+                "commit": {
+                    "kind": "output",
+                    "output": {
+                        "outcome": {
+                            "status": "failure",
+                            "payload": {
+                                "class": "execution",
+                                "code": "boom",
+                                "message": "kaboom",
+                                "source": "tool",
+                            },
                         },
                     },
                 },

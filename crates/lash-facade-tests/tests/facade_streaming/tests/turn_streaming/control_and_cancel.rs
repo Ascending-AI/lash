@@ -896,15 +896,12 @@ async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     assert_eq!(assistant_prose(&output.activities), "done");
     assert_eq!(output.assistant_message(), Some("done"));
     assert!(output.is_success());
-    let tool_completed = output
-        .activities
-        .iter()
-        .find(|activity| matches!(&activity.event, TurnEvent::ToolCallCompleted { .. }))
-        .expect("tool completion");
-    assert!(matches!(
-        &tool_completed.event,
-        TurnEvent::ToolCallCompleted { name, output, .. }
-            if name == "tools.app_lookup" && output.value_for_projection() == serde_json::json!({ "ok": true })
-    ));
+    let committed = lash::testing::committed_tool_calls(&output.activities);
+    let tool_completed = committed.first().expect("tool completion");
+    assert_eq!(tool_completed.tool, "tools.app_lookup");
+    assert_eq!(
+        tool_completed.output.value_for_projection(),
+        serde_json::json!({ "ok": true })
+    );
     Ok(())
 }

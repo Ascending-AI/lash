@@ -272,16 +272,9 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
         "{:?}",
         report
     );
-    let completions: Vec<_> = events
-        .snapshot()
-        .await
+    let completions: Vec<_> = lash::testing::committed_tool_calls(&events.snapshot().await)
         .into_iter()
-        .filter_map(|activity| match activity.event {
-            lash::TurnEvent::ToolCallCompleted { output, .. } => {
-                Some(std::sync::Arc::unwrap_or_clone(output))
-            }
-            _ => None,
-        })
+        .map(|call| call.output)
         .collect();
     let loser_completion = completions
         .iter()
@@ -463,16 +456,10 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
     );
     // Past any next attempt closing might wrongly start.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let loser = events
-        .snapshot()
-        .await
+    let loser = lash::testing::committed_tool_calls(&events.snapshot().await)
         .into_iter()
-        .find_map(|activity| match activity.event {
-            lash::TurnEvent::ToolCallCompleted { output, .. } if !output.is_success() => {
-                Some(std::sync::Arc::unwrap_or_clone(output))
-            }
-            _ => None,
-        });
+        .map(|call| call.output)
+        .find(|output| !output.is_success());
     drop(session);
     core.shutdown().await?;
     Ok((answered, tools.attempts.load(Ordering::SeqCst), loser))

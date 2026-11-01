@@ -3,7 +3,7 @@
 //! recorded; a `Deny` fails only the call.
 
 use super::*;
-use lash::{TurnEvent, TurnInput};
+use lash::TurnInput;
 use lash_core::facade_support::{TurnOutcome, TurnStop};
 
 const ECHO: &str = "echo_tool";
@@ -125,16 +125,9 @@ async fn run_policy_turn(
         .send(TurnInput::text("call the tool"))
         .output_into(&events)
         .await?;
-    let completed = events
-        .snapshot()
-        .await
+    let completed = lash::testing::committed_tool_calls(&events.snapshot().await)
         .into_iter()
-        .filter_map(|activity| match activity.event {
-            TurnEvent::ToolCallCompleted { output, .. } => {
-                Some(std::sync::Arc::unwrap_or_clone(output))
-            }
-            _ => None,
-        })
+        .map(|call| call.output)
         .collect();
     let calls_in_turn = calls.load(Ordering::SeqCst);
     session.send(TurnInput::text("next")).output().await?;

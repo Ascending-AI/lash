@@ -6,7 +6,7 @@
 
 use super::*;
 
-use lash::{TurnEvent, TurnInput};
+use lash::TurnInput;
 use lash_core::facade_support::{TurnFinish, TurnOutcome};
 
 const SEARCH: &str = "search";
@@ -118,14 +118,9 @@ async fn a_success_its_output_schema_refuses_settles_as_a_failure_naming_the_too
         .send(TurnInput::text("search the index"))
         .output_into(&events)
         .await?;
-    let completed: Vec<_> = events
-        .snapshot()
-        .await
+    let completed: Vec<_> = lash::testing::committed_tool_calls(&events.snapshot().await)
         .into_iter()
-        .filter_map(|activity| match activity.event {
-            TurnEvent::ToolCallCompleted { output, .. } => Some(output),
-            _ => None,
-        })
+        .map(|call| call.output)
         .collect();
     drop(session);
     core.shutdown().await?;
@@ -401,14 +396,9 @@ async fn llm_query_settles_its_per_call_output_contract() -> Result<()> {
                 .send(TurnInput::text("summarise"))
                 .output_into(&events)
                 .await?;
-            let completed: Vec<_> = events
-                .snapshot()
-                .await
+            let completed: Vec<_> = lash::testing::committed_tool_calls(&events.snapshot().await)
                 .into_iter()
-                .filter_map(|activity| match activity.event {
-                    TurnEvent::ToolCallCompleted { output, .. } => Some(output),
-                    _ => None,
-                })
+                .map(|call| call.output)
                 .collect();
             drop(session);
             core.shutdown().await?;

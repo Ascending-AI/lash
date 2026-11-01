@@ -230,11 +230,13 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while let Some(activity) = events.next_activity().await {
             let activity = activity?;
-            let b_done = matches!(&activity.event,
-                TurnEvent::ToolCallCompleted { output, .. }
-                    if output.value_for_projection()["set"] == "B");
+            let completed = matches!(&activity.event, TurnEvent::ToolCallCompleted { .. });
             seen.push(activity);
-            if b_done {
+            if completed
+                && crate::testing::committed_tool_calls(&seen)
+                    .last()
+                    .is_some_and(|call| call.output.value_for_projection()["set"] == "B")
+            {
                 return Result::Ok(());
             }
         }
@@ -262,19 +264,15 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     while let Some(activity) = events.next_activity().await {
         seen.push(activity?);
     }
+    let committed = crate::testing::committed_tool_calls(&seen);
     let completion = |symbol: &str| {
-        seen.iter().find_map(|activity| match &activity.event {
-            TurnEvent::ToolCallCompleted {
-                provider_call_id,
-                output,
-                ..
-            } if provider_call_id.as_deref() == Some(format!("call-{symbol}").as_str())
-                || output.value_for_projection()["set"] == symbol =>
-            {
-                Some(lash_core::ToolCallOutput::clone(output))
-            }
-            _ => None,
-        })
+        committed
+            .iter()
+            .find(|call| {
+                call.provider_call_id.as_deref() == Some(format!("call-{symbol}").as_str())
+                    || call.output.value_for_projection()["set"] == symbol
+            })
+            .map(|call| call.output.clone())
     };
     let a = completion("A");
     let b = completion("B").unwrap_or_else(|| panic!("B's completion is published: {seen:?}"));
