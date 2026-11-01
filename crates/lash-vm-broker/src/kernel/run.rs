@@ -140,6 +140,14 @@ pub trait KernelEffects: Projections + Send + Sync {
     /// The save that staged the host's state committed.
     fn host_committed(&self) {}
 
+    /// The run's journal holds these admissions, each call with its
+    /// Admission node: a commit admitted them, or the run follows a
+    /// journal that did (FIG-7585). The host's next checkpoint records
+    /// each call against its admission.
+    fn journaled(&self, admissions: &[(lash_protocol_types::ToolCallId, NodeId)]) {
+        let _ = admissions;
+    }
+
     /// The declared reads an in-turn run made since its last commit, each
     /// staged as its read fact: the caller-owned call, its ordinal and the
     /// fact's node. Its next commit records them, so a run that resumes
@@ -612,6 +620,7 @@ impl KernelBroker<'_> {
             }
         }));
         self.effects.resumed(&admitted)?;
+        self.effects.journaled(&journal_calls(&journal));
         self.effects.mark();
         let (activation, machine) = match &base {
             Some((state, _)) => {
@@ -933,6 +942,20 @@ impl Journal {
     fn checkpointed(&mut self, state: ParkedState, ledger: EffectLedger) {
         *self = Self::following(CellJournal::default(), Some((state, ledger)));
     }
+}
+
+/// Each call `journal` admitted, with its Admission node.
+fn journal_calls(journal: &CellJournal) -> Vec<(lash_protocol_types::ToolCallId, NodeId)> {
+    journal
+        .admitted
+        .values()
+        .filter_map(|resolved| match &resolved.admission.disposition {
+            super::graph::Disposition::Execution { pin, .. } => {
+                Some((pin.call.clone(), resolved.node))
+            }
+            super::graph::Disposition::Refused => None,
+        })
+        .collect()
 }
 
 fn diverged(message: impl Into<String>) -> KernelFailure {

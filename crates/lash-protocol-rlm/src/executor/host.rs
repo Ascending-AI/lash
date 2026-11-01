@@ -1008,6 +1008,13 @@ impl KernelEffects for CellHost<'_> {
         }
     }
 
+    fn journaled(&self, admissions: &[(lash_core::ToolCallId, NodeId)]) {
+        let mut graph = self.graph.lock_recover();
+        for (call, admission) in admissions {
+            graph.admissions.insert(call.clone(), *admission);
+        }
+    }
+
     fn stage_reads(
         &self,
         staging: &mut GraphStaging,

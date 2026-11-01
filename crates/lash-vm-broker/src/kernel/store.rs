@@ -821,7 +821,7 @@ impl DurableSnapshotStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         let admits = !requests.is_empty();
-        let (_, admitted) = self.admit_requests(
+        let (calls, admitted) = self.admit_requests(
             &mut tx,
             &mut staging,
             &mut book,
@@ -906,6 +906,12 @@ impl DurableSnapshotStore {
         }
         let stopped = response.is_some_and(|response| response.stops_in(&committed));
         host.host_committed();
+        host.journaled(
+            &calls
+                .iter()
+                .map(|call| (call.call.clone(), call.admission))
+                .collect::<Vec<_>>(),
+        );
         *self
             .book
             .lock()
