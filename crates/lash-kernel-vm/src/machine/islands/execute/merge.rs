@@ -7,6 +7,11 @@ use super::super::compiled::{
 use super::*;
 use crate::compile::LibId;
 
+// Core installs these kernels after source-prefix and activation authentication.
+// Storage preparation itself never enters the old member-event journal.
+#[path = "merge/region.rs"]
+pub(super) mod region;
+
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     fn source_primitive(&self, lib: LibId, args: &[Value]) -> Option<Value> {
         let (crate::compile::Entry::Native(entry), _) =
@@ -101,46 +106,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         if !self.depth_fits(reduction.depth) {
             return None;
         }
-        let number = |at| match frame.slots[at] {
-            SlotState::Value(value @ (Value::Int(_) | Value::Float(_))) => Some(value),
-            _ => None,
+        let (SlotState::Value(accumulator), SlotState::Value(item)) = (
+            frame.slots[reduction.accumulator],
+            frame.slots[reduction.item],
+        ) else {
+            return None;
         };
-        let (accumulator, item) = (number(reduction.accumulator)?, number(reduction.item)?);
-        let values = if reduction.reverse {
-            [item, accumulator]
-        } else {
-            [accumulator, item]
-        };
-        let function = self.exe.lib(reduction.lib);
-        let (entry, _) = function.specialization.prepared.as_ref()?;
-        let signature = reduction.checked.then_some(&function.header.signature);
-        if signature.is_some_and(|signature| {
-            !signature
-                .params
-                .iter()
-                .zip(values)
-                .all(|(param, value)| crate::compile::import_result_fits(&param.ty, value))
-        }) {
-            return None;
-        }
-        let paired = entry.pair().and_then(|pair| match values {
-            [Value::Int(left), Value::Int(right)] => {
-                lash_kernel_doc::scalar::ints(pair.ints?, left, right)
-            }
-            [Value::Float(left), Value::Float(right)] => {
-                lash_kernel_doc::scalar::floats(pair.floats?, left, right)
-            }
-            _ => None,
-        });
-        let answer = paired.or_else(|| entry.call(&values))?;
-        if !matches!(answer, Value::Int(_) | Value::Float(_)) {
-            return None;
-        }
-        if signature
-            .is_some_and(|signature| !crate::compile::import_result_fits(&signature.result, answer))
-        {
-            return None;
-        }
+        let answer = reduction.answer(self.exe, accumulator, item)?;
         self.end_statement(frame);
         frame.slots[reduction.accumulator] = SlotState::Value(answer);
         frame.state.control.push(Position::Block(reduction.body, 1));

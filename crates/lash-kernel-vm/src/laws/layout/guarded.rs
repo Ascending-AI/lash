@@ -525,3 +525,166 @@ fn resident_native_items_agree() {
         }
     }
 }
+
+/// K-COL / K-MACH-008: finite collection preparations preserve real lists,
+/// holes, saved callback values and exact source exits. Rejected, abandoned
+/// and stale append transactions publish no list edit or allocation ordinal.
+/// This is a storage/preparation law, not the core source-acceptance gate.
+#[test]
+fn collection_region_preparations_preserve_source_and_storage() {
+    use crate::machine::islands::witness::Family;
+    const BODY: &str = r#"
+        let out = [0, 0] let i = 0 let n = resident.len(values) let list = true
+        for value in values { set out[resident.len(out)] = value }
+        let sum = 0
+        for value in values { set sum = flat.add(sum, value) }
+        for value in values { set out[i] = value set i = flat.add(i, 1) }
+        for value in values {
+            let in_place = false
+            if list { set in_place = num.lt(i, resident.len(out)) }
+            if in_place { set out[i] = value }
+            set i = num.add(i, 1)
+        }
+        set i = 0
+        for value in values {
+            if same(i, n) { break }
+            if same(value, ()) { set i = flat.add(i, 1) } else { set out[0] = value }
+            set i = flat.add(i, 1)
+        }
+        set i = 0
+        while num.lt(i, n) {
+            let present = false let value = absent
+            if list { if num.lt(i, resident.len(values)) {
+                set value = values[i] set present = bool.not(same(value, ()))
+            } }
+            if present { set out[0] = value }
+            set i = num.add(i, 1)
+        }
+        let sorted = values let width = 1
+        let dest = 0 let end = 0 let mid = 0 let left = 0 let right = 0
+        for unused in values {
+            if same(dest, end) {
+                set mid = num.min(num.add(dest, width), n)
+                set end = num.min(num.add(mid, width), n)
+                set left = dest set right = mid
+            }
+            let from_right = false
+            if num.lt(left, mid) {
+                if num.lt(right, end) {
+                    let first = list.get(sorted, left)
+                    let second = list.get(sorted, right)
+                    let output = apply compare(first, second)
+                    let order = output
+                    if num.lt(0, order) { set from_right = true }
+                }
+            } else { set from_right = true }
+            if from_right {
+                set out[dest] = list.get(sorted, right) set right = num.add(right, 1)
+            } else {
+                set out[dest] = list.get(sorted, left) set left = num.add(left, 1)
+            }
+            set dest = num.add(dest, 1)
+        }
+        return out
+    "#;
+    fn probes(
+        registry: &mut lash_kernel_doc::FunctionRegistry,
+        ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+    ) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+        let mut probes = guarded_probes(registry, ids);
+        for (name, native, signature) in [
+            ("resident.len", "list.len", "(values: List(Any)) -> Int"),
+            ("num.min", "num.min", "(a: Number, b: Number) -> Number"),
+        ] {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function {name}{signature}\nkernel 1\ncharge 1\nnative\n"
+            ))
+            .unwrap();
+            probes.push((
+                name,
+                registry
+                    .register(definition, lash_kernel_lib::native(native))
+                    .unwrap(),
+            ));
+        }
+        let references = ["num.add", "num.lt"]
+            .map(|name| (name, ids[name]))
+            .into_iter()
+            .chain(
+                [
+                    "flat.add",
+                    "same",
+                    "bool.not",
+                    "num.min",
+                    "list.get",
+                    "resident.len",
+                ]
+                .map(|name| (name, probes.iter().find(|(key, _)| *key == name).unwrap().1)),
+            )
+            .map(|(name, id)| format!("use {name} = @{id}\n"))
+            .collect::<String>();
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function helper.direct(values: Any, compare: Any) -> Any\nkernel 1\ncharge 1\n{references}body {{ {BODY} }}"
+        )).unwrap();
+        probes.push((
+            "helper.direct",
+            registry.register(definition, None).unwrap(),
+        ));
+        probes
+    }
+    let source = "main { return invoke helper.direct([3, 7], fn(a, b) { return 0 }) }";
+    let embedder = Embedder::with(
+        source,
+        Setup {
+            probes: Some(probes),
+            ..Setup::default()
+        },
+    );
+    let (program, _) = embedder.program(false);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("collection fixture admits"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("collection fixture compiles"));
+    let mut prepared = Vec::new();
+    for code in 0..exe.code_count() {
+        let Some(plan) = exe
+            .island_of(crate::compile::CodeId(code as u32))
+            .and_then(|index| exe.island_plan(index))
+        else {
+            continue;
+        };
+        if let Some(compiled) = plan.compiled(&exe) {
+            prepared.extend(compiled.check_collection_preparations(
+                &exe,
+                embedder.machine.source_law_heap(),
+                plan.slots,
+            ));
+        }
+    }
+    for family in [
+        Family::CollectionAppend,
+        Family::Reduction,
+        Family::Placement,
+        Family::Visit,
+        Family::ReadSlot,
+        Family::Merge,
+    ] {
+        assert!(
+            prepared.contains(&family),
+            "a real recognized {family:?} preparation must execute: {prepared:?}"
+        );
+    }
+    println!(
+        "finite collection preparations: {} cases, {prepared:?}",
+        prepared.len()
+    );
+}

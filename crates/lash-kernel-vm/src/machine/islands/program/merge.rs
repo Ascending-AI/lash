@@ -45,6 +45,59 @@ pub(crate) struct Reduction {
     pub(in crate::machine::islands) depth: Depth,
 }
 
+impl Reduction {
+    /// Canonical immediate reduction, shared by ordinary and region exits.
+    /// No caller is allowed to replace a mixed numeric or checked call with
+    /// an integer recurrence that changes its result or error boundary.
+    pub(in crate::machine::islands) fn answer(
+        &self,
+        exe: &Executable,
+        accumulator: Value,
+        item: Value,
+    ) -> Option<Value> {
+        if !matches!(accumulator, Value::Int(_) | Value::Float(_))
+            || !matches!(item, Value::Int(_) | Value::Float(_))
+        {
+            return None;
+        }
+        let values = if self.reverse {
+            [item, accumulator]
+        } else {
+            [accumulator, item]
+        };
+        let function = exe.lib(self.lib);
+        let (entry, _) = function.specialization.prepared.as_ref()?;
+        let signature = self.checked.then_some(&function.header.signature);
+        if signature.is_some_and(|signature| {
+            !signature
+                .params
+                .iter()
+                .zip(values)
+                .all(|(param, value)| crate::compile::import_result_fits(&param.ty, value))
+        }) {
+            return None;
+        }
+        let paired = entry.pair().and_then(|pair| match values {
+            [Value::Int(left), Value::Int(right)] => {
+                lash_kernel_doc::scalar::ints(pair.ints?, left, right)
+            }
+            [Value::Float(left), Value::Float(right)] => {
+                lash_kernel_doc::scalar::floats(pair.floats?, left, right)
+            }
+            _ => None,
+        });
+        let answer = paired.or_else(|| entry.call(&values))?;
+        if !matches!(answer, Value::Int(_) | Value::Float(_))
+            || signature.is_some_and(|signature| {
+                !crate::compile::import_result_fits(&signature.result, answer)
+            })
+        {
+            return None;
+        }
+        Some(answer)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ReadSlot {
     pub(in crate::machine::islands) bound: LibId,
@@ -55,6 +108,9 @@ pub(crate) struct ReadSlot {
     pub(in crate::machine::islands) value: usize,
     pub(in crate::machine::islands) present: usize,
     pub(in crate::machine::islands) body: usize,
+    pub(in crate::machine::islands) bound_statement: StmtId,
+    pub(in crate::machine::islands) completed: StmtId,
+    pub(in crate::machine::islands) arms: [usize; 2],
 }
 
 #[derive(Clone)]
@@ -74,6 +130,8 @@ pub(crate) struct Placement {
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) value: usize,
     pub(in crate::machine::islands) list: Option<usize>,
+    pub(in crate::machine::islands) in_place: Option<usize>,
+    pub(in crate::machine::islands) bound: Option<LibId>,
     pub(in crate::machine::islands) body: usize,
     pub(in crate::machine::islands) statements: usize,
     pub(in crate::machine::islands) advance: LibId,
@@ -325,9 +383,12 @@ impl Build<'_> {
         matches!(initial.kind, Kind::Const(Value::Absent)).then_some(())?;
         let (condition, yes, _) = branch(read)?;
         let list = local(condition)?;
+        let outer = self.blocks.iter().position(|block| block.id == yes.id)?;
         let [bound] = plain(yes)?;
         let (condition, yes, no) = branch(bound)?;
+        let inner = self.blocks.iter().position(|block| block.id == yes.id)?;
         empty(no)?;
+        let bound_statement = bound.id;
         let bound = self.primitive(condition, 2)?;
         let [index, length] = self.merge_args(condition, "num.lt")?;
         let index = local(index)?;
@@ -353,6 +414,7 @@ impl Build<'_> {
         (local(source)? == target && local(position)? == index).then_some(())?;
         let (at, test) = assigned(mark, false)?;
         (at == present).then_some(())?;
+        let completed = mark.id;
         let mark = self.primitive(test, 1)?;
         let Kind::Operator { args, .. } = &unpin(test).kind else {
             return None;
@@ -379,6 +441,9 @@ impl Build<'_> {
             value: value as usize,
             present: present as usize,
             body: self.blocks.iter().position(|block| block.id == body.id)?,
+            bound_statement,
+            completed,
+            arms: [outer, inner],
         })
     }
 
@@ -458,6 +523,7 @@ impl Build<'_> {
         let [set] = plain(yes)?;
         let (at, condition) = assigned(set, false)?;
         (at == in_place).then_some(())?;
+        let bound = self.primitive(condition, 2)?;
         let [index, length] = self.merge_args(condition, "num.lt")?;
         let index = local(index)?;
         let Kind::Native { lib, args, .. } = &unpin(length).kind else {
@@ -508,6 +574,8 @@ impl Build<'_> {
             index: index as usize,
             value: value as usize,
             list: Some(list as usize),
+            in_place: Some(in_place as usize),
+            bound: Some(bound),
             body: self.blocks.iter().position(|block| block.id == body.id)?,
             statements: 4,
             advance,
@@ -567,6 +635,8 @@ impl Build<'_> {
             index: index as usize,
             value: value as usize,
             list: None,
+            in_place: None,
+            bound: None,
             body: self.blocks.iter().position(|block| block.id == body.id)?,
             statements: 2,
             advance: lib,
