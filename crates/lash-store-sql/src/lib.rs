@@ -131,6 +131,7 @@ pub const TABLES: &[&str] = &[
     durable::run_records::TABLE,
     durable::model_calls::TABLE,
     durable::tool_calls::TABLE,
+    durable::turns::JOURNAL_TABLE,
     durable::turns::NAMESPACES_TABLE,
     durable::turns::TABLE,
     durable::session_close::ENDING_TABLE,

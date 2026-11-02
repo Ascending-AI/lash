@@ -371,8 +371,22 @@ pub enum TurnWrite {
         /// The working state from this commit on.
         working: Option<NodeId>,
     },
-    /// End the turn and drop its phase row, with its receipt, and its run's
-    /// namespace rows,
+    /// Append `inputs`, what the unfinished turn's machine was handed since
+    /// the turn's last journal row, as its next row (FIG-7585): a resume
+    /// replays the rows, in order, into a fresh machine. Written in the
+    /// commit of the phase that observed them. Refused with
+    /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
+    /// it is not the session's unfinished turn.
+    Journal {
+        /// The session.
+        session: SessionId,
+        /// The run.
+        run: TurnId,
+        /// The inputs, encoded by their owner.
+        inputs: String,
+    },
+    /// End the turn and drop its phase row, with its receipt, its journal
+    /// and its run's namespace rows,
     /// whether its commit promoted them or a cancel discards them, and the
     /// working state of every cell the turn stopped in: each cell's root,
     /// effect admissions and own run facts. Its accepted cancel request

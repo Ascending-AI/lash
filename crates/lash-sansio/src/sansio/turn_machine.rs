@@ -1148,11 +1148,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Feed a response to a previously emitted effect.
     pub fn handle_response(&mut self, response: Response<M::IntentOutcome>) {
-        self.record_input(|| MachineInput::Answered {
-            response: RecordedResponse::of(&response),
-            fails_on_overflow: true,
-        });
-        if let Err(overflow) = self.handle_unrecorded(response) {
+        if let Err(overflow) = self.handle_answer(response, Some(true)) {
             self.fail_on_overflow(overflow);
         }
     }
@@ -1177,20 +1173,31 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         response: Response<M::IntentOutcome>,
     ) -> Result<(), TokenUsageOverflow> {
-        self.record_input(|| MachineInput::Answered {
-            response: RecordedResponse::of(&response),
-            fails_on_overflow: false,
-        });
-        self.handle_unrecorded(response)
+        self.handle_answer(response, Some(false))
     }
 
-    pub(super) fn handle_unrecorded(
+    /// Apply `response` to the effect the machine waits on. An answer the
+    /// machine takes is journaled when `journaled` says how its usage
+    /// overflow is handled; an answer to an effect it does not wait on
+    /// changes nothing and is not an input.
+    pub(super) fn handle_answer(
         &mut self,
         response: Response<M::IntentOutcome>,
+        journaled: Option<bool>,
     ) -> Result<(), TokenUsageOverflow> {
+        let recorded = match journaled {
+            Some(fails_on_overflow) if self.journaling() => Some(MachineInput::Answered {
+                response: RecordedResponse::of(&response),
+                fails_on_overflow,
+            }),
+            _ => None,
+        };
         let Some(answered) = self.state.take_waiting(response) else {
             return Ok(());
         };
+        if let Some(input) = recorded {
+            self.record_input(|| input);
+        }
         match answered {
             AnsweredWork::ExecutionEnvironmentSynced { result } => {
                 self.handle_execution_environment_synced(result)

@@ -528,13 +528,14 @@ impl TurnServices for L4Services {
         // its admission took.
         let window = head.window()?;
         let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
-        let machine = TurnMachine::in_window(
+        let mut machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
             window,
             messages,
             Vec::new(),
             0,
         );
+        machine.journal_inputs(0);
         Ok(self.drive(row, machine, None))
     }
 
@@ -553,9 +554,18 @@ impl TurnServices for L4Services {
             .lock_recover()
             .restored_tool_counts
             .push(row.tool_calls);
-        let restored = restore
-            .restore(machine_config(&row.session, &row.run))
-            .await?;
+        let mut restore = restore;
+        restore.decode_phase().await?;
+        let window = restore.head().await?.window()?;
+        let messages = window.then(seed::admitted_messages(&self.backend(), &row).await?);
+        let fresh = TurnMachine::in_window(
+            machine_config(&row.session, &row.run),
+            window,
+            messages,
+            Vec::new(),
+            0,
+        );
+        let restored = restore.restore(fresh).await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,

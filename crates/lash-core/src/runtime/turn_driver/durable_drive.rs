@@ -110,7 +110,8 @@ impl RuntimeDrive {
             trace_scope,
             attachments,
         } = turn;
-        let machine = fresh_machine(&mut driver, window, messages)?;
+        let mut machine = fresh_machine(&mut driver, window, messages)?;
+        machine.journal_inputs(0);
         Ok(Self::assemble(
             driver,
             machine,
@@ -144,7 +145,7 @@ impl RuntimeDrive {
             trace_scope,
             attachments,
         } = turn;
-        let config = fresh_machine(&mut driver, window, messages)?.into_config();
+        let fresh = fresh_machine(&mut driver, window, messages)?;
         let RestoredTurn {
             machine,
             namespaces,
@@ -152,7 +153,7 @@ impl RuntimeDrive {
             pending,
             answered,
             row,
-        } = restore.restore(config).await?;
+        } = Box::pin(restore.restore(fresh)).await?;
         // The steering input the turn's checkpoints delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);

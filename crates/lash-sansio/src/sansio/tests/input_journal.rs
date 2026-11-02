@@ -125,7 +125,7 @@ fn live_run() -> (Vec<MachineInput<()>>, Vec<(usize, serde_json::Value)>) {
     let mut cuts = Vec::new();
     let mut calls = 0;
     let mut checkpoints = 0;
-    let mut cut = |machine: &mut TurnMachine, cuts: &mut Vec<(usize, serde_json::Value)>| {
+    let cut = |machine: &mut TurnMachine, cuts: &mut Vec<(usize, serde_json::Value)>| {
         let (_, mark) = machine.stage_inputs();
         cuts.push((mark, state(machine)));
     };
@@ -200,8 +200,48 @@ fn live_run() -> (Vec<MachineInput<()>>, Vec<(usize, serde_json::Value)>) {
         cut(&mut machine, &mut cuts);
     }
     assert_eq!(calls, 2, "the fixture turn reaches its second call");
-    let (inputs, _) = machine.stage_inputs();
-    (inputs.to_vec(), cuts)
+    let (row, _) = machine.stage_inputs();
+    let stored = serde_json::to_string(&row).expect("the row encodes");
+    let read: JournalRow<()> = serde_json::from_str(&stored).expect("the row reads back");
+    assert_eq!(read.from, 0, "the uncommitted row starts the journal");
+    (read.inputs, cuts)
+}
+
+/// A response held for a later commit reaches the store in the same commit
+/// as the row staged after it, which holds its inputs again: the journal
+/// holds each input once, and a row past the inputs before it is refused.
+#[test]
+fn overlapping_journal_rows_assemble_to_each_input_once() {
+    let (inputs, _) = live_run();
+    let half = inputs.len() / 2;
+    let rows = vec![
+        JournalRow {
+            from: 0,
+            inputs: inputs[..half].to_vec(),
+        },
+        JournalRow {
+            from: half / 2,
+            inputs: inputs[half / 2..].to_vec(),
+        },
+    ];
+    let assembled = JournalRow::assemble(rows).expect("overlapping rows assemble");
+    assert_eq!(
+        serde_json::to_value(&assembled).unwrap(),
+        serde_json::to_value(&inputs).unwrap(),
+        "each input once, in order"
+    );
+    let gap = vec![
+        JournalRow {
+            from: 0,
+            inputs: inputs[..half].to_vec(),
+        },
+        JournalRow {
+            from: half + 1,
+            inputs: inputs[half + 1..].to_vec(),
+        },
+    ];
+    let refused = JournalRow::assemble(gap).expect_err("a gap is refused");
+    assert_eq!(refused.index, half, "the refusal names the missing input");
 }
 
 #[test]

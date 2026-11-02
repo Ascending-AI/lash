@@ -517,6 +517,7 @@ impl ActorTx {
                     TurnWrite::Advance { .. }
                     | TurnWrite::Answer { .. }
                     | TurnWrite::Namespaces { .. }
+                    | TurnWrite::Journal { .. }
                     | TurnWrite::Working { .. } => false,
                 },
                 DomainWrite::Environment(_)

@@ -51,7 +51,6 @@ use crate::AdmittedScope;
 use crate::Effect;
 use crate::HostTurnProtocol;
 use crate::TurnMachine;
-use crate::TurnMachineConfig;
 use crate::TurnOutcome;
 use lash_execution_contracts::backend::Backend;
 use lash_kernel_value::identity::SessionId;
@@ -1170,6 +1169,16 @@ pub enum TurnRestoreError {
         #[source]
         source: Box<TurnError>,
     },
+    /// The turn's journal does not replay into the machine this build
+    /// builds for the turn: a different call, arguments or order than the
+    /// journal records, or a machine built differently.
+    #[error("turn {run}'s journal does not replay: {divergence}")]
+    Diverged {
+        /// The turn.
+        run: TurnId,
+        /// Where it diverged.
+        divergence: lash_sansio::ReplayDivergence,
+    },
     /// The stored checkpoint does not decode.
     #[error("turn {run} checkpoint does not decode: {reason}")]
     Undecodable {
@@ -1353,6 +1362,28 @@ impl<'a> TurnRestore<'a> {
         self.heads.held(self.cx)
     }
 
+    /// Decode the turn's stored phase before anything else of the turn is
+    /// read, as [`Self::recorded_preparation`] does for the production
+    /// host: a phase this build does not decode refuses first.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnRestoreError`] when the row holds no checkpoint or it does not
+    /// decode.
+    pub async fn decode_phase(&mut self) -> Result<(), TurnRestoreError> {
+        self.phase().await.map(|_| ())
+    }
+
+    /// The session's head, which the turn started from: a resumed turn
+    /// builds its machine over this head's window the way its start did.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionOwner::head`]'s.
+    pub async fn head(&mut self) -> Result<&SessionHead, TurnError> {
+        self.heads.head(self.cx, &self.row.session).await
+    }
+
     /// What the turn's checkpoint records for preparing the resumed turn:
     /// its before-turn callback decisions, its retained trace scope and its
     /// run's recorded configuration, so no before-turn callback runs, no
@@ -1381,18 +1412,17 @@ impl<'a> TurnRestore<'a> {
         })
     }
 
-    /// Restore the turn's machine under `config`, the configuration it was
-    /// built with, over the committed window its checkpoint pins, and the
-    /// effect its checkpoint re-delivers. The window is the head the owner
-    /// cached when the checkpoint pins that head, and is read back from the
-    /// session store at the pin only when the head has moved past it.
+    /// Restore the turn's machine: `machine`, built the way the turn's first
+    /// machine was, replays the inputs the turn's journal committed, and
+    /// waits on the effect it waited on when its last phase committed.
     ///
     /// # Errors
     ///
-    /// [`TurnRestoreError`].
+    /// [`TurnRestoreError`]: a journal row that does not decode, or a
+    /// journal that does not replay into `machine`.
     pub async fn restore(
         mut self,
-        config: TurnMachineConfig,
+        mut machine: TurnMachine,
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
         self.phase().await?;
@@ -1405,6 +1435,26 @@ impl<'a> TurnRestore<'a> {
         else {
             return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
         };
+        // The session's head can have moved past the window the turn
+        // started from: the machine is rebuilt over that window first.
+        if let Some(pin) = saved.checkpoint.window_pin()
+            && machine.window_pin() != Some(pin)
+        {
+            let window = self
+                .heads
+                .window_at(self.cx, &row.session, pin)
+                .await
+                .map_err(|source| TurnRestoreError::Window {
+                    run: row.run.clone(),
+                    source: Box::new(source),
+                })?;
+            machine
+                .rewindow(window)
+                .map_err(|divergence| TurnRestoreError::Diverged {
+                    run: row.run.clone(),
+                    divergence,
+                })?;
+        }
         // A paid answer restores with its receipt, which the resumed turn
         // derives; a call in flight restores to be sent again.
         let answered = match &row.phase {
@@ -1419,26 +1469,36 @@ impl<'a> TurnRestore<'a> {
             }
             | UnfinishedPhase::Tools { .. } => None,
         };
-        let window = match saved.checkpoint.window_pin() {
-            Some(pin) => Some(
-                self.heads
-                    .window_at(self.cx, &row.session, pin)
-                    .await
-                    .map_err(|source| TurnRestoreError::Window {
+        let reads = self.cx.durable_reads()?;
+        let namespaces = reads.turn_namespaces(&row.session, &row.run).await?;
+        let mut rows = Vec::new();
+        for journaled in reads.turn_journal(&row.session, &row.run).await? {
+            rows.push(
+                serde_json::from_str::<lash_sansio::JournalRow<_>>(&journaled).map_err(
+                    |error| TurnRestoreError::Undecodable {
                         run: row.run.clone(),
-                        source: Box::new(source),
-                    })?,
-            ),
-            None => None,
-        };
-        let namespaces = self
-            .cx
-            .durable_reads()?
-            .turn_namespaces(&row.session, &row.run)
-            .await?;
+                        reason: format!("a journal row does not decode: {error}"),
+                    },
+                )?,
+            );
+        }
+        let inputs = lash_sansio::JournalRow::assemble(rows).map_err(|divergence| {
+            TurnRestoreError::Diverged {
+                run: row.run.clone(),
+                divergence,
+            }
+        })?;
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
-        let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
-        // The turn's next phase builds on the content this one stored.
+        machine
+            .replay_inputs(inputs)
+            .map_err(|divergence| TurnRestoreError::Diverged {
+                run: row.run.clone(),
+                divergence,
+            })?;
+        // The turn's next phase builds on the content its last phase stored:
+        // the replayed machine stages its own checkpoint, whose blobs that
+        // phase pinned.
+        let _ = machine.checkpoint_delta();
         stored.restored(&mut machine);
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {

@@ -315,6 +315,15 @@ impl DurableReads for ObservedStore {
             .await
     }
 
+    async fn turn_journal(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<String>, DurableError> {
+        self.observe("turn_journal", self.inner.turn_journal(session, run))
+            .await
+    }
+
     async fn turn_end(
         &self,
         session: &SessionId,

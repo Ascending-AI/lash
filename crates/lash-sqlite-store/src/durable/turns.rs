@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
     graph_root_ref INTEGER REFERENCES blobs(id),
     PRIMARY KEY (session_id, run, plugin)
 );
+-- An unfinished turn's journal (FIG-7585): the inputs its machine was
+-- handed, one row per phase commit that observed some, in append order,
+-- dropped with the phase row when the turn ends.
+CREATE TABLE IF NOT EXISTS turn_journal (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    inputs TEXT NOT NULL,
+    PRIMARY KEY (session_id, run, seq)
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
 CREATE INDEX IF NOT EXISTS idx_turn_phases_working_execution_ref
     ON turn_phases (working_execution_ref);
@@ -290,6 +300,28 @@ pub(super) fn apply(
                 }),
             }
         }
+        TurnWrite::Journal {
+            session,
+            run,
+            inputs,
+        } => {
+            let open = tx
+                .statement(SQL.open_named_run.sql())?
+                .query_row([session.as_str(), run.as_str()], |_| Ok(()))
+                .optional()?;
+            if open.is_none() {
+                return refuse(DomainRefusal::TurnNotOpen {
+                    session: session.clone(),
+                    run: run.clone(),
+                });
+            }
+            tx.statement(SQL.append_journal.sql())?.execute([
+                session.as_str(),
+                run.as_str(),
+                inputs.as_str(),
+            ])?;
+            Ok(Ok(()))
+        }
         TurnWrite::Namespaces {
             session,
             run,
@@ -473,6 +505,8 @@ pub(super) fn apply(
             for root in namespaces.into_iter().flatten() {
                 commit.retired.stored(root);
             }
+            tx.statement(SQL.delete_journal.sql())?
+                .execute([session.as_str(), run.as_str()])?;
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
             crate::obligation_ledger::end_execution_tx(
                 tx,
@@ -744,6 +778,20 @@ pub(super) fn turn_end(
         cause,
         head_revision,
     })))
+}
+
+pub(super) fn turn_journal(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Answer<Vec<String>> {
+    let mut statement = tx.statement(SQL.journal.sql())?;
+    let rows = statement
+        .query_map([session.as_str(), run.as_str()], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Ok(rows))
 }
 
 pub(super) fn turn_namespaces(

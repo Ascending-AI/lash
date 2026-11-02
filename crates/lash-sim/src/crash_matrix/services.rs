@@ -448,13 +448,14 @@ impl TurnServices for SimServices {
         let backend = self.world.backend().map_err(TurnError::Exec)?;
         let window = head.window()?;
         let messages = window.then(admitted_messages(&backend, row).await?);
-        let machine = TurnMachine::in_window(
+        let mut machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run),
             window,
             messages,
             Vec::new(),
             0,
         );
+        machine.journal_inputs(0);
         Ok(self.drive(row, machine, None))
     }
 
@@ -467,9 +468,19 @@ impl TurnServices for SimServices {
             return cells.resume(cx, restore).await;
         }
         let row = restore.row().clone();
-        let restored = restore
-            .restore(machine_config(&row.session, &row.run))
-            .await?;
+        let mut restore = restore;
+        restore.decode_phase().await?;
+        let window = restore.head().await?.window()?;
+        let backend = self.world.backend().map_err(TurnError::Exec)?;
+        let messages = window.then(admitted_messages(&backend, &row).await?);
+        let fresh = TurnMachine::in_window(
+            machine_config(&row.session, &row.run),
+            window,
+            messages,
+            Vec::new(),
+            0,
+        );
+        let restored = restore.restore(fresh).await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,

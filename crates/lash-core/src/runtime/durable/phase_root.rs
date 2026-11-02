@@ -349,6 +349,8 @@ pub(in crate::runtime) struct StagedPhase {
     supplied: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
     stored: PhaseStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
+    /// The journal row of the machine inputs the phase observed, if any.
+    journal: Option<lash_durable::DomainWrite>,
 }
 
 /// The blobs a staged phase added, each by the node it is stored as: what
@@ -360,6 +362,8 @@ pub(in crate::runtime) struct PhaseStored {
     content: Vec<(CheckpointContentRef, CheckpointContentPin)>,
     config: RunConfigStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
+    /// The machine's journal mark the phase's commit makes durable.
+    inputs: Option<usize>,
 }
 
 impl PhaseStored {
@@ -369,6 +373,9 @@ impl PhaseStored {
             publication.committed();
         }
         drive.machine().checkpoint_stored(self.content);
+        if let Some(mark) = self.inputs {
+            drive.machine().inputs_committed(mark);
+        }
         drive.run_config_stored(&self.config);
     }
 
@@ -542,8 +549,39 @@ impl StagedPhase {
                 content: stored,
                 config: config_stored,
                 publication,
+                inputs: None,
             },
+            journal: None,
         })
+    }
+
+    /// Journal `machine`'s inputs since its last committed journal row
+    /// with the phase: the phase's commit appends them, and its
+    /// acknowledgement makes them durable.
+    ///
+    /// # Errors
+    ///
+    /// The account of inputs that do not encode.
+    pub(in crate::runtime) fn journaling(
+        mut self,
+        machine: &mut crate::TurnMachine,
+        session: &lash_kernel_value::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
+    ) -> Result<Self, String> {
+        let (row, mark) = machine.stage_inputs();
+        if !row.is_empty() {
+            let inputs = serde_json::to_string(&row)
+                .map_err(|error| format!("the turn's machine inputs do not encode: {error}"))?;
+            self.journal = Some(lash_durable::DomainWrite::Turn(
+                lash_durable::domain::TurnWrite::Journal {
+                    session: session.clone(),
+                    run: run.clone(),
+                    inputs,
+                },
+            ));
+        }
+        self.stored.inputs = Some(mark);
+        Ok(self)
     }
 
     /// Stages the nodes in `tx`, requiring the held ones, and returns the
@@ -554,6 +592,9 @@ impl StagedPhase {
     ) -> (NodeId, PhaseStored) {
         if let Some(publication) = self.publication {
             publication.stage(tx);
+        }
+        if let Some(journal) = self.journal {
+            tx.write(journal);
         }
         for node in self.held {
             tx.require(node);
@@ -723,6 +764,7 @@ pub(in crate::runtime) fn load(
             content: stored,
             config: RunConfigStored::default(),
             publication: None,
+            inputs: None,
         },
     ))
 }

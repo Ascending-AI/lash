@@ -210,6 +210,65 @@ impl AdmittedDelta {
     }
 }
 
+/// One journal row: the inputs a commit made durable, from the input at
+/// `from` on. A response held for a later commit can reach the store in
+/// the same commit as the inputs staged after it, so rows can overlap: the
+/// journal is the rows' union, in input order ([`JournalRow::assemble`]).
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(bound(serialize = "I: Serialize", deserialize = "I: DeserializeOwned"))]
+pub struct JournalRow<I> {
+    /// The journal position of the row's first input.
+    pub from: usize,
+    /// The inputs.
+    pub inputs: Vec<MachineInput<I>>,
+}
+
+/// [`JournalRow`] borrowed from the machine's staged inputs.
+#[derive(Serialize)]
+#[serde(bound(serialize = "I: Serialize"))]
+pub struct StagedRow<'a, I> {
+    from: usize,
+    inputs: &'a [MachineInput<I>],
+}
+
+impl<I> StagedRow<'_, I> {
+    /// Whether the row holds no input.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.inputs.is_empty()
+    }
+}
+
+impl<I> JournalRow<I> {
+    /// The journal `rows` hold, in the order they were appended: each
+    /// row's inputs past those an earlier row already holds.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplayDivergence`] when a row starts past the inputs before it:
+    /// the journal lost inputs.
+    pub fn assemble(
+        rows: impl IntoIterator<Item = Self>,
+    ) -> Result<Vec<MachineInput<I>>, ReplayDivergence> {
+        let mut journal = Vec::new();
+        for row in rows {
+            if row.from > journal.len() {
+                return Err(ReplayDivergence {
+                    index: journal.len(),
+                    reason: format!(
+                        "a journal row starts at input {}, past the {} inputs before it",
+                        row.from,
+                        journal.len()
+                    ),
+                });
+            }
+            let held = journal.len() - row.from;
+            journal.extend(row.inputs.into_iter().skip(held));
+        }
+        Ok(journal)
+    }
+}
+
 /// Where a replay left the recorded inputs: the input that does not apply
 /// to the machine the inputs before it reached.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,13 +343,25 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// The inputs recorded since the last [`Self::inputs_committed`], and
     /// the mark that commits them. A later poll starts an input of its own,
     /// so the mark never splits one.
-    pub fn stage_inputs(&mut self) -> (&[MachineInput<M::IntentOutcome>], usize) {
+    pub fn stage_inputs(&mut self) -> (StagedRow<'_, M::IntentOutcome>, usize) {
         match &mut self.inputs {
             Some(journal) => {
                 journal.sealed = true;
-                (&journal.pending, journal.committed + journal.pending.len())
+                (
+                    StagedRow {
+                        from: journal.committed,
+                        inputs: &journal.pending,
+                    },
+                    journal.committed + journal.pending.len(),
+                )
             }
-            None => (&[], 0),
+            None => (
+                StagedRow {
+                    from: 0,
+                    inputs: &[],
+                },
+                0,
+            ),
         }
     }
 
@@ -355,7 +426,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                             self.state.waiting_effect()
                         )));
                     }
-                    if let Err(overflow) = self.handle_unrecorded(response) {
+                    if let Err(overflow) = self.handle_answer(response, None) {
                         if !fails_on_overflow {
                             return Err(diverged(format!(
                                 "usage counter `{}` overflowed",
@@ -408,6 +479,55 @@ impl<M: TurnProtocol> TurnMachine<M> {
         Ok(())
     }
 
+    /// The pin of the committed window the machine was built over, if any.
+    #[must_use]
+    pub fn window_pin(&self) -> Option<&TurnWindowPin> {
+        self.window.as_ref().map(TurnWindow::pin)
+    }
+
+    /// Rebuild this fresh machine over `window`, the committed window the
+    /// turn started from, keeping what it holds past its own window: a
+    /// resumed turn's host builds it over the session's head, which can
+    /// have moved past the turn's window since the turn started.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplayDivergence`] when the machine already took an input, or was
+    /// built over no window.
+    pub fn rewindow(&mut self, window: TurnWindow<M::Event>) -> Result<(), ReplayDivergence> {
+        let refused = |reason: &str| ReplayDivergence {
+            index: 0,
+            reason: reason.to_owned(),
+        };
+        if self.journaled_inputs() != 0 || !matches!(self.state, MachineState::PreparingProtocol) {
+            return Err(refused("the machine was already handed inputs"));
+        }
+        let Some(own) = self.window.as_ref() else {
+            return Err(refused(
+                "the turn started from a window, and this machine from none",
+            ));
+        };
+        if own.pin() == window.pin() {
+            return Ok(());
+        }
+        let delta = self
+            .messages
+            .iter()
+            .skip(own.messages().len())
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut events = window.events().clone();
+        for event in self.events.iter().skip(own.events().len()) {
+            events.push_adopting(event.clone(), lash_protocol_types::same_history_record);
+        }
+        self.messages = window.then(delta);
+        self.prompt_messages = self.messages.clone();
+        self.progress_event_cursor = events.len();
+        self.events = events;
+        self.window = Some(window);
+        Ok(())
+    }
+
     /// The request the machine waits on as model call `id`.
     fn waiting_request(&self, id: EffectId) -> Option<Arc<RetainedLlmRequest>> {
         match &self.state {
@@ -418,6 +538,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
             } if *effect_id == id => Some(Arc::clone(request)),
             _ => None,
         }
+    }
+
+    /// Whether the machine journals its inputs now.
+    pub(super) fn journaling(&self) -> bool {
+        self.inputs
+            .as_ref()
+            .is_some_and(|journal| !journal.replaying)
     }
 
     pub(super) fn record_input(&mut self, input: impl FnOnce() -> MachineInput<M::IntentOutcome>) {

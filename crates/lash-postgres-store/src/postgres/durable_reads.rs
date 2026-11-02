@@ -119,6 +119,15 @@ impl DurableReads for PostgresDurableStore {
         .await
     }
 
+    async fn turn_journal(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
+    ) -> Result<Vec<String>, DurableError> {
+        self.read(|connection| Box::pin(turns::turn_journal(connection, session, run)))
+            .await
+    }
+
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
         self.read_run_facts(owner, None).await
     }

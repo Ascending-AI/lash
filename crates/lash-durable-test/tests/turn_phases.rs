@@ -510,13 +510,14 @@ impl TurnServices for L3Services {
         // its admission took.
         let window = head.window()?;
         let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
-        let machine = TurnMachine::in_window(
+        let mut machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run, self.mode),
             window,
             messages,
             Vec::new(),
             0,
         );
+        machine.journal_inputs(0);
         Ok(self.drive(row, machine, None))
     }
 
@@ -526,9 +527,18 @@ impl TurnServices for L3Services {
         restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
         let row = restore.row().clone();
-        let restored = restore
-            .restore(machine_config(&row.session, &row.run, self.mode))
-            .await?;
+        let mut restore = restore;
+        restore.decode_phase().await?;
+        let window = restore.head().await?.window()?;
+        let messages = window.then(seed::admitted_messages(&self.backend(), &row).await?);
+        let fresh = TurnMachine::in_window(
+            machine_config(&row.session, &row.run, self.mode),
+            window,
+            messages,
+            Vec::new(),
+            0,
+        );
+        let restored = restore.restore(fresh).await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,
@@ -1834,6 +1844,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         Vec::new(),
         0,
     );
+    machine.journal_inputs(0);
     let pinned = loop {
         match machine
             .poll_effect()
@@ -1898,6 +1909,11 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         iteration: 0,
     };
     tx.write(DomainWrite::Turn(advance));
+    tx.write(DomainWrite::Turn(TurnWrite::Journal {
+        session: session(),
+        run: run(),
+        inputs: serde_json::to_string(&machine.stage_inputs().0).expect("the inputs encode"),
+    }));
     database
         .commit(tx, CommitLabel::MODEL_START)
         .await
@@ -1909,8 +1925,22 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         .expect("the turn is open");
     let cx = ActorContext::detached(backend.clone());
     let mut heads = SessionOwner::default();
+    // The resumed host builds its machine over the moved head, as it
+    // builds every turn's.
+    let moved_window = moved.window().expect("the moved head's window");
+    let fresh = TurnMachine::in_window(
+        machine_config(&session(), &run(), Mode::Plain),
+        moved_window.clone(),
+        moved_window.then(vec![session_message(
+            "l3-input",
+            MessageRole::User,
+            "the turn's own input",
+        )]),
+        Vec::new(),
+        0,
+    );
     let restored = TurnRestore::new(&cx, &row, &mut heads)
-        .restore(machine_config(&session(), &run(), Mode::Plain))
+        .restore(fresh)
         .await
         .expect("the turn restores over its pinned window");
     assert_eq!(

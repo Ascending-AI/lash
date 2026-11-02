@@ -71,7 +71,7 @@ use machine_state::{
 pub use machine_state::{SavedTurn, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine};
 mod helpers;
 mod input_journal;
-pub use input_journal::{AdmittedDelta, MachineInput, ReplayDivergence};
+pub use input_journal::{AdmittedDelta, JournalRow, MachineInput, ReplayDivergence, StagedRow};
 use input_journal::{InputJournal, RecordedResponse};
 mod turn_machine;
 use helpers::{checked_turn_usage_from_llm_usage, refine_terminal_reason_for_context_window};

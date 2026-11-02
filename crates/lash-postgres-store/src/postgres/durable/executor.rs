@@ -237,6 +237,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &turns::ANSWER_SET,
         &turns::OPEN_NAMED_RUN,
         &turns::UPSERT_NAMESPACES,
+        &turns::APPEND_JOURNAL,
         &turns::WORKING_SET,
         &turns::PHASE_ROOTS,
         &turns::NAMESPACE_ROOTS,

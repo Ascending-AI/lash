@@ -115,6 +115,16 @@ impl DurableReads for SqliteDurableStore {
             .await
     }
 
+    async fn turn_journal(
+        &self,
+        session: &lash_kernel_value::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
+    ) -> Result<Vec<String>, DurableError> {
+        let (session, run) = (session.clone(), run.clone());
+        self.read(move |tx| turns::turn_journal(tx, &session, &run))
+            .await
+    }
+
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
         let owner = owner.clone();
         let limits = self.graph_reads.owner();

@@ -436,6 +436,14 @@ impl DurableReads for RecordedStore {
         self.inner.turn_namespaces(session, run).await
     }
 
+    async fn turn_journal(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<String>, DurableError> {
+        self.inner.turn_journal(session, run).await
+    }
+
     async fn turn_end(
         &self,
         session: &SessionId,

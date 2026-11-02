@@ -180,6 +180,7 @@ pub(in crate::runtime::durable) fn resume_refusal(error: &TurnError) -> Option<S
         ),
         TurnError::Restore(
             restore @ (TurnRestoreError::Undecodable { .. }
+            | TurnRestoreError::Diverged { .. }
             | TurnRestoreError::Checkpoint(
                 Checkpoint::IncompatibleSchemaVersion { .. }
                 | Checkpoint::IncompatibleFormat { .. },

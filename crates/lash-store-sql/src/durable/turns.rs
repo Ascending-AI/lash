@@ -23,6 +23,11 @@ pub const TABLE: &str = "turn_phases";
 /// the turn's phase row.
 pub const NAMESPACES_TABLE: &str = "turn_namespaces";
 
+/// The table of an unfinished turn's journal (FIG-7585): the inputs its
+/// machine was handed, one row per phase commit that observed some, in
+/// append order, dropped with the turn's phase row.
+pub const JOURNAL_TABLE: &str = "turn_journal";
+
 crate::statements! {
     lazy
     /// `turn_phases`, `session_runs` and `turn_cancel_requests` statements
@@ -141,6 +146,17 @@ crate::statements! {
              WHERE session_id = ?1 AND run = ?2
                AND (SELECT hash FROM blobs WHERE id = working_execution_ref) IS NOT DISTINCT FROM ?4
              RETURNING run";
+
+        /// Append inputs `?3` to run `?2` of session `?1`'s journal, after
+        /// its last row.
+        append_journal = "INSERT INTO turn_journal (session_id, run, seq, inputs)
+             SELECT ?1, ?2, COALESCE(MAX(seq) + 1, 0), ?3 FROM turn_journal
+             WHERE session_id = ?1 AND run = ?2";
+        /// Run `?2` of session `?1`'s journal rows, in append order.
+        journal = "SELECT inputs FROM turn_journal WHERE session_id = ?1 AND run = ?2
+             ORDER BY seq";
+        /// Drop run `?2` of session `?1`'s journal.
+        delete_journal = "DELETE FROM turn_journal WHERE session_id = ?1 AND run = ?2";
 
         /// Drop run `?2` of session `?1`'s namespace rows, returning each
         /// values root.

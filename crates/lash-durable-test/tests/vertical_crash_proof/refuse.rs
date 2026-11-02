@@ -10,33 +10,14 @@ use lash_core_store::checkpoint_graph::{
 
 #[derive(Clone, Copy)]
 enum Damage {
-    Driver,
+    Journal,
     Checkpoint,
 }
 
-/// Edit only the protocol's parked driver payload, retaining its stamp and
-/// every other field the same-build checkpoint wrote.
-fn damage_driver(value: &mut serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(state) = map
-                .get_mut("driver_state")
-                .and_then(|state| state.pointer_mut("/payload/state"))
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                state.insert("left_by_another_build".to_owned(), true.into());
-                return true;
-            }
-            map.values_mut().any(damage_driver)
-        }
-        serde_json::Value::Array(values) => values.iter_mut().any(damage_driver),
-        _ => false,
-    }
-}
-
-/// Rewrite the actual stored graph after closing the first node. The
-/// existing fenced test-writer seam publishes new bytes at the turn/cell's
-/// own root; it never constructs a runtime or drives the turn. Envelopes,
+/// Rewrite the actual stored state after closing the first node: append a
+/// journal row this build does not decode, or rewrite the turn's phase root.
+/// The existing fenced test-writer seam publishes new bytes at the turn's
+/// own rows; it never constructs a runtime or drives the turn. Envelopes,
 /// digests and edges stay valid so restore reaches the semantic refusal.
 async fn damage(database: &dyn DurableStore, damage: Damage) {
     use lash_durable::domain::{DomainWrite, PhaseAdvance, RootOwner, TurnWrite, UnfinishedPhase};
@@ -62,8 +43,15 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
     let mut tx = database.begin(&actor(), epoch, u64::MAX).await.unwrap();
     let limits = DecodeLimits::within_total(u64::MAX);
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-    let (graph, old, root, write) = match damage {
-        Damage::Driver | Damage::Checkpoint => {
+    match damage {
+        Damage::Journal => {
+            tx.write(DomainWrite::Turn(TurnWrite::Journal {
+                session: session(),
+                run: run(),
+                inputs: r#"{"from":0,"inputs":[{"LeftByAnotherBuild":true}]}"#.to_owned(),
+            }));
+        }
+        Damage::Checkpoint => {
             let row = database
                 .turn(&session())
                 .await
@@ -92,18 +80,10 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
                 .unwrap();
             let mut value: serde_json::Value =
                 serde_json::from_str(&body.checkpoint).expect("the same-build checkpoint is JSON");
-            match damage {
-                Damage::Driver => assert!(
-                    damage_driver(&mut value),
-                    "the turn parked its driver state"
-                ),
-                Damage::Checkpoint => {
-                    value
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("left_by_another_build".to_owned(), true.into());
-                }
-            }
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("left_by_another_build".to_owned(), true.into());
             body.checkpoint = value.to_string();
             let root = staging.encode_value(NodeKind::PHASE_ROOT, &body).unwrap();
             let write = DomainWrite::Turn(TurnWrite::Advance {
@@ -115,15 +95,14 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
                 },
                 iteration: row.iteration,
             });
-            (graph, checkpoint, root, write)
+            assert_ne!(root, checkpoint, "the stored root must actually change");
+            for node in graph.nodes.keys() {
+                tx.require(*node);
+            }
+            tx.stage_all(staging);
+            tx.write(write);
         }
-    };
-    assert_ne!(root, old, "the stored root must actually change");
-    for node in graph.nodes.keys() {
-        tx.require(*node);
     }
-    tx.stage_all(staging);
-    tx.write(write);
     tx.give_up(lash_durable::Release::Ready);
     database
         .commit(tx, CommitLabel::new("law.corrupt_parked_state"))
@@ -314,17 +293,17 @@ async fn refused(damage_kind: Damage) -> Refused {
     }
 }
 
-/// D-PARKREFUSE / FIG-5592: unknown driver state refuses at restore,
-/// with no cell, operation, model or turn commit redelivered.
+/// D-PARKREFUSE / FIG-5592, FIG-7585: a turn journal row this build does
+/// not decode refuses at restore, with no cell, operation, model or turn
+/// commit redelivered.
 #[tokio::test]
-async fn a_parked_driver_state_this_build_cannot_decode_is_refused_at_restore_before_any_redelivery()
- {
-    let law = refused(Damage::Driver).await;
+async fn a_journal_row_this_build_cannot_decode_is_refused_at_restore_before_any_redelivery() {
+    let law = refused(Damage::Journal).await;
     let park = law.park_reason().await;
     assert!(
         matches!(park, Some(lash::SessionParkReason::UndecodableState {
-        state: lash::ParkedTurnState::DriverState { ref driver }, ref message,
-    }) if driver == lash::rlm::RLM_PROTOCOL_PLUGIN_ID && message.contains("left_by_another_build")),
+        state: lash::ParkedTurnState::Checkpoint, ref message,
+    }) if message.contains("LeftByAnotherBuild")),
         "{park:?}"
     );
     law.assert_refused().await;

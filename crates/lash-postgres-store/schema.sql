@@ -1224,6 +1224,16 @@ CREATE TABLE IF NOT EXISTS lash_turn_namespaces (
     graph_root_ref BIGINT REFERENCES lash_blobs(id) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run, plugin)
 );
+-- An unfinished turn's journal (FIG-7585): the inputs its machine was
+-- handed, one row per phase commit that observed some, in append order,
+-- dropped with the phase row when the turn ends.
+CREATE TABLE IF NOT EXISTS lash_turn_journal (
+    session_id TEXT NOT NULL,
+    run TEXT NOT NULL,
+    seq BIGINT NOT NULL,
+    inputs TEXT NOT NULL,
+    PRIMARY KEY (session_id, run, seq)
+);
 CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_checkpoint_ref ON lash_turn_phases (checkpoint_ref);
 CREATE INDEX IF NOT EXISTS idx_lash_turn_phases_working_execution_ref
     ON lash_turn_phases (working_execution_ref);

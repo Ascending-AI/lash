@@ -554,6 +554,14 @@ pub trait DurableReads: Send + Sync {
         run: &TurnId,
     ) -> Result<Vec<TurnNamespace>, DurableError>;
 
+    /// FIG-7585: the journal rows of `session`'s unfinished `run`, in the
+    /// order they were appended.
+    async fn turn_journal(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<String>, DurableError>;
+
     /// L3: how `run` of `session` ended, once it ended.
     async fn turn_end(
         &self,

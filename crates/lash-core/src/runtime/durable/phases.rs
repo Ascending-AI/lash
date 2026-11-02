@@ -75,9 +75,13 @@ use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
 /// and the input its checkpoints delivered, staged as its PhaseRoot.
-fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<StagedPhase, TurnError> {
+fn encode_checkpoint(
+    drive: &mut dyn TurnDrive,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<StagedPhase, TurnError> {
     let delta = drive.machine().checkpoint_delta();
-    encode_phase(drive, delta)
+    encode_phase(drive, delta, session, run)
 }
 
 /// `delta`, a checkpoint of `drive`'s machine, staged as its PhaseRoot: the
@@ -86,6 +90,8 @@ fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<StagedPhase, TurnError
 fn encode_phase(
     drive: &mut dyn TurnDrive,
     delta: CheckpointDelta<HostTurnProtocol>,
+    session: &SessionId,
+    run: &TurnId,
 ) -> Result<StagedPhase, TurnError> {
     lash_core_ids::operational_metrics::turn::sync_phase("checkpoint encode", || {
         let checkpoint = PhaseCheckpoint {
@@ -96,7 +102,9 @@ fn encode_phase(
             config: drive.run_config(),
             cell: drive.cell_start(),
         };
-        StagedPhase::of(&checkpoint, &delta.held, &delta.links).map_err(TurnError::Exec)
+        StagedPhase::of(&checkpoint, &delta.held, &delta.links)
+            .and_then(|staged| staged.journaling(drive.machine(), session, run))
+            .map_err(TurnError::Exec)
     })
 }
 
@@ -751,7 +759,7 @@ async fn phase_loop(
                     }
                     let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                     let (checkpoint, stored) =
-                        encode_phase(drive.as_mut(), delta)?.staged_in(&mut tx);
+                        encode_phase(drive.as_mut(), delta, &session, &run)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -878,7 +886,7 @@ async fn phase_loop(
                     }
                     let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                     let (checkpoint, stored) =
-                        encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
+                        encode_checkpoint(drive.as_mut(), &session, &run)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -1017,7 +1025,7 @@ async fn phase_loop(
                 let tools = drive.tools()?;
                 let reads =
                     tool_round::bind_reads(drive.as_mut(), tools.as_ref(), row, id, &mut calls)?;
-                let checkpoint = encode_checkpoint(drive.as_mut())?;
+                let checkpoint = encode_checkpoint(drive.as_mut(), &session, &run)?;
                 let current = iteration(drive.machine());
                 let done = tool_round::ModelDone {
                     checkpoint,
@@ -1082,7 +1090,8 @@ async fn phase_loop(
                     tx.write(bind);
                 }
                 let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
-                let (checkpoint, stored) = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
+                let (checkpoint, stored) =
+                    encode_checkpoint(drive.as_mut(), &session, &run)?.staged_in(&mut tx);
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),
                     run: run.clone(),
@@ -1355,7 +1364,7 @@ async fn record_cell_before_environment(
         tx.write(bind);
     }
     let written = write_run_changes(drive, &mut tx, &row.session, &row.run);
-    let (checkpoint, stored) = encode_checkpoint(drive)?.staged_in(&mut tx);
+    let (checkpoint, stored) = encode_checkpoint(drive, &row.session, &row.run)?.staged_in(&mut tx);
     tx.write(DomainWrite::Turn(TurnWrite::Advance {
         session: row.session.clone(),
         run: row.run.clone(),

@@ -9,11 +9,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use sansio::{
     ChatContextProjector, CheckpointContentPin, CheckpointContentRef, CheckpointDelivery,
     CheckpointDelta, CheckpointResumeAction, CompletedToolCall, ContextProjector, DriverAction,
-    DriverContextView, Effect, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls,
-    PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle, Response,
-    ResponseToolCalls, SavedTurn, ToolControlOrigin, ToolExpansionPlan, ToolWave, TurnCheckpoint,
-    TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
-    TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
+    DriverContextView, Effect, EffectId, ExpandedRow, ExpandedWrapper, JournalRow, MachineInput,
+    ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle,
+    ReplayDivergence, Response, ResponseToolCalls, SavedTurn, StagedRow, ToolControlOrigin,
+    ToolExpansionPlan, ToolWave, TurnCheckpoint, TurnCheckpointContent, TurnCheckpointRestoreError,
+    TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow, TurnWindowPin,
+    UndecodableDriverState, UnitTurnProtocol,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

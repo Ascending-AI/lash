@@ -52,6 +52,8 @@ lash_store_sql::statements! {
              ), namespaces AS (
                  DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
                  RETURNING graph_root_ref
+             ), journal AS (
+                 DELETE FROM turn_journal WHERE session_id = ?1 AND run = ?2
              ), cancel AS (
                  DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
 
@@ -180,6 +182,11 @@ pub(super) static UPSERT_NAMESPACES: Entry = Entry::new(
         Ty::Keys,
         Ty::Bools,
     ],
+    Shape::Exec,
+);
+pub(super) static APPEND_JOURNAL: Entry = Entry::new(
+    || &SQL.append_journal,
+    &[Ty::Text, Ty::Text, Ty::Text],
     Shape::Exec,
 );
 pub(super) static WORKING_SET: Entry = Entry::new(
@@ -533,6 +540,18 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
             }
             program
         }
+        TurnWrite::Journal {
+            session,
+            run,
+            inputs,
+        } => {
+            let mut values = turn(session, run);
+            values.push(Value::text(inputs.clone()));
+            vec![
+                Step::one(&OPEN_NAMED_RUN, turn(session, run)),
+                Step::any(&APPEND_JOURNAL, values),
+            ]
+        }
         TurnWrite::Working {
             session,
             run,
@@ -583,6 +602,7 @@ pub(super) async fn apply(
         TurnWrite::Advance { session, run, .. }
         | TurnWrite::Answer { session, run, .. }
         | TurnWrite::Namespaces { session, run, .. }
+        | TurnWrite::Journal { session, run, .. }
         | TurnWrite::Working { session, run, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
             match steps::run(tx, &program, &commit.steps()).await? {
@@ -866,6 +886,22 @@ pub(super) async fn turn_end(
         cause,
         head_revision,
     }))
+}
+
+pub(super) async fn turn_journal(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+) -> Result<Vec<String>, DurableError> {
+    crate::observed_sql::query(SQL.journal.sql())
+        .bind(session.as_str())
+        .bind(run.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?
+        .iter()
+        .map(|row| row.try_get::<String, _>(0).map_err(sqlx_failure))
+        .collect()
 }
 
 pub(super) async fn turn_namespaces(

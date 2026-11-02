@@ -445,13 +445,14 @@ impl TurnServices for BenchServices {
         }
         let window = head.window()?;
         let messages = window.then(admitted_messages(&self.backend, row).await?);
-        let machine = TurnMachine::in_window(
+        let mut machine = TurnMachine::in_window(
             machine_config(&row.session, &row.run, &self.driver),
             window,
             messages,
             Vec::new(),
             0,
         );
+        machine.journal_inputs(0);
         Ok(self.drive(row, machine, None))
     }
 
@@ -464,9 +465,18 @@ impl TurnServices for BenchServices {
             return self.cells.resume(cx, restore).await;
         }
         let row = restore.row().clone();
-        let restored = restore
-            .restore(machine_config(&row.session, &row.run, &self.driver))
-            .await?;
+        let mut restore = restore;
+        restore.decode_phase().await?;
+        let window = restore.head().await?.window()?;
+        let messages = window.then(admitted_messages(&self.backend, &row).await?);
+        let fresh = TurnMachine::in_window(
+            machine_config(&row.session, &row.run, &self.driver),
+            window,
+            messages,
+            Vec::new(),
+            0,
+        );
+        let restored = restore.restore(fresh).await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,
