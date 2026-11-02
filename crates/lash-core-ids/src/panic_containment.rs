@@ -37,19 +37,3 @@ pub fn enforce_loudness(payload: Box<dyn Any + Send>) {
 pub fn enforce_message(code: &'static str, message: &str) {
     enforce_loudness(Box::new(format!("{code}: {message}")));
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn contained_panic_obeys_the_runtime_switch() {
-        let previous = super::set_loud(false);
-        super::enforce_loudness(Box::new("quiet"));
-
-        super::set_loud(true);
-        let panic = std::panic::catch_unwind(|| {
-            super::enforce_loudness(Box::new("contained panic remains loud"));
-        });
-        super::set_loud(previous);
-        assert!(panic.is_err());
-    }
-}

@@ -894,25 +894,6 @@ mod tests {
         assert_eq!(live_only_site_fixture(), fixture);
     }
 
-    #[test]
-    #[ignore = "regenerates crates/lash-core/src/runtime/observation/process_workflow_site.fixture.json"]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the explicitly invoked test-only fixture recorder owns its destination and regeneration flag"
-    )]
-    fn regenerate_process_workflow_site_fixture() {
-        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-        let root =
-            std::env::var("BUILD_WORKSPACE_DIRECTORY").expect("the recorder names its workspace");
-        let path = std::path::Path::new(&root)
-            .join("crates/lash-core/src/runtime/observation/process_workflow_site.fixture.json");
-        std::fs::write(
-            path,
-            serde_json::to_string_pretty(&live_only_site_fixture()).unwrap() + "\n",
-        )
-        .unwrap();
-    }
-
     /// FIG-6370: live counts are provisional until their segment's
     /// `process.ran` commits, which replaces them; a carry restarts the sum;
     /// a process not observed at `counts` reports none, never zero.
