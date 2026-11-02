@@ -30,6 +30,10 @@ pub struct PoolCounters {
     /// envelope bytes; counted only in perf-witness builds.
     pub checkpoint_roots: u64,
     pub checkpoint_root_bytes: u64,
+    /// Pages a run's start carries to warm its worker; with the worker's
+    /// `pages_loaded` misses, the pages a resume reads. Counted only in
+    /// perf-witness builds.
+    pub warm_pages: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -115,6 +119,7 @@ pub(crate) fn units() -> BTreeMap<&'static str, &'static str> {
         ("receipts_dropped", "count"),
         ("checkpoint_roots", "count"),
         ("checkpoint_root_bytes", "bytes"),
+        ("warm_pages", "pages"),
     ]
     .into()
 }

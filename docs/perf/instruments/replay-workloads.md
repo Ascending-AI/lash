@@ -321,7 +321,7 @@ steady turns. Only `vm` figures compare with an in-process engine.
 | `resume_worker_start_ms` | vm | effect phases: the worker the run resumes on after the kill, from its `spawn_to_ready` start through its installation (`pool_started`) |
 | `resume_run_ms` | vm | effect phases: the first frame the run sends that worker, through its first `parked` or `ended` frame (the statement after the park) |
 | `resume_ms` | vm | the sum of the two: worker start to the first statement, without the idle gap before the run checks the worker out |
-| `resume_pages_read` | vm | the worker's `pages_loaded`, from the kill's tool body through the next tool body |
+| `resume_pages_read` | vm | pool counter `warm_pages` (pages the resumed start carries) plus the worker's `pages_loaded` misses, from the kill's tool body through the next tool body |
 | `resume_bytes_read` | vm | effect phases: frame bytes sent to that worker over `resume_run_ms` (start, deliveries, page replies) |
 | `turn_wall_ms` | store | the round's `wall_ms`, from send through outcome |
 | `store_bytes_per_park` | store | the round's `store_bytes_written` (FIG-7583, retirement included) divided by parks. This covers every commit in the turn, not only the parks |

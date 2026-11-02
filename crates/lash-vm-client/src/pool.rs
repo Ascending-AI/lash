@@ -588,6 +588,8 @@ impl Checkout {
     fn drive(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
         let timeout = self.pool.config.protocol.no_response_watchdog;
         let start = self.unsent_start.take();
+        #[cfg(feature = "perf-witness")]
+        self.count_warm(start.as_deref());
         let deliveries = std::mem::take(&mut self.deliveries);
         let scope = self.phase_scope();
         let encode_start = scope.as_ref().map(|scope| scope.recorder.now());
@@ -809,6 +811,14 @@ impl Checkout {
         }
     }
 
+    /// Counts the pages `start` carries to warm the worker, as it crosses.
+    #[cfg(feature = "perf-witness")]
+    fn count_warm(&self, start: Option<&Start>) {
+        if let Some(start) = start {
+            lock(&self.pool.measurements).counters.warm_pages += start.warm.len() as u64;
+        }
+    }
+
     /// Holds `sealed`, the stage capabilities the page service issued for
     /// the seal batch that crossed with the last step, until they cross
     /// with the run's next slice (FIG-6288).
@@ -846,6 +856,8 @@ impl Checkout {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
         let start = self.unsent_start.take();
+        #[cfg(feature = "perf-witness")]
+        self.count_warm(start.as_deref());
         self.split_from(
             start,
             Split {

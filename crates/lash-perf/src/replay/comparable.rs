@@ -80,7 +80,8 @@ pub(super) struct Cut {
 struct Body {
     /// Effect-phase events recorded before the body ran.
     event: usize,
-    pages_loaded: u64,
+    /// Pages warmed by a start plus the worker's page misses.
+    pages_read: u64,
     kill: bool,
 }
 
@@ -128,8 +129,9 @@ impl Observer {
                         .as_ref()
                         .and_then(lash::vm::WorkerPool::effect_phases)
                         .map_or(0, |phases| phases.events.len()),
-                    pages_loaded: pool.as_ref().map_or(0, |pool| {
-                        pool.measurements().counters.worker_work.pages_loaded
+                    pages_read: pool.as_ref().map_or(0, |pool| {
+                        let counters = pool.measurements().counters;
+                        counters.warm_pages + counters.worker_work.pages_loaded
                     }),
                     kill,
                 }
@@ -207,7 +209,7 @@ impl Observer {
                 .with_context(|| format!("turn {turn}: cold resume"))?;
             figures.insert(
                 "resume_pages_read".to_owned(),
-                (next.pages_loaded - killed.pages_loaded) as f64,
+                (next.pages_read - killed.pages_read) as f64,
             );
         }
         if let Some(wall) = metrics.get("wall_ms") {
@@ -259,20 +261,28 @@ fn cell(events: &[lash::vm::EffectPhase], figures: &mut BTreeMap<String, f64>) {
     figures.insert("cell_vm_ms".to_owned(), ms(exchanges));
 }
 
-/// The worker the run resumes on after a kill: the one it sends its first
-/// frame to, which must have started after the kill. Its start through
+/// The worker the run resumes on after a kill: the first worker started
+/// after the kill that is sent a frame of the run. Frames the host still
+/// sends to a killed worker are not the resume. Its start through
 /// installation, then from that frame to the first slice that stops at a
 /// statement, and the bytes it was sent in that window.
 fn resume(events: &[lash::vm::EffectPhase], figures: &mut BTreeMap<String, f64>) -> Result<()> {
     let first = events
         .iter()
-        .position(|e| e.phase == "send" && !is(e, "send", &INSTALL))
-        .context("the run was never sent to a worker after the kill")?;
+        .enumerate()
+        .position(|(at, e)| {
+            e.phase == "send"
+                && !is(e, "send", &INSTALL)
+                && events[..at]
+                    .iter()
+                    .any(|s| s.pid == e.pid && s.phase == "spawn_to_ready")
+        })
+        .context("the run was never sent to a worker started after the kill")?;
     let pid = events[first].pid;
     let spawn = events[..first]
         .iter()
         .find(|e| e.pid == pid && e.phase == "spawn_to_ready")
-        .context("the run resumed on a worker that started before the kill")?;
+        .context("the resumed worker has no start")?;
     let installed = events[..first]
         .iter()
         .find(|e| e.pid == pid && is(e, "receive", &["pool_started"]))
