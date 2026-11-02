@@ -180,13 +180,12 @@ fn validate_document_in(
         if !library_reach.insert(function) {
             continue;
         }
-        let callees = if let Some(registered) = catalog.registered(&function) {
-            registered.callees().clone()
+        if let Some(registered) = catalog.registered(&function) {
+            pending.extend(registered.callees().iter().copied());
         } else if let Some(definition) = catalog.definition(&function) {
-            definition
-                .body()
-                .map(|body| body.functions.keys().copied().collect())
-                .unwrap_or_default()
+            if let Some(body) = definition.body() {
+                pending.extend(body.functions.keys().copied());
+            }
         } else {
             return Err(invalid(
                 None,
@@ -195,8 +194,7 @@ fn validate_document_in(
                     reason: lash_kernel_value::HelperUnavailableReason::Unknown,
                 },
             ));
-        };
-        pending.extend(callees);
+        }
     }
     let context = crate::DocumentCatalog::new(document, catalog);
     let names = document

@@ -886,23 +886,20 @@ fn helper_closure(
             function,
         };
         let header = catalog.header(&function).ok_or_else(missing)?;
-        let (callees, imports) = if let Some(registered) = catalog.registered(&function) {
-            (registered.callees().clone(), registered.imports().clone())
+        if let Some(registered) = catalog.registered(&function) {
+            let callees = registered.callees();
+            let imports = registered.imports();
+            visit(function, &header, imports);
+            pending.extend(callees.iter().copied());
         } else {
-            catalog
-                .definition(&function)
-                .ok_or_else(missing)?
-                .body()
-                .map(|body| {
-                    (
-                        body.functions.keys().copied().collect(),
-                        body.imports.clone(),
-                    )
-                })
-                .unwrap_or_default()
-        };
-        visit(function, &header, &imports);
-        pending.extend(callees);
+            let definition = catalog.definition(&function).ok_or_else(missing)?;
+            if let Some(body) = definition.body() {
+                visit(function, &header, &body.imports);
+                pending.extend(body.functions.keys().copied());
+            } else {
+                visit(function, &header, &BTreeMap::new());
+            }
+        }
     }
     Ok(())
 }
