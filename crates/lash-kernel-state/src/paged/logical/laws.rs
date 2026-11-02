@@ -2,6 +2,8 @@
 mod invocation_ranges;
 #[path = "native_construction_tests.rs"]
 mod native_construction;
+#[path = "roots_tests.rs"]
+mod root_authority;
 use super::heap::{Source, fresh};
 use crate::paged::SealBudget;
 use crate::paged::census_impl::TraceLimits;
@@ -971,6 +973,7 @@ fn pressure_reclaims_cycles_and_retires_only_unreached_results_after_restore() {
 /// page failures cannot publish a partial root, and scratch cannot cross seal.
 #[test]
 fn failed_or_stale_source_admission_never_publishes_a_holding() {
+    root_authority::exact_values();
     checked_program_and_warm_balance();
     let (heap, _) = fresh();
     let access = heap.pages().clone();

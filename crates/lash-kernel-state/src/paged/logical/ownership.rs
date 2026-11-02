@@ -4,6 +4,8 @@ use crate::arena::Arena;
 use crate::paged::heap_impl::PagedHeap;
 use lash_kernel_doc::{Value, arena::ArenaHandle};
 use std::collections::{BTreeSet, HashMap};
+mod value;
+pub use value::PublicationValue;
 
 /// Outputs name semantic owners. A copy uses the ledger's existing Holding;
 /// a new value uses the canonical value projection, never a caller's byte delta.

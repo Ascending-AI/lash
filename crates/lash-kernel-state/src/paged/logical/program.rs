@@ -3,53 +3,11 @@
 use super::*;
 mod native;
 use crate::arena::{Arena, Registration};
-use crate::paged::{FrozenRef, PagedHeap};
+use crate::paged::PagedHeap;
 use lash_kernel_doc::{Value, arena::ArenaHandle, heap::PageValue};
 use lash_kernel_value::tokens::encode_body;
 use std::collections::BTreeSet;
 
-#[derive(Clone)]
-pub enum PublicationValue {
-    Native(Value),
-    Page(PageValue),
-    Frozen(FrozenRef),
-    Capture(ArenaHandle),
-    Existing(Owner),
-    Frame,
-    /// A break or continue departs with no value.
-    Departure,
-}
-impl PublicationValue {
-    fn root(&self) -> RootValue<'_> {
-        match self {
-            Self::Native(value) => RootValue::Value(value),
-            Self::Page(value) => RootValue::Page(value),
-            Self::Frozen(value) => RootValue::Frozen(value),
-            Self::Capture(handle) => RootValue::Capture(*handle),
-            Self::Existing(owner) => RootValue::Existing(*owner),
-            Self::Frame => RootValue::Frame,
-            Self::Departure => RootValue::Departure,
-        }
-    }
-    fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Native(a), Self::Native(b)) => a.same(b),
-            (Self::Page(a), Self::Page(b)) => encode_body(a) == encode_body(b),
-            (Self::Frozen(a), Self::Frozen(b)) => a.root.id == b.root.id && a.summary == b.summary,
-            (Self::Capture(a), Self::Capture(b)) => a == b,
-            (Self::Existing(a), Self::Existing(b)) => a == b,
-            (Self::Frame, Self::Frame) | (Self::Departure, Self::Departure) => true,
-            _ => false,
-        }
-    }
-    fn handles(&self, out: &mut Vec<ArenaHandle>) {
-        match self {
-            Self::Native(value) => out.extend(value.handle()),
-            Self::Capture(handle) => out.push(*handle),
-            _ => {}
-        }
-    }
-}
 /// Canonical source payloads. Their direct occurrence prices use Holding and
 /// LogicalHeldV1; the executor supplies no byte delta or entity header price.
 #[derive(Clone)]
@@ -451,6 +409,7 @@ impl EvaluatedProgram {
         let mut projected = Vec::new();
         let mut virtuals = BTreeMap::<EntityId, VirtualBody>::new();
         let mut member_edits = Vec::new();
+        let mut root_claims = publication::RootProof::default();
         let mut handles = Vec::new();
         let mut scratches = BTreeMap::<Owner, u64>::new();
         for event in actual.events {
@@ -530,6 +489,7 @@ impl EvaluatedProgram {
                 .iter()
                 .map(|(owner, value)| (*owner, value.root()))
                 .collect();
+            root_claims.append(&inputs, &roots);
             let roots = draft.ownership_changes(
                 registration.arena(),
                 access,
@@ -663,6 +623,7 @@ impl EvaluatedProgram {
                 dependencies,
                 prepared,
                 member_edits,
+                root_claims,
             ),
             entities: virtuals,
         })

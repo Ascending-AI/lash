@@ -394,6 +394,7 @@ impl Ledger {
             dependencies,
             prepared,
             Vec::new(),
+            publication::RootProof::new(inputs, &[(output, RootValue::Page(value))]),
         )))
     }
 }

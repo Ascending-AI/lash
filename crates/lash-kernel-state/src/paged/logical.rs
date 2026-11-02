@@ -29,12 +29,12 @@ mod ownership;
 mod program;
 pub use program::{
     AcceptedProgram, EvaluatedProgram, FrameEvent, JournalEvent, Materializations, PreparedProgram,
-    Program, PublicationValue, ScratchEvent, VirtualBody, VirtualEntity,
+    Program, ScratchEvent, VirtualBody, VirtualEntity,
 };
 mod publication;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
-pub use ownership::RootValue;
+pub use ownership::{PublicationValue, RootValue};
 pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
 mod warming;
 pub use warming::WarmFact;

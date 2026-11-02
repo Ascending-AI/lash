@@ -3,6 +3,8 @@
 use super::*;
 use crate::arena::{Arena, Registration};
 use lash_kernel_doc::{Value, arena::ArenaHandle};
+mod roots;
+pub(super) use roots::RootProof;
 
 /// The canonical storage owner receives exactly the edit whose old content
 /// and replacement were checked. It reserves fallible storage before publish.
@@ -20,6 +22,7 @@ pub struct BoundaryTransaction<'a> {
     dependencies: Dependencies,
     prepared: Prepared,
     members: Vec<MemberEdit>,
+    roots: RootProof,
 }
 pub struct AcceptedBoundary<'a>(BoundaryTransaction<'a>);
 
@@ -42,6 +45,7 @@ impl Ledger {
             dependencies,
             prepared,
             members: Vec::new(),
+            roots: RootProof::new(inputs, outputs),
         })
     }
     pub fn prepare_enter_publication<'a>(
@@ -54,12 +58,13 @@ impl Ledger {
     ) -> Result<(Invocation, BoundaryTransaction<'a>), HeapFault> {
         let (invocation, prepared) =
             self.prepare_enter(task, registration.arena(), access, inputs, bindings)?;
-        let outputs: Vec<_> = bindings
+        let mut outputs: Vec<_> = bindings
             .iter()
             .map(|(slot, value)| (invocation.owner(*slot), *value))
             .collect();
         let dependencies =
             projection_dependencies(self, registration.arena(), &prepared, &outputs)?;
+        outputs.insert(0, (invocation.frame(), RootValue::Frame));
         Ok((
             invocation,
             BoundaryTransaction {
@@ -67,6 +72,7 @@ impl Ledger {
                 dependencies,
                 prepared,
                 members: Vec::new(),
+                roots: RootProof::new(inputs, &outputs),
             },
         ))
     }
@@ -77,6 +83,7 @@ impl Ledger {
         access: &Access<'_>,
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<BoundaryTransaction<'a>, HeapFault> {
+        let inputs = self.invocation_owners(invocation, access)?;
         let prepared = self.prepare_leave(invocation, registration.arena(), access, outputs)?;
         let dependencies = projection_dependencies(self, registration.arena(), &prepared, outputs)?;
         Ok(BoundaryTransaction {
@@ -84,6 +91,7 @@ impl Ledger {
             dependencies,
             prepared,
             members: Vec::new(),
+            roots: RootProof::new(&inputs, outputs),
         })
     }
     pub fn prepare_publication<'a>(
@@ -100,6 +108,7 @@ impl Ledger {
             dependencies,
             prepared,
             members: Vec::new(),
+            roots: RootProof::new(inputs, outputs),
         })
     }
     #[expect(clippy::too_many_arguments, reason = "one atomic source member event")]
@@ -135,6 +144,7 @@ impl Ledger {
                 member,
                 next,
             }],
+            roots: RootProof::new(inputs, outputs),
         })
     }
 }
@@ -167,13 +177,27 @@ impl<'a> BoundaryTransaction<'a> {
         dependencies: Dependencies,
         prepared: Prepared,
         members: Vec<MemberEdit>,
+        roots: RootProof,
     ) -> Self {
         Self {
             registration,
             dependencies,
             prepared,
             members,
+            roots,
         }
+    }
+
+    /// Authenticate an external source certificate against the exact prepared
+    /// entry owners and surviving values, including native/page provenance.
+    /// A matching holding price alone never authenticates an output value.
+    pub fn matches_roots(
+        &mut self,
+        ledger: &Ledger,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> bool {
+        self.is_current(ledger) && self.roots.matches(inputs, outputs)
     }
 
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
@@ -231,6 +255,7 @@ impl<'a> BoundaryTransaction<'a> {
         let next =
             projection_dependencies(ledger, self.registration.arena(), &self.prepared, outputs)?;
         self.dependencies.extend(next)?;
+        self.roots.append(inputs, outputs);
         Ok(self)
     }
     /// Independently staged targets may share one pure publication. Repeated
@@ -273,6 +298,7 @@ impl<'a> BoundaryTransaction<'a> {
         prepared.projected.extend(self.prepared.projected);
         self.prepared = prepared;
         self.dependencies.extend(dependencies)?;
+        self.roots.append(inputs, outputs);
         self.members.push(MemberEdit {
             handle,
             member,
@@ -302,6 +328,7 @@ impl AcceptedBoundary<'_> {
             dependencies,
             prepared,
             members,
+            roots: _,
         } = self.0;
         if !dependencies.is_current(ledger, registration.arena()) {
             return Err(invalid("stale source publication"));

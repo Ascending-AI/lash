@@ -219,7 +219,13 @@ impl Ledger {
         let dependencies = Dependencies::capture(self, registration.arena(), &handles)
             .ok_or_else(|| invalid("construction facts disappeared"))?;
         Ok((
-            BoundaryTransaction::from_program(registration, dependencies, prepared, Vec::new()),
+            BoundaryTransaction::from_program(
+                registration,
+                dependencies,
+                prepared,
+                Vec::new(),
+                publication::RootProof::new(inputs, outputs),
+            ),
             members,
         ))
     }

@@ -96,6 +96,7 @@ impl Ledger {
             dependencies,
             prepared,
             edits.to_vec(),
+            publication::RootProof::new(inputs, outputs),
         ))
     }
 
