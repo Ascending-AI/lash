@@ -123,7 +123,6 @@ use lash_core_execution::runtime::actor::round::{
     AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
 };
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
-use lash_durable::domain::graph::{OWNER_READ_LIMITS, RootOwner};
 use lash_durable::domain::{
     MailAnswer, MailDomainWrite, ModelCallId, PromptCallKey, PromptWrite, TurnCancelAnswer,
     TurnWrite,
@@ -334,7 +333,7 @@ struct Call {
     /// The composition the attempt carries: its call and render.
     composed: Option<Composition>,
     /// The call the turn's row pinned when the attempt was sent, and
-    /// whether its stored checkpoint carries the attempt's composition.
+    /// whether its committed journal reproduces the attempt's composition.
     admitted: Option<(u32, bool)>,
     /// The exact wire bytes the attempt sent, as the provider received
     /// them from the runtime's attempt loop.
@@ -730,30 +729,19 @@ impl TurnDrive for L3Drive {
         // What the rows admitted when this attempt is sent.
         let reads = cx.durable_reads()?;
         let admitted = match reads.turn(&session()).await? {
-            Some(TurnRow {
-                phase:
-                    UnfinishedPhase::Model {
-                        pin, checkpoint, ..
-                    },
-                ..
-            }) => {
-                // The phase root's text holds the composed instructions
-                // inline or in its text leaves.
-                let owner = RootOwner::TurnPhase {
-                    session: session(),
-                    run: self.run.clone(),
-                };
-                let graph = reads
-                    .hydrate(owner, Some(checkpoint), OWNER_READ_LIMITS)
-                    .await?;
-                let held = composed.is_some_and(|composed| {
-                    let text = composed.instructions();
-                    let mut nodes = graph.nodes.values();
-                    nodes.any(|node| node.bytes.windows(text.len()).any(|w| w == text.as_bytes()))
-                });
-                Some((pin.call, held))
-            }
-            Some(_) | None => None,
+            Some(row) => match &row.phase {
+                UnfinishedPhase::Model { pin, .. } => {
+                    let held = model_receipts::journaled_request(&self.services, cx, &row)
+                        .await?
+                        .is_some_and(|recorded| {
+                            serde_json::to_string(&*recorded).expect("a journal request encodes")
+                                == rendered
+                        });
+                    Some((pin.call, held))
+                }
+                _ => None,
+            },
+            None => None,
         };
         let stored = match admitted {
             Some((ordinal, _)) => {

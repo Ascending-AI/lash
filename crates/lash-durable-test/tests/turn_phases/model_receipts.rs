@@ -2,6 +2,34 @@
 
 use super::*;
 
+/// The request the committed journal reproduces, read independently of the
+/// sending drive. This observes the admission fence after machine checkpoints
+/// have been removed; the original IDENTITY/FENCE/CUT-ACK assertions stay intact.
+pub(super) async fn journaled_request(
+    services: &L3Services,
+    cx: &ActorContext,
+    row: &TurnRow,
+) -> Result<Option<Arc<lash_protocol_types::llm::types::RetainedLlmRequest>>, TurnError> {
+    let head = SessionHead::load(&services.backend(), &row.session).await?;
+    let mut drive = services.start(cx, row, &head).await?;
+    let rows = cx
+        .durable_reads()?
+        .turn_journal(&row.session, &row.run)
+        .await?;
+    let rows = rows
+        .iter()
+        .map(|row| serde_json::from_str::<lash_sansio::JournalRow<_>>(row))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let inputs = lash_sansio::JournalRow::assemble(rows)
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let machine = drive.machine();
+    machine
+        .replay_inputs(inputs, &|_| Some(ExecutionEnvironmentSync::default()))
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    Ok(machine.waited_request().cloned())
+}
+
 /// Admission at `model.start` (FIG-5255), in every cell.
 ///
 /// - IDENTITY: the turn's first call is call 1 and its second call 2, and
