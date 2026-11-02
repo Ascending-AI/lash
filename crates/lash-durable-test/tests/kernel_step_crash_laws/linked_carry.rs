@@ -562,8 +562,12 @@ async fn an_absent_or_incompatible_defining_link_refuses_without_fallback_on_sql
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_sqlite() {
     use super::callback_carry::{Discovery, SERVICES, core};
-    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> =
-        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let clock = lash_durable_test::SimClock::new();
+    let stores: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+            .await
+            .unwrap(),
+    );
     let core = core(
         Arc::clone(&stores),
         "callable-carry",
@@ -749,6 +753,7 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
     })
     .await
     .unwrap();
+    clock.advance_by(3000).await;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         core.processes().await_output(&process),

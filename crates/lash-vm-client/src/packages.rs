@@ -7,7 +7,7 @@ use lash_kernel_vm::PreparedLibrary;
 use lash_protocol_types::engine_fault::{PayloadKind, WorkerLibraryRefusal};
 use lash_vm_protocol::{EncodedPayload, FrameCodec, PoolStarted};
 use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use {
     lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenReader,
     lash_kernel_value::tokens::TokenWriter,
@@ -16,11 +16,18 @@ use {
 #[derive(Clone, Debug)]
 pub struct WorkerLibrary {
     frame: Arc<[u8]>,
+    pool_frames: Arc<Mutex<Option<PoolFrames>>>,
     live: Arc<OnceLock<&'static [u8]>>,
     registry: Arc<FunctionRegistry>,
     roots: std::collections::BTreeSet<lash_kernel_value::names::FunctionId>,
     documents: Arc<BTreeMap<DocumentId, IdentifiedDocument>>,
     helpers: Arc<BuildHelpers>,
+}
+
+#[derive(Debug)]
+struct PoolFrames {
+    max_frame_bytes: u32,
+    frames: Weak<Vec<Vec<u8>>>,
 }
 
 impl WorkerLibrary {
@@ -162,6 +169,7 @@ impl WorkerLibrary {
         }
         Ok(Self {
             frame: frame.into(),
+            pool_frames: Arc::default(),
             live: Arc::new(OnceLock::new()),
             registry: Arc::new(functions.clone()),
             roots,
@@ -180,6 +188,29 @@ impl WorkerLibrary {
     }
     pub fn frame(&self) -> Arc<[u8]> {
         self.frame.clone()
+    }
+    pub(crate) fn pool_frames(
+        &self,
+        codec: &FrameCodec,
+    ) -> Result<Arc<Vec<Vec<u8>>>, lash_protocol_types::engine_fault::CodecRefusal> {
+        let mut cached = self
+            .pool_frames
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let max_frame_bytes = codec.limits().max_frame_bytes;
+        if let Some(frames) = cached
+            .as_ref()
+            .filter(|cached| cached.max_frame_bytes == max_frame_bytes)
+            .and_then(|cached| cached.frames.upgrade())
+        {
+            return Ok(frames);
+        }
+        let frames = Arc::new(codec.encode_pool_start(&self.frame)?);
+        *cached = Some(PoolFrames {
+            max_frame_bytes,
+            frames: Arc::downgrade(&frames),
+        });
+        Ok(frames)
     }
     pub fn from_frame(frame: Arc<[u8]>) -> Result<Self, WorkerLibraryRefusal> {
         sections(&frame)?;
@@ -220,6 +251,7 @@ impl WorkerLibrary {
         }
         Ok(Self {
             frame,
+            pool_frames: Arc::default(),
             live: Arc::new(OnceLock::from(owner)),
             registry,
             roots,

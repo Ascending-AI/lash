@@ -61,7 +61,7 @@ struct Pool {
     config: PoolConfig,
     /// The pool start's frames, encoded once from the parent and shared by
     /// prewarm and replacement workers.
-    packages: Vec<Vec<u8>>,
+    packages: Arc<Vec<Vec<u8>>>,
     library: Arc<crate::packages::WorkerLibrary>,
     /// The most workers the pool runs at once, within its memory budget.
     capacity: usize,
@@ -95,7 +95,7 @@ impl WorkerPool {
         })?;
         let codec = FrameCodec::new(config.protocol.decode)
             .with_detail_limit(config.tuning.diagnostic_bytes);
-        let packages = codec.encode_pool_start(&held.frame())?;
+        let packages = held.pool_frames(&codec)?;
         static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
             phases,
