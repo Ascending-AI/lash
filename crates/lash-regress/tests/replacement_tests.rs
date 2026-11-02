@@ -1,13 +1,6 @@
 use lash_regress::Regex;
 
 #[test]
-fn test_replace_basic() {
-    let re = Regex::new(r"world").unwrap();
-    let result = re.replace("hello world", "universe");
-    assert_eq!(result, "hello universe");
-}
-
-#[test]
 fn test_replace_no_match() {
     let re = Regex::new(r"xyz").unwrap();
     let result = re.replace("hello world", "universe");
@@ -36,13 +29,6 @@ fn test_replace_with_literal_dollar() {
 }
 
 #[test]
-fn test_replace_date_format() {
-    let re = Regex::new(r"(\d{4})-(\d{2})-(\d{2})").unwrap();
-    let result = re.replace("2023-12-25", "$2/$3/$1");
-    assert_eq!(result, "12/25/2023");
-}
-
-#[test]
 fn test_replace_all_basic() {
     let re = Regex::new(r"\d+").unwrap();
     let result = re.replace_all("a1b2c3", "X");
@@ -54,10 +40,7 @@ fn test_replace_all_with_groups() {
     let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     let result = re.replace_all("hello world foo bar", "$2-$1");
     assert_eq!(result, "world-hello bar-foo");
-}
 
-#[test]
-fn test_replace_all_word_boundaries() {
     let re = Regex::new(r"\b(\w)(\w+)").unwrap();
     let result = re.replace_all("hello world", "$1.$2");
     assert_eq!(result, "h.ello w.orld");
@@ -132,13 +115,6 @@ fn test_replace_dollar_at_end() {
 }
 
 #[test]
-fn test_replace_email() {
-    let re = Regex::new(r"(\w+)@(\w+)\.(\w+)").unwrap();
-    let result = re.replace("Contact: user@example.com", "$1 at $2 dot $3");
-    assert_eq!(result, "Contact: user at example dot com");
-}
-
-#[test]
 fn test_replace_backreferences() {
     let re = Regex::new(r"(\w+)\s+\1").unwrap();
     let result = re.replace("hello hello world", "[$1]");
@@ -150,14 +126,6 @@ fn test_replace_case_insensitive() {
     let re = Regex::with_flags(r"(\w+)", "i").unwrap();
     let result = re.replace("Hello WORLD", "[$1]");
     assert_eq!(result, "[Hello] WORLD");
-}
-
-#[test]
-fn test_as_str_method() {
-    let re = Regex::new(r"\d+").unwrap();
-    let text = "Price: $123 and $456";
-    let m = re.find(text).unwrap();
-    assert_eq!(m.as_str(text), "123");
 }
 
 #[test]

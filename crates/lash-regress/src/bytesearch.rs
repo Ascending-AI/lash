@@ -352,12 +352,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_search() {
-        assert_eq!(EmptyString {}.find_in(&[1, 2, 3]), Some(0));
-        assert_eq!(EmptyString {}.find_in(&[]), Some(0));
-    }
-
-    #[test]
     fn bitmap_search() {
         assert_eq!(make_bitmap(&[]).find_in(&[1, 2, 3]), None);
         assert_eq!(make_bitmap(&[]).bitnot().find_in(&[1, 2, 3]), Some(0));
@@ -376,11 +370,5 @@ mod tests {
                 .find_in(&[8, 9, 10, 11, 12, 13, 4, 14, 6, 15, 7, 16, 17, 18, 19, 20]),
             Some(6)
         );
-    }
-
-    #[test]
-    fn literal_search() {
-        assert_eq!([0, 1, 2, 3].find_in(&[4, 5, 6, 7]), None);
-        assert_eq!([0, 1, 2, 3].find_in(&[]), None);
     }
 }

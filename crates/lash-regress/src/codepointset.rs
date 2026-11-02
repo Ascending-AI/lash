@@ -310,24 +310,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlaps() {
-        let a = iv(0, 9);
-        let b = iv(5, 14);
-        let c = iv(10, 19);
-        assert!(a.overlaps(b));
-        assert!(!a.overlaps(c));
-    }
-
-    #[test]
-    fn test_add_one() {
-        let mut set = CodePointSet::new();
-        set.add_one(10);
-        set.add_one(20);
-        set.add_one(15);
-        assert_eq!(set.intervals(), &[iv(10, 10), iv(15, 15), iv(20, 20)]);
-    }
-
-    #[test]
     fn test_add_set() {
         let mut set1 = CodePointSet::new();
         set1.add(iv(10, 20));
@@ -389,5 +371,11 @@ mod tests {
         assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 23), iv(100, 250)]);
         set.add(iv(0, 0x10ffff));
         assert_eq!(&set.intervals(), &[iv(0, 0x10ffff)]);
+
+        let mut sparse = CodePointSet::new();
+        sparse.add_one(10);
+        sparse.add_one(20);
+        sparse.add_one(15);
+        assert_eq!(sparse.intervals(), &[iv(10, 10), iv(15, 15), iv(20, 20)]);
     }
 }

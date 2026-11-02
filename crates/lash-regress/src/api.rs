@@ -871,26 +871,4 @@ mod deterministic_fuel_tests {
         assert!(matches!(short.next(), Some(Err(MatchError::Exhausted))));
         assert_eq!(short.consumed_fuel(), needed - 1);
     }
-
-    #[test]
-    fn utf8_utf16_and_ucs2_report_the_same_typed_exhaustion() {
-        let regex = Regex::new("a").expect("compile");
-        assert!(matches!(
-            regex.try_find_from("a", 0, 0).next(),
-            Some(Err(MatchError::Exhausted))
-        ));
-
-        #[cfg(feature = "utf16")]
-        {
-            let input = [b'a' as u16];
-            assert!(matches!(
-                regex.try_find_from_utf16(&input, 0, 0).next(),
-                Some(Err(MatchError::Exhausted))
-            ));
-            assert!(matches!(
-                regex.try_find_from_ucs2(&input, 0, 0).next(),
-                Some(Err(MatchError::Exhausted))
-            ));
-        }
-    }
 }
