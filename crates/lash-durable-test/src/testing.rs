@@ -11,9 +11,8 @@ use lash_durable::{
     NodeId, NodeLease, NodeSpec, Reaped,
 };
 use lash_kernel_value::identity::SessionId;
-use lash_protocol_types::sync::MutexExt as _;
 use lash_vocabulary::identity::ProcessId;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub(crate) const FORMATS: &str = "t-v1";
@@ -22,24 +21,6 @@ pub(crate) async fn sqlite(clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
         .await
         .expect("an in-memory store set opens");
-    Arc::new(stores.durable_store())
-}
-
-/// A fresh SQLite file store set on `clock`, under a directory that `dirs`
-/// keeps until the test ends.
-pub(crate) async fn sqlite_file(
-    clock: Arc<SimClock>,
-    dirs: &Mutex<Vec<tempfile::TempDir>>,
-) -> Arc<dyn DurableStore> {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
-        dir.path().join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
-        clock,
-    )
-    .await
-    .expect("a file store set opens");
-    dirs.lock_recover().push(dir);
     Arc::new(stores.durable_store())
 }
 

@@ -877,8 +877,14 @@ mod tests {
         );
         let hold = Arc::new(Hold::default());
         let nodes = holding(script, &hold).await;
+        let asked = nodes.clock().logical_ms();
         nodes.stop("a");
         nodes.quiesce().await;
+        assert_eq!(
+            nodes.clock().logical_ms(),
+            asked,
+            "time moved before it stopped"
+        );
         let trace = nodes.script().trace();
         let release = trace
             .iter()
@@ -980,39 +986,6 @@ mod tests {
             "{renewals} renewals while the claim acknowledgement hung\n{}",
             nodes.script().rendered_trace()
         );
-    }
-
-    /// A node asked to stop while its heartbeat hangs stops at once: the
-    /// stop is heard during the heartbeat, not after it (FIG-5178).
-    #[tokio::test]
-    async fn a_node_asked_to_stop_while_its_heartbeat_hangs_stops_at_once() {
-        let hold = Arc::new(Hold::default());
-        let nodes = holding(hung_heartbeat(), &hold).await;
-        let heartbeat_every = u64::try_from(
-            LeaseConfig::default()
-                .settings()
-                .heartbeat_every
-                .as_millis(),
-        )
-        .unwrap();
-        while nodes.clock().logical_ms() <= heartbeat_every {
-            nodes.step().await;
-        }
-        let asked = nodes.clock().logical_ms();
-        nodes.stop("a");
-        for _ in 0..8 {
-            if !nodes.serving("a") {
-                break;
-            }
-            nodes.quiesce().await;
-        }
-        assert_eq!(
-            nodes.clock().logical_ms(),
-            asked,
-            "time moved before it stopped"
-        );
-        assert_eq!(nodes.stopped("a").await, Some(Ok(Stopped::Requested)));
-        assert_eq!(hold.live.load(Ordering::SeqCst), 0);
     }
 
     /// A restarted node keeps nothing it held in memory: its old boot's

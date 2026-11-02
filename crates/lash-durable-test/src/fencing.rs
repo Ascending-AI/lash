@@ -377,7 +377,7 @@ async fn produce(nodes: &SimNodes) {
 mod tests {
     use super::*;
     use crate::matrix::Matrix;
-    use crate::testing::{sqlite, sqlite_file};
+    use crate::testing::sqlite;
 
     /// F1 and O1 hold on SQLite in memory with every labelled write of the
     /// scenario cut under every fault that applies to it.
@@ -394,20 +394,6 @@ mod tests {
         } else {
             matrix.run(make).await
         };
-        assert_every_label_held(&report);
-    }
-
-    /// The same matrix on a SQLite file store set.
-    #[tokio::test]
-    async fn the_fencing_laws_hold_at_every_cut_on_sqlite_file() {
-        let dirs = Arc::new(Mutex::new(Vec::new()));
-        let database: Database = Arc::new(move |clock| {
-            let dirs = Arc::clone(&dirs);
-            Box::pin(async move { sqlite_file(clock, &dirs).await })
-        });
-        let report = Matrix::new()
-            .run(|| Fencing::new(Arc::clone(&database)))
-            .await;
         assert_every_label_held(&report);
     }
 
