@@ -3,13 +3,19 @@
 //! starts with every site empty.
 
 use crate::compile::{PropertySlot, ReadSite};
+use std::collections::BTreeMap;
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum CachedSite {
+    Read(usize),
+    Guard(usize),
+    Write(usize),
+}
 
 /// Each site's guarded short key and position.
 #[derive(Default)]
 pub(crate) struct SiteCaches {
-    properties: Vec<Option<PropertySlot>>,
-    guards: Vec<Option<PropertySlot>>,
-    writes: Vec<Option<PropertySlot>>,
+    slots: BTreeMap<CachedSite, Option<PropertySlot>>,
 }
 
 impl SiteCaches {
@@ -19,7 +25,10 @@ impl SiteCaches {
         if site.missing {
             return None;
         }
-        self.properties.get(site.at.ix()).copied().flatten()
+        self.slots
+            .get(&CachedSite::Read(site.at.ix()))
+            .copied()
+            .flatten()
     }
 
     /// Keeps the slot `site` found its property at, or none.
@@ -28,19 +37,15 @@ impl SiteCaches {
         if site.missing {
             return;
         }
-        let at = site.at.ix();
-        if at >= self.properties.len() {
-            if slot.is_none() {
-                return;
-            }
-            self.properties.resize(at + 1, None);
-        }
-        self.properties[at] = slot;
+        self.keep_at(CachedSite::Read(site.at.ix()), slot);
     }
 
     #[inline]
     pub(crate) fn write(&self, statement: crate::compile::StmtId) -> Option<PropertySlot> {
-        self.writes.get(statement.0 as usize).copied().flatten()
+        self.slots
+            .get(&CachedSite::Write(statement.0 as usize))
+            .copied()
+            .flatten()
     }
 
     pub(crate) fn keep_write(
@@ -48,19 +53,15 @@ impl SiteCaches {
         statement: crate::compile::StmtId,
         slot: Option<PropertySlot>,
     ) {
-        let at = statement.0 as usize;
-        if at >= self.writes.len() {
-            if slot.is_none() {
-                return;
-            }
-            self.writes.resize(at + 1, None);
-        }
-        self.writes[at] = slot;
+        self.keep_at(CachedSite::Write(statement.0 as usize), slot);
     }
 
     #[inline]
     pub(crate) fn guard(&self, statement: crate::compile::StmtId) -> Option<PropertySlot> {
-        self.guards.get(statement.0 as usize).copied().flatten()
+        self.slots
+            .get(&CachedSite::Guard(statement.0 as usize))
+            .copied()
+            .flatten()
     }
 
     pub(crate) fn keep_guard(
@@ -68,13 +69,14 @@ impl SiteCaches {
         statement: crate::compile::StmtId,
         slot: Option<PropertySlot>,
     ) {
-        let at = statement.0 as usize;
-        if at >= self.guards.len() {
-            if slot.is_none() {
-                return;
-            }
-            self.guards.resize(at + 1, None);
+        self.keep_at(CachedSite::Guard(statement.0 as usize), slot);
+    }
+
+    fn keep_at(&mut self, at: CachedSite, slot: Option<PropertySlot>) {
+        if slot.is_some() {
+            self.slots.insert(at, slot);
+        } else if let Some(stored) = self.slots.get_mut(&at) {
+            *stored = None;
         }
-        self.guards[at] = slot;
     }
 }
