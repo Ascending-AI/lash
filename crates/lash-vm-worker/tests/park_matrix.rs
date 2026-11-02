@@ -27,6 +27,10 @@
 //! next call with the same arguments, is refused at that park, naming its
 //! charge, before anything is admitted again.
 //!
+//! Fingerprint law (FIG-7585): a re-run of another document from the same
+//! journal is refused before it runs a step, naming its document or
+//! closure, and admits nothing again.
+//!
 //! Checkpoint law (FIG-7585): a run of more sequential calls than its
 //! journal holds before a checkpoint takes one mid-run, and P1 to P5 hold
 //! with that checkpoint's commit cut under every fault.
@@ -178,24 +182,31 @@ main {{
 /// loops when `slow`, then performs `work(1)`. Either way its effects, their
 /// sites and their arguments are the same, and so is its document.
 fn diverging_program() -> Program {
-    let go = lash_kernel_doc::parse_definition(
+    diverging_program_with("")
+}
+
+/// The divergence law's program with `tail` run before `go` returns: any
+/// tail is another document.
+fn diverging_program_with(tail: &str) -> Program {
+    let go = lash_kernel_doc::parse_definition(&format!(
         r#"function go(slow: Bool) -> Any
 kernel 1
 metering statements
 import 0 operation tools.work(index: Int) -> Any
-body {
+body {{
   let first = perform 0(0) as Any
   let last = 0
-  if slow {
-    for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+  if slow {{
+    for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {{
       set last = x
-    }
-  }
+    }}
+  }}
   let second = perform 0(1) as Any
+  {tail}
   return [first, second]
-}
-"#,
-    )
+}}
+"#
+    ))
     .expect("the divergence fixture is valid");
     let text = format!(
         r#"kernel 1
@@ -557,6 +568,9 @@ enum Drive {
     /// The divergence law: the run, then a re-run of it that computes
     /// more between its parks, from the same journal.
     Diverges,
+    /// The fingerprint law: the run, then a re-run of another document
+    /// from the same journal.
+    ChangesCode,
 }
 
 struct ParkScenario {
@@ -637,7 +651,7 @@ impl Scenario for ParkScenario {
         let mut violations = self.shared.violations.lock().expect("violations").clone();
         // The divergence law ends its actor once it judged the re-run: its
         // verdict is the activation's own.
-        if let Drive::Diverges = self.drive {
+        if let Drive::Diverges | Drive::ChangesCode = self.drive {
             return violations;
         }
         let bodies = self.shared.bodies.lock().expect("bodies").clone();
@@ -925,8 +939,10 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            if let Drive::Diverges = self.drive {
-                let refusal = Box::pin(diverges(&self.shared, &broker, &self.program)).await;
+            if let drive @ (Drive::Diverges | Drive::ChangesCode) = self.drive {
+                let changed = matches!(drive, Drive::ChangesCode);
+                let refusal =
+                    Box::pin(diverges(&self.shared, &broker, &self.program, changed)).await;
                 if let Err(why) = refusal {
                     self.shared.violation(why);
                 }
@@ -1022,6 +1038,7 @@ async fn diverges(
     shared: &Shared,
     broker: &KernelBroker<'_>,
     program: &Program,
+    changed: bool,
 ) -> Result<(), String> {
     let first = shared.machines_from(program, going(program, false))?;
     match Box::pin(broker.run(&first, &CancellationToken::new())).await {
@@ -1043,19 +1060,23 @@ async fn diverges(
             .map_err(|error| error.to_string())
     };
     let before = admitted().await?;
-    let again = shared.machines_from(program, going(program, true))?;
+    // The re-run computes more between its parks, or runs a document that
+    // only adds a tail after its last call: refused at the park it leaves
+    // its journal, naming what differs.
+    let (again, park, field) = if changed {
+        let other = diverging_program_with("let tail = 1");
+        let again = shared.machines_from(&other, going(&other, false))?;
+        (again, "at park 1", "its document or closure differs")
+    } else {
+        let again = shared.machines_from(program, going(program, true))?;
+        (again, "at park 2", "its charge differs")
+    };
     let refusal = match Box::pin(broker.run(&again, &CancellationToken::new())).await {
         Err(lash_vm_broker::kernel::KernelFailure::Diverged(refusal)) => refusal,
-        other => {
-            return Err(format!(
-                "the re-run that computes more is refused: {other:?}"
-            ));
-        }
+        other => return Err(format!("the re-run is refused: {other:?}")),
     };
-    if !refusal.contains("at park 2") || !refusal.contains("its charge differs") {
-        return Err(format!(
-            "the refusal names the second park and its charge: {refusal}"
-        ));
+    if !refusal.contains(park) || !refusal.contains(field) {
+        return Err(format!("the refusal names {park} and {field}: {refusal}"));
     }
     if admitted().await? != before {
         return Err("the refused re-run committed no admission".to_owned());
@@ -1695,6 +1716,24 @@ async fn a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint(tier: 
     report.assert_held();
 }
 
+/// The fingerprint law, uncut: a journal is followed only by the document
+/// and closure that wrote it.
+async fn a_rerun_of_another_document_is_refused_before_it_runs(tier: Tier) {
+    Matrix::new()
+        .faults(&[])
+        .run(|| ParkScenario {
+            shared: Arc::default(),
+            drive: Drive::ChangesCode,
+            program: diverging_program(),
+            tier,
+            first_claimant: None,
+            sequential: None,
+            keep: Mutex::default(),
+        })
+        .await
+        .assert_held();
+}
+
 /// The divergence law, uncut.
 async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge(tier: Tier) {
     let shared: Arc<Shared> = Arc::default();
@@ -1715,6 +1754,12 @@ async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_
 
 // Each tier mounts the same kernel laws; PostgreSQL selection requires a service.
 mod sqlite_memory {
+    #[tokio::test]
+    async fn a_rerun_of_another_document_is_refused_before_it_runs() {
+        super::a_rerun_of_another_document_is_refused_before_it_runs(super::Tier::SqliteMemory)
+            .await;
+    }
+
     #[tokio::test]
     async fn a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint() {
         super::a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint(

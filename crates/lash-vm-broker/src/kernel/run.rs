@@ -606,6 +606,23 @@ impl KernelBroker<'_> {
             None => None,
         };
         let journal = self.store.journal(self.effects).await?;
+        // A run follows only a journal its own document and closure wrote:
+        // any other code is refused before it runs a step (FIG-7585).
+        let fingerprint = super::graph::RunFingerprint {
+            document,
+            closure: machines.closure()?.reference(),
+        };
+        if journal
+            .admitted
+            .values()
+            .any(|recorded| recorded.admission.run != fingerprint)
+        {
+            return Err(diverged(
+                1,
+                Field::Code,
+                "it executes another document or closure than its journal recorded",
+            ));
+        }
         // A run follows records its earlier runs' commits left out of the
         // cache: it reads them from the store.
         self.store.reload_records().await;
@@ -1279,10 +1296,6 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         outstanding: u64,
         live: u64,
     ) -> Result<(), KernelFailure> {
-        let fingerprint = super::graph::RunFingerprint {
-            document: self.document,
-            closure: self.machines.closure()?.reference(),
-        };
         // The run's lifetime counts the requests it replays as it counted
         // them when it admitted them, so a bound recurs at the same park.
         let growth = self
@@ -1313,13 +1326,6 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                 .get(&request.identity)
                 .ok_or(KernelFailure::EmptyCheckpoint)?
                 .clone();
-            if recorded.admission.run != fingerprint {
-                return Err(diverged(
-                    at,
-                    Field::Code,
-                    "it executes another document or closure than its journal recorded",
-                ));
-            }
             let recorded_progress = recorded.admission.progress;
             if let (Some(then), Some(now)) = (recorded_progress.charge, progress.charge)
                 && then != now
