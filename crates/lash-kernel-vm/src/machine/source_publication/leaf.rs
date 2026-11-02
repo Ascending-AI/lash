@@ -15,6 +15,17 @@ impl KernelMachine {
         pc: u32,
         value: doc::Value,
     ) -> Result<bool, Halt> {
+        if matches!(
+            value,
+            doc::Value::Null
+                | doc::Value::Absent
+                | doc::Value::Bool(_)
+                | doc::Value::Int(_)
+                | doc::Value::Float(_)
+                | doc::Value::Text(_)
+        ) {
+            return Ok(false);
+        }
         let op = running.stream.ops[pc as usize];
         if !matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
             || matches!(op, Op::Const { .. }) && value.handle().is_some()
