@@ -1,6 +1,7 @@
 //! The round trips the owner's commits pay on PostgreSQL (FIG-5275,
 //! FIG-5936), counted on an isolated database: the acceptance of one
-//! input, a turn's admission, `model.start`, a round's outcome, a VM park,
+//! input, a turn's admission, `model.start`, a round's outcome, a VM park and a
+//! code cell's checkpoint that leases its root (FIG-7585),
 //! `turn.commit`, every boundary of a five-tool turn, a session's opening
 //! turn and its close, and a commit publishing a candidate beside its pages
 //! (FIG-7576).
@@ -18,6 +19,7 @@ use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::store::AdmittedTurnRows;
 use lash_core_store::store::RunAdmissionRecord;
+use lash_durable::domain::graph::RootOwner;
 use lash_durable::domain::{
     DomainWrite, ExecKey, ExecRootWrite, ModelPin, Ordinal, OwnerKey, PhaseAdvance, RunFactKind,
     RunFactWrite, RunSeq, SessionMailWrite, SnapshotRev, TurnWrite, UnfinishedPhase,
@@ -345,7 +347,9 @@ async fn a_round_outcome_stays_within_its_round_trip_budget() {
 /// installs its state and replaces the root.
 const VM_PARK_ROUND_TRIPS: u64 = 2;
 
-/// A VM park over an earlier park stays within its round-trip budget.
+/// A VM park over an earlier park stays within its round-trip budget, and
+/// so does a checkpoint park that leases its root and ends its earlier
+/// park's lease.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_vm_park_stays_within_its_round_trip_budget() {
     let Some(owned) = owned("round-trips-park").await else {
@@ -377,19 +381,53 @@ async fn a_vm_park_stays_within_its_round_trip_budget() {
         .commit(tx, CommitLabel::CELL_SNAPSHOT)
         .await
         .expect("the first park");
-    let (_, trips) = round_trips(async {
+    let (second, trips) = round_trips(async {
         let mut tx = store
             .begin(&owned.actor, owned.epoch, u64::MAX)
             .await
             .expect("open");
-        park(&mut tx, "second park", Some((1, first)));
+        let root = park(&mut tx, "second park", Some((1, first)));
         store
             .commit(tx, CommitLabel::CELL_SNAPSHOT)
             .await
-            .expect("the second park")
+            .expect("the second park");
+        root
     })
     .await;
     within("cell.snapshot", trips, VM_PARK_ROUND_TRIPS);
+    // A code cell's checkpoint leases the root it publishes, and the next
+    // one ends that lease as it leases its own (FIG-7585): each is still
+    // the open and one call, which answers the lease it took.
+    let mut expected = (2, second);
+    let mut held = None;
+    for state in ["leased park", "next leased park"] {
+        let ((committed, root), trips) = round_trips(async {
+            let mut tx = store
+                .begin(&owned.actor, owned.epoch, u64::MAX)
+                .await
+                .expect("open");
+            let root = park(&mut tx, state, Some(expected));
+            tx.lease_root(RootOwner::Exec(exec.clone()), root, 60_000);
+            if let Some(lease) = held {
+                tx.release_root_lease(lease);
+            }
+            let committed = store
+                .commit(tx, CommitLabel::CELL_SNAPSHOT_ADMIT)
+                .await
+                .expect("the leased park");
+            (committed, root)
+        })
+        .await;
+        within("a leased cell.snapshot+admit", trips, VM_PARK_ROUND_TRIPS);
+        let [lease] = &committed.root_leases[..] else {
+            panic!(
+                "the call answers its one lease: {:?}",
+                committed.root_leases
+            );
+        };
+        held = Some(lease.id);
+        expected = (expected.0 + 1, root);
+    }
 }
 
 /// The most round trips `turn.commit` pays from its open (FIG-5942; 38
