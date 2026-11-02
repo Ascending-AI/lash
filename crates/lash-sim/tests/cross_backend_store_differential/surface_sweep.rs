@@ -424,6 +424,9 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 durable_read_coverage::DurableReadMethod::TurnNamespaces,
             )),
             surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::TurnJournal,
+            )),
+            surface(SurfaceMethod::DurableRead(
                 durable_read_coverage::DurableReadMethod::TurnEnd,
             )),
             surface(SurfaceMethod::DurableRead(

@@ -12,6 +12,7 @@ use lash_durable::{ActorKey, DurableStore};
 pub(super) enum DurableReadMethod {
     Turn,
     TurnNamespaces,
+    TurnJournal,
     TurnEnd,
     RunFacts,
     RunFactsOf,
@@ -40,6 +41,7 @@ impl DurableReadMethod {
         match self {
             Self::Turn => "turn",
             Self::TurnNamespaces => "turn_namespaces",
+            Self::TurnJournal => "turn_journal",
             Self::TurnEnd => "turn_end",
             Self::RunFacts => "run_facts",
             Self::RunFactsOf => "run_facts_of",
@@ -104,6 +106,13 @@ pub(super) async fn drive(
                 .turn_namespaces(session, &run)
                 .await
                 .expect("execute turn_namespaces")
+        ),
+        DurableReadMethod::TurnJournal => format!(
+            "{:?}",
+            store
+                .turn_journal(session, &run)
+                .await
+                .expect("execute turn_journal")
         ),
         DurableReadMethod::TurnEnd => format!(
             "{:?}",
