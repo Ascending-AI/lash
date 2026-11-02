@@ -93,6 +93,45 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if site.bind && ledger.holding(output, self.heap.pages())?.is_some() {
             return Ok(Some(false));
         }
+        if entity.is_none()
+            && value
+                .handle()
+                .is_none_or(|handle| self.arena.content_version(handle).is_some())
+            && interval.binding_move(source, rhs).is_some_and(|owner| {
+                slots.root(owner, self.task, activation.invocation.id()) == Some(output)
+            })
+            && let Some(frontier) = activation.frontier.as_mut()
+        {
+            // The proven prefix's shared admission: a move adds no peak, so
+            // only the current envelope, the close charge and the window.
+            // Its journal moves the RHS holding into the binding in place,
+            // releasing the binding's previous value.
+            drop(ledger);
+            let mut ledger = store.borrow_mut();
+            let close = self
+                .accounting
+                .then_some(site.close)
+                .flatten()
+                .map_or(0, |close| u64::from(close.total));
+            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
+            let Some(end) = self.charged.checked_add(close) else {
+                return Ok(Some(false));
+            };
+            if ledger.balance()?.total()? > self.memory_bound
+                || end > self.bound
+                || depth > self.call_depth
+                || !ledger.transfer(input, output, self.heap.pages())?
+            {
+                return Ok(Some(false));
+            }
+            frontier.proven()?;
+            let total = ledger.balance()?.total()?;
+            drop(ledger);
+            self.logical_memory.set(total);
+            self.charged = end;
+            frame.slots[site.at] = SlotState::Value(value);
+            return Ok(Some(true));
+        }
         let mut inputs = vec![input];
         let mut measures = std::collections::BTreeMap::new();
         if !site.bind {

@@ -876,6 +876,88 @@ impl CompiledInterval {
                 .any(|lease| lease.at == event.point))
         .then_some(owner)
     }
+    /// A nested scope's Leave is a proven release when its one event only
+    /// releases that scope's own owner groups: no output, entity, input,
+    /// peak, scratch lease or publication role, and both exits normal.
+    pub(crate) fn scope_release(&self, source: &Source, closing: &Site) -> bool {
+        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
+            return false;
+        };
+        let event = &step.event;
+        let publication = &step.publication;
+        let release = Measure::Release(
+            vec![
+                Owner::Scope(closing.clone()),
+                Owner::Operands(closing.clone()),
+            ]
+            .into(),
+        );
+        event.point.site == *closing
+            && event.point.phase == Phase::Leave
+            && *closing != source.site
+            && step.selected == ExitKind::Normal
+            && step.normal == ExitKind::Normal
+            && event.output.is_none()
+            && event.inputs.is_empty()
+            && event.entities.is_empty()
+            && event.peak.fixed == 0
+            && event.peak.terms.is_empty()
+            && event.delta.fixed == 0
+            && event.delta.terms.len() == 1
+            && event.delta.terms.get(&release) == Some(&-1)
+            && !publication.borrowed_inputs
+            && publication.restored_roles.is_none()
+            && publication.assignment.is_none()
+            && !publication.member
+            && publication.field.is_none()
+            && !source
+                .room
+                .scratch
+                .iter()
+                .any(|lease| lease.at == event.point)
+    }
+    /// A local binding's Commit is a proven move when its one event moves the
+    /// RHS operand into its output owner, at most releasing that owner's
+    /// previous value: no entity, peak, scratch lease, cell or member edit,
+    /// and both exits normal. Returns the output selector.
+    pub(crate) fn binding_move(&self, source: &Source, rhs: &Site) -> Option<&Owner> {
+        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
+            return None;
+        };
+        let event = &step.event;
+        let publication = &step.publication;
+        let output = event.output.as_ref()?;
+        let releases_output = || {
+            event.delta.terms.len() == 1
+                && event.delta.terms.iter().all(|(measure, coefficient)| {
+                    *coefficient == -1
+                        && matches!(measure, Measure::Release(group) if **group == [output.clone()])
+                })
+        };
+        (event.point.phase == Phase::Commit
+            && step.selected == ExitKind::Normal
+            && step.normal == ExitKind::Normal
+            && *event.inputs == [Owner::Operand(rhs.clone())]
+            && event.entities.is_empty()
+            && event.peak.fixed == 0
+            && event.peak.terms.is_empty()
+            && event.delta.fixed == 0
+            && (event.delta.terms.is_empty() || releases_output())
+            && !publication.borrowed_inputs
+            && publication.restored_roles.is_none()
+            && publication
+                .assignment
+                .as_ref()
+                .is_none_or(|_| !source.assigns_cell(&event.point.site))
+            && !publication.member
+            && publication.field.is_none()
+            && !source
+                .room
+                .scratch
+                .iter()
+                .any(|lease| lease.at == event.point))
+        .then_some(output)
+    }
     /// Bind canonical event facts once, then evaluate indexed polynomials.
     /// No source node, child vector, or AST traversal is used here.
     pub(crate) fn evaluate_interval(

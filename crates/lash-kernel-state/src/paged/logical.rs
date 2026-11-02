@@ -374,6 +374,17 @@ struct State {
     written: Written,
 }
 impl State {
+    /// A placeholder held only while the committed state is edited in place.
+    fn vacant() -> Self {
+        Self {
+            owners: Tree::new(false),
+            execution: Tree::new(false),
+            ended: Tree::new(false),
+            entities: Tree::new(false),
+            refinements: 0,
+            next_invocation: 0,
+        }
+    }
     fn balance(&self) -> Result<Balance, HeapFault> {
         let balance = Balance {
             entity_local_bytes: self.entities.cost(),
@@ -699,6 +710,66 @@ impl Ledger {
         // The owner holds what no runtime event published to it.
         self.published.expire(Written::Owners(vec![owner]));
         Ok(true)
+    }
+    /// Commit one proven release of present, distinct owners in place,
+    /// through the same graph edit as a checked journal: each owner's edges
+    /// are released once and every entity left unowned is retired. A missing
+    /// or repeated owner declines (`false`) before any edit. Outstanding
+    /// admissions expire.
+    pub fn release(&mut self, owners: &[Owner], access: &Access<'_>) -> Result<bool, HeapFault> {
+        for (index, owner) in owners.iter().enumerate() {
+            if owners[..index].contains(owner) || !self.present(*owner, access)? {
+                return Ok(false);
+            }
+        }
+        self.edit_in_place(access, owners.iter().map(|owner| (*owner, None)).collect())?;
+        Ok(true)
+    }
+    /// Commit one proven move of a present owner's holding into another owner
+    /// in place, releasing the destination's previous holding, through the
+    /// same graph edit as a checked journal. An absent source or a move onto
+    /// itself declines (`false`) before any edit. Outstanding admissions expire.
+    pub fn transfer(
+        &mut self,
+        from: Owner,
+        to: Owner,
+        access: &Access<'_>,
+    ) -> Result<bool, HeapFault> {
+        let Some(row) = self.state.roots(from).get(&owner_key(from), access)? else {
+            return Ok(false);
+        };
+        if from == to {
+            return Ok(false);
+        }
+        self.edit_in_place(access, vec![(to, Some(row.value)), (from, None)])?;
+        Ok(true)
+    }
+    fn present(&self, owner: Owner, access: &Access<'_>) -> Result<bool, HeapFault> {
+        self.state
+            .roots(owner)
+            .get_with(&owner_key(owner), access, |row| row.is_some())
+    }
+    /// The committed state is edited directly: its trees are uniquely owned,
+    /// so copy-on-write copies no search path. A fault mid-edit still expires
+    /// every outstanding admission.
+    fn edit_in_place(
+        &mut self,
+        access: &Access<'_>,
+        changes: Vec<(Owner, Option<Holding>)>,
+    ) -> Result<(), HeapFault> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| invalid("logical revision overflow"))?;
+        let mut edit = Edit {
+            state: std::mem::replace(&mut self.state, State::vacant()),
+            access,
+            zero: VecDeque::new(),
+            fresh: Vec::new(),
+        };
+        let edited = edit.roots(changes);
+        self.state = edit.state;
+        edited
     }
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
         Ok(self
