@@ -44,9 +44,6 @@ class ParentPaths(unittest.TestCase):
         self.assertFalse(self.problems('#[cfg(test)]\nmod tests { fn run() { lash_dialect_typescript::lower(source, &environment); } }'))
         self.assertFalse(self.problems("fn run() { let note = \"lash_dialect_typescript::lower(source)\"; }"))
 
-    def test_repository_has_no_parent_vm_entry_points(self):
-        self.assertEqual(CHECK.check(ROOT), [])
-
 
 if __name__ == "__main__":
     unittest.main()

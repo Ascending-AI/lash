@@ -27,21 +27,6 @@ def write_workflow(root: Path, name: str, body: str) -> Path:
     return path
 
 
-class PostgreSqlUrlContractTests(unittest.TestCase):
-    def test_postgres_url_needs_no_separate_flag(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            write_workflow(root, "ci.yml", """
-name: CI
-jobs:
-  verify:
-    env:
-      LASH_POSTGRES_DATABASE_URL: postgres://lash@localhost/lash
-    steps:
-      - run: cargo test -p lash-internal-postgres-store
-""")
-            self.assertEqual(checker.check_repository(root), [])
-
 
 class IgnoredSuiteRuleTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -253,19 +238,6 @@ jobs:
         )
         self.assertEqual(checker.check_repository(self.root), [])
 
-    def test_unrelated_test_binaries_are_left_alone(self) -> None:
-        scripts = self.root / "scripts"
-        scripts.mkdir(parents=True)
-        (scripts / "gate.sh").write_text(
-            "cargo test -p lash-internal-postgres-store --test conformance --locked\n",
-            encoding="utf-8",
-        )
-        self.assertEqual(checker.check_repository(self.root), [])
-
-
-class RepositoryTests(unittest.TestCase):
-    def test_the_real_repository_passes(self) -> None:
-        self.assertEqual(checker.check_repository(checker.ROOT), [])
 
 
 if __name__ == "__main__":

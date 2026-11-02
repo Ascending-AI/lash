@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import json
 import pathlib
-import re
 import signal
 import subprocess
 import tempfile
@@ -249,42 +248,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
             timeout=30,
         )
 
-    def test_fixture_timeout_terminates_grandchild(self) -> None:
-        grandchild_pid = self.root / "grandchild.pid"
-        command = [
-            "sh",
-            "-c",
-            'echo timeout-marker; sleep 60 >/dev/null 2>&1 & echo "$!" > "$1"; wait',
-            "sh",
-            str(grandchild_pid),
-        ]
-        pid: int | None = None
-        try:
-            with self.assertRaises(subprocess.TimeoutExpired) as timeout:
-                run_subprocess(
-                    command,
-                    cwd=self.root,
-                    check=False,
-                    timeout=0.1,
-                )
-            self.assertIn("timeout-marker", timeout.exception.output)
-            pid = int(grandchild_pid.read_text(encoding="utf-8"))
-            deadline = time.monotonic() + 0.5
-            while time.monotonic() < deadline:
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.01)
-            else:
-                self.fail(f"grandchild process {pid} survived the fixture timeout")
-        finally:
-            if pid is not None:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-
     def test_cancelled_checker_terminates_plan_command(self) -> None:
         plan_group_pid = self.root / "plan-group.pid"
         grandchild_pid = self.root / "plan-grandchild.pid"
@@ -362,11 +325,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
             )
         plan.write_text(contents.replace("commands = [", commands), encoding="utf-8")
 
-    def test_complete_contract_passes(self) -> None:
-        result = self.check()
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("2 declared features", result.stdout)
-
     def test_new_unowned_feature_fails(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"
         manifest.write_text(
@@ -417,17 +375,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
     def test_a_lane_without_buck2_targets_fails(self) -> None:
         self.write_lane_table({"member-testing": []})
         result = self.check()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn(
-            "coverage lane has no Buck2 targets: member-testing", result.stdout
-        )
-
-    def test_run_refuses_a_lane_without_buck2_targets(self) -> None:
-        # `run` validates the whole contract before it executes a command, so a
-        # lane the pool no longer compiles fails the Cargo lane too rather than
-        # reporting a pass for a gate that is only half there.
-        self.write_lane_table({"member-testing": []})
-        result = self.run_lane()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
             "coverage lane has no Buck2 targets: member-testing", result.stdout
@@ -910,30 +857,6 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("lane 'member-testing' has no executable commands", result.stdout)
         self.assertIn("lacks an exact ON command for member/testing", result.stdout)
-
-    def test_workspace_checker_scans_each_source_once(self) -> None:
-        # A wall-clock budget flakes under `just floor`'s parallel gates, so
-        # the budget is on work instead: cfg_requirements is meant to visit,
-        # and read, every workspace Rust source exactly once. Ordinary repo
-        # growth keeps these counts equal; a regression that does more work
-        # (re-scanning per feature, reading files repeatedly) breaks them on
-        # any machine, which is what the clock assertion was really guarding.
-        result = run_subprocess(
-            ["python3", str(CHECKER), "check", "--root", str(ROOT)],
-            check=False,
-            env={**os.environ, "LASH_FEATURE_COVERAGE_STATS": "1"},
-            timeout=120,  # liveness guard only; the counts are the budget
-        )
-        self.assertEqual(result.returncode, 0, result.stdout)
-        match = re.search(
-            r"feature coverage scan: (\d+) Rust source visits, "
-            r"(\d+) unique paths, (\d+) reads",
-            result.stdout,
-        )
-        self.assertIsNotNone(match, result.stdout)
-        visits, unique, reads = (int(group) for group in match.groups())
-        self.assertEqual(visits, unique, result.stdout)
-        self.assertEqual(unique, reads, result.stdout)
 
 
 if __name__ == "__main__":

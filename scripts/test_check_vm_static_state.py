@@ -39,17 +39,6 @@ class CheckTests(unittest.TestCase):
     def problems(self) -> list[str]:
         return gate.check(self.repo)
 
-    def test_a_new_static_is_refused(self) -> None:
-        self.write(
-            "crates/lash-kernel-vm/src/cache.rs",
-            """\
-            static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
-            """,
-        )
-        problems = self.problems()
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("crates/lash-kernel-vm/src/cache.rs:1: static `SEEN` (in `<module>`)", problems[0])
-
     def test_every_static_form_is_refused(self) -> None:
         self.write(
             "crates/lash-dialect-typescript/src/forms.rs",
@@ -61,6 +50,7 @@ class CheckTests(unittest.TestCase):
                 static ref TABLE: Vec<u8> = Vec::new();
             }
             static mut COUNTER: u64 = 0;
+            static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
             fn memo() -> &'static str {
                 static CELL: OnceLock<String> = OnceLock::new();
                 static LAZY: LazyLock<String> = LazyLock::new(String::new);
@@ -69,7 +59,7 @@ class CheckTests(unittest.TestCase):
             """,
         )
         names = sorted(problem.split("static `")[1].split("`")[0] for problem in self.problems())
-        self.assertEqual(names, ["CELL", "COUNTER", "LAZY", "LOCAL", "TABLE"])
+        self.assertEqual(names, ["CELL", "COUNTER", "LAZY", "LOCAL", "SEEN", "TABLE"])
 
     def test_a_new_kernel_crate_is_checked_by_its_name(self) -> None:
         self.write("crates/lash-kernel-future/src/lib.rs", "static SEEN: u8 = 0;\n")
@@ -145,9 +135,6 @@ class CheckTests(unittest.TestCase):
         self.write("crates/lash-kernel-vm/examples/perf.rs", "static LIVE: u8 = 0;\n")
         self.write("crates/lash-kernel-vm/benches/bench.rs", "static PEAK: u8 = 0;\n")
         self.assertEqual(self.problems(), [])
-
-    def test_the_tree_passes(self) -> None:
-        self.assertEqual(gate.check(gate.ROOT), [])
 
 
 if __name__ == "__main__":

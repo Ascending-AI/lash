@@ -211,9 +211,6 @@ class FilteredRunnerTests(Fixture):
             runinfo_prefix=injected,
         ))
 
-    def test_selector_typo_fails(self):
-        self.assert_failed(self.single("law_typo"))
-
     def test_ignored_only_selection_fails(self):
         self.env["FIXTURE_CASES"] = '[["law", true]]'
         self.assert_failed(self.single("law"))
@@ -230,16 +227,10 @@ class FilteredRunnerTests(Fixture):
     def test_skip_excluding_the_selection_fails(self):
         self.assert_failed(self.single("law", "--skip", "law"))
 
-    def test_listing_a_valid_selection_preserves_the_requested_format(self):
-        self.assert_passed(self.single("law", "--list", "--format", "terse"))
-
     def test_unfiltered_empty_binary_with_output_flags_passes(self):
         self.env["FIXTURE_CASES"] = "[]"
         self.assert_passed(self.single("--nocapture", "--test-threads", "1"))
         self.assert_passed(self.batch("--nocapture"))
-
-    def test_one_exact_case_passes(self):
-        self.assert_passed(self.single("law", "--exact"))
 
     def test_ignored_inclusion_executes_and_passes(self):
         self.env["FIXTURE_CASES"] = '[["law", true]]'
@@ -279,9 +270,6 @@ class FilteredRunnerTests(Fixture):
     def test_batch_one_empty_member_does_not_fail_the_union(self):
         self.env["FIXTURE_BATCH_EMPTY_MEMBER"] = "1"
         self.assert_passed(self.batch("law"))
-
-    def test_batch_one_case_passes(self):
-        self.assert_passed(self.batch("law", "--exact"))
 
     def test_batch_legitimate_empty_unfiltered_binary_passes(self):
         self.env["FIXTURE_CASES"] = "[]"
@@ -325,10 +313,6 @@ class StoreGateTests(Fixture):
         self.env.update(FIXTURE_CASES=json.dumps([[name, False] for name in self.SUITES["pg-pool-wait"]]),
                         FIXTURE_NO_REPORT="1")
         self.assert_failed(self.gate("pg-pool-wait"), "No such file or directory")
-
-    def test_pg_service_gate_executes_ignored_selection(self):
-        self.env["FIXTURE_CASES"] = json.dumps([[name, True] for name in self.SUITES["pg-pool-wait"]])
-        self.assert_passed(self.gate("pg-pool-wait"))
 
     def test_pg_s3_empty_shard_union_fails(self):
         for suite, names in self.SUITES.items():

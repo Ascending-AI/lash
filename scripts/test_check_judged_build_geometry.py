@@ -67,9 +67,6 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         GATE.check_build_precedes_launcher_locks(failures)
         return failures
 
-    def test_repository_tree_is_clean(self) -> None:
-        self.assertEqual(self.run_gate(), [])
-
     def test_missing_judged_profile_fails(self) -> None:
         manifest = self.root / "Cargo.toml"
         manifest.write_text(

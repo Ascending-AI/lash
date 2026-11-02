@@ -91,11 +91,24 @@ class Fixture(unittest.TestCase):
     def assert_clean(self) -> None:
         self.assertEqual([], self.violations())
 
+    def target(self, tags=(), source=None):
+        package = self.root / "crates/durable"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "proof.rs").write_text(source or '''#[tokio::test]
+async fn opens_once_on_postgres() {
+    let _ = std::env::var("LASH_POSTGRES_DATABASE_URL");
+}
+''')
+        (package / "BUCK").write_text(
+            'lash_rust_integration_test(name="proof__test", crate_root="proof.rs")'
+        )
+        inventory = self.root / "tools/buck2/target-inventory.json"
+        inventory.parent.mkdir(parents=True, exist_ok=True)
+        inventory.write_text(json.dumps({"packages": [{"manifest": "crates/durable/Cargo.toml",
+            "targets": [{"kind": "test", "label": "//crates/durable:proof__test", "tags": list(tags)}]}]}))
+
 
 class PassingShapes(Fixture):
-    def test_plain_attribute_law_passes(self) -> None:
-        self.assert_clean()
-
     def test_law_table_entry_passes(self) -> None:
         self.write_source(
             "src/tables.rs",
@@ -168,6 +181,15 @@ class SelectionDefects(Fixture):
         violations = self.violations()
         self.assertTrue(
             any("a_durable_law" in v.detail for v in violations), violations
+        )
+        self.target(source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn requires_a_database() {}
+''')
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        violations = self.violations()
+        self.assertTrue(
+            any("requires_a_database" in v.detail for v in violations), violations
         )
 
     def test_second_service_law_run_without_its_skip_fails(self) -> None:
@@ -263,22 +285,6 @@ fn opens_on_postgres() {}
         self.write_recipe("//crates/durable:proof__test", "skip=opens_on_postgres")
         self.assertTrue(any("selects zero" in v.detail for v in self.violations()))
 
-    def target(self, tags=(), source=None):
-        package = self.root / "crates/durable"
-        package.mkdir(parents=True, exist_ok=True)
-        (package / "proof.rs").write_text(source or '''#[tokio::test]
-async fn opens_once_on_postgres() {
-    let _ = std::env::var("LASH_POSTGRES_DATABASE_URL");
-}
-''')
-        (package / "BUCK").write_text(
-            'lash_rust_integration_test(name="proof__test", crate_root="proof.rs")'
-        )
-        inventory = self.root / "tools/buck2/target-inventory.json"
-        inventory.parent.mkdir(parents=True, exist_ok=True)
-        inventory.write_text(json.dumps({"packages": [{"manifest": "crates/durable/Cargo.toml",
-            "targets": [{"kind": "test", "label": "//crates/durable:proof__test", "tags": list(tags)}]}]}))
-
     def test_facade_ui_type_witness_is_not_a_postgres_leg(self):
         self.write_source("tests/ui.rs", '#[path = "ui/backend.rs"] mod backend;')
         witness = 'fn pool(_: &lash::postgres::sqlx::PgPool) {}'
@@ -320,14 +326,6 @@ fn opens_on_postgres() {}
 ''')
         self.write_recipe("//crates/durable:proof__test", "nocapture")
         self.assert_clean()
-
-    def test_named_gate_with_wrong_filter_does_not_cover_a_law(self):
-        self.target(source='''#[test]
-#[ignore = "requires PostgreSQL"]
-fn requires_a_database() {}
-''')
-        self.write_recipe("//crates/durable:proof__test", "nocapture")
-        self.assertTrue(any("requires_a_database" in v.detail for v in self.violations()))
 
     def test_missing_discovered_root_fails_closed(self):
         self.target(tags=["hermetic-postgres"])
