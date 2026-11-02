@@ -26,8 +26,7 @@ mod arc_serde_bytes {
 /// snapshot fields are refused rather than remapped.
 ///
 /// version_guard(
-///     roots(path = "crates/lash-core-store/src/store/session_manifest.rs", ManifestBody, SessionMetadata),
-///     items(path = "crates/lash-core-store/src/store/session_manifest.rs", METADATA_COMPONENTS),
+///     roots(path = "crates/lash-core-store/src/store/session_manifest.rs", ManifestBody),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
