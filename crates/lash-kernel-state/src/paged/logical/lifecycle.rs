@@ -120,6 +120,10 @@ pub(super) type Replacement = (Owner, Option<SourceValue>);
 /// Orders recorded replacements by owner, keeping each owner's last record:
 /// the one final replacement per owner the runtime event publishes.
 fn settle(pending: &mut Vec<Replacement>) {
+    // Strictly ascending records already name each owner once.
+    if pending.is_sorted_by(|earlier, later| earlier.0 < later.0) {
+        return;
+    }
     pending.sort_by_key(|(owner, _)| *owner);
     pending.dedup_by(|later, earlier| {
         let same = later.0 == earlier.0;
