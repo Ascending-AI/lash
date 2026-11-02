@@ -14,6 +14,7 @@ mod leaf;
 mod literal;
 pub(in crate::machine) mod literal_storage;
 mod member;
+pub(in crate::machine) use member::SourceMember;
 mod native;
 pub(in crate::machine) mod native_storage;
 mod occurrence;

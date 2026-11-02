@@ -10,6 +10,7 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 /// admission, including exact charge-bound and strict slice equality.
 pub(super) fn compiled_charges() {
     calls::pure_calls();
+    member_closes();
     for layout in [0, 1, 42, u64::MAX] {
         let text = super::super::layout::scalar_document(
             "let x = flat.add(0, flat.mul(2, 3)) set x = flat.add(x, 4) return x",
@@ -568,4 +569,91 @@ fn compiled_formulas_equal_the_recursive_oracle() {
         cases.len(),
         cases.len() * 16
     );
+}
+
+/// Member publication authenticates its unpaid source close before it writes.
+fn member_closes() {
+    for layout in [0, 1, 42, u64::MAX] {
+        let (program, _) = Embedder::with(
+            "main { let values = [1, 2] set values[0] = 3 return values }",
+            Setup {
+                layout: crate::Layout(layout),
+                ..Setup::default()
+            },
+        )
+        .program(false);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("member source is admitted and compiled"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("member source is admitted and compiled"));
+        let body = exe
+            .islands
+            .plans
+            .iter()
+            .find(|plan| plan.params.is_empty() && plan.body.statements.len() == 3)
+            .unwrap();
+        let statement = body.body.statements[1].id;
+        let (stream, stmt, _) = exe.statement(statement);
+        let pc = (stmt.ops.start..stmt.ops.end())
+            .find(|pc| matches!(stream.ops[*pc as usize], Op::SetIndex { .. }))
+            .unwrap();
+        let pending = (stmt.ops.start..pc)
+            .rev()
+            .find_map(|head| match stream.ops[head as usize] {
+                Op::Region { region, total } => Some(crate::compile::expr::Close {
+                    region: region.0,
+                    head,
+                    total,
+                }),
+                _ => None,
+            })
+            .unwrap();
+        let charges =
+            ChargeProgram::event_packet(&exe, body.code, statement, pc, Some(pending)).unwrap();
+        let debt = charges.bind(&[]).unwrap();
+        assert_eq!(
+            debt.units(),
+            u64::from(pending.total),
+            "a member pays its original fixed close exactly once"
+        );
+        let tape = crate::observe::ChargeTape::new();
+        debt.record(&tape);
+        assert_eq!(
+            tape.steps(),
+            stream
+                .regions
+                .events(pending.region)
+                .iter()
+                .map(|event| event.weight)
+                .collect::<Vec<_>>()
+        );
+        assert!(debt.native_allowance(7).unwrap().strict);
+        assert!(
+            ChargeProgram::event_packet(&exe, body.code, statement, pc, None).is_err(),
+            "a member cannot erase its unpaid prefix"
+        );
+        assert!(
+            ChargeProgram::event_packet(
+                &exe,
+                body.code,
+                statement,
+                pc,
+                Some(crate::compile::expr::Close {
+                    total: pending.total + 1,
+                    ..pending
+                })
+            )
+            .is_err(),
+            "equal event coordinates cannot authenticate another close"
+        );
+    }
 }

@@ -875,6 +875,14 @@ impl EventContext<'_> {
                     }
                 }
                 (logical::Member::Field(_), _) | (_, Some(_)) => return Err(Refused::Retained),
+                (logical::Member::List(_) | logical::Member::Table(_), None) => {
+                    let target = event
+                        .inputs
+                        .first()
+                        .and_then(root)
+                        .ok_or(Refused::Retained)?;
+                    self.check_reference(target, edit.handle)?;
+                }
                 _ => {}
             }
         }

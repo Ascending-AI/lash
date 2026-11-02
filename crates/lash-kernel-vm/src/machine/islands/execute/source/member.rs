@@ -1,25 +1,12 @@
 //! A source member commit consumes its evaluated operand occurrences once.
 use super::*;
 use crate::admission::Allowance;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Member, MemberEdit, Program};
+use lash_kernel_state::kernel_internals::logical::{Member, MemberEdit};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
     publication::{Occurrence, Position as SourcePosition},
 };
-
-enum PreparedWrite {
-    List(lash_kernel_state::arena::PreparedListWrite),
-    Cell(lash_kernel_state::arena::PreparedCellWrite),
-}
-impl PreparedWrite {
-    fn publish(self, arena: &mut Arena, edit: MemberEdit) {
-        match self {
-            Self::List(write) => write.publish(arena, edit),
-            Self::Cell(write) => write.publish(arena, edit),
-        }
-    }
-}
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
     pub(in crate::machine::islands::execute) fn publish_list_store(
@@ -111,6 +98,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement) = frame.state.statement else {
             return Ok(false);
         };
+        // Store packets follow their canonical Pay packets. Cell writes keep
+        // their own close and submit that unpaid debt with the boundary.
+        let charges = if matches!(edit.member, Member::Variable) {
+            let Ok(charges) = room::charges::ChargeProgram::event_packet(
+                self.exe,
+                frame.state.callee.plan.code,
+                statement,
+                pc,
+                close,
+            ) else {
+                return Ok(false);
+            };
+            Some(charges)
+        } else {
+            None
+        };
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(roles) = statement.source_roles_at(stream, pc) else {
             return Ok(false);
@@ -133,7 +136,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
@@ -145,18 +147,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let mut inputs = Vec::new();
         let mut selectors = Vec::new();
         let mut values = Vec::new();
-        for (reg, site) in roles.iter() {
+        let event = interval
+            .events()
+            .next()
+            .ok_or_else(|| malformed("member event disappeared"))?;
+        for selector in &event.inputs {
+            let room::Owner::Operand(site) = selector else {
+                return Ok(false);
+            };
+            let Some((reg, _)) = roles.iter().find(|(_, actual)| actual.as_ref() == site) else {
+                return Ok(false);
+            };
             let value = operands
                 .iter()
                 .find(|(input, _)| *input == reg.0)
                 .map(|(_, value)| *value)
                 .ok_or_else(|| malformed("verified member operand disappeared"))?;
-            let selector = room::Owner::Operand((**site).clone());
             let owner = slots
-                .root(&selector, self.task, activation.invocation.id())
+                .root(selector, self.task, activation.invocation.id())
                 .ok_or_else(|| malformed("member operand has no source owner"))?;
             inputs.push(owner);
-            selectors.push(selector);
+            selectors.push(selector.clone());
             values.push(value);
         }
         self.logical.flush(self.arena, self.heap)?;
@@ -248,13 +259,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             unpaid: Some(unpaid),
             ..start.clone()
         };
-        let make = || {
-            Program::new(vec![JournalEvent {
-                inputs: inputs.clone(),
-                member: Some(edit.clone()),
-                ..Default::default()
-            }])
-        };
         let allowance = Allowance {
             occurrences: vec![],
             before: 0,
@@ -265,7 +269,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             safe_point: self.charged,
         };
         drop(ledger);
-        let published = self.publish_source_prepared(
+        let published = self.publish_source_boundary(
             frame.state.callee,
             activation,
             publication::Prefix {
@@ -275,21 +279,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            make,
-            publication::Reserve(|arena: &mut Arena| {
-                let Some(value) = edit.next else {
-                    return Ok(None);
-                };
-                match edit.member {
-                    Member::List(index) => arena
-                        .prepare_list_write(handle, index, value)
-                        .map(|write| write.map(PreparedWrite::List)),
-                    Member::Variable => arena
-                        .prepare_cell_write(handle, value)
-                        .map(|write| write.map(PreparedWrite::Cell)),
-                    Member::Table(_) | Member::Field(_) => Ok(None),
-                }
-            }),
+            crate::machine::source_publication::SourceMember {
+                charges: charges.as_ref(),
+                edit: edit.clone(),
+                inputs,
+                operands: values,
+            },
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list publication changed member arity");

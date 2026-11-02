@@ -2,6 +2,7 @@
 //! Actual values are retained until preparation, so a holding price never
 //! authorizes a substituted result or a different source transfer.
 use super::*;
+mod member;
 pub(crate) use logical::PublicationValue as ExactValue;
 use logical::{BoundaryTransaction, Dependencies, Owner as RootOwner, RootValue};
 
@@ -43,6 +44,7 @@ pub(crate) struct ExactEvent {
     interval: Arc<CompiledInterval>,
     at: Point,
     unpaid: Point,
+    member: Option<member::MemberEvent>,
 }
 
 /// Entry dependencies, the actual roots and source exit remain inseparable.
@@ -89,7 +91,9 @@ impl ExactEvent {
             return Err(Refused::Source);
         }
         let unpaid = source.exact_successor(&at, successor)?;
+        let member = member::MemberEvent::compile(source, &at)?;
         Ok(Self {
+            member,
             source: Arc::clone(source),
             interval,
             at,
@@ -224,16 +228,13 @@ impl ExactEvent {
         }
         if let Some(edit) = external.member {
             let event = self.interval.events().next().ok_or(Refused::Path)?;
-            if external.operands.len() != event.inputs.len()
-                || edit.next.as_ref().is_some_and(|next| {
-                    external
-                        .operands
-                        .last()
-                        .is_none_or(|value| !next.same(value))
-                })
-            {
+            if external.operands.len() != event.inputs.len() {
                 return Err(Refused::Facts);
             }
+            self.member
+                .as_ref()
+                .ok_or(Refused::Source)?
+                .check(edit, external.operands)?;
         }
         if external.native.is_some() || external.member.is_some() {
             let slots = self.source.owner_slots()?;

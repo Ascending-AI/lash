@@ -1,47 +1,54 @@
 use super::*;
+use crate::compile::room;
+struct Facts(std::collections::BTreeMap<room::Measure, i128>);
+impl room::Facts for Facts {
+    fn dependencies(&self) -> Option<&[lash_kernel_doc::arena::ArenaHandle]> {
+        Some(&[])
+    }
+    fn measure(&self, measure: &room::Measure) -> Option<i128> {
+        self.0.get(measure).copied()
+    }
+    fn call(
+        &self,
+        _: &lash_kernel_value::sites::Site,
+        _: room::CallSource,
+    ) -> Option<&room::CheckedRoom> {
+        None
+    }
+    fn raised(&self) -> bool {
+        false
+    }
+    fn resolved(
+        &self,
+        _: &lash_kernel_value::sites::Site,
+    ) -> Option<lash_kernel_value::FunctionId> {
+        None
+    }
+}
+struct Execution<'a>(&'a Facts);
+impl room::Execution for Execution<'_> {
+    fn event(&mut self, _: &room::Point) -> Option<Box<dyn room::Facts + '_>> {
+        Some(Box::new(Facts(self.0.0.clone())))
+    }
+    fn choose(&mut self, _: &lash_kernel_value::sites::Site) -> Option<bool> {
+        None
+    }
+}
 
 /// Equal-price field names cannot authorize each other's member journal.
 pub(super) fn names() {
     private_cell_storage();
     private_member_storage();
+    indexed_members();
     use crate::compile::room::{
         self, ExitKind, Measure, Owner as Selector, Phase, Point, publication::*,
     };
     use lash_kernel_doc::{self as doc, TaskId, Value};
-    use lash_kernel_state::kernel_internals::logical::{
-        JournalEvent, Member, MemberEdit, Program, RootValue, Slot,
-    };
+    use lash_kernel_state::kernel_internals::logical::{Member, MemberEdit, RootValue, Slot};
     use lash_kernel_value::sites::{Site, Unit};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    struct Facts(BTreeMap<Measure, i128>);
-    impl room::Facts for Facts {
-        fn dependencies(&self) -> Option<&[doc::arena::ArenaHandle]> {
-            Some(&[])
-        }
-        fn measure(&self, measure: &Measure) -> Option<i128> {
-            self.0.get(measure).copied()
-        }
-        fn call(&self, _: &Site, _: room::CallSource) -> Option<&room::CheckedRoom> {
-            None
-        }
-        fn raised(&self) -> bool {
-            false
-        }
-        fn resolved(&self, _: &Site) -> Option<lash_kernel_value::FunctionId> {
-            None
-        }
-    }
-    struct Execution<'a>(&'a Facts);
-    impl room::Execution for Execution<'_> {
-        fn event(&mut self, _: &Point) -> Option<Box<dyn room::Facts + '_>> {
-            Some(Box::new(Facts(self.0.0.clone())))
-        }
-        fn choose(&mut self, _: &Site) -> Option<bool> {
-            None
-        }
-    }
     let run =
         Embedder::new("main { let record = {left: 1, rght: 1} set record.left = 2 return record }");
     let (program, _) = run.program(false);
@@ -179,10 +186,13 @@ pub(super) fn names() {
         depth: 0,
         safe_point: 7,
     };
-    for (target, name, valid) in [
-        (handle, "left", true),
-        (handle, "rght", false),
-        (foreign_handle, "left", false),
+    let exact = ExactEvent::compile(&source, Arc::clone(&interval), Successor::Normal).unwrap();
+    let operands: Vec<_> = values.iter().map(|(_, value)| *value).collect();
+    for (target, name, next_value, valid) in [
+        (handle, "left", Value::Int(2), true),
+        (handle, "rght", Value::Int(2), false),
+        (foreign_handle, "left", Value::Int(2), false),
+        (handle, "left", Value::Int(3), false),
     ] {
         let mut charged = 0;
         let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
@@ -195,31 +205,50 @@ pub(super) fn names() {
             limit: 10,
             safe_point: 7,
         };
-        let actual = Program::new(vec![JournalEvent {
-            inputs: inputs.clone(),
-            member: Some(MemberEdit {
-                handle: target,
-                member: Member::Field(Arc::from(name)),
-                next: Some(Value::Int(2)),
-            }),
-            ..Default::default()
-        }]);
-        let evaluated = frontier.evaluate_interval(
-            Arc::clone(&interval),
-            &mut Execution(&facts),
+        let edit = MemberEdit {
+            handle: target,
+            member: Member::Field(Arc::from(name)),
+            next: Some(next_value),
+        };
+        let evaluated = exact.bind_paid_external(
+            &frontier,
             &ledger,
             &arena,
             heap,
-            actual,
+            &mut Execution(&facts),
+            ExactRoots {
+                inputs: inputs.clone(),
+                ..Default::default()
+            },
             next.clone(),
             allowance.clone(),
             resources.facts(&allowance).unwrap(),
+            ExternalFacts {
+                operands: &operands,
+                member: Some(&edit),
+                ..Default::default()
+            },
         );
         assert_eq!(
             evaluated.is_ok(),
             valid,
             "only the admitted code field and actual target operand may be edited: {name} {target:?}"
         );
+        if valid {
+            let transaction = ledger
+                .prepare_source_members_boundary(
+                    arena.registration().unwrap(),
+                    heap,
+                    &[edit],
+                    &inputs,
+                    &[],
+                )
+                .unwrap();
+            evaluated
+                .unwrap()
+                .finish_external(&frontier, &ledger, transaction)
+                .unwrap();
+        }
         assert_eq!(charged, 0);
         assert!(matches!(
             arena.table_get(handle, &left).unwrap(),
@@ -575,4 +604,244 @@ fn private_cell_storage() {
             .is_some()
     );
     assert!(arena.item(cycle_handle, 0).unwrap().unwrap().same(&cycle));
+}
+
+/// The actual index and set-presence RHS authenticate an edit independently
+/// of equal holding sizes or the final graph delta.
+fn indexed_members() {
+    use crate::compile::room::{self, ExitKind, Measure, Phase, Point, publication::*};
+    use lash_kernel_doc::{self as doc, TaskId, Value};
+    use lash_kernel_state::kernel_internals::logical::{Member, MemberEdit, RootValue, Slot};
+    use lash_kernel_value::sites::{Site, Unit};
+    use std::{collections::BTreeMap, sync::Arc};
+    for kind in 0..5 {
+        let text = match kind {
+            0 => "main { let values = [1, 1] set values[0] = 2 return values }",
+            1 => "main { let values = map{0: 1, 1: 1} set values[0] = 2 return values }",
+            2 => "main { let values = set{1} set values[0] = true return values }",
+            3 => "main { let values = set{0, 1} set values[0] = false return values }",
+            _ => "main { let values = [1, 1] remove values[0] return values }",
+        };
+        let run = Embedder::new(text);
+        let (program, _) = run.program(false);
+        let source = Arc::new(room::Source::compile(
+            doc::constant_pool::PoolOwner::Document(program.document.identity()),
+            Site::new(Unit::Main, vec![]),
+            program.document.main.as_ref().unwrap(),
+            &[],
+            Default::default(),
+            &BTreeMap::new(),
+            &Default::default(),
+        ));
+        let heap = run.machine.source_law_heap();
+        let store = heap.logical_ledger();
+        let mut ledger = store.borrow_mut();
+        let mut arena = lash_kernel_state::arena::Arena::new();
+        let object = match kind {
+            0 | 4 => doc::NewObject::List(vec![Value::Int(1), Value::Int(1)]),
+            1 => doc::NewObject::Map(vec![
+                (Value::Int(0), Value::Int(1)),
+                (Value::Int(1), Value::Int(1)),
+            ]),
+            2 => doc::NewObject::Set(vec![Value::Int(1)]),
+            _ => doc::NewObject::Set(vec![Value::Int(0), Value::Int(1)]),
+        };
+        let mut nursery = doc::Nursery::unaccounted(arena.objects());
+        let target = nursery.allocate(object.clone());
+        let foreign = nursery.allocate(object);
+        arena.install(nursery.into_new()).unwrap();
+        let (invocation, entered) = ledger
+            .prepare_enter(
+                TaskId::MAIN,
+                &mut arena,
+                heap.pages(),
+                &[],
+                &[
+                    (Slot::Binding(0), RootValue::Value(&target)),
+                    (Slot::Binding(1), RootValue::Value(&foreign)),
+                ],
+            )
+            .unwrap();
+        ledger
+            .commit(entered.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let at = Point {
+            site: source.site.child(1),
+            phase: Phase::Commit,
+        };
+        let interval = source.compile_event(&at, ExitKind::Normal).unwrap();
+        let event = interval.events().next().unwrap();
+        let mut operands = vec![target, Value::Int(0)];
+        if kind < 4 {
+            operands.push(if kind >= 2 {
+                Value::Bool(kind == 2)
+            } else {
+                Value::Int(2)
+            });
+        }
+        assert_eq!(event.inputs.len(), operands.len());
+        let slots = source.owner_slots().unwrap();
+        let inputs: Vec<_> = event
+            .inputs
+            .iter()
+            .map(|owner| slots.root(owner, TaskId::MAIN, invocation.id()).unwrap())
+            .collect();
+        let roots: Vec<_> = inputs
+            .iter()
+            .zip(&operands)
+            .map(|(owner, value)| (*owner, RootValue::Value(value)))
+            .collect();
+        let held = ledger
+            .prepare_ownership(&mut arena, heap.pages(), &[], &roots)
+            .unwrap();
+        ledger.commit(held.admit(u64::MAX).ok().unwrap()).unwrap();
+        let edit = MemberEdit {
+            handle: target.handle().unwrap(),
+            member: if matches!(kind, 0 | 4) {
+                Member::List(0)
+            } else {
+                Member::Table(Value::Int(0))
+            },
+            next: match kind {
+                0 | 1 => Some(Value::Int(2)),
+                2 => Some(Value::Absent),
+                _ => None,
+            },
+        };
+        let member = ledger
+            .prepare_source_members_boundary(
+                arena.registration().unwrap(),
+                heap,
+                std::slice::from_ref(&edit),
+                &[],
+                &[],
+            )
+            .unwrap();
+        let delta = i128::from(member.balance().unwrap().total().unwrap())
+            - i128::from(ledger.balance().unwrap().total().unwrap());
+        let released = member.release_cost(&inputs, heap.pages()).unwrap();
+        drop(member);
+        let mut measures = BTreeMap::new();
+        for (selector, owner) in event.inputs.iter().zip(&inputs) {
+            measures.insert(
+                Measure::Local(selector.clone()),
+                i128::from(
+                    ledger
+                        .holding(*owner, heap.pages())
+                        .unwrap()
+                        .unwrap()
+                        .bytes(),
+                ),
+            );
+        }
+        measures.insert(Measure::MemberDelta(at.site.clone()), delta);
+        measures.insert(Measure::Release(event.inputs.clone()), i128::from(released));
+        let start = Position {
+            at: at.clone(),
+            unpaid: Some(at.clone()),
+            recovery: [1; 32],
+            occurrence: Occurrence {
+                task: TaskId::MAIN,
+                invocation: invocation.id(),
+                loops: vec![],
+                action: None,
+            },
+        };
+        let next = Position {
+            unpaid: Some(source.next_after_commit(&at.site).unwrap()),
+            ..start.clone()
+        };
+        drop(ledger);
+        let ledger = store.borrow();
+        let frontier = source
+            .frontier(
+                &ledger,
+                heap,
+                &invocation,
+                program.link,
+                doc::KernelVersion::One,
+                start,
+            )
+            .unwrap();
+        let exact = ExactEvent::compile(&source, Arc::clone(&interval), Successor::Normal).unwrap();
+        let mut wrong_key = edit.clone();
+        wrong_key.member = if matches!(kind, 0 | 4) {
+            Member::List(1)
+        } else {
+            Member::Table(Value::Int(1))
+        };
+        let mut wrong_target = edit.clone();
+        wrong_target.handle = foreign.handle().unwrap();
+        let mut wrong_value = edit.clone();
+        wrong_value.next = Some(Value::Int(3));
+        for (actual, valid) in [
+            (&edit, true),
+            (&wrong_key, false),
+            (&wrong_target, false),
+            (&wrong_value, false),
+        ] {
+            let facts = Facts(measures.clone());
+            let mut execution = Execution(&facts);
+            let mut charged = 7;
+            let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
+            let resources = crate::admission::SourceResources {
+                charged: &mut charged,
+                counters: &mut counters,
+                bound: 20,
+                slice: 20,
+                depth: 1,
+                limit: 10,
+                safe_point: 7,
+            };
+            let allowance = crate::admission::Allowance {
+                occurrences: vec![],
+                before: 0,
+                units: 0,
+                close: None,
+                strict: false,
+                depth: 0,
+                safe_point: 7,
+            };
+            let bound = exact.bind_paid_external(
+                &frontier,
+                &ledger,
+                &arena,
+                heap,
+                &mut execution,
+                ExactRoots {
+                    inputs: inputs.clone(),
+                    ..Default::default()
+                },
+                next.clone(),
+                allowance.clone(),
+                resources.facts(&allowance).unwrap(),
+                ExternalFacts {
+                    operands: &operands,
+                    member: Some(actual),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                bound.is_ok(),
+                valid,
+                "actual member roles kind={kind}, edit={actual:?}"
+            );
+            if valid {
+                let transaction = ledger
+                    .prepare_source_members_boundary(
+                        arena.registration().unwrap(),
+                        heap,
+                        std::slice::from_ref(actual),
+                        &inputs,
+                        &[],
+                    )
+                    .unwrap();
+                bound
+                    .unwrap()
+                    .finish_external(&frontier, &ledger, transaction)
+                    .unwrap();
+            }
+            assert_eq!(charged, 7);
+        }
+    }
 }

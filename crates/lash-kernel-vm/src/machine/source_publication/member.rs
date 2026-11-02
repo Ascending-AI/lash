@@ -3,10 +3,11 @@ use super::*;
 use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurrence};
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Member, MemberEdit, MemberFault};
+use lash_kernel_state::kernel_internals::logical::{Member, MemberEdit, MemberFault, Owner};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
-enum PreparedMember {
+pub(in crate::machine) enum PreparedMember {
+    Cell(lash_kernel_state::arena::PreparedCellWrite),
     Write(lash_kernel_state::arena::PreparedListWrite),
     Remove(lash_kernel_state::arena::PreparedListRemove),
     Table(lash_kernel_state::arena::PreparedTableMember),
@@ -16,8 +17,9 @@ enum PreparedMember {
     ),
 }
 impl PreparedMember {
-    fn publish(self, arena: &mut Arena, edit: MemberEdit) {
+    pub(in crate::machine) fn publish(self, arena: &mut Arena, edit: MemberEdit) {
         match self {
+            Self::Cell(write) => write.publish(arena, edit),
             Self::Write(write) => write.publish(arena, edit),
             Self::Remove(remove) => remove.publish(arena, edit),
             Self::Table(table) => table.publish(arena, edit),
@@ -28,52 +30,120 @@ impl PreparedMember {
         }
     }
 }
-struct MemberStorage(MemberEdit);
-impl StoragePreparation for MemberStorage {
+pub(in crate::machine) struct SourceMember<'charge> {
+    pub(in crate::machine) charges: Option<&'charge room::charges::ChargeProgram>,
+    pub(in crate::machine) edit: MemberEdit,
+    pub(in crate::machine) inputs: Vec<Owner>,
+    pub(in crate::machine) operands: Vec<doc::Value>,
+}
+impl BoundaryPreparation for SourceMember<'_> {
     type Prepared = PreparedMember;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let edit = self.0;
-        if let Member::Field(name) = edit.member {
+        entry: ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault> {
+        use room::publication::{ExactRoots, ExternalFacts};
+        let ExternalEntry {
+            event,
+            frontier,
+            ledger,
+            heap,
+            mut prefix,
+            resources,
+        } = entry;
+        let roots = ExactRoots {
+            inputs: self.inputs.clone(),
+            ..Default::default()
+        };
+        let external = ExternalFacts {
+            operands: &self.operands,
+            member: Some(&self.edit),
+            ..Default::default()
+        };
+        let bound = if let Some(charges) = self.charges {
+            let Some(debt) = charges.bind(&[]) else {
+                return Ok(None);
+            };
+            let Some(allowance) = debt.native_allowance(prefix.allowance.safe_point) else {
+                return Ok(None);
+            };
+            event.bind_external(
+                frontier,
+                ledger,
+                arena,
+                heap,
+                &mut prefix.facts,
+                roots,
+                prefix.next,
+                allowance,
+                resources,
+                external,
+                &debt,
+            )
+        } else {
+            event.bind_paid_external(
+                frontier,
+                ledger,
+                arena,
+                heap,
+                &mut prefix.facts,
+                roots,
+                prefix.next,
+                prefix.allowance,
+                resources,
+                external,
+            )
+        };
+        let Ok(bound) = bound else {
+            return Ok(None);
+        };
+        let edit = self.edit;
+        let (registration, storage) = if let Member::Field(name) = &edit.member {
             let Some((installation, table)) =
-                arena.prepare_field_member(edit.handle, name, edit.next)?
+                arena.prepare_field_member(edit.handle, Arc::clone(name), edit.next)?
             else {
                 return Ok(None);
             };
             let (registration, batch) = installation.into_parts();
-            return Ok(Some(PreparedStorage {
-                registration,
-                storage: PreparedMember::Field(batch, table),
-                actual,
-            }));
+            (registration, PreparedMember::Field(batch, table))
+        } else {
+            let storage = match edit.member {
+                Member::Variable => match edit.next {
+                    Some(value) => arena
+                        .prepare_cell_write(edit.handle, value)?
+                        .map(PreparedMember::Cell),
+                    None => return Ok(None),
+                },
+                Member::List(index) => match edit.next {
+                    Some(value) => arena
+                        .prepare_list_write(edit.handle, index, value)?
+                        .map(PreparedMember::Write),
+                    None => arena
+                        .prepare_list_remove(edit.handle, index)?
+                        .map(PreparedMember::Remove),
+                },
+                Member::Table(key) => arena
+                    .prepare_table_member(edit.handle, key, edit.next)?
+                    .map(PreparedMember::Table),
+                Member::Field(_) => unreachable!(),
+            };
+            let Some(storage) = storage else {
+                return Ok(None);
+            };
+            (arena.registration().map_err(native_fault)?, storage)
+        };
+        let transaction = ledger
+            .prepare_source_members_boundary(registration, heap, &[edit], &self.inputs, &[])
+            .map_err(|error| match error {
+                MemberFault::Heap(error) => error,
+                MemberFault::Native(error) => native_fault(error),
+            })?;
+        match bound.finish_external(frontier, ledger, transaction) {
+            Ok(prepared) => Ok(Some((prepared, storage))),
+            Err(PublicationError::Miss(_)) => Ok(None),
+            Err(PublicationError::Heap(error)) => Err(error),
         }
-        let storage = match edit.member {
-            Member::List(index) => match edit.next {
-                Some(value) => arena
-                    .prepare_list_write(edit.handle, index, value)?
-                    .map(PreparedMember::Write),
-                None => arena
-                    .prepare_list_remove(edit.handle, index)?
-                    .map(PreparedMember::Remove),
-            },
-            Member::Table(key) => arena
-                .prepare_table_member(edit.handle, key, edit.next)?
-                .map(PreparedMember::Table),
-            Member::Variable | Member::Field(_) => {
-                return Err(malformed("a source member store has another target"));
-            }
-        };
-        let Some(storage) = storage else {
-            return Ok(None);
-        };
-        Ok(Some(PreparedStorage {
-            registration: arena.registration().map_err(native_fault)?,
-            storage,
-            actual,
-        }))
     }
 }
 impl KernelMachine {
@@ -337,7 +407,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_external(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -367,14 +437,12 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    member: Some(edit.clone()),
-                    ..Default::default()
-                }])
+            SourceMember {
+                charges: None,
+                edit: edit.clone(),
+                inputs,
+                operands: values,
             },
-            MemberStorage(edit.clone()),
             |arena, _, edits, write| {
                 let [edit] = edits.as_slice() else {
                     unreachable!("a checked list store changed member arity")

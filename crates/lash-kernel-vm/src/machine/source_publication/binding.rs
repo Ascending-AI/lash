@@ -16,14 +16,12 @@ struct BindingPreparation<'bank, 'slot> {
     bank: PreparedTransfer<'bank>,
     slot: Option<PreparedBinding<'slot>>,
     cell: Option<CellConstruction>,
-    member: Option<MemberEdit>,
 }
 impl<'bank, 'slot> StoragePreparation for BindingPreparation<'bank, 'slot> {
     type Prepared = (
         PreparedTransfer<'bank>,
         Option<PreparedBinding<'slot>>,
         Option<PreparedObjectConstruction>,
-        Option<lash_kernel_state::arena::PreparedCellWrite>,
     );
     const MATERIALIZES: bool = true;
     fn prepare<'a>(
@@ -31,17 +29,6 @@ impl<'bank, 'slot> StoragePreparation for BindingPreparation<'bank, 'slot> {
         arena: &'a mut Arena,
         actual: Program,
     ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let write = if let Some(edit) = self.member {
-            let Some(value) = edit.next else {
-                return Ok(None);
-            };
-            let Some(write) = arena.prepare_cell_write(edit.handle, value)? else {
-                return Ok(None);
-            };
-            Some(write)
-        } else {
-            None
-        };
         let (registration, storage, actual) = if let Some(cell) = self.cell {
             let Some(prepared) = cell.prepare(arena, actual)? else {
                 return Ok(None);
@@ -56,7 +43,7 @@ impl<'bank, 'slot> StoragePreparation for BindingPreparation<'bank, 'slot> {
         };
         Ok(Some(PreparedStorage {
             registration,
-            storage: (self.bank, self.slot, storage, write),
+            storage: (self.bank, self.slot, storage),
             actual,
         }))
     }
@@ -350,7 +337,7 @@ impl KernelMachine {
                 safe_point,
             },
         };
-        let published = if shared || cell.is_some() {
+        let published = if shared {
             context.publish(
                 roots.invocation(),
                 &mut frame.source_frontier,
@@ -358,7 +345,6 @@ impl KernelMachine {
                 || {
                     Program::new(vec![JournalEvent {
                         inputs: inputs.clone(),
-                        member: member.as_ref().map(|(_, edit)| edit.clone()),
                         outputs: if member.is_some() {
                             vec![]
                         } else {
@@ -385,17 +371,9 @@ impl KernelMachine {
                     bank,
                     slot,
                     cell: entity.map(|entity| CellConstruction { entity, value }),
-                    member: member.as_ref().map(|(_, edit)| edit.clone()),
                 },
-                |arena, _, edits, (bank, slot, cell, write)| {
-                    if let Some(write) = write {
-                        let [edit] = edits.as_slice() else {
-                            unreachable!("cell publication changed member arity");
-                        };
-                        write.publish(arena, edit.clone());
-                    } else {
-                        debug_assert!(edits.is_empty());
-                    }
+                |arena, _, edits, (bank, slot, cell)| {
+                    debug_assert!(edits.is_empty());
                     let state = if let Some(cell) = cell {
                         cell.batch.publish(arena);
                         SlotState::Cell(cell.handle)
@@ -406,6 +384,25 @@ impl KernelMachine {
                     if let Some(slot) = slot {
                         slot.publish(state);
                     }
+                },
+            )
+        } else if let Some((_, edit)) = &member {
+            context.publish_external(
+                roots.invocation(),
+                &mut frame.source_frontier,
+                prefix,
+                SourceMember {
+                    charges: None,
+                    edit: edit.clone(),
+                    inputs,
+                    operands: vec![value],
+                },
+                |arena, _, edits, write| {
+                    let [edit] = edits.as_slice() else {
+                        unreachable!("cell publication changed member arity");
+                    };
+                    write.publish(arena, edit.clone());
+                    bank.publish();
                 },
             )
         } else {

@@ -52,27 +52,8 @@ pub(super) fn derive(
     let mut tape = Vec::new();
     let mut regions = Vec::new();
     if let Some(pending) = pending {
-        // This is the original source close, not a fee chosen by a packet.
-        // Every earlier close was completed; only the current region remains.
-        for pc in canonical.start..range.start {
-            match stream.ops[pc as usize] {
-                Op::Region { region, total } => {
-                    let close = expr::Close {
-                        region: region.0,
-                        head: pc,
-                        total,
-                    };
-                    compile::islands::verify_close(Some(&close), stream)
-                        .map_err(|_| Refused::Exit)?;
-                    regions.push(close);
-                }
-                op if !op.kind().in_region() => regions.clear(),
-                _ => {}
-            }
-        }
-        if regions.as_slice() != pending.as_slice() {
-            return Err(Refused::Exit);
-        }
+        regions =
+            super::event_packet::pending_regions(stream, canonical, range.start, pending, false)?;
         if exe.code(code).charged {
             for close in &regions {
                 tape.extend(

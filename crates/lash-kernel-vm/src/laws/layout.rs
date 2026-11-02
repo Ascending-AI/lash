@@ -533,6 +533,14 @@ pub(super) fn scalar_probes(
         }
     }
     impl NativeFunction for Identity {
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+            Self::answer(args.values())
+                .map(|value| lash_kernel_doc::NativeResourceContract::returned(args, &value))
+                .transpose()
+        }
         fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             Self::answer(call.args.values())
                 .ok_or_else(|| NativeError::refused("scalar", "outside the scalar domain"))

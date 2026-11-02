@@ -16,17 +16,6 @@ impl KernelMachine {
         pc: u32,
         value: doc::Value,
     ) -> Result<bool, Halt> {
-        if matches!(
-            value,
-            doc::Value::Null
-                | doc::Value::Absent
-                | doc::Value::Bool(_)
-                | doc::Value::Int(_)
-                | doc::Value::Float(_)
-                | doc::Value::Text(_)
-        ) {
-            return Ok(false);
-        }
         let op = running.stream.ops[pc as usize];
         if !matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
             || matches!(op, Op::Const { .. }) && value.handle().is_some()
@@ -103,13 +92,6 @@ impl KernelMachine {
         else {
             return Ok(false);
         };
-        let activation = placement.capture(
-            frame.code,
-            roots.invocation(),
-            &store.borrow(),
-            &self.heap,
-            frame.slots.states(),
-        )?;
         let start = Position {
             at: at.clone(),
             unpaid: Some(at.clone()),
@@ -121,6 +103,20 @@ impl KernelMachine {
                 action: None,
             },
         };
+        if let Some(frontier) = &mut frame.source_frontier
+            && frontier.departs(&start)
+        {
+            frontier.handoff(&mut store.borrow_mut(), start.clone())?;
+        }
+        // A source handoff expires earlier ledger views. Capture the actual
+        // frame only after that transition, retaining the new revision.
+        let activation = placement.capture(
+            frame.code,
+            roots.invocation(),
+            &store.borrow(),
+            &self.heap,
+            frame.slots.states(),
+        )?;
         let next = Position {
             at: at.clone(),
             unpaid: Some(unpaid),

@@ -149,6 +149,21 @@ impl KernelMachine {
             return Ok(false);
         };
         self.logical_flush()?;
+        // Captures may still be cold after reopen. Validate the actual cell
+        // heads through the machine's retry owner before reserving a closure.
+        for capture in &captures {
+            loop {
+                let cold = match self.arena.borrow().cell(*capture) {
+                    Ok(_) => None,
+                    Err(doc::NativeError::Retry(doc::Retry::Cold { object, chunk })) => {
+                        Some((object, chunk))
+                    }
+                    Err(error) => return Err(native_fault(error).into()),
+                };
+                let Some((object, chunk)) = cold else { break };
+                self.warm(object, chunk)?;
+            }
+        }
         let mut entities = Vec::new();
         entities
             .try_reserve(captures.len())

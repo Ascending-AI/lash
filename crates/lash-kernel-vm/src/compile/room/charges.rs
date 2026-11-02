@@ -7,12 +7,14 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::sync::Arc;
 pub(crate) mod composition;
+mod event_packet;
 mod native_completion;
 #[derive(Clone, Copy)]
 enum Coverage {
     Span,
     NativeCompletion,
     NativePacket(Option<expr::Close>),
+    EventPacket(Option<expr::Close>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,7 +82,7 @@ impl ChargeDebt<'_> {
         let strict = match self.program.coverage {
             Coverage::Span => return None,
             Coverage::NativeCompletion => false,
-            Coverage::NativePacket(_) => true,
+            Coverage::NativePacket(_) | Coverage::EventPacket(_) => true,
         };
         Some(crate::admission::Allowance {
             occurrences: vec![],
@@ -179,9 +181,13 @@ impl ChargeProgram {
             Coverage::NativePacket(close) => {
                 native_completion::derive(exe, code, self.statement, self.range, Some(close))?
             }
+            Coverage::EventPacket(close) => {
+                event_packet::derive(exe, code, self.statement, self.range, close)?
+            }
         };
         let native_depth = match self.coverage {
             Coverage::Span => None,
+            Coverage::EventPacket(_) => Some(0),
             Coverage::NativeCompletion => Some(native_completion::depth(
                 exe,
                 self.statement,
