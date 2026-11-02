@@ -3,7 +3,7 @@ use super::*;
 use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurrence};
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Member, MemberEdit};
+use lash_kernel_state::kernel_internals::logical::{JournalEvent, Member, MemberEdit, MemberFault};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 enum PreparedMember {
@@ -218,25 +218,36 @@ impl KernelMachine {
             .invocation;
         let mut arena = self.arena.borrow_mut();
         let ledger = store.borrow();
-        let member = ledger
-            .prepare_member_publication(
-                arena.registration().map_err(native_fault)?,
-                self.heap.pages(),
-                handle,
-                edit.member.clone(),
-                edit.next,
-                &[],
-                &[],
-            )
-            .map_err(|error| match error {
-                lash_kernel_state::kernel_internals::logical::MemberFault::Heap(error) => error,
-                lash_kernel_state::kernel_internals::logical::MemberFault::Native(error) => {
-                    native_fault(error)
-                }
-            })?;
-        let delta = i128::from(member.balance()?.total()?) - i128::from(ledger.balance()?.total()?);
-        let released = member.release_cost(&inputs, self.heap.pages())?;
-        drop(member);
+        let measured = match ledger.prepare_member_publication(
+            arena.registration().map_err(native_fault)?,
+            self.heap.pages(),
+            handle,
+            edit.member.clone(),
+            edit.next,
+            &[],
+            &[],
+        ) {
+            Ok(member) => Ok((
+                i128::from(member.balance()?.total()?) - i128::from(ledger.balance()?.total()?),
+                member.release_cost(&inputs, self.heap.pages())?,
+            )),
+            Err(MemberFault::Native(doc::NativeError::Retry(doc::Retry::Cold {
+                object,
+                chunk,
+            }))) => Err((object, chunk)),
+            Err(MemberFault::Heap(error)) => return Err(error.into()),
+            Err(MemberFault::Native(error)) => return Err(native_fault(error).into()),
+        };
+        let (delta, released) = match measured {
+            Ok(measured) => measured,
+            Err((object, chunk)) => {
+                // A member the store reaches cold has done nothing a run
+                // sees: the machine decodes the chunk and asks again.
+                drop((ledger, arena, bank));
+                self.warm(object, chunk)?;
+                return self.publish_source_member(running, pc);
+            }
+        };
         let event = interval
             .events()
             .next()
