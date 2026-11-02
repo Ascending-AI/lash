@@ -488,6 +488,22 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
 }
 
 impl<M: TurnProtocol> MachineState<M> {
+    /// The effect the machine waits on, if it waits on one.
+    pub(super) fn waiting_effect(&self) -> Option<EffectId> {
+        match self {
+            Self::Waiting { effect_id, .. } => Some(*effect_id),
+            _ => None,
+        }
+    }
+
+    /// Deliver the effect the machine waits on again at the next poll: a
+    /// replayed machine's host has not seen it.
+    pub(super) fn redeliver(&mut self) {
+        if let Self::Waiting { delivery, .. } = self {
+            *delivery = EffectDeliveryStatus::Pending;
+        }
+    }
+
     pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
             Self::Waiting {
@@ -580,6 +596,9 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) run_abort: Option<RunAbort>,
     /// The turn's decided completion candidates, in decision order.
     pub(super) decided_completions: Vec<lash_protocol_types::DecidedCompletion>,
+    /// The inputs the machine was handed since its host started journaling
+    /// them, and not yet committed ([`TurnMachine::journal_inputs`]).
+    pub(super) inputs: Option<super::InputJournal<M::IntentOutcome>>,
     /// What the turn's last committed checkpoint stored, which the next
     /// builds on (FIG-5955). Runtime-only: a restore starts it from the
     /// content it reads.

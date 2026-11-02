@@ -119,6 +119,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             resume_work: None,
             run_abort: None,
             content: ContentLedger::default(),
+            inputs: None,
         }
     }
 
@@ -204,6 +205,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// re-delivers it unchanged. Answers `false`, changing nothing, when the
     /// machine waits on no model call under `id`.
     pub fn admit_request(&mut self, id: EffectId, request: Arc<RetainedLlmRequest>) -> bool {
+        self.record_admitted(id, &request);
         match &mut self.state {
             MachineState::Waiting {
                 effect_id,
@@ -225,6 +227,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         evidence: lash_protocol_types::TurnCancellationEvidence,
     ) {
+        self.record_input(|| MachineInput::Cancellation(evidence.clone()));
         if self.observed_cancellation.is_none() {
             self.observed_cancellation = Some(evidence);
         }
@@ -300,6 +303,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         usage: &LlmUsage,
     ) -> Result<(), TokenUsageOverflow> {
+        self.record_input(|| MachineInput::UnansweredUsage(usage.clone()));
         self.cumulative_usage = self.cumulative_usage.checked_add(usage)?;
         Ok(())
     }
@@ -312,6 +316,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ///
     /// [`TokenUsageOverflow`] when the count overflows.
     pub fn record_unknown_call_usage(&mut self) -> Result<(), TokenUsageOverflow> {
+        self.record_input(|| MachineInput::UnknownUsage);
         self.cumulative_usage = self
             .cumulative_usage
             .checked_add(&LlmUsage::unknown_call())?;
@@ -332,6 +337,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         reported: &LlmUsage,
         newest: bool,
     ) -> Result<(), TokenUsageOverflow> {
+        self.record_input(|| MachineInput::SettledUsage {
+            reported: reported.clone(),
+            newest,
+        });
         let (reported, _) = checked_turn_usage_from_llm_usage(reported)?;
         let Some(unknown_calls) = self.cumulative_usage.unknown_calls.checked_sub(1) else {
             return Ok(());
@@ -661,6 +670,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             resume_work: None,
             run_abort: None,
             content: ledger,
+            inputs: None,
         };
         machine.check_parked_state()?;
         Ok(machine)
@@ -719,7 +729,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let Some(environment) = self.environment.as_ref() else {
             // A fresh machine syncs before it prepares, and restore refuses a
             // checkpoint that waits on driver work with no environment.
-            self.fail_turn(make_error_event(
+            self.fail_unrecorded(make_error_event(
                 lash_protocol_types::session_model::TurnFailureKind::ExecutionEnvironment,
                 Some(lash_protocol_types::session_model::TurnFailureCode::ReconfigureFailed.into()),
                 "the turn has no synced execution environment",
@@ -784,10 +794,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn fail_turn(&mut self, event: SessionStreamEvent) {
-        let cause = lash_protocol_types::TurnErrorCause::runtime(match &event {
-            SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
-            _ => None,
-        });
+        let cause = runtime_cause(&event);
         self.fail_turn_with_cause(event, cause);
     }
 
@@ -798,11 +805,26 @@ impl<M: TurnProtocol> TurnMachine<M> {
         event: SessionStreamEvent,
         cause: lash_protocol_types::TurnErrorCause,
     ) {
+        self.record_input(|| MachineInput::Failed {
+            event: event.clone(),
+            cause: cause.clone(),
+        });
+        self.fail_with(event, cause);
+    }
+
+    /// The machine's own failure, which its inputs already determine.
+    fn fail_unrecorded(&mut self, event: SessionStreamEvent) {
+        let cause = runtime_cause(&event);
+        self.fail_with(event, cause);
+    }
+
+    fn fail_with(&mut self, event: SessionStreamEvent, cause: lash_protocol_types::TurnErrorCause) {
         self.emit(event);
         self.finish(TurnOutcome::Stopped(TurnStop::RuntimeError { cause }));
     }
 
     pub fn finish_with_outcome(&mut self, outcome: TurnOutcome) {
+        self.record_input(|| MachineInput::Finished(outcome.clone()));
         self.finish(outcome);
     }
 
@@ -813,6 +835,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// uncommitted tail the stop returns to that point. A machine waiting
     /// on its next model call, between steps, keeps everything.
     pub fn finish_cancelled(&mut self, evidence: lash_protocol_types::TurnCancellationEvidence) {
+        self.record_input(|| MachineInput::FinishedCancelled(evidence.clone()));
         let safe = self.messages.prompt_resume_safe_len();
         if safe < self.messages.len() {
             self.messages.make_mut().truncate(safe);
@@ -887,6 +910,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn poll_effect(&mut self) -> Option<Effect<M>> {
+        self.record_input(|| MachineInput::Polled(1));
         if let Some(effect) = self.poll_scheduled_effect() {
             return Some(effect);
         }
@@ -1124,25 +1148,43 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Feed a response to a previously emitted effect.
     pub fn handle_response(&mut self, response: Response<M::IntentOutcome>) {
-        if let Err(overflow) = self.try_handle_response(response) {
-            self.fail_turn(make_error_event(
-                lash_protocol_types::session_model::TurnFailureKind::TokenUsageAccounting,
-                Some(
-                    lash_protocol_types::session_model::TurnFailureCode::TokenUsageOverflow.into(),
-                ),
-                format!(
-                    "token usage counter `{}` overflowed while accumulating turn usage",
-                    overflow.counter()
-                ),
-                None,
-                lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-            ));
+        self.record_input(|| MachineInput::Answered {
+            response: RecordedResponse::of(&response),
+            fails_on_overflow: true,
+        });
+        if let Err(overflow) = self.handle_unrecorded(response) {
+            self.fail_on_overflow(overflow);
         }
+    }
+
+    /// Fail the turn for the usage overflow a response caused.
+    pub(super) fn fail_on_overflow(&mut self, overflow: TokenUsageOverflow) {
+        self.fail_unrecorded(make_error_event(
+            lash_protocol_types::session_model::TurnFailureKind::TokenUsageAccounting,
+            Some(lash_protocol_types::session_model::TurnFailureCode::TokenUsageOverflow.into()),
+            format!(
+                "token usage counter `{}` overflowed while accumulating turn usage",
+                overflow.counter()
+            ),
+            None,
+            lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
+        ));
     }
 
     /// Fallible host seam for delivering a response whose usage must remain
     /// suitable for durable accumulation.
     pub fn try_handle_response(
+        &mut self,
+        response: Response<M::IntentOutcome>,
+    ) -> Result<(), TokenUsageOverflow> {
+        self.record_input(|| MachineInput::Answered {
+            response: RecordedResponse::of(&response),
+            fails_on_overflow: false,
+        });
+        self.handle_unrecorded(response)
+    }
+
+    pub(super) fn handle_unrecorded(
         &mut self,
         response: Response<M::IntentOutcome>,
     ) -> Result<(), TokenUsageOverflow> {
@@ -1191,7 +1233,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.state = MachineState::PrepareIteration;
             }
             Err(failure) => {
-                self.fail_turn(make_error_event(
+                self.fail_unrecorded(make_error_event(
                     lash_protocol_types::session_model::TurnFailureKind::ExecutionEnvironment,
                     Some(failure.code),
                     format!(
@@ -1658,4 +1700,12 @@ fn sibling_failed<I>(call: PendingToolCall) -> CompletedToolCall<I> {
         intent_outcomes: Vec::new(),
         replay: call.replay,
     }
+}
+
+/// The runtime cause a failure event names.
+fn runtime_cause(event: &SessionStreamEvent) -> lash_protocol_types::TurnErrorCause {
+    lash_protocol_types::TurnErrorCause::runtime(match event {
+        SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
+        _ => None,
+    })
 }

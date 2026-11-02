@@ -11,6 +11,7 @@ use super::*;
 mod bounded_checkpoint;
 mod fold;
 mod held_progress;
+mod input_journal;
 use lash_protocol_types::TurnFinish;
 use lash_protocol_types::session_model::message::PartAttachment;
 use lash_protocol_types::{ModelToolReturnPart, ToolCancellation, ToolFailure, ToolFailureClass};
