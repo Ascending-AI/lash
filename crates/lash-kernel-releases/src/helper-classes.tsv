@@ -1144,6 +1144,7 @@ ts.string.uint32	operation
 ts.string.valueOf	total
 ts.sub	operation
 ts.tdz	total
+ts.text_index	body
 ts.to_boolean	total
 ts.to_int32	operation
 ts.to_number	operation
