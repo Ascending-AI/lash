@@ -4,6 +4,7 @@ use super::*;
 // sufficient envelope also keeps the output occurrence live throughout, but
 // exact admission must use the real body events and atomic output transfer.
 pub(super) fn check() {
+    boundary_construction();
     use lash_kernel_doc::heap::PageValue;
     use lash_kernel_doc::{
         NativeResourceContract as Contract, NativeResourceEntity as Kind,
@@ -91,5 +92,149 @@ pub(super) fn check() {
     assert!(
         prepared.admit(83).is_some(),
         "the sufficient 99-byte envelope is not the exact native refusal threshold"
+    );
+}
+
+/// Source allocation order includes retired interiors; a rootless cycle remains
+/// charged until normalization. Preparing, refusing and rejecting a stale
+/// boundary must not consume an identity or invoke its storage callback.
+fn boundary_construction() {
+    use lash_kernel_doc::heap::{FamilyId, PageValue};
+    let (heap, _) = fresh();
+    let mut arena = crate::arena::Arena::new();
+    let mut ledger = Ledger::fresh();
+    let ids: Vec<_> = (0..3)
+        .map(|ordinal| EntityId {
+            family: FamilyId::PROVISIONAL,
+            ordinal,
+        })
+        .collect();
+    let entities = vec![
+        VirtualEntity {
+            entity: ids[0],
+            body: VirtualBody::List(vec![]),
+        },
+        VirtualEntity {
+            entity: ids[1],
+            body: VirtualBody::List(vec![PageValue::List(ids[1])]),
+        },
+        VirtualEntity {
+            entity: ids[2],
+            body: VirtualBody::List(vec![PageValue::Int(7.into())]),
+        },
+    ];
+    let value = PageValue::List(ids[2]);
+    let outputs = [(owner(5), RootValue::Page(&value))];
+    let before = (arena.held(), arena.allocations(), arena.next_provisional());
+    for swapped in [true, false] {
+        let mut bodies = entities.clone();
+        if swapped {
+            bodies.swap(0, 2);
+        }
+        {
+            let prepared = ledger.prepare_construction_boundary(
+                arena.registration().unwrap(),
+                &heap,
+                &[],
+                &outputs,
+                &bodies,
+            );
+            if swapped {
+                assert!(
+                    prepared.is_err(),
+                    "binding traversal cannot choose allocation ordinals"
+                );
+            } else {
+                let (prepared, members) = prepared.unwrap();
+                assert_eq!(members, [0, 16, 17]);
+                assert_eq!(prepared.balance().unwrap().total().unwrap(), 113);
+                assert!(
+                    prepared.admit(112).is_err(),
+                    "a rootless cycle is still source retained"
+                );
+            }
+        }
+        assert_eq!(
+            (arena.held(), arena.allocations(), arena.next_provisional()),
+            before
+        );
+        assert_eq!(ledger.balance().unwrap().total().unwrap(), 0);
+    }
+    let called = std::cell::Cell::new(false);
+    let (prepared, _) = ledger
+        .prepare_construction_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            &[],
+            &outputs,
+            &entities,
+        )
+        .unwrap();
+    let accepted = prepared
+        .admit(113)
+        .unwrap_or_else(|_| panic!("exact construction fits"));
+    ledger.handoff().unwrap();
+    assert!(
+        accepted
+            .publish(&mut ledger, |_, _| called.set(true))
+            .is_err()
+    );
+    assert!(!called.get(), "stale acceptance cannot install storage");
+    assert_eq!(
+        (arena.held(), arena.allocations(), arena.next_provisional()),
+        before
+    );
+    let (prepared, _) = ledger
+        .prepare_construction_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            &[],
+            &outputs,
+            &entities,
+        )
+        .unwrap();
+    prepared
+        .admit(113)
+        .unwrap_or_else(|_| panic!("exact construction fits"))
+        .publish(&mut ledger, |_, edits| {
+            assert!(edits.is_empty());
+            called.set(true);
+        })
+        .unwrap();
+    assert!(called.get());
+    assert_eq!(
+        arena.next_provisional().ordinal,
+        3,
+        "the retired allocation consumed its original ordinal"
+    );
+    assert!(
+        ledger
+            .entity_holding(ids[0], heap.pages())
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        ledger
+            .entity_holding(ids[1], heap.pages())
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        ledger
+            .entity_holding(ids[2], heap.pages())
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), 113);
+    ledger
+        .normalize(
+            heap.pages(),
+            crate::paged::census_impl::TraceLimits::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        ledger.balance().unwrap().total().unwrap(),
+        65,
+        "canonical normalization releases the rootless cycle"
     );
 }

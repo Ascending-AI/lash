@@ -3,6 +3,10 @@ use super::*;
 /// A completed construction never becomes its own unpaid head. Navigation
 /// follows source evaluation order and declines a future cursor decision.
 pub(super) fn successors() {
+    Embedder::new("main { return null }")
+        .machine
+        .check_prepared_constructor_graphs();
+    prepared_literals_and_captures();
     use crate::compile::room::{self, Phase, Point};
     use lash_kernel_value::sites::{Site, Unit};
     for (text, completed, next, phase) in [
@@ -157,4 +161,53 @@ pub(super) fn successors() {
             .is_err(),
         "an expression cursor cannot navigate a statement Commit"
     );
+}
+
+fn prepared_literals_and_captures() {
+    use crate::compile::CodeId;
+
+    use lash_kernel_doc as doc;
+
+    use std::sync::Arc;
+    let run = Embedder::new(
+        "main { let make = fn(x) { let f = fn() { return x } return f } return apply make(7) }",
+    );
+    let (program, _) = run.program(false);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("closure source admits"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("closure source compiles"));
+    let (code_id, target) = (0..exe.code_count())
+        .map(|index| (CodeId(index as u32), exe.code(CodeId(index as u32))))
+        .find(|(_, code)| code.created.is_some() && code.captures.len() == 1)
+        .unwrap();
+    let lash_kernel_value::sites::Unit::Library(function) = target.site.unit else {
+        panic!("closure has a source function");
+    };
+    let identity = Arc::new(doc::arena::ClosureIdentity {
+        capture_names: target.capture_names.clone(),
+        callable: lash_kernel_value::names::CallableId {
+            link: program.link,
+            function,
+        },
+        site: doc::linked_site::LinkedSite {
+            link: program.link,
+            site: target.created.as_ref().unwrap().clone(),
+        },
+    });
+    let code = doc::arena::LocalCode {
+        executable: exe.local(),
+        code: code_id.0,
+    };
+    run.machine
+        .check_prepared_constructor_literals(identity, code);
 }

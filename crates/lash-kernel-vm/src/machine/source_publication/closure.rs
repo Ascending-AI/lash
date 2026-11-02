@@ -38,6 +38,7 @@ impl StoragePreparation for ClosureConstruction {
         };
         if !matches!(&entity.body, VirtualBody::Closure(captures) if captures == &self.entities)
             || entity.entity != self.entity
+            || self.entity != arena.next_provisional()
             || !matches!(event.outputs.as_slice(), [(_, PV::Page(doc::heap::PageValue::Closure(id)))] if *id == self.entity)
             || !event.inputs.is_empty()
             || event.member.is_some()
@@ -56,12 +57,8 @@ impl StoragePreparation for ClosureConstruction {
         {
             return Ok(None);
         }
-        let (handle, mut installation) = arena
-            .prepare_closure(self.identity, self.captures, self.code)
-            .map_err(native_fault)?;
-        installation
-            .bind_entity(handle, self.entity)
-            .map_err(native_fault)?;
+        let (handle, installation, _) =
+            prepare_closure_body(arena, self.identity, self.captures, self.code)?;
         let (registration, batch) = installation.into_parts();
         Ok(Some(PreparedStorage {
             registration,
@@ -324,4 +321,76 @@ impl KernelMachine {
         }
         Ok(published)
     }
+}
+
+/// Capture identities come from the actual cells, in capture order. The fresh
+/// closure takes the next source allocation ordinal under the same registration.
+fn prepare_closure_body(
+    arena: &mut Arena,
+    identity: Arc<doc::arena::ClosureIdentity>,
+    captures: Vec<ArenaHandle>,
+    code: doc::arena::LocalCode,
+) -> Result<
+    (
+        ArenaHandle,
+        lash_kernel_state::arena::PreparedInstallation<'_>,
+        VirtualEntity,
+    ),
+    HeapFault,
+> {
+    if identity.capture_names.len() != captures.len() {
+        return Err(malformed(
+            "closure capture names disagree with actual cells",
+        ));
+    }
+    let entity = arena.next_provisional();
+    let entities = captures
+        .iter()
+        .map(|handle| {
+            arena.cell(*handle).map_err(native_fault)?;
+            arena
+                .facts(*handle)
+                .map_err(native_fault)?
+                .ledger_entity()
+                .ok_or_else(|| malformed("closure capture has no source identity"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (handle, mut installation) = arena
+        .prepare_closure(identity, captures, code)
+        .map_err(native_fault)?;
+    installation
+        .bind_entity(handle, entity)
+        .map_err(native_fault)?;
+    Ok((
+        handle,
+        installation,
+        VirtualEntity {
+            entity,
+            body: VirtualBody::Closure(entities),
+        },
+    ))
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "core wires authenticated source acceptance after consumer merge"
+    )
+)]
+pub(in crate::machine) fn prepare_closure<'a>(
+    arena: &'a mut Arena,
+    heap: &PagedHeap,
+    identity: Arc<doc::arena::ClosureIdentity>,
+    captures: Vec<ArenaHandle>,
+    code: doc::arena::LocalCode,
+    output: lash_kernel_state::kernel_internals::logical::Owner,
+) -> Result<super::construction::boundary::PreparedGraph<'a>, HeapFault> {
+    let (handle, installation, entity) = prepare_closure_body(arena, identity, captures, code)?;
+    super::construction::boundary::finish(
+        installation,
+        heap,
+        &[(output, doc::Value::Closure(handle))],
+        vec![entity],
+    )
 }

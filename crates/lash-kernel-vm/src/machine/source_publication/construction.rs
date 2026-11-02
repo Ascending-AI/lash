@@ -1,4 +1,5 @@
 //! Precise constructors publish the body and its real operand-bank transition.
+pub(in crate::machine) mod boundary;
 pub(in crate::machine) mod storage;
 use super::*;
 use crate::compile::room::{ExitKind, Phase, Point, publication::Occurrence};
