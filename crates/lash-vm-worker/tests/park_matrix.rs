@@ -27,6 +27,10 @@
 //! next call with the same arguments, is refused at that park, naming its
 //! charge, before anything is admitted again.
 //!
+//! Checkpoint law (FIG-7585): a run of more sequential calls than its
+//! journal holds before a checkpoint takes one mid-run, and P1 to P5 hold
+//! with that checkpoint's commit cut under every fault.
+//!
 //! Number law (`K-EFF-005`): through the admitted-execution lifecycle and
 //! its run records, a result's numbers reach the machine as written, and an
 //! integer or a float argument leaves as digits that lose nothing.
@@ -217,6 +221,37 @@ main {{}}
         }),
     );
     linked(document)
+}
+
+/// More sequential calls than a run journals before its next park takes a
+/// checkpoint (`CHECKPOINT_BATCHES`, 600): the run checkpoints mid-run once.
+const SEQUENTIAL: u64 = 605;
+
+/// The checkpoint law's program: `main` performs `work(index)` for each
+/// index in turn, one delivery batch each, and returns every result.
+fn sequential_program() -> Program {
+    let indices = (0..SEQUENTIAL)
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = format!(
+        r#"kernel 1
+numbers float
+import 0 operation tools.work(index: Int) -> Any
+main {{
+  let results = []
+  for index in [{indices}] {{
+    let answer = null
+    try {{
+      set answer = perform 0(index) as Any
+    }} catch e {{ set answer = e }}
+    set results[index] = answer
+  }}
+  return results
+}}
+"#
+    );
+    linked(parse_document(&text).expect("the sequential fixture is valid"))
 }
 
 /// The program `document`, linked against the law's published operations.
@@ -530,6 +565,9 @@ struct ParkScenario {
     program: Program,
     tier: Tier,
     first_claimant: Option<&'static str>,
+    /// The sequential program's call count, whose results the run ends
+    /// with in order; `None` for the three workers and their sum.
+    sequential: Option<u64>,
     keep: Mutex<Option<lash_postgres_store::testing::IsolatedDatabase>>,
 }
 
@@ -641,20 +679,45 @@ impl Scenario for ParkScenario {
         if ends.iter().any(|other| other != end) {
             violations.push(format!("P4: the run ended differently: {ends:?}"));
         }
-        let results = match end {
-            Datum::List(results) if results.len() as u64 == WORKERS + 1 => results.clone(),
-            other => {
-                violations.push(format!("P4: the run ended with {other:?}"));
-                Vec::new()
+        if let Some(calls) = self.sequential {
+            violations.extend(sequential_answered(end, calls, &bodies));
+        } else {
+            violations.extend(workers_answered(end, &bodies, &calls));
+        }
+        match stored_root(nodes.database().as_ref()).await {
+            Ok((root, _)) if root.status == ExecStatus::Ended => {}
+            Ok((root, _)) => {
+                violations.push(format!("P5: the last root is {:?}, not ended", root.status));
             }
-        };
-        let identities: Vec<EffectId> = (0..WORKERS)
-            .map(worker_identity)
-            .chain([sum_identity()])
-            .collect();
-        for (identity, result) in identities.iter().zip(&results) {
-            let call = calls.get(identity);
-            let answered = match result {
+            Err(error) => violations.push(format!("P5: no last root reads: {error}")),
+        }
+        violations
+    }
+}
+
+/// P4 for the three workers and their sum: each result is what one of
+/// that effect's bodies answered, or its interruption.
+fn workers_answered(
+    end: &Datum,
+    bodies: &[Body],
+    calls: &BTreeMap<EffectId, ToolCallId>,
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    let results = match end {
+        Datum::List(results) if results.len() as u64 == WORKERS + 1 => results.clone(),
+        other => {
+            violations.push(format!("P4: the run ended with {other:?}"));
+            Vec::new()
+        }
+    };
+    let identities: Vec<EffectId> = (0..WORKERS)
+        .map(worker_identity)
+        .chain([sum_identity()])
+        .collect();
+    for (identity, result) in identities.iter().zip(&results) {
+        let call = calls.get(identity);
+        let answered =
+            match result {
                 Datum::Record(fields) => fields.iter().any(|(key, value)| {
                     key == "token"
                         && bodies.iter().any(|body| {
@@ -668,20 +731,53 @@ impl Scenario for ParkScenario {
                 Datum::Error(error) => error.kind == EFFECT_INTERRUPTED,
                 _ => false,
             };
-            if !answered {
-                violations.push(format!(
-                    "P4: {identity:?} ended as {result:?}, neither a body's answer nor its interruption"
-                ));
-            }
+        if !answered {
+            violations.push(format!(
+                "P4: {identity:?} ended as {result:?}, neither a body's answer nor its interruption"
+            ));
         }
-        match stored_root(nodes.database().as_ref()).await {
-            Ok((root, _)) if root.status == ExecStatus::Ended => {}
-            Ok((root, _)) => {
-                violations.push(format!("P5: the last root is {:?}, not ended", root.status));
+    }
+    violations
+}
+
+/// P4 for the sequential program: the run ends with its `calls` results,
+/// each the answer of one body, no two the same, or its interruption.
+fn sequential_answered(end: &Datum, calls: u64, bodies: &[Body]) -> Vec<String> {
+    let Datum::List(results) = end else {
+        return vec![format!("P4: the run ended with {end:?}")];
+    };
+    if results.len() as u64 != calls {
+        return vec![format!("P4: the run ended with {} results", results.len())];
+    }
+    // A body's token, as the run's float numbers carry it.
+    let token = |result: &Datum| match result {
+        Datum::Record(fields) => fields.iter().find_map(|(key, value)| match value {
+            Datum::Float(token) if key == "token" => Some(token.get()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let answered: Vec<f64> = bodies.iter().map(|body| body.token as f64).collect();
+    let mut seen = Vec::new();
+    let unanswered: Vec<usize> = results
+        .iter()
+        .enumerate()
+        .filter(|(_, result)| match token(result) {
+            Some(token) if answered.contains(&token) && !seen.contains(&token) => {
+                seen.push(token);
+                false
             }
-            Err(error) => violations.push(format!("P5: no last root reads: {error}")),
-        }
-        violations
+            _ => !matches!(result, Datum::Error(error) if error.kind == EFFECT_INTERRUPTED),
+        })
+        .map(|(index, _)| index)
+        .collect();
+    if unanswered.is_empty() {
+        Vec::new()
+    } else {
+        vec![format!(
+            "P4: results {unanswered:?} are not one body's answer each: {:?}",
+            unanswered.first().map(|index| &results[*index])
+        )]
     }
 }
 
@@ -1453,6 +1549,7 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
             program: program.clone(),
             tier,
             first_claimant: None,
+            sequential: None,
             keep: Mutex::default(),
         })
         .await;
@@ -1513,6 +1610,7 @@ async fn every_park_cut_is_reached_when_b_claims_before_a(tier: Tier) {
             } else {
                 "b"
             }),
+            sequential: None,
             keep: Mutex::default(),
         })
         .await;
@@ -1562,11 +1660,39 @@ async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numb
                 program: program.clone(),
                 tier,
                 first_claimant: None,
+                sequential: None,
                 keep: Mutex::default(),
             })
             .await
             .assert_held();
     }
+}
+
+/// The checkpoint law (FIG-7585): a run longer than its journal bound
+/// checkpoints mid-run, and P1 to P5 hold with that checkpoint's commit cut
+/// under every fault: a cut before it re-runs the run from its start over
+/// its journal, a cut after it resumes from the checkpoint.
+async fn a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint(tier: Tier) {
+    let program = sequential_program();
+    let report = park_matrix()
+        .labels(&[CommitLabel::CELL_SNAPSHOT_ADMIT])
+        .run(|| ParkScenario {
+            shared: Arc::default(),
+            drive: Drive::Broker,
+            program: program.clone(),
+            tier,
+            first_claimant: None,
+            sequential: Some(SEQUENTIAL),
+            keep: Mutex::default(),
+        })
+        .await;
+    assert!(
+        report.labels().contains(&CommitLabel::CELL_SNAPSHOT_ADMIT),
+        "the run took a mid-run checkpoint: {:?}",
+        report.labels()
+    );
+    assert!(!report.cells.is_empty(), "the checkpoint commit was cut");
+    report.assert_held();
 }
 
 /// The divergence law, uncut.
@@ -1580,6 +1706,7 @@ async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_
             program: diverging_program(),
             tier,
             first_claimant: None,
+            sequential: None,
             keep: Mutex::default(),
         })
         .await
@@ -1588,6 +1715,14 @@ async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_
 
 // Each tier mounts the same kernel laws; PostgreSQL selection requires a service.
 mod sqlite_memory {
+    #[tokio::test]
+    async fn a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint() {
+        super::a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint(
+            super::Tier::SqliteMemory,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge() {
         super::a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge(
@@ -1618,6 +1753,15 @@ mod sqlite_memory {
     }
 }
 mod postgres {
+    #[tokio::test]
+    #[ignore = "requires hermetic PostgreSQL through kiln gate"]
+    async fn a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint() {
+        super::a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint(
+            super::Tier::Postgres,
+        )
+        .await;
+    }
+
     #[tokio::test]
     #[ignore = "requires hermetic PostgreSQL through kiln gate"]
     async fn every_park_cut_is_reached_when_b_claims_before_a() {
