@@ -200,6 +200,7 @@ impl Machine for KernelMachine {
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         self.logical_flush().map_err(SealError::Heap)?;
         let sealed = self.seal_projection(budget)?;
+        self.publish_logical_meter().map_err(SealError::Heap)?;
         self.projecting = sealed.is_none();
         Ok(sealed)
     }
