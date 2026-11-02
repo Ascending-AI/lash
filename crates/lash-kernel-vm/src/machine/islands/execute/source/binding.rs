@@ -129,6 +129,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             frame.slots[site.at] = SlotState::Value(value);
             return Ok(Some(true));
         }
+        // An RHS that holds nothing once the region publishes has no source
+        // move; deciding that needs no publication, so the region stays open.
+        if !self.logical.holds(input, self.heap.pages())? {
+            return Ok(None);
+        }
         self.source_bindings(frame)?;
         let activation = frame
             .state

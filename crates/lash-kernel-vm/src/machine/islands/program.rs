@@ -260,6 +260,7 @@ impl<'e> Build<'e> {
             starts: Box::default(),
             end: 0,
             after: 0,
+            leave: std::sync::OnceLock::new(),
         });
         let literal_entry = self.fused
             && index == 0

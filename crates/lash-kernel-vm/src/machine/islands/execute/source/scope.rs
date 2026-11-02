@@ -84,70 +84,65 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         debug_assert!(loop_body.is_none() || frame.state.control.len() >= 2);
         debug_assert!(!matches!(loop_body, Some(ScopeLoop::For { .. })) || dependency.is_some());
-        let leave = Point {
-            site: closing.clone(),
-            phase: SourcePhase::Leave,
-        };
-        let Ok(interval) = source.compile_event(&leave, ExitKind::Normal) else {
+        let members = frame.state.callee.compiled.blocks[block]
+            .leave
+            .get_or_init(|| {
+                let leave = Point {
+                    site: closing.clone(),
+                    phase: SourcePhase::Leave,
+                };
+                let interval = source.compile_event(&leave, ExitKind::Normal).ok()?;
+                if !interval.scope_release(source, closing) {
+                    return None;
+                }
+                let slots = source.owner_slots().ok()?;
+                let mut members = BTreeSet::new();
+                for selector in [
+                    room::Owner::Scope(closing.clone()),
+                    room::Owner::Operands(closing.clone()),
+                ] {
+                    for owner in slots.group(&selector, self.task, 0)? {
+                        let Owner::Value { slot, .. } = owner else {
+                            return None;
+                        };
+                        members.insert(slot);
+                    }
+                }
+                Some(members.into_iter().collect())
+            });
+        let Some(members) = members else {
             return Ok(false);
         };
-        if !interval.scope_release(source, closing)
-            || dependency.is_some_and(|handle| self.arena.content_version(handle).is_none())
-        {
+        if dependency.is_some_and(|handle| self.arena.content_version(handle).is_none()) {
             return Ok(false);
         }
-        self.source_bindings(frame)?;
-        self.logical.flush(self.arena, self.heap)?;
         let activation = frame
             .state
             .source
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| malformed("nested scope has no source activation"))?;
-        if activation.frontier.is_none() {
+        let Some(frontier) = activation.frontier.as_mut() else {
             return Ok(false);
-        }
-        let slots = source
-            .owner_slots()
-            .map_err(|_| malformed("nested scope owners failed verification"))?;
-        let store = self.logical.ledger();
-        let mut ledger = store.borrow_mut();
-        let live = ledger.frame_owners(self.task, activation.invocation.id(), self.heap.pages())?;
-        let mut inputs = BTreeSet::new();
-        for selector in [
-            room::Owner::Scope(closing.clone()),
-            room::Owner::Operands(closing.clone()),
-        ] {
-            let owners = slots
-                .select_group(&selector, self.task, activation.invocation.id(), &live)
-                .ok_or_else(|| malformed("nested scope has no canonical owner group"))?;
-            for owner in owners {
-                if ledger.holding(owner, self.heap.pages())?.is_some() {
-                    inputs.insert(owner);
-                }
-            }
-        }
-        let inputs = inputs.into_iter().collect::<Vec<_>>();
+        };
         // The proven prefix's shared admission: a release adds no peak and no
-        // charge, so only the current envelope and window. Its journal is the
-        // groups' held owners, released in place.
+        // charge, so only the current envelope and window. Its journal is
+        // the groups' held owners, released inside the open region.
         let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-        if ledger.balance()?.total()? > self.memory_bound
-            || self.charged > self.bound
+        if self.charged > self.bound
             || depth > self.call_depth
-            || !ledger.release(&inputs, self.heap.pages())?
+            || !self
+                .logical
+                .admit(self.arena, self.heap, 0, self.memory_bound)?
         {
             return Ok(false);
         }
-        let total = ledger.balance()?.total()?;
-        drop(ledger);
-        frame
-            .state
-            .source
-            .as_mut()
-            .and_then(|activation| activation.frontier.as_mut())
-            .ok_or_else(|| malformed("nested scope frontier disappeared"))?
-            .proven()?;
-        self.logical_memory.set(total);
+        for slot in members {
+            let owner = activation.invocation.owner(*slot);
+            if self.logical.holds(owner, self.heap.pages())? {
+                self.logical.replace(owner, None);
+            }
+        }
+        frontier.proven()?;
         for at in &frame.state.callee.compiled.blocks[block].declares {
             frame.slots[*at as usize] = SlotState::Empty;
         }

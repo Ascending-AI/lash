@@ -955,6 +955,44 @@ pub(crate) struct Stream {
     /// The layout the stream was lowered under, which says whether its
     /// read sites cache.
     pub(crate) layout: Layout,
+    /// Each source leaf read's authenticated interval and operand slot,
+    /// resolved once per pc from the immutable source.
+    pub(crate) source_leaves: PcMemo<SourceLeaf>,
+    /// Where each source site's operand transfers, resolved once per pc.
+    pub(crate) source_transfers: PcMemo<(CodeId, Option<room::TransferTarget>)>,
+}
+
+/// A source leaf read resolved for one pc of one code's source.
+pub(crate) struct SourceLeaf {
+    pub(crate) code: CodeId,
+    pub(crate) at: room::Point,
+    pub(crate) unpaid: room::Point,
+    pub(crate) interval: Arc<room::CompiledInterval>,
+    /// The read's operand slot, when the source owns one.
+    pub(crate) output: Option<lash_kernel_state::kernel_internals::logical::Slot>,
+}
+/// Per-pc resolutions from the immutable source, sized on first use.
+pub(crate) struct PcMemo<T>(std::sync::OnceLock<Box<[std::sync::OnceLock<Option<T>>]>>);
+impl<T> Default for PcMemo<T> {
+    fn default() -> Self {
+        Self(std::sync::OnceLock::new())
+    }
+}
+impl<T> PcMemo<T> {
+    /// The resolution at `pc`, made by `resolve` on first use. Callers check
+    /// its code and take the uncached path for a miss.
+    pub(crate) fn get(
+        &self,
+        pcs: usize,
+        pc: usize,
+        resolve: impl FnOnce() -> Option<T>,
+    ) -> Option<&T> {
+        self.0
+            .get_or_init(|| (0..pcs).map(|_| std::sync::OnceLock::new()).collect())
+            .get(pc)?
+            .get_or_init(resolve)
+            .as_ref()
+    }
 }
 
 #[derive(Clone)]

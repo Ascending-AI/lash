@@ -188,9 +188,40 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(Some(site)) = stream.source_sites.get(read.pc() as usize) else {
             return Ok(false);
         };
-        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let Ok((at, unpaid, interval)) = source.compile_leaf(site) else {
-            return Ok(false);
+        let code = frame.state.callee.plan.code;
+        let source = &self.exe.code(code).source_room;
+        // The leaf's interval and operand slot are resolved once per pc.
+        let leaf = stream
+            .source_leaves
+            .get(stream.ops.len(), read.pc() as usize, || {
+                let (at, unpaid, interval) = source.compile_leaf(site).ok()?;
+                let output = match source.owner_slots().ok()?.root(
+                    &room::Owner::Operand(at.site.clone()),
+                    self.task,
+                    0,
+                ) {
+                    Some(Owner::Value { slot, .. }) => Some(slot),
+                    _ => None,
+                };
+                Some(crate::compile::SourceLeaf {
+                    code,
+                    at,
+                    unpaid,
+                    interval,
+                    output,
+                })
+            })
+            .filter(|leaf| leaf.code == code);
+        let owned;
+        let (at, unpaid, interval, slot) = match leaf {
+            Some(leaf) => (&leaf.at, &leaf.unpaid, &leaf.interval, Some(leaf.output)),
+            None => {
+                let Ok(leaf) = source.compile_leaf(site) else {
+                    return Ok(false);
+                };
+                owned = leaf;
+                (&owned.0, &owned.1, &owned.2, None)
+            }
         };
         let cell = match stream.ops[read.pc() as usize] {
             Op::Local { local, .. } => match frame.slots[local.at as usize] {
@@ -203,16 +234,21 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             frame.state.source.as_mut().ok_or_else(|| {
                 self.halt(malformed("packet read has no source activation").into())
             })?;
-        let slots = source
-            .owner_slots()
-            .map_err(|_| self.halt(malformed("packet read owners failed verification").into()))?;
-        let output = slots
-            .root(
-                &room::Owner::Operand(at.site.clone()),
-                self.task,
-                activation.invocation.id(),
-            )
-            .ok_or_else(|| self.halt(malformed("packet read has no canonical owner").into()))?;
+        let output = match slot {
+            Some(Some(slot)) => activation.invocation.owner(slot),
+            Some(None) => {
+                return Err(self.halt(malformed("packet read has no canonical owner").into()));
+            }
+            None => source
+                .owner_slots()
+                .map_err(|_| self.halt(malformed("packet read owners failed verification").into()))?
+                .root(
+                    &room::Owner::Operand(at.site.clone()),
+                    self.task,
+                    activation.invocation.id(),
+                )
+                .ok_or_else(|| self.halt(malformed("packet read has no canonical owner").into()))?,
+        };
         if let (Input::Native(value), Some(frontier)) = (value, activation.frontier.as_mut())
             && interval.acquisition(source).is_some()
         {
@@ -287,7 +323,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         };
         let next = SourcePosition {
             at: at.clone(),
-            unpaid: Some(unpaid),
+            unpaid: Some(unpaid.clone()),
             ..start.clone()
         };
         let allowance = Allowance {
@@ -312,7 +348,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 frame.state.callee,
                 activation,
                 publication::Prefix {
-                    interval,
+                    interval: std::sync::Arc::clone(interval),
                     facts: LeafExecution(
                         [(
                             at.clone(),
@@ -347,7 +383,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     link: frame.state.callee.link,
                     physical_room,
                     owner: output,
-                    at,
+                    at: at.clone(),
                     heap: self.heap,
                 },
                 |arena, _, edits, storage| {

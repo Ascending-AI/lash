@@ -89,6 +89,10 @@ pub(super) struct Block {
     pub(super) starts: Box<[usize]>,
     pub(super) end: usize,
     pub(super) after: usize,
+    /// The slots this block's Leave releases when it is a proven release:
+    /// its scope and operand groups, resolved once from the immutable source.
+    pub(super) leave:
+        std::sync::OnceLock<Option<Box<[lash_kernel_state::kernel_internals::logical::Slot]>>>,
 }
 
 /// A plan's frame layout, precomputed from its plan: how many arguments

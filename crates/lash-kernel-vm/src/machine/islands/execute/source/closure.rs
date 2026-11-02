@@ -45,7 +45,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let target = self.exe.code(site.code);
         if target.created.as_ref() != Some(at)
             || !self.storage_room(self.arena.sequence_bound(target.captures.len()))
-            || !self.source_operand_transfer(frame, at)
+            || !self.source_operand_transfer(frame, stream, site.pc, at)
         {
             return Ok(ValuePublication::Unavailable);
         }

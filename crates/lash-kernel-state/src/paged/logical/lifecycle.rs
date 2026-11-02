@@ -113,66 +113,54 @@ impl Publications {
 #[derive(Clone)]
 pub struct Lifecycle {
     ledger: Rc<RefCell<Ledger>>,
-    /// The open region's journal: replacements recorded since the ledger
-    /// last published, committed together as one runtime event.
-    pending: Rc<RefCell<Vec<Replacement>>>,
+    /// The open region's journal: each owner's last replacement recorded
+    /// since the ledger last published, in owner order, committed together
+    /// as one runtime event.
+    pending: Rc<RefCell<Journal>>,
     /// Bytes the open region's admitted acquisitions may add above the
     /// committed balance: an upper bound on every interior peak.
     growth: Rc<std::cell::Cell<u64>>,
 }
-/// A region closes when its journal reaches this many records, so a lookup
-/// in it stays bounded.
-const REGION_RECORDS: usize = 256;
+/// A region publishes once it has recorded this many replacements. Its
+/// journal keeps one record per owner, so lookups stay logarithmic; the cap
+/// bounds the pure work between publications, which a crash discards and
+/// resume re-executes from the last checkpoint either way.
+const REGION_RECORDS: usize = 4096;
 /// One recorded root replacement; `None` releases the owner.
 pub(super) type Replacement = (Owner, Option<SourceValue>);
-/// Orders recorded replacements by owner, keeping each owner's last record:
-/// the one final replacement per owner the runtime event publishes.
-fn settle(pending: &mut Vec<Replacement>) {
-    // Strictly ascending records already name each owner once.
-    if pending.is_sorted_by(|earlier, later| earlier.0 < later.0) {
-        return;
+#[derive(Default)]
+struct Journal {
+    /// Each owner's last replacement: the one the runtime event publishes.
+    last: std::collections::BTreeMap<Owner, Option<SourceValue>>,
+    /// Replacements recorded since the last publication, superseded or not.
+    records: usize,
+}
+impl Journal {
+    fn record(&mut self, owner: Owner, next: Option<SourceValue>) {
+        self.last.insert(owner, next);
+        self.records += 1;
     }
-    pending.sort_by_key(|(owner, _)| *owner);
-    pending.dedup_by(|later, earlier| {
-        let same = later.0 == earlier.0;
-        if same {
-            std::mem::swap(later, earlier);
-        }
-        same
-    });
 }
 impl Lifecycle {
     pub fn new(ledger: Rc<RefCell<Ledger>>) -> Self {
         Self {
             ledger,
-            pending: Rc::new(RefCell::new(Vec::new())),
+            pending: Rc::default(),
             growth: Rc::default(),
         }
     }
     /// Whether `owner` holds a value once the open region publishes: its
     /// last record decides, else the committed ledger.
     pub fn holds(&self, owner: Owner, access: &Access<'_>) -> Result<bool, HeapFault> {
-        if let Some((_, next)) = self
-            .pending
-            .borrow()
-            .iter()
-            .rev()
-            .find(|(at, _)| *at == owner)
-        {
+        if let Some(next) = self.pending.borrow().last.get(&owner) {
             return Ok(next.is_some());
         }
         Ok(self.ledger.borrow().holding(owner, access)?.is_some())
     }
     /// The plain value the open region last recorded for `owner`.
     pub fn recorded(&self, owner: Owner) -> Option<Value> {
-        match self
-            .pending
-            .borrow()
-            .iter()
-            .rev()
-            .find(|(at, _)| *at == owner)
-        {
-            Some((_, Some(SourceValue::Value(value)))) => Some(*value),
+        match self.pending.borrow().last.get(&owner) {
+            Some(Some(SourceValue::Value(value))) => Some(*value),
             _ => None,
         }
     }
@@ -212,14 +200,14 @@ impl Lifecycle {
         Rc::clone(&self.ledger)
     }
     pub fn replace(&self, owner: Owner, next: Option<SourceValue>) {
-        self.pending.borrow_mut().push((owner, next));
+        self.pending.borrow_mut().record(owner, next);
     }
     /// Re-projects a binding or control slot into the open region: `next`
     /// supersedes the owner's earlier record, and an owner without one that
     /// still holds what the ledger last published for it records nothing.
     pub fn rebind(&self, owner: Owner, next: Option<SourceValue>) {
         let mut pending = self.pending.borrow_mut();
-        if let Some((_, recorded)) = pending.iter_mut().rev().find(|(at, _)| *at == owner) {
+        if let Some(recorded) = pending.last.get_mut(&owner) {
             *recorded = next;
             return;
         }
@@ -230,11 +218,11 @@ impl Lifecycle {
         {
             return;
         }
-        pending.push((owner, next));
+        pending.record(owner, next);
     }
     /// Publishes the open region once its journal reaches the record cap.
     pub fn bounded(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
-        if self.pending.borrow().len() >= REGION_RECORDS {
+        if self.pending.borrow().records >= REGION_RECORDS {
             self.flush(arena, heap)?;
         }
         Ok(())
@@ -253,12 +241,12 @@ impl Lifecycle {
         let mut pending = self.pending.borrow_mut();
         let first = invocation.owner(Slot::Operand(0));
         let last = invocation.owner(Slot::Operand(u32::MAX));
-        for (owner, value) in pending.iter_mut() {
-            if (first..=last).contains(owner) {
-                *value = None;
-            }
+        for (_, value) in pending.last.range_mut(first..=last) {
+            *value = None;
         }
-        pending.extend(owners.into_iter().map(|owner| (owner, None)));
+        for owner in owners {
+            pending.record(owner, None);
+        }
         Ok(())
     }
     /// Rekeys the ledger to the durable ids the projections since the last
@@ -269,19 +257,26 @@ impl Lifecycle {
     }
     pub fn flush(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
         self.rekey(arena, heap)?;
-        let mut pending = self.pending.borrow_mut();
+        let mut journal = self.pending.borrow_mut();
         let events = arena.take_member_events();
-        if pending.is_empty() && events.is_empty() {
+        if journal.last.is_empty() && events.is_empty() {
+            journal.records = 0;
             arena.return_member_events(events, true);
             self.growth.set(0);
             return Ok(());
         }
-        settle(&mut pending);
         let result = (|| {
             let mut ledger = self.ledger.borrow_mut();
             // An owner still holding what it last published needs no event.
-            pending.retain(|(owner, next)| !ledger.published.holds(owner, next));
+            let pending: Vec<Replacement> = journal
+                .last
+                .iter()
+                .filter(|(owner, next)| !ledger.published.holds(owner, next))
+                .map(|(owner, next)| (*owner, next.clone()))
+                .collect();
             if pending.is_empty() && events.is_empty() {
+                journal.last.clear();
+                journal.records = 0;
                 return Ok(());
             }
             let mut registration = arena
@@ -294,7 +289,8 @@ impl Lifecycle {
                 .map_err(|_| invalid("source holding overflow"))?;
             ledger.publish(accepted, || registration.commit())?;
             ledger.published.record(&pending);
-            pending.clear();
+            journal.last.clear();
+            journal.records = 0;
             Ok(())
         })();
         arena.return_member_events(events, result.is_ok());

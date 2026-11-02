@@ -183,6 +183,8 @@ pub(crate) struct CompiledInterval {
     /// Whether this interval is a proven acquisition: decided once, since
     /// an interval belongs to the one Source that compiled it.
     acquires: std::sync::OnceLock<bool>,
+    /// Whether this interval is a proven native commit, decided once.
+    commits: std::sync::OnceLock<bool>,
 }
 impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
@@ -467,6 +469,7 @@ impl Source {
             return_loops: Some(return_loops.into()),
             resume,
             acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -552,6 +555,7 @@ impl Source {
             return_loops: None,
             resume: None,
             acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -698,6 +702,7 @@ impl Source {
             return_loops: None,
             resume: None,
             acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
         });
         match key {
             Some(key) => {
@@ -767,6 +772,7 @@ impl Source {
             return_loops: None,
             resume: None,
             acquires: std::sync::OnceLock::new(),
+            commits: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -889,6 +895,68 @@ impl CompiledInterval {
                 .scratch
                 .iter()
                 .any(|lease| lease.at == event.point))
+    }
+    /// A proven native commit: one normal Commit event whose output is its
+    /// own operand owner, whose peak is exactly the native call's peak (or,
+    /// for an operator act, its answer's holding) and whose retained delta is
+    /// that measure's delta less its consumed operands,
+    /// with no entity, member, field, cell or restored role. Its scratch
+    /// lease is the call's runtime scratch, which the caller requires to be
+    /// zero. For such an interval with a scalar answer the checked journal releases
+    /// the operands and holds the answer, so its shared admission is the
+    /// call's envelope, charge window and depth alone.
+    pub(crate) fn native_commit(&self, source: &Source) -> bool {
+        *self.commits.get_or_init(|| self.commits_natively(source))
+    }
+    fn commits_natively(&self, source: &Source) -> bool {
+        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
+            return false;
+        };
+        let event = &step.event;
+        let publication = &step.publication;
+        let site = &event.point.site;
+        // The callee's own peak, or the answer's holding for an operator
+        // act; the retained delta is that same measure less the consumed
+        // operands.
+        let produced = |measure: &Measure| match measure {
+            Measure::CallPeak {
+                at,
+                callee: CallSource::Native(_),
+            } => at == site,
+            Measure::Local(Owner::Operand(at)) => at == site,
+            _ => false,
+        };
+        let retained = |measure: &Measure| match measure {
+            Measure::CallDelta {
+                at,
+                callee: CallSource::Native(_),
+            } => at == site,
+            Measure::Local(Owner::Operand(at)) => at == site,
+            _ => false,
+        };
+        let consumed = |measure: &Measure| matches!(measure, Measure::Release(owners) if **owners == *event.inputs);
+        let peak = matches!(event.peak.terms.as_slice(), [(measure, 1)] if produced(measure));
+        let delta = match event.delta.terms.as_slice() {
+            [(measure, 1)] => retained(measure) && event.inputs.is_empty(),
+            [(first, 1), (second, -1)] => retained(first) && consumed(second),
+            [(first, -1), (second, 1)] => consumed(first) && retained(second),
+            _ => false,
+        };
+        event.point.phase == Phase::Commit
+            && event.point.site != source.site
+            && step.selected == ExitKind::Normal
+            && step.normal == ExitKind::Normal
+            && matches!(&event.output, Some(Owner::Operand(at)) if at == site)
+            && event.entities.is_empty()
+            && event.peak.fixed == 0
+            && event.delta.fixed == 0
+            && peak
+            && delta
+            && !publication.borrowed_inputs
+            && publication.restored_roles.is_none()
+            && publication.assignment.is_none()
+            && !publication.member
+            && publication.field.is_none()
     }
     /// A nested scope's Leave is a proven release when its one event only
     /// releases that scope's own owner groups: no output, entity, input,
