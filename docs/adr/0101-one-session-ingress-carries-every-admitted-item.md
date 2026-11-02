@@ -482,7 +482,7 @@ resent model call's admission) is such a park, taken at once. The turn's
 restore decodes all of it before anything is re-delivered: the protocol
 driver answers for its own parked state
 (`ProtocolDriverHandle::check_parked_state`, asked by
-`TurnMachine::restore_from_checkpoint`) and the code executor for its cell's
+the shared journal replay path) and the code executor for its cell's
 snapshot, so no cell runs again and no model call is resent for a turn that
 is then refused. Nothing of the turn is committed or settled for it, its rows
 keep the state for a build that reads it, and the session's park carries the

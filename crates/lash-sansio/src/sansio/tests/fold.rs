@@ -232,12 +232,13 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     let driver: Arc<dyn ProtocolDriverHandle> = Arc::new(ExpandingDriver {
         handed_back: std::sync::Mutex::new(Vec::new()),
     });
-    let mut machine = TurnMachine::new(
+    let mut replay = crate::testing::JournalReplay::new(
         test_config(Arc::clone(&driver)),
         vec![user_message("use tools")],
         lash_protocol_types::AppendVec::new(),
         0,
     );
+    let mut machine = replay.start();
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
     machine.handle_response(Response::LlmComplete {
@@ -247,9 +248,9 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     });
     let (id, calls, expansion) = tool_calls_effect(&drain_effects(&mut machine));
 
-    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(driver), checkpoint, None)
-        .expect("supported checkpoint");
+    let mut restored = replay
+        .resume(&mut machine, &|_| Some(ExecutionEnvironmentSync::default()))
+        .expect("journal replays");
     let (restored_id, restored_calls, restored_expansion) =
         tool_calls_effect(&drain_effects(&mut restored));
     assert_eq!(restored_id, id);
@@ -262,7 +263,7 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
 fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
     for remove in [false, true] {
         let original = user_message("real input");
-        let mut machine = TurnMachine::new(
+        let replay = crate::testing::JournalReplay::new(
             test_config(Arc::new(ProseDriver)),
             vec![original.clone()],
             lash_protocol_types::AppendVec::new(),
@@ -276,7 +277,8 @@ fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
                 text_message(MessageRole::User, "ephemeral note"),
             ]
         };
-        machine.adopt_prepared_messages(MessageSequence::from_owned(prompt));
+        let mut replay = replay.with_prepared_messages(MessageSequence::from_owned(prompt));
+        let mut machine = replay.start();
         // Resume after the sync, before the request has been constructed.
         let effects = drain_unsynced_effects(&mut machine);
         let id = find_execution_environment_sync(&effects).expect("sync");
@@ -284,12 +286,9 @@ fn checkpoint_resume_keeps_prompt_view_edits_out_of_progress_and_done() {
             id,
             result: Ok(ExecutionEnvironmentSync::default()),
         });
-        let mut resumed = TurnMachine::restore_from_checkpoint(
-            test_config(Arc::new(ProseDriver)),
-            roundtrip_checkpoint(machine.checkpoint()),
-            None,
-        )
-        .expect("restore");
+        let mut resumed = replay
+            .resume(&mut machine, &|_| Some(ExecutionEnvironmentSync::default()))
+            .expect("journal replays");
         let effects = drain_effects(&mut resumed);
         let (_, request) = find_llm_call(&effects).expect("model request");
         let rendered = serde_json::to_string(&request.messages).expect("request");

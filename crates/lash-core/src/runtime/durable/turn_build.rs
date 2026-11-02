@@ -133,14 +133,24 @@ pub(in crate::runtime) fn replay(
     machine: &mut crate::TurnMachine,
     mut inputs: Vec<lash_sansio::MachineInput<HostIntent>>,
     committed: usize,
+    run: &lash_vocabulary::identity::TurnId,
     syncs: lash_sansio::RecordedSyncs<'_>,
-) -> Result<(), lash_sansio::ReplayDivergence> {
+) -> Result<(), super::session::TurnRestoreError> {
     if inputs.len() < committed {
-        return Err(lash_sansio::ReplayDivergence {
-            index: inputs.len(),
-            reason: "the phase names inputs absent from its journal".to_owned(),
+        return Err(super::session::TurnRestoreError::Diverged {
+            run: run.clone(),
+            divergence: lash_sansio::ReplayDivergence {
+                index: inputs.len(),
+                reason: "the phase names inputs absent from its journal".to_owned(),
+            },
         });
     }
     inputs.truncate(committed);
-    machine.replay_inputs(inputs, syncs)
+    machine.replay_inputs(inputs, syncs).map_err(|divergence| {
+        super::session::TurnRestoreError::Diverged {
+            run: run.clone(),
+            divergence,
+        }
+    })?;
+    machine.check_parked_state().map_err(Into::into)
 }

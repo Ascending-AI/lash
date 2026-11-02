@@ -255,9 +255,8 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "host-owned storage: compare build witnesses before reopening mirrors; \
              Lash cannot enumerate the host's rows",
         ),
-        DurableFormat::TurnCheckpoint => SurfaceRelation::Unwalkable(
-            "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
-             this version gates live outside lash's own store",
+        DurableFormat::TurnJournal => SurfaceRelation::Unwalkable(
+            "no bounded surface: turn inputs are read by session and run; actor format sets fence recovery",
         ),
         DurableFormat::RuntimeCommitReceipt => SurfaceRelation::Unwalkable(
             "no bounded surface: one row per committed turn, each receipt refused at decode \
@@ -281,7 +280,7 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             primary: true,
         },
         DurableFormat::RlmDriverState => SurfaceRelation::Unwalkable(
-            "no bounded surface: carried by TurnCheckpoint; refused when either RLM channel resumes",
+            "no bounded surface: carried by the turn input journal; refused when either RLM channel resumes",
         ),
         DurableFormat::Engine(format) => SurfaceRelation::Unwalkable(format.unwalkable_reason),
         DurableFormat::KernelVersion => SurfaceRelation::Unwalkable(

@@ -179,17 +179,6 @@ pub(crate) fn find_done(
     })
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the checkpoint is a crate-owned serde round-trip fixture; serialization cannot fail"
-)]
-pub(crate) fn roundtrip_turn_checkpoint(
-    checkpoint: lash_sansio::SavedTurn<lash_core::HostTurnProtocol>,
-) -> lash_sansio::SavedTurn<lash_core::HostTurnProtocol> {
-    let encoded = serde_json::to_string(&checkpoint).expect("serialize checkpoint");
-    serde_json::from_str(&encoded).expect("deserialize checkpoint")
-}
-
 pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<CellRecord> {
     machine
         .events()

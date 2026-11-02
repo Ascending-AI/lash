@@ -15,7 +15,7 @@ pub(crate) struct RlmDriverState {
 }
 
 /// Schema version of the RLM driver state parked in the protocol
-/// driver-state slot in TurnCheckpoint.
+/// driver-state slot of pending work rebuilt by turn replay.
 ///
 /// version_guard(
 ///     shapes(cover(RlmDriverState, Envelope)),

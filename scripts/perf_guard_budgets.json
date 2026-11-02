@@ -1613,24 +1613,6 @@
           }
         }
       },
-      "turn_checkpoint": {
-        "guarded_span": "whole_run",
-        "enforced_allocation": {
-          "alloc_bytes_max": 16480000,
-          "steady_state_turn_alloc_bytes_max": 1354000
-        },
-        "phases": {
-          "codemode_exec_checkpoint": {
-            "required": true
-          },
-          "standard_llm_checkpoint": {
-            "required": true
-          },
-          "standard_parallel_tools_checkpoint": {
-            "required": true
-          }
-        }
-      },
       "turn_start_gate": {
         "guarded_span": "whole_run",
         "enforced_allocation": {

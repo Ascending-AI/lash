@@ -1063,17 +1063,20 @@ fn public_effect_emission_contract_matrix() {
         PublicWork::Code,
         PublicWork::Checkpoint,
     ] {
-        let mut machine = TurnMachine::new(
+        let mut replay = lash_sansio::testing::JournalReplay::new(
             external_config(work),
             vec![user_message("public input")],
             Default::default(),
             0,
         );
+        let mut machine = replay.start();
         let first = drain_effects(&mut machine);
-        let checkpoint =
-            serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap()).unwrap();
-        let mut restored =
-            TurnMachine::restore_from_checkpoint(external_config(work), checkpoint, None).unwrap();
+
+        let mut restored = replay
+            .resume(&mut machine, &|_| {
+                Some(sansio::ExecutionEnvironmentSync::default())
+            })
+            .expect("journal replays");
         let replayed = drain_effects(&mut restored);
         for effects in [&first, &replayed] {
             let waiting = effects

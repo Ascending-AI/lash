@@ -138,12 +138,13 @@ fn progress_boundaries(effects: &[Effect]) -> Vec<(&MessageSequence, &[SessionHi
 /// in the order the machine appended it: after the call, before the result.
 #[test]
 fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_boundary() {
-    let mut machine = TurnMachine::new(
+    let mut replay = crate::testing::JournalReplay::new(
         test_config(Arc::new(MidCallNoteDriver)),
         vec![user_message("use the tool")],
         lash_protocol_types::AppendVec::new(),
         0,
     );
+    let mut machine = replay.start();
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
     machine.handle_response(Response::LlmComplete {
@@ -168,12 +169,9 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
 
     // The redrive: the owner that resumes the round's checkpoint holds the
     // record as one no boundary has delivered.
-    let mut restored = TurnMachine::restore_from_checkpoint(
-        test_config(Arc::new(MidCallNoteDriver)),
-        roundtrip_checkpoint(machine.checkpoint()),
-        None,
-    )
-    .expect("the round's checkpoint restores");
+    let mut restored = replay
+        .resume(&mut machine, &|_| Some(ExecutionEnvironmentSync::default()))
+        .expect("journal replays");
     assert!(
         restored.progressed_boundaries().next().is_none(),
         "the record counts as delivered before any boundary carried it"

@@ -11,7 +11,7 @@ Lash cannot enumerate the host's product rows during preflight.
 
 | Host storage contract | Roots under the host-storage witness | Documentation authority |
 | --- | --- | --- |
-| Saved sans-IO turns and referenced environment content | `SavedTurn`, `TurnCheckpoint`, `TurnCheckpointContent`, `SyncedEnvironment` | [FIG-7506](../host-upgrades/unreleased/FIG-7506.md), `SavedTurn` Rust documentation |
+| Turn build decisions, input journal and recorded environment | `TurnBuild`, `MachineInput`, `JournalRow`, `SyncedEnvironment` | [Turn recovery](../adr/0132-durability-is-state-first-over-the-lash-store.md#4-turns-replay-their-journal), journal Rust documentation |
 | Committed transcript, cells, calls and settled outcomes | `CommittedTurn`, `CommittedTurnWithCalls`, both committed page forms, `TranscriptEntry`, `CellRecord`, `ExecutedCall`, `ExecutedCallOutcome`, `ToolCallRead`, tool/model call addresses and records | [Committed history](../adr/0129-committed-history-is-typed-facts-a-host-renders.md), [settle verdicts](../operations/durable-hosting.md#reading-a-calls-settle-verdict) |
 | Check verdicts | `CheckRecord`, `AttributedVerdict`, `BeforeCheckVerdict`, `AfterCheckVerdict`, `BeforeSelection` and their typed causes | [Tool-run contract](../architecture/tool-run-contract.md), the `CheckRecord` record contract |
 | Host cursor delivery | `HistoryCursor`, `CommittedTurnCursor`, `ProcessHistoryContinuation`, `ProcessChangeCursor`, `SessionCursor`, `ProcessObservationCursor`, `ChangePage` and `ProcessEventsRead` | [Durable history](../operations/durable-hosting.md), [process observations](../observing-processes.md) |
@@ -22,11 +22,9 @@ Lash cannot enumerate the host's product rows during preflight.
 | Package/publication records | `LinkRecord`, `PackageRecord`, `PublicationRecord`, `NamespaceSnapshot` and their reachable identities and content | [Package ownership and retention](../host-packages.md) |
 | Explicit tool-live wire contracts | `ToolLiveItem`, `ToolLiveFilter` and their event/cursor payloads | [ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md) |
 
-Checkpoint roots already had a `TURN_CHECKPOINT_SCHEMA_VERSION` guard. The
-cc0e5b332f field change from `Option<SyncedEnvironment>` to
-`Option<CheckpointContentRef>` is now a regression case against both that
-existing witness and the host-storage witness. The current gate detects it;
-the incident alone does not establish that the root was absent.
+Turn journal inputs and their build decisions also have a
+`TURN_JOURNAL_SCHEMA_VERSION` guard. The format gate's regression case changes
+a journal input and requires the host-storage witness to advance.
 
 Cells and tool records also retain their existing RLM, run-record and backend
 schema guards. Trace records and workflow execution overlays retain trace

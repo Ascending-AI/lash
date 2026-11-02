@@ -167,24 +167,16 @@ pub(in crate::runtime::durable) fn resume_refusal(error: &TurnError) -> Option<S
             refusal: refusal.as_ref().clone(),
         });
     }
-    use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
     let (state, reason) = match error {
         TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),
-        TurnError::Restore(TurnRestoreError::Checkpoint(Checkpoint::UndecodableDriverState(
-            refusal,
-        ))) => (
+        TurnError::Restore(TurnRestoreError::DriverState(refusal)) => (
             ParkedTurnState::DriverState {
                 driver: refusal.driver.clone(),
             },
             refusal.reason.clone(),
         ),
         TurnError::Restore(
-            restore @ (TurnRestoreError::Undecodable { .. }
-            | TurnRestoreError::Diverged { .. }
-            | TurnRestoreError::Checkpoint(
-                Checkpoint::IncompatibleSchemaVersion { .. }
-                | Checkpoint::IncompatibleFormat { .. },
-            )),
+            restore @ (TurnRestoreError::Undecodable { .. } | TurnRestoreError::Diverged { .. }),
         ) => (ParkedTurnState::Checkpoint, restore.to_string()),
         _ => return None,
     };

@@ -736,11 +736,11 @@ mod tests {
             DurableFormat::RlmDriverState,
             FormatVersion::Counter(2),
             FormatProbe::Comparable,
-            FormatEvidence::CarriedBy(DurableFormat::TurnCheckpoint.name()),
+            FormatEvidence::CarriedBy("turn journal"),
         );
         let json = serde_json::to_value(row).expect("the row serializes");
         assert_eq!(json["evidence"]["kind"], "carried_by");
-        assert_eq!(json["evidence"]["carrier"], "turn checkpoint");
+        assert_eq!(json["evidence"]["carrier"], "turn journal");
         assert!(json.get("format_key").is_none());
     }
 

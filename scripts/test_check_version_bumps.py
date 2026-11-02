@@ -1470,22 +1470,17 @@ class RealRepository(unittest.TestCase):
         self.assertFalse(before_cut.errors, before_cut)
         self.assertEqual({f.surface.key for f in before_cut.failures}, {key})
 
-    def test_fig_7506_environment_content_reference_requires_a_checkpoint_witness(self) -> None:
-        # cc0e5b332f changed exactly this persisted field; use the old
-        # spelling as the baseline, under today's checkpoint guards.
-        path = "crates/lash-sansio/src/sansio/machine_state.rs"
+    def test_turn_journal_input_shape_requires_a_host_witness(self) -> None:
+        path = "crates/lash-sansio/src/sansio/input_journal.rs"
         text = self.view.content(path)
-        before = text.replace("environment: Option<CheckpointContentRef>",
-                              "environment: Option<SyncedEnvironment>", 1)
-        self.assertNotEqual(before, text)
-        key = "crates/lash-protocol-types/src/lib.rs:TURN_CHECKPOINT_SCHEMA_VERSION"
+        changed = text.replace("UnansweredUsage(LlmUsage)", "UnansweredUsage(Option<LlmUsage>)", 1)
+        self.assertNotEqual(changed, text)
         host = "crates/lash/src/formats.rs:HOST_STORED_SCHEMA_VERSION"
-        result = gate.check_views(PlantedView(self.view, {path: before}), self.view,
-                                  only=frozenset({key, host}), strict=False)
+        result = gate.check_views(self.view, PlantedView(self.view, {path: changed}),
+                                 only=frozenset({host}), strict=True)
         self.assertFalse(result.errors, result)
-        self.assertEqual({f.surface.key for f in result.failures}, {key, host}, result)
-        for finding in result.failures:
-            self.assertIn("TurnCheckpoint", finding.detail)
+        self.assertEqual(len(result.failures), 1, result)
+        self.assertIn("MachineInput", result.failures[0].detail)
 
     def test_the_ddl_stamps_are_the_surfaces_that_guard_ddl(self) -> None:
         stamps = {key for key in self.surfaces if self.declaration(key).catalogs}

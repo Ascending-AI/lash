@@ -93,7 +93,6 @@ pub(crate) enum RuntimePerfScenario {
     ScopedEffects,
     StoreReopen,
     SqliteStoreReopen,
-    TurnCheckpoint,
     CheckpointStateHotPaths,
     LiveReplayPressure,
     TraceJsonlStandard,
@@ -335,7 +334,7 @@ impl RuntimePerfScenario {
         Self::FrameResidencyCurvePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 49] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 48] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -527,14 +526,6 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures SQLite runtime persistence reopen behavior below protocol and facade ownership.",
             wiring { measure_commit_bytes = false }
-        ),
-        runtime_perf_metadata!(
-            TurnCheckpoint,
-            "turn_checkpoint",
-            Standard,
-            RuntimeScenario,
-            "Measures runtime checkpoint paths shared across protocols and below facade ownership.",
-            ["runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"]
         ),
         runtime_perf_metadata!(
             CheckpointStateHotPaths,

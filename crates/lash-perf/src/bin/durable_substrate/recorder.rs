@@ -146,10 +146,7 @@ impl Encoded {
             share.bytes += bytes;
             encoded.graph_nodes += 1;
             encoded.graph_bytes += bytes;
-            if kind == NodeKind::PHASE_ROOT.0
-                || kind == NodeKind::TURN_CONTENT.0
-                || kind == NodeKind::CONTENT_CHUNK.0
-            {
+            if kind == NodeKind::PHASE_ROOT.0 {
                 encoded.checkpoint_bytes += bytes;
             } else {
                 encoded.snapshot_bytes += bytes;

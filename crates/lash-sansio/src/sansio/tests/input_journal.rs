@@ -117,10 +117,23 @@ fn fresh() -> TurnMachine {
 }
 
 fn state(machine: &TurnMachine) -> serde_json::Value {
-    let saved = machine.checkpoint();
     serde_json::json!({
-        "checkpoint": serde_json::to_value(&saved.checkpoint).expect("checkpoint"),
-        "content": serde_json::to_value(&saved.content).expect("content"),
+        "state": machine.state,
+        "pending_effects": machine.side_effect_outbox,
+        "next_effect_id": machine.next_effect_id,
+        "window": machine.window_pin(),
+        "messages": machine.messages,
+        "prompt_messages": machine.prompt_messages,
+        "events": machine.events,
+        "progress_event_cursor": machine.progress_event_cursor,
+        "progress_boundaries": machine.progress_boundaries,
+        "protocol_iteration": machine.protocol_iteration,
+        "protocol_run_offset": machine.protocol_run_offset,
+        "consecutive_unproductive": machine.consecutive_unproductive,
+        "cumulative_usage": machine.cumulative_usage,
+        "last_call_usage": machine.last_call_usage,
+        "environment": machine.environment,
+        "decided_completions": machine.decided_completions,
     })
 }
 

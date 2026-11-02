@@ -1,20 +1,21 @@
 //! Sans-IO turn machine and protocol driver contracts.
 
 pub mod sansio;
+#[doc(hidden)]
+pub mod testing;
 pub mod turn;
 pub mod turn_driver;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub use sansio::{
-    ChatContextProjector, CheckpointContentPin, CheckpointContentRef, CheckpointDelivery,
-    CheckpointDelta, CheckpointResumeAction, CompletedToolCall, ContextProjector, DriverAction,
-    DriverContextView, Effect, EffectId, ExpandedRow, ExpandedWrapper, JournalRow, MachineInput,
-    ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle,
-    RecordedSyncs, ReplayDivergence, Response, ResponseToolCalls, SavedTurn, StagedRow,
-    ToolControlOrigin, ToolExpansionPlan, ToolWave, TurnCheckpoint, TurnCheckpointContent,
-    TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow,
-    TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
+    ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
+    ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExpandedRow,
+    ExpandedWrapper, JournalRow, MachineInput, ModelToolCalls, PendingToolCall, PendingWork,
+    ProjectorContext, ProtocolDriverHandle, RecordedSyncs, ReplayDivergence, Response,
+    ResponseToolCalls, StagedRow, ToolControlOrigin, ToolExpansionPlan, ToolWave, TurnMachine,
+    TurnMachineConfig, TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState,
+    UnitTurnProtocol,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

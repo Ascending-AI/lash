@@ -70,7 +70,7 @@ pub use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
 pub use lash_protocol_rlm::{
     CODEMODE_SNAPSHOT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
 };
-pub use lash_protocol_types::TURN_CHECKPOINT_SCHEMA_VERSION;
+pub use lash_protocol_types::TURN_JOURNAL_SCHEMA_VERSION;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
@@ -118,7 +118,8 @@ pub use lash_vm_runtime::{
 ///     shapes(path = "crates/lash-trace/src/*.rs", cover(TraceRecord, WorkflowExecutionOverlay)),
 ///     items(path = "crates/lash-trace/src/workflow_overlay.rs", fold_workflow_overlay),
 ///     shapes(path = "crates/lash-core-execution/src/tool_live.rs", cover(ToolLiveItem, ToolLiveFilter)),
-///     roots(path = "crates/lash-sansio/src/sansio/machine_state.rs", SavedTurn),
+///     roots(path = "crates/lash-sansio/src/sansio/input_journal.rs", MachineInput, JournalRow),
+///     roots(path = "crates/lash-core/src/runtime/durable/turn_build.rs", TurnBuild),
 ///     roots(path = "crates/lash-sansio/src/sansio/turn_protocol.rs", SyncedEnvironment),
 ///     roots(path = "crates/lash-protocol-types/src/tool_output.rs", ToolValue, ToolCallRecord, ToolCallOutput, ToolFailure, ToolCancellation, TurnControl, ToolControl),
 ///     items(path = "crates/lash-protocol-types/src/tool_output.rs", projected_json_value, value_for_projection, to_json_value),
@@ -168,8 +169,8 @@ pub enum DurableFormat {
     CreateSessionRequestIdentity,
     /// Records and projections hosts persist or mirror in their own stores.
     HostStoredShapes,
-    /// The serialized sans-IO turn checkpoint.
-    TurnCheckpoint,
+    /// The journal that reconstructs an open turn.
+    TurnJournal,
     /// The bodies of a tool round's run records.
     RunRecord,
     /// A wait row: a keyed promise, durable wait or timer.
@@ -242,7 +243,7 @@ impl DurableFormat {
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
             DurableFormat::HostStoredShapes => "host-stored records and projections",
-            DurableFormat::TurnCheckpoint => "turn checkpoint",
+            DurableFormat::TurnJournal => "turn journal",
             DurableFormat::RunRecord => "run record",
             DurableFormat::WaitRow => "wait row",
             DurableFormat::OutcomeMaterial => "outcome material",
@@ -280,7 +281,7 @@ impl DurableFormat {
             DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
             DurableFormat::HostStoredShapes => UpgradePolicy::Drain,
-            DurableFormat::TurnCheckpoint => UpgradePolicy::Drain,
+            DurableFormat::TurnJournal => UpgradePolicy::Drain,
             DurableFormat::RunRecord => UpgradePolicy::Drain,
             DurableFormat::WaitRow => UpgradePolicy::Drain,
             DurableFormat::OutcomeMaterial => UpgradePolicy::Drain,
@@ -458,10 +459,10 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {
-            format: DurableFormat::TurnCheckpoint,
-            version: FormatVersion::Counter(TURN_CHECKPOINT_SCHEMA_VERSION),
+            format: DurableFormat::TurnJournal,
+            version: FormatVersion::Counter(TURN_JOURNAL_SCHEMA_VERSION),
             owning_crate: "lash-sansio",
-            constant: "TURN_CHECKPOINT_SCHEMA_VERSION",
+            constant: "TURN_JOURNAL_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {

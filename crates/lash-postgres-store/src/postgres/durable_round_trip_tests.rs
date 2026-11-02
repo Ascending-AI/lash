@@ -158,7 +158,11 @@ fn admit(tx: &mut ActorTx, owned: &Owned, run: &TurnId, input: lash_vocabulary::
 /// its checkpoint.
 fn model_start(tx: &mut ActorTx, owned: &Owned, run: &TurnId, call: u32) {
     let deadline = tx.opened_at().after_millis(60_000);
-    let checkpoint = staged(tx, NodeKind::TURN_CONTENT, &format!("{{\"call\":{call}}}"));
+    let checkpoint = staged(
+        tx,
+        NodeKind::NAMESPACE_VALUE,
+        &format!("{{\"call\":{call}}}"),
+    );
     tx.write(DomainWrite::Turn(TurnWrite::Advance {
         session: owned.session.clone(),
         run: run.clone(),
@@ -713,7 +717,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
         .begin(&owned.actor, owned.epoch, u64::MAX)
         .await
         .expect("open");
-    let answer = staged(&mut tx, NodeKind::TURN_CONTENT, "answer");
+    let answer = staged(&mut tx, NodeKind::NAMESPACE_VALUE, "answer");
     tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Answered {
         key: key.clone(),
     }));
@@ -729,13 +733,13 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
         .await
         .expect("open");
     tx.set_requires(vec!["tool-component".into()]);
-    let record = staged(&mut tx, NodeKind::TURN_CONTENT, "sealed model call");
+    let record = staged(&mut tx, NodeKind::NAMESPACE_VALUE, "sealed model call");
     tx.write(DomainWrite::ModelCall(ModelCallWrite {
         key: key.clone(),
         call_id: LlmCallId("boundary-call".into()),
         record,
     }));
-    let checkpoint = staged(&mut tx, NodeKind::TURN_CONTENT, "tools");
+    let checkpoint = staged(&mut tx, NodeKind::NAMESPACE_VALUE, "tools");
     tx.write(DomainWrite::Turn(TurnWrite::Advance {
         session: owned.session.clone(),
         run: run.clone(),
@@ -785,7 +789,11 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
         .await
         .expect("open collision");
     tx.set_requires(vec!["must-not-publish".into()]);
-    let record = staged(&mut tx, NodeKind::TURN_CONTENT, "conflicting sealed call");
+    let record = staged(
+        &mut tx,
+        NodeKind::NAMESPACE_VALUE,
+        "conflicting sealed call",
+    );
     tx.write(DomainWrite::ModelCall(ModelCallWrite {
         key,
         call_id: LlmCallId("boundary-call".into()),
@@ -863,7 +871,7 @@ async fn model_and_tool_boundaries_each_commit_in_one_call() {
                 prefix: Some(missing.clone()),
             },
         ));
-        let later_answer = staged(&mut tx, NodeKind::TURN_CONTENT, "later invalid phase");
+        let later_answer = staged(&mut tx, NodeKind::NAMESPACE_VALUE, "later invalid phase");
         tx.write(DomainWrite::Turn(TurnWrite::Answer {
             session: owned.session.clone(),
             run: TurnId::from("absent-run"),
@@ -952,13 +960,21 @@ async fn a_five_tool_turn_commits_each_boundary_in_one_call() {
             lash_protocol_types::ToolCallId::parse(&format!("tc_{round:064x}")).expect("call id");
         let (tx, open) = round_trips(store.begin(&owned.actor, owned.epoch, u64::MAX)).await;
         let mut tx = tx.expect("open");
-        let record = staged(&mut tx, NodeKind::TURN_CONTENT, &format!("sealed {round}"));
+        let record = staged(
+            &mut tx,
+            NodeKind::NAMESPACE_VALUE,
+            &format!("sealed {round}"),
+        );
         tx.write(DomainWrite::ModelCall(ModelCallWrite {
             key: pin(round),
             call_id: LlmCallId(format!("five-tools-{round}")),
             record,
         }));
-        let checkpoint = staged(&mut tx, NodeKind::TURN_CONTENT, &format!("tools {round}"));
+        let checkpoint = staged(
+            &mut tx,
+            NodeKind::NAMESPACE_VALUE,
+            &format!("tools {round}"),
+        );
         tx.write(DomainWrite::Turn(TurnWrite::Advance {
             session: owned.session.clone(),
             run: run.clone(),

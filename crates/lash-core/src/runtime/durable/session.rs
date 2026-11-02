@@ -1160,9 +1160,9 @@ pub enum TurnRestoreError {
     /// The row names no checkpoint to restore from.
     #[error("turn {0} has no checkpoint")]
     NoCheckpoint(TurnId),
-    /// The checkpoint does not restore.
+    /// This build does not decode the replayed driver state.
     #[error(transparent)]
-    Checkpoint(#[from] lash_sansio::TurnCheckpointRestoreError),
+    DriverState(#[from] lash_sansio::UndecodableDriverState),
     /// The committed window the checkpoint pins cannot be read.
     #[error("turn {run}'s window cannot be read: {source}")]
     Window {
@@ -1529,12 +1529,7 @@ impl<'a> TurnRestore<'a> {
             .await?;
         let inputs = std::mem::take(&mut self.journal().await?.inputs);
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
-        super::turn_build::replay(&mut machine, inputs, journal_inputs, syncs).map_err(
-            |divergence| TurnRestoreError::Diverged {
-                run: row.run.clone(),
-                divergence,
-            },
-        )?;
+        super::turn_build::replay(&mut machine, inputs, journal_inputs, &row.run, syncs)?;
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

@@ -460,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_fold_sums_turn_spans_and_mirrors_last_turn_memory() {
-        let scenario = RuntimePerfScenario::TurnCheckpoint;
+        let scenario = RuntimePerfScenario::StoreReopen;
         let mut recorder = RunRecorder::start(scenario, 2);
         for turn_index in 0..2 {
             recorder

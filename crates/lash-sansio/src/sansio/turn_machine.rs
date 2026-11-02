@@ -1,4 +1,3 @@
-use super::checkpoint_content::Chain;
 use super::*;
 use lash_protocol_types::ReportedFailure;
 use lash_protocol_types::llm::types::RetainedLlmRequest;
@@ -10,16 +9,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
     pub fn adopt_prepared_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
         let messages = self.rebased(messages);
-        let agreed = self.agreed_prefix(&self.prompt_messages, &messages);
-        self.content.rewrote(Sequence::Prompt, agreed);
         self.prompt_messages = messages;
     }
 
     /// Adopt the real inputs and outputs retained by a recorded sync.
     pub fn adopt_committed_messages(&mut self, messages: lash_protocol_types::MessageSequence) {
         let messages = self.rebased(messages);
-        let agreed = self.agreed_prefix(&self.messages, &messages);
-        self.content.rewrote(Sequence::Messages, agreed);
         self.messages = messages;
     }
 
@@ -44,25 +39,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             return messages;
         }
         window.messages_then(shared, messages.iter().skip(shared).cloned().collect())
-    }
-
-    /// How many leading messages `before` and `now` agree on: those `now`
-    /// keeps of `before`'s. The window's messages both lead with agree by
-    /// construction.
-    fn agreed_prefix(&self, before: &MessageSequence, now: &MessageSequence) -> usize {
-        let from = self
-            .window
-            .as_ref()
-            .filter(|window| before.has_base(window.messages()) && now.has_base(window.messages()))
-            .map_or(0, |window| window.messages().len());
-        from + before
-            .iter()
-            .skip(from)
-            .zip(now.iter().skip(from))
-            .take_while(|(before, now)| {
-                lash_protocol_types::session_model::message::message_content_equal(*before, *now)
-            })
-            .count()
     }
 
     /// Whether this machine's projector contributes a dedicated User prefix
@@ -118,7 +94,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
-            content: ContentLedger::default(),
             inputs: None,
         }
     }
@@ -127,8 +102,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// (FIG-5206): its messages are `messages`, which lead with the window's
     /// (see [`TurnWindow::then`]), and its history is the window's records
     /// followed by `turn_events`. Its checkpoint names the window by its pin
-    /// instead of holding it, and [`Self::restore_from_checkpoint`] is handed
-    /// the same window again.
+    /// instead of holding it, and replay is handed the same window again.
     pub fn in_window(
         config: TurnMachineConfig<M>,
         window: TurnWindow<M::Event>,
@@ -389,320 +363,35 @@ impl<M: TurnProtocol> TurnMachine<M> {
         )
     }
 
-    /// The configuration the machine was built with, the one its checkpoint
-    /// restores under ([`Self::restore_from_checkpoint`]).
+    /// The configuration the machine was built with.
     pub fn into_config(self) -> TurnMachineConfig<M> {
         self.config
-    }
-
-    /// The machine's bounded checkpoint, with the transcript content it
-    /// names by digest: what the turn added to the window it started from.
-    pub fn checkpoint(&self) -> SavedTurn<M> {
-        let (checkpoint, content, _, _) = self.record(None, Floors::default());
-        SavedTurn {
-            checkpoint,
-            content,
-        }
-    }
-
-    /// The machine's checkpoint as a phase stores it (FIG-5955): the same
-    /// checkpoint [`Self::checkpoint`] takes, its content only the blobs no
-    /// committed checkpoint of the turn stored, which it names by the pins
-    /// the host gave them. It encodes only the items it does not keep from
-    /// the committed checkpoint. The host stores it, and once its commit is
-    /// acknowledged reports the pins of what it added
-    /// ([`Self::checkpoint_stored`]); until then the turn's checkpoints
-    /// still build on the committed one.
-    pub fn checkpoint_delta(&mut self) -> CheckpointDelta<M> {
-        let (base, floors) = self.content.base();
-        let (checkpoint, mut content, chains, encoded) = self.record(base, floors);
-        let links = chains.links();
-        let held = self.content.stage(chains, &mut content);
-        CheckpointDelta {
-            saved: SavedTurn {
-                checkpoint,
-                content,
-            },
-            held,
-            links,
-            encoded,
-        }
-    }
-
-    /// The checkpoint [`Self::checkpoint_delta`] took last, or the one the
-    /// machine was restored from, is stored, each blob it added under the
-    /// host's pin in `stored`: later checkpoints build on it.
-    pub fn checkpoint_stored(
-        &mut self,
-        stored: impl IntoIterator<Item = (CheckpointContentRef, CheckpointContentPin)>,
-    ) {
-        self.content.stored(stored);
-    }
-
-    /// The checkpoint over `base`, the chains a committed checkpoint stored,
-    /// whose sequences are unchanged through `floors`; its content every
-    /// blob it did not keep from `base`, the chains it is stored as and how
-    /// many items it encoded.
-    fn record(
-        &self,
-        base: Option<&StoredChains>,
-        floors: Floors,
-    ) -> (
-        TurnCheckpoint<M>,
-        TurnCheckpointContent,
-        StoredChains,
-        usize,
-    ) {
-        let mut content = TurnCheckpointContent::default();
-        let mut encoded = 0;
-        let environment = self.environment.as_ref().map(|environment| {
-            StoredEnvironment::record(
-                environment,
-                base.and_then(|base| base.environment.as_ref()),
-                &mut content,
-                &mut encoded,
-            )
-        });
-        let window = self.window.as_ref();
-        let window_events = window.map_or(0, |window| window.events().len());
-        let (state, request) = CheckpointState::record(
-            &self.state,
-            &mut content,
-            window,
-            base.and_then(|base| base.request.as_ref()),
-            &mut encoded,
-        );
-        let (messages, stored_messages) = CheckpointMessages::record(
-            &self.messages,
-            window,
-            base.map(|base| &base.messages),
-            floors.messages,
-            &mut content,
-            &mut encoded,
-        );
-        let (prompt_messages, stored_prompt) = CheckpointPrompt::record(
-            &self.prompt_messages,
-            &self.messages,
-            window,
-            base.map(|base| &base.prompt),
-            floors.prompt,
-            &mut content,
-            &mut encoded,
-        );
-        // The machine only appends to its history, so the window's records
-        // lead it.
-        let turn_events = self
-            .events
-            .as_slice()
-            .get(window_events..)
-            .unwrap_or_default();
-        let events = Chain::of(
-            turn_events.iter(),
-            turn_events.len(),
-            base.map(|base| &base.events),
-            floors.events.saturating_sub(window_events),
-            &mut content,
-            &mut encoded,
-        );
-        let completions = Chain::of(
-            self.decided_completions.iter(),
-            self.decided_completions.len(),
-            base.map(|base| &base.completions),
-            usize::MAX,
-            &mut content,
-            &mut encoded,
-        );
-        let checkpoint = TurnCheckpoint {
-            schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
-            state,
-            pending_effects: self
-                .side_effect_outbox
-                .iter()
-                .cloned()
-                .map(|effect| match effect {
-                    Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
-                        message: _,
-                        envelope: Some(mut envelope),
-                    })) if matches!(
-                        envelope.kind,
-                        lash_protocol_types::session_model::TurnFailureKind::LlmProvider
-                    ) =>
-                    {
-                        envelope.raw = None;
-                        envelope.user_message = "provider call failed".to_string();
-                        Effect::Emit(SessionStreamEvent::Error(ReportedFailure {
-                            message: envelope.user_message.clone(),
-                            envelope: Some(envelope),
-                        }))
-                    }
-                    effect => effect,
-                })
-                .collect(),
-            next_effect_id: self.next_effect_id,
-            window: window.map(CheckpointWindow::of),
-            messages,
-            prompt_messages,
-            events: events.head().clone(),
-            progress_event_cursor: self.progress_event_cursor,
-            progress_boundaries: self.progress_boundaries.clone(),
-            protocol_iteration: self.protocol_iteration,
-            protocol_run_offset: self.protocol_run_offset,
-            consecutive_unproductive: self.consecutive_unproductive,
-            cumulative_usage: self.cumulative_usage.clone(),
-            last_call_usage: self.last_call_usage.clone(),
-            environment: environment
-                .as_ref()
-                .map(|environment| CheckpointEnvironment {
-                    protocol_iteration: environment.source.protocol_iteration,
-                    content: environment.reference.clone(),
-                }),
-            decided_completions: completions.head().clone(),
-        };
-        let chains = StoredChains {
-            messages: stored_messages,
-            prompt: stored_prompt,
-            events,
-            completions,
-            environment,
-            // A turn between model calls keeps its last request stored: the
-            // next one builds on it.
-            request: request.or_else(|| base.and_then(|base| base.request.clone())),
-        };
-        (checkpoint, content, chains, encoded)
-    }
-
-    /// Re-hydrate a machine from a checkpoint, the content it names and the
-    /// committed window it started from ([`TurnCheckpoint::window_pin`]). The
-    /// schema version, window and environment are validated before any
-    /// content is read; content that is missing or not the bytes its digest
-    /// names is refused.
-    pub fn restore_from_checkpoint(
-        config: TurnMachineConfig<M>,
-        saved: SavedTurn<M>,
-        window: Option<TurnWindow<M::Event>>,
-    ) -> Result<Self, TurnCheckpointRestoreError> {
-        let SavedTurn {
-            checkpoint,
-            content,
-        } = saved;
-        if checkpoint.schema_version != TURN_CHECKPOINT_SCHEMA_VERSION {
-            return Err(TurnCheckpointRestoreError::IncompatibleSchemaVersion {
-                actual: checkpoint.schema_version,
-                expected: TURN_CHECKPOINT_SCHEMA_VERSION,
-            });
-        }
-        // Only a machine that has yet to sync holds no environment: every
-        // other wait was started by a driver that projected from one.
-        if checkpoint.environment.is_none() && checkpoint.state.waits_on_driver_work() {
-            return Err(TurnCheckpointRestoreError::IncompatibleFormat {
-                message: "a checkpoint waiting on driver work records no execution environment"
-                    .to_string(),
-            });
-        }
-        CheckpointWindow::check(checkpoint.window.as_ref(), window.as_ref())?;
-        let environment = checkpoint
-            .environment
-            .as_ref()
-            .map(|environment| {
-                StoredEnvironment::restore(
-                    &environment.content,
-                    environment.protocol_iteration,
-                    &content,
-                )
-            })
-            .transpose()?;
-        let synced = environment
-            .as_ref()
-            .map(|environment| Arc::clone(&environment.source));
-        let side_effect_outbox = checkpoint
-            .pending_effects
-            .into_iter()
-            .collect::<VecDeque<_>>();
-        let (messages, stored_messages) = checkpoint.messages.restore(&content, window.as_ref())?;
-        let (prompt_messages, stored_prompt) =
-            checkpoint
-                .prompt_messages
-                .restore(&content, window.as_ref(), &messages)?;
-        let mut events = window
-            .as_ref()
-            .map(|window| window.events().clone())
-            .unwrap_or_default();
-        let (turn_events, stored_events) = content.sequence(&checkpoint.events)?;
-        for event in turn_events {
-            events.push(event);
-        }
-        let (decided_completions, stored_completions) =
-            content.sequence(&checkpoint.decided_completions)?;
-        let (state, request) = checkpoint.state.restore(
-            &content,
-            window.as_ref(),
-            &config.projector.history_presentation(),
-        )?;
-        let mut ledger = ContentLedger::default();
-        ledger.restored(StoredChains {
-            messages: stored_messages,
-            prompt: stored_prompt,
-            events: stored_events,
-            completions: stored_completions,
-            environment,
-            request,
-        });
-        let machine = Self {
-            projection_refusal: None,
-            config,
-            state,
-            side_effect_outbox,
-            next_effect_id: checkpoint.next_effect_id,
-            window,
-            messages,
-            prompt_messages,
-            events,
-            progress_event_cursor: checkpoint.progress_event_cursor,
-            progress_boundaries: checkpoint.progress_boundaries,
-            protocol_iteration: checkpoint.protocol_iteration,
-            protocol_run_offset: checkpoint.protocol_run_offset,
-            consecutive_unproductive: checkpoint.consecutive_unproductive,
-            cumulative_usage: checkpoint.cumulative_usage,
-            last_call_usage: checkpoint.last_call_usage,
-            environment: synced,
-            decided_completions,
-            observed_cancellation: None,
-            resume_work: None,
-            run_abort: None,
-            content: ledger,
-            inputs: None,
-        };
-        machine.check_parked_state()?;
-        Ok(machine)
     }
 
     /// Ask the driver whether this build decodes the state it parked in the
     /// work the restored machine waits on: the one place a parked driver
     /// state is refused, before the host re-delivers the work.
-    fn check_parked_state(&self) -> Result<(), TurnCheckpointRestoreError> {
+    pub fn check_parked_state(&self) -> Result<(), UndecodableDriverState> {
         let (MachineState::Waiting { work, .. }, Some(environment)) =
             (&self.state, self.environment.as_ref())
         else {
             return Ok(());
         };
-        self.config
-            .protocol_driver
-            .check_parked_state(
-                DriverContextView {
-                    config: &self.config,
-                    messages: &self.messages,
-                    prompt_messages: &self.prompt_messages,
-                    events: self.events.as_slice(),
-                    protocol_iteration: self.protocol_iteration,
-                    protocol_run_offset: self.protocol_run_offset,
-                    consecutive_unproductive: self.consecutive_unproductive,
-                    successful_tool_execution: false,
-                    observed_cancellation: None,
-                    environment: &environment.sync,
-                },
-                work,
-            )
-            .map_err(TurnCheckpointRestoreError::UndecodableDriverState)
+        self.config.protocol_driver.check_parked_state(
+            DriverContextView {
+                config: &self.config,
+                messages: &self.messages,
+                prompt_messages: &self.prompt_messages,
+                events: self.events.as_slice(),
+                protocol_iteration: self.protocol_iteration,
+                protocol_run_offset: self.protocol_run_offset,
+                consecutive_unproductive: self.consecutive_unproductive,
+                successful_tool_execution: false,
+                observed_cancellation: None,
+                environment: &environment.sync,
+            },
+            work,
+        )
     }
 
     /// Run one driver step over the synced environment and apply the
@@ -840,9 +529,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if safe < self.messages.len() {
             self.messages.make_mut().truncate(safe);
             self.events.truncate(self.progress_event_cursor);
-            self.content.rewrote(Sequence::Messages, safe);
-            self.content
-                .rewrote(Sequence::Events, self.progress_event_cursor);
         }
         self.finish(TurnOutcome::Stopped(TurnStop::Cancelled { evidence }));
     }
@@ -869,7 +555,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.emit(SessionStreamEvent::TurnOutcome { outcome });
         self.emit(SessionStreamEvent::Done);
         let msgs = std::mem::take(&mut self.messages);
-        self.content.rewrote(Sequence::Messages, 0);
         let event_delta = self.next_event_delta();
         let window_events = self
             .window
@@ -877,7 +562,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .map_or(0, |window| window.events().len());
         self.events.truncate(window_events);
         self.progress_event_cursor = window_events;
-        self.content.rewrote(Sequence::Events, window_events);
         let protocol_iteration = self.protocol_iteration;
         self.state = MachineState::Finished;
         self.side_effect_outbox.push_back(Effect::Done {

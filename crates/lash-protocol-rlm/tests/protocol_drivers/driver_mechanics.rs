@@ -217,25 +217,41 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
 /// not decode is refused when it is restored, with the driver's typed
 /// refusal: no machine exists to re-deliver its model call or run its cell.
 #[test]
-fn rlm_driver_state_this_build_cannot_decode_refuses_its_checkpoint_at_restore() {
+fn rlm_driver_state_this_build_cannot_decode_refuses_pending_work() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
     let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
     let effects = drain_effects(&mut machine);
     assert!(find_llm_call(&effects).is_some());
 
-    let mut checkpoint = serde_json::to_value(machine.checkpoint()).expect("checkpoint serializes");
-    assert!(
-        rewrite_first_rlm_driver_state_owner(&mut checkpoint),
-        "checkpoint should contain RLM driver state"
+    let llm_id = *find_llm_call(&effects).unwrap();
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![
+            lash_protocol_rlm::test_support::execute_code("1"),
+        ])),
+    });
+    drain_effects(&mut machine);
+    let (language, code, driver_state) = machine.waiting_exec().expect("pending execution");
+    let mut encoded = serde_json::to_value(driver_state).unwrap();
+    assert!(rewrite_first_rlm_driver_state_owner(&mut encoded));
+    let work = lash_sansio::PendingWork::Exec {
+        language: language.to_owned(),
+        code: code.to_owned(),
+        driver_state: serde_json::from_value(encoded).unwrap(),
+    };
+    let mut resumed = TurnMachine::new(
+        test_config(),
+        vec![user_message("run some code")],
+        Default::default(),
+        0,
     );
-    let checkpoint = serde_json::from_value(checkpoint).expect("checkpoint deserializes");
-    let Err(error) = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None) else {
-        panic!("the machine restored over driver state its driver does not decode");
-    };
-    let lash_sansio::TurnCheckpointRestoreError::UndecodableDriverState(refusal) = error else {
-        panic!("the restore failed with {error}, not the driver's refusal");
-    };
+    resumed.resume_with(work);
+    drain_effects(&mut resumed);
+    let refusal = resumed
+        .check_parked_state()
+        .expect_err("foreign driver state is refused");
     assert_eq!(refusal.driver, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
     assert!(
         refusal.reason.contains("driver state belongs to plugin"),
@@ -247,7 +263,8 @@ fn rlm_driver_state_this_build_cannot_decode_refuses_its_checkpoint_at_restore()
 fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
-    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
+    let mut replay = lash_sansio::testing::JournalReplay::new(config, msgs, Default::default(), 0);
+    let mut machine = replay.start();
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
@@ -271,9 +288,9 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         .expect("exec effect");
     assert_eq!(code, "console.log(\"hi\");");
 
-    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
-        .expect("supported checkpoint");
+    let mut restored = replay
+        .resume(&mut machine, &|_| Some(rlm_environment()))
+        .expect("journal replays");
     let effects = drain_effects(&mut restored);
     let (restored_exec_id, restored_code) = effects
         .iter()
@@ -394,12 +411,13 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                     "restored_pending_exec={restore_pending_exec}, response_error={response_error:?}"
                 );
                 let config = test_config();
-                let mut machine = TurnMachine::new(
+                let mut replay = lash_sansio::testing::JournalReplay::new(
                     config,
                     vec![user_message("run until I stop")],
                     Default::default(),
                     0,
                 );
+                let mut machine = replay.start();
 
                 let effects = drain_effects(&mut machine);
                 let llm_id = *find_llm_call(&effects).expect("initial model call");
@@ -414,9 +432,9 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
 
                 let mut effects = drain_effects(&mut machine);
                 if restore_pending_exec {
-                    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-                    machine = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
-                        .expect("supported checkpoint");
+                    machine = replay
+                        .resume(&mut machine, &|_| Some(rlm_environment()))
+                        .expect("journal replays");
                     effects = drain_effects(&mut machine);
                 }
                 let exec_id = effects
@@ -569,7 +587,8 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
 fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes() {
     let config = test_config();
     let msgs = vec![user_message("run fanout tools")];
-    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
+    let mut replay = lash_sansio::testing::JournalReplay::new(config, msgs, Default::default(), 0);
+    let mut machine = replay.start();
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
@@ -696,9 +715,9 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     );
     assert!(!emitted[2].3.is_success());
 
-    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
-        .expect("supported checkpoint");
+    let mut restored = replay
+        .resume(&mut machine, &|_| Some(rlm_environment()))
+        .expect("journal replays");
     let effects = drain_effects(&mut restored);
     assert!(
         !effects

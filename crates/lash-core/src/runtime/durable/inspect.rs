@@ -134,12 +134,9 @@ impl LashRuntime {
             &mut machine,
             journal.inputs,
             phase.journal_inputs,
+            run,
             &|iteration| syncs.get(&iteration).cloned(),
-        )
-        .map_err(|divergence| TurnRestoreError::Diverged {
-            run: run.clone(),
-            divergence,
-        })?;
+        )?;
         Ok(Some(machine))
     }
 }

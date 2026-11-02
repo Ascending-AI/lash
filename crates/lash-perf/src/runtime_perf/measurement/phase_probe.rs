@@ -271,7 +271,6 @@ async fn run_once_inner(
         | RuntimePerfScenario::AsyncProcessSettlement8Children => {
             return Box::pin(run_once_async_process_settlement(scenario, chat_turns)).await;
         }
-        RuntimePerfScenario::TurnCheckpoint => return run_once_turn_checkpoint(chat_turns).await,
         RuntimePerfScenario::CheckpointStateHotPaths => {
             return Box::pin(run_once_checkpoint_state_hot_paths(chat_turns)).await;
         }

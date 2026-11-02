@@ -859,6 +859,17 @@ pub struct UndecodableDriverState {
     pub reason: String,
 }
 
+impl std::fmt::Display for UndecodableDriverState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} driver state is undecodable: {}",
+            self.driver, self.reason
+        )
+    }
+}
+impl std::error::Error for UndecodableDriverState {}
+
 pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) config: &'a TurnMachineConfig<M>,
     pub(super) messages: &'a MessageSequence,
@@ -1135,7 +1146,7 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     /// Check the state the driver parked in `work`, the work a restored
     /// checkpoint waits on: whether this build decodes what
     /// [`Self::handle_llm_success`] or [`Self::handle_exec_result`] will be
-    /// handed back. [`TurnMachine::restore_from_checkpoint`] asks once,
+    /// handed back. [`TurnMachine::check_parked_state`] asks once after replay,
     /// before the host re-delivers anything, and refuses the checkpoint with
     /// the driver's answer; so a handler is only ever handed state this
     /// build wrote or this check admitted. A driver that parks no state
@@ -1306,6 +1317,7 @@ impl ResponseToolCalls {
 }
 
 /// Configuration for a `TurnMachine` instance.
+#[derive(Clone)]
 pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     /// Where this turn's model-issued tool calls are admitted.
     pub model_tool_calls: ModelToolCalls,

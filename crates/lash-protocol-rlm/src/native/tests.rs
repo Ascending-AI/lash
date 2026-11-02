@@ -181,12 +181,13 @@ fn run(
     exec: Option<Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>>,
 ) -> (Vec<serde_json::Value>, Vec<lash_core::CellRecord>) {
     let termination: Ending = termination.into();
-    let mut machine = TurnMachine::new(
+    let mut replay = lash_sansio::testing::JournalReplay::new(
         config(termination.clone()),
         Vec::new(),
         Default::default(),
         0,
     );
+    let mut machine = replay.start();
     let initial = drain(&mut machine);
     let parts = match prose {
         Some(prose) => {
@@ -213,10 +214,10 @@ fn run(
             })
             .expect("exec");
         // Pending provider replay metadata survives the parked execution boundary.
-        let checkpoint = serde_json::to_string(&machine.checkpoint()).unwrap();
-        let saved = serde_json::from_str(&checkpoint).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(termination.clone()), saved, None)
-            .expect("supported checkpoint");
+
+        machine = replay
+            .resume(&mut machine, &|_| Some(replay_environment()))
+            .expect("journal replays");
         drain(&mut machine);
         machine.handle_response(Response::ExecResult { id, result });
         effects = drain(&mut machine);
@@ -234,10 +235,10 @@ fn run(
             break;
         };
         checkpoints.push(serde_json::to_value(checkpoint).unwrap());
-        let saved =
-            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(config(termination.clone()), saved, None)
-            .expect("supported checkpoint");
+
+        machine = replay
+            .resume(&mut machine, &|_| Some(replay_environment()))
+            .expect("journal replays");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -850,12 +851,13 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
 #[test]
 fn output_limit_prose_repairs() {
     {
-        let mut machine = TurnMachine::new(
+        let mut replay = lash_sansio::testing::JournalReplay::new(
             config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
         );
+        let mut machine = replay.start();
         let initial = drain(&mut machine);
         let effects = reply_with_reason(
             &mut machine,
@@ -880,14 +882,10 @@ fn output_limit_prose_repairs() {
                 _ => None,
             })
             .unwrap();
-        let saved =
-            serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
-        machine = TurnMachine::restore_from_checkpoint(
-            config(lash_core::TerminationMode::Natural),
-            saved,
-            None,
-        )
-        .expect("supported checkpoint");
+
+        machine = replay
+            .resume(&mut machine, &|_| Some(replay_environment()))
+            .expect("journal replays");
         drain(&mut machine);
         machine.handle_response(Response::Checkpoint {
             id,
@@ -914,12 +912,13 @@ fn output_limit_prose_repairs() {
 #[test]
 fn output_limit_calls_repair_without_execution_until_stall_budget() {
     for arguments in [r#"{"code":"finish(1);"}"#, r#"{"code":"finish"#] {
-        let mut machine = TurnMachine::new(
+        let mut replay = lash_sansio::testing::JournalReplay::new(
             config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
         );
+        let mut machine = replay.start();
         let mut effects = drain(&mut machine);
         let mut events = Vec::new();
         for attempt in 1..=3 {
@@ -951,15 +950,10 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                     _ => None,
                 })
                 .unwrap();
-            let saved =
-                serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap())
-                    .unwrap();
-            machine = TurnMachine::restore_from_checkpoint(
-                config(lash_core::TerminationMode::Natural),
-                saved,
-                None,
-            )
-            .expect("supported checkpoint");
+
+            machine = replay
+                .resume(&mut machine, &|_| Some(replay_environment()))
+                .expect("journal replays");
             drain(&mut machine);
             machine.handle_response(Response::Checkpoint {
                 id,
@@ -1113,12 +1107,13 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
     let payload =
         serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
     {
-        let mut machine = TurnMachine::new(
+        let mut replay = lash_sansio::testing::JournalReplay::new(
             config(lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
         );
+        let mut machine = replay.start();
         let initial = drain(&mut machine);
         let id = initial
             .iter()
@@ -1148,14 +1143,11 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             }),
         });
         drain(&mut machine);
-        let saved = serde_json::to_value(machine.checkpoint()).unwrap();
-        let usage = saved["checkpoint"]["cumulative_usage"].clone();
-        machine = TurnMachine::restore_from_checkpoint(
-            config(lash_core::TerminationMode::Natural),
-            serde_json::from_value(saved).unwrap(),
-            None,
-        )
-        .expect("restore pending execution");
+
+        let usage = serde_json::to_value(machine.cumulative_usage()).unwrap();
+        machine = replay
+            .resume(&mut machine, &|_| Some(replay_environment()))
+            .expect("journal replays");
         let replayed = drain(&mut machine);
         assert!(
             !replayed
@@ -1219,14 +1211,14 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
                 _ => None,
             })
             .expect("terminal checkpoint");
-        let saved = serde_json::to_value(machine.checkpoint()).unwrap();
-        assert_eq!(saved["checkpoint"]["cumulative_usage"], usage);
-        machine = TurnMachine::restore_from_checkpoint(
-            config(lash_core::TerminationMode::Natural),
-            serde_json::from_value(saved).unwrap(),
-            None,
-        )
-        .expect("restore terminal checkpoint");
+
+        assert_eq!(
+            serde_json::to_value(machine.cumulative_usage()).unwrap(),
+            usage
+        );
+        machine = replay
+            .resume(&mut machine, &|_| Some(replay_environment()))
+            .expect("journal replays");
         let redelivered = drain(&mut machine);
         assert!(
             !redelivered
@@ -1257,7 +1249,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             )
         );
         assert_eq!(
-            serde_json::to_value(machine.checkpoint()).unwrap()["checkpoint"]["cumulative_usage"],
+            serde_json::to_value(machine.cumulative_usage()).unwrap(),
             usage
         );
         assert!(
@@ -1443,5 +1435,18 @@ async fn printed_tool_image_survives_execution_settlement_and_the_next_model_req
             })
             .collect::<Vec<_>>();
         assert_eq!(images, vec![image.clone()]);
+    }
+}
+
+fn replay_environment() -> lash_sansio::sansio::ExecutionEnvironmentSync {
+    lash_sansio::sansio::ExecutionEnvironmentSync {
+        turn_controls: [(
+            crate::FINISH_TOOL_NAME.to_string(),
+            lash_kernel_value::tool_declaration::TurnControls::finish(
+                lash_kernel_value::json_schema::JsonSchema::any(),
+            ),
+        )]
+        .into(),
+        ..Default::default()
     }
 }

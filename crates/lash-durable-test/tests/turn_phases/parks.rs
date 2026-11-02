@@ -277,7 +277,7 @@ impl Activation for PoisonFirst {
             );
             let checkpoint = staging
                 .encode_value(
-                    lash_core_store::checkpoint_graph::NodeKind::TURN_CONTENT,
+                    lash_core_store::checkpoint_graph::NodeKind::NAMESPACE_VALUE,
                     &"not a turn checkpoint".to_owned(),
                 )
                 .expect("the poison node encodes");

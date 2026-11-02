@@ -379,12 +379,13 @@ fn a_failed_tool_outcome_control_is_not_taken_as_the_turn_outcome() {
 fn a_settled_control_call_finishes_the_turn_at_before_completion() {
     for code in [false, true] {
         for (turns, steer) in [(1, false), (1, true), (2, true)] {
-            let mut machine = TurnMachine::new(
+            let mut replay = lash_sansio::testing::JournalReplay::new(
                 loop_config(code, false, turns),
                 Vec::new(),
                 Default::default(),
                 7,
             );
+            let mut machine = replay.start();
             let ready = drain(&mut machine);
             let output = ToolCallOutput::finish(serde_json::json!("terminal value"));
             let effects = if code {
@@ -420,11 +421,10 @@ fn a_settled_control_call_finishes_the_turn_at_before_completion() {
             assert!(turn_outcomes(&effects).is_empty());
             let (id, kind) = checkpoint(&effects).expect("a declared completion checkpoints");
             assert_eq!(kind, CheckpointKind::BeforeCompletion);
-            let saved = serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
-                .unwrap();
-            machine =
-                TurnMachine::restore_from_checkpoint(loop_config(code, false, turns), saved, None)
-                    .unwrap();
+
+            machine = replay
+                .resume(&mut machine, &|_| Some(replay_environment()))
+                .expect("journal replays");
             drain(&mut machine);
             machine.handle_response(Response::Checkpoint {
                 id,
@@ -1119,12 +1119,13 @@ fn both_protocols_share_the_persistent_no_progress_meter() {
             (vec![false, false], 2, 2),
         ] {
             for restore in [false, true] {
-                let mut machine = TurnMachine::new(
+                let mut replay = lash_sansio::testing::JournalReplay::new(
                     loop_config(code, batch, turns),
                     Vec::new(),
                     Default::default(),
                     7,
                 );
+                let mut machine = replay.start();
                 let mut effects = drain(&mut machine);
                 let mut calls = 0;
                 for productive in &units {
@@ -1136,16 +1137,9 @@ fn both_protocols_share_the_persistent_no_progress_meter() {
                     let (id, kind) = checkpoint(&effects).expect("continuation admitted");
                     assert_eq!(kind, CheckpointKind::AfterWork);
                     if restore {
-                        let saved = serde_json::from_slice(
-                            &serde_json::to_vec(&machine.checkpoint()).unwrap(),
-                        )
-                        .unwrap();
-                        machine = TurnMachine::restore_from_checkpoint(
-                            loop_config(code, batch, turns),
-                            saved,
-                            None,
-                        )
-                        .unwrap();
+                        machine = replay
+                            .resume(&mut machine, &|_| Some(replay_environment()))
+                            .expect("journal replays");
                         drain(&mut machine);
                     }
                     machine.handle_response(Response::Checkpoint {
@@ -1199,5 +1193,24 @@ fn both_protocols_share_the_persistent_no_progress_meter() {
                 }
             }
         }
+    }
+}
+
+fn replay_environment() -> sansio::ExecutionEnvironmentSync {
+    sansio::ExecutionEnvironmentSync {
+        turn_controls: [
+            (
+                "finish".to_string(),
+                lash_kernel_value::tool_declaration::TurnControls::finish(
+                    lash_kernel_value::json_schema::JsonSchema::any(),
+                ),
+            ),
+            (
+                "switch".to_string(),
+                lash_kernel_value::tool_declaration::TurnControls::switch_agent_frame(),
+            ),
+        ]
+        .into(),
+        ..sansio::ExecutionEnvironmentSync::default()
     }
 }

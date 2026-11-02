@@ -151,13 +151,15 @@ Substrate parameters (lease TTL, heartbeat and reap intervals, self-stop
 bound, claim poll, idle eviction, activation budget, cancel grace) live in one
 typed, validated `DurableConfig` with refusal laws.
 
-### 4. Turns restore from their checkpoint
+### 4. Turns replay their journal
 
 A turn is a sequence of committed phases of the sans-io `TurnMachine`.
-Production restores from `TurnCheckpoint`
-(`crates/lash-sansio/src/sansio/machine_state.rs`,
-`crates/lash-sansio/src/sansio/turn_machine.rs`) and re-delivers the pending
-effect the checkpoint names.
+The first phase records its build inputs, including context-pressure and
+attachment-omission decisions. Production recovery and read-only open-turn
+inspection share a callback-free builder over the pinned window, then replay
+the committed `MachineInput` journal. Recovery validates the parked protocol
+driver state before it re-delivers the pending effect. Phase roots hold the
+window pin and the committed journal length, without saved machine content.
 
 - Admission commits the turn row, binds its inputs and records the turn
   deadline.

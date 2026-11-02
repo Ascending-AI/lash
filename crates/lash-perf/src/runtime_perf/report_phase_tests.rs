@@ -650,7 +650,6 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::ScopedEffects,
         RuntimePerfScenario::StoreReopen,
         RuntimePerfScenario::SqliteStoreReopen,
-        RuntimePerfScenario::TurnCheckpoint,
         RuntimePerfScenario::LiveReplayPressure,
         RuntimePerfScenario::StoreHardeningHotPaths,
     ] {

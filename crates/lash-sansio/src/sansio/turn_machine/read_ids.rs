@@ -54,12 +54,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
             };
             Some((first, rebound))
         };
-        if let Some((first, messages)) = rebind_messages(&self.messages) {
-            self.content.rewrote(Sequence::Messages, first);
+        if let Some((_first, messages)) = rebind_messages(&self.messages) {
             self.messages = messages;
         }
-        if let Some((first, messages)) = rebind_messages(&self.prompt_messages) {
-            self.content.rewrote(Sequence::Prompt, first);
+        if let Some((_first, messages)) = rebind_messages(&self.prompt_messages) {
             self.prompt_messages = messages;
         }
         if let Some(first) = self
@@ -81,7 +79,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 }
             }
             self.events.replace_from(first, tail);
-            self.content.rewrote(Sequence::Events, first);
         }
         if let MachineState::Waiting {
             work: PendingWork::WaitingForToolResults { wave, .. },

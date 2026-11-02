@@ -1,6 +1,6 @@
 //! The format sets of this build's actors (ADR 0106 §1; L11, FIG-5187).
 //!
-//! A session's state is its turn checkpoint, its session-state generation,
+//! A session's state is its turn journal, its session-state generation,
 //! its run records, its wait rows and its tool outcomes' materials; a started
 //! process's is its engine's state and the same run records, waits and
 //! materials. The assembler adds
@@ -41,8 +41,8 @@ use crate::EngineStateFormat;
 /// format_manifest = "RunRecord"
 pub const RUN_RECORD_FORMAT_VERSION: u32 = 17;
 
-/// The turn checkpoint's format id.
-pub const TURN_CHECKPOINT_FORMAT_ID: &str = "turn-checkpoint";
+/// The turn journal's format id.
+pub const TURN_JOURNAL_FORMAT_ID: &str = "turn-journal";
 /// The run-record bodies' format id.
 pub const RUN_RECORD_FORMAT_ID: &str = "run-record";
 /// The wait rows' format id.
@@ -112,8 +112,8 @@ fn session_set(extra: &[FormatSurface]) -> FormatSet {
             .into_iter()
             .chain([
                 FormatSurface::new(
-                    TURN_CHECKPOINT_FORMAT_ID,
-                    lash_protocol_types::TURN_CHECKPOINT_SCHEMA_VERSION,
+                    TURN_JOURNAL_FORMAT_ID,
+                    lash_protocol_types::TURN_JOURNAL_SCHEMA_VERSION,
                 ),
                 FormatSurface::new(
                     SESSION_STATE_FORMAT_ID,

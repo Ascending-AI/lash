@@ -869,13 +869,13 @@ mod tests {
     #[test]
     fn runtime_perf_report_serializes_scenario_harness_groups() {
         let scenarios = vec![
-            RuntimePerfScenario::TurnCheckpoint,
+            RuntimePerfScenario::StoreReopen,
             RuntimePerfScenario::Standard,
             RuntimePerfScenario::Rlm,
             RuntimePerfScenario::RlmProcessHandles,
         ];
         let results = vec![
-            run_result(RuntimePerfScenario::TurnCheckpoint, 10.0, 100),
+            run_result(RuntimePerfScenario::StoreReopen, 10.0, 100),
             run_result(RuntimePerfScenario::Standard, 20.0, 200),
             run_result(RuntimePerfScenario::Rlm, 30.0, 300),
             run_result(RuntimePerfScenario::RlmProcessHandles, 40.0, 400),
@@ -886,9 +886,9 @@ mod tests {
         let report = RuntimePerfReport {
             kind: "runtime-perf",
             experiments: BTreeMap::from([(
-                "turn_checkpoint".to_owned(),
+                "store_reopen".to_owned(),
                 runtime_experiment(serde_json::json!({"fixture": true}), false, false)
-                    .for_scenario("turn_checkpoint"),
+                    .for_scenario("store_reopen"),
             )]),
             load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
             created_at: "test".to_string(),
@@ -938,7 +938,7 @@ mod tests {
         );
         assert_eq!(
             report_json["scenario_harness_summary"][0]["scenarios"],
-            serde_json::json!(["turn_checkpoint"])
+            serde_json::json!(["store_reopen"])
         );
         assert_eq!(
             report_json["summary"][0]["scenario_harness"],
@@ -947,13 +947,11 @@ mod tests {
         assert!(
             report_json["summary"][0]["scenario_harness_rationale"]
                 .as_str()
-                .is_some_and(|value| value.contains("runtime checkpoint"))
+                .is_some_and(|value| value.contains("runtime persistence reopen"))
         );
         assert_eq!(
-            report_json["summary"][0]["correctness_coverage_ids"],
-            serde_json::json!([
-                "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"
-            ])
+            report_json["summary"][1]["correctness_coverage_ids"],
+            serde_json::json!(["standard_protocol_scenario_projects_initial_request"])
         );
         assert_eq!(
             report_json["results"][0]["scenario_harness"],
@@ -987,7 +985,7 @@ mod tests {
             "scenario_harness_summary": [
                 {
                     "scenario_harness": "Runtime Scenario",
-                    "scenarios": ["turn_checkpoint"],
+                    "scenarios": ["store_reopen"],
                     "runs": 1
                 },
                 {
@@ -1008,11 +1006,9 @@ mod tests {
             ],
             "summary": [
                 {
-                    "scenario": "turn_checkpoint",
+                    "scenario": "store_reopen",
                     "scenario_harness": "Runtime Scenario",
-                    "correctness_coverage_ids": [
-                        "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"
-                    ]
+                    "correctness_coverage_ids": []
                 },
                 {
                     "scenario": "standard",
@@ -1065,7 +1061,7 @@ mod tests {
 
     #[test]
     fn runtime_perf_ledger_keeps_the_summary_median_and_p95() {
-        let scenario = RuntimePerfScenario::TurnCheckpoint;
+        let scenario = RuntimePerfScenario::StoreReopen;
         let stack_profile = stack_profile(2 * 1024 * 1024);
         let mut result = run_result(scenario, 10.0, 100);
         result
@@ -1156,7 +1152,7 @@ mod tests {
 
     #[test]
     fn skipped_and_measured_zero_stages_are_distinguished_in_records_and_summary() {
-        let scenario = RuntimePerfScenario::TurnCheckpoint;
+        let scenario = RuntimePerfScenario::StoreReopen;
         let stack_profile = stack_profile(2 * 1024 * 1024);
 
         // A run that measured every stage, with `export_state` genuinely
