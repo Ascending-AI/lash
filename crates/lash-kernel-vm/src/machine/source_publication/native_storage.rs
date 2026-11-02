@@ -208,16 +208,33 @@ impl NativeStorage<'_> {
             Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
             _ => return Ok(None),
         }
-        let (value, work, depth, new) = if let Some((value, depth)) = self.known {
-            if !crate::compile::scalar(&value)
-                || !crate::compile::import_result_fits(
-                    &self.function.header.signature.result,
-                    value,
-                )
-            {
-                return Ok(None);
+        let known = match self.known {
+            Some((value, depth)) => {
+                if depth != 0
+                    || !crate::compile::scalar(&value)
+                    || !crate::compile::import_result_fits(
+                        &self.function.header.signature.result,
+                        value,
+                    )
+                {
+                    return Ok(None);
+                }
+                match self
+                    .function
+                    .specialization
+                    .prepared
+                    .as_ref()
+                    .and_then(|(entry, _)| entry.call(&self.args))
+                {
+                    Some(actual) if actual.same(&value) => Some(value),
+                    Some(_) => return Ok(None),
+                    None => None,
+                }
             }
-            (value, 0, depth, vec![])
+            None => None,
+        };
+        let (value, work, depth, new) = if let Some(value) = known {
+            (value, 0, 0, vec![])
         } else {
             let semantics = arena.semantics().with_limits(self.limits);
             let mut nursery = match self.room {
@@ -241,6 +258,16 @@ impl NativeStorage<'_> {
                     };
                 }
             };
+            // Heap reads can have a checked direct answer without an immediate
+            // prepared entry. Authenticate it with the installed native before
+            // retaining any nursery output or accepting the source boundary.
+            if self
+                .known
+                .is_some_and(|(expected, _)| !value.same(&expected))
+            {
+                nursery.discard();
+                return Ok(None);
+            }
             if self.room.is_some_and(|room| {
                 arena
                     .install_bound(nursery.built())

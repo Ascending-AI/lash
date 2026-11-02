@@ -15,16 +15,33 @@ pub(crate) struct CompiledExit {
     through: Point,
     unpaid: Point,
     recovery: [u8; 32],
+    depth: u64,
 }
 
 impl CompiledExit {
-    pub(crate) fn scalar(region: &ScalarRegion) -> Result<Self, Refused> {
+    pub(crate) fn scalar(
+        exe: &crate::compile::Executable,
+        region: &ScalarRegion,
+    ) -> Result<Self, Refused> {
         let source = region.source();
         let interval = region.interval();
         let first = interval.events().next().ok_or(Refused::Path)?.point.clone();
         let through = interval.events().last().ok_or(Refused::Path)?.point.clone();
         if interval.exit() != ExitKind::Normal || through.phase != Phase::Commit {
             return Err(Refused::Exit);
+        }
+        let mut depth = 0;
+        for event in interval.events() {
+            for measure in event.peak.measures() {
+                if let Measure::CallPeak {
+                    callee: CallSource::Native(id),
+                    ..
+                } = measure
+                {
+                    let lib = exe.library_lib(id).ok_or(Refused::Source)?;
+                    depth = depth.max(u64::from(exe.lib(lib).operation()));
+                }
+            }
         }
         let unpaid = source.next_after_commit(&through.site)?;
         let mut encoding = TokenWriter::new();
@@ -39,6 +56,7 @@ impl CompiledExit {
             through,
             unpaid,
             recovery: logical_digest(&encoding.into_bytes()),
+            depth,
         })
     }
     pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
@@ -100,7 +118,7 @@ impl Frontier {
         resources.admit_region(
             debt,
             &[],
-            0,
+            exit.depth,
             safe_point,
             PreparedRegion {
                 frontier: std::rc::Rc::clone(&self.identity),

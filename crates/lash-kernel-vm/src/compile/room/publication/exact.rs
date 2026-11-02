@@ -8,8 +8,8 @@ use logical::{BoundaryTransaction, Dependencies, Owner as RootOwner, RootValue};
 /// These are actual live roots, not executor-authored fees or byte deltas.
 /// Preparation consumes them directly under the canonical ledger owner.
 #[derive(Default)]
-pub(crate) struct ExactRoots {
-    pub(crate) activation: Option<crate::compile::room::placement::DenseActivation>,
+pub(crate) struct ExactRoots<'v> {
+    pub(crate) activation: Option<crate::compile::room::placement::DenseActivation<'v>>,
     pub(crate) inputs: Vec<RootOwner>,
     pub(crate) outputs: Vec<(RootOwner, ExactValue)>,
 }
@@ -39,7 +39,7 @@ pub(crate) struct BoundEvent {
     before: Position,
     next: Position,
     dependencies: Dependencies,
-    roots: ExactRoots,
+    roots: ExactRoots<'static>,
     room: CheckedRoom,
     allowance: Allowance,
     resources: ResourceFacts,
@@ -91,7 +91,7 @@ impl ExactEvent {
         arena: &Arena,
         heap: &PagedHeap,
         execution: &mut impl Execution,
-        roots: ExactRoots,
+        roots: ExactRoots<'_>,
         next: Position,
         allowance: Allowance,
         resources: ResourceFacts,
@@ -207,7 +207,11 @@ impl ExactEvent {
             before: frontier.position.clone(),
             next,
             dependencies,
-            roots,
+            roots: ExactRoots {
+                activation: None,
+                inputs: roots.inputs,
+                outputs: roots.outputs,
+            },
             room,
             allowance,
             resources,

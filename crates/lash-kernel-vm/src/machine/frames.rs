@@ -222,6 +222,10 @@ impl PreparedScopeSlots<'_, '_> {
 }
 
 impl Slots {
+    pub(super) fn states(&self) -> &[SlotState] {
+        &self.values
+    }
+
     pub(super) fn prepare_scope<'slots, 'code>(
         &'slots mut self,
         declares: &'code [u32],

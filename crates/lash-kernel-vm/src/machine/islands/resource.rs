@@ -20,29 +20,30 @@ use lash_kernel_state::{
 };
 use std::sync::Arc;
 
-enum Input {
-    Literal(Value),
-    Binding(u32),
-}
+#[path = "resource/expression.rs"]
+mod expression;
+use expression::{Expression, NativeValues};
 
 pub(crate) struct CertifiedStatement {
+    executable: u64,
     pub(in crate::machine::islands) id: StmtId,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) source_pc: u32,
     pub(in crate::machine::islands) target: u32,
     placement: Arc<BindingPlacement>,
-    input: Input,
-    read: Point,
+    expression: Expression,
     through: Point,
     region: ScalarRegion,
     pub(in crate::machine::islands) exit: CompiledExit,
     pub(in crate::machine::islands) charges: ChargeProgram,
 }
 
-pub(in crate::machine::islands) struct EvaluatedStatement<'a> {
-    pub(in crate::machine::islands) activation: DenseActivation,
+pub(in crate::machine::islands) struct EvaluatedStatement<'a, 'v> {
+    pub(in crate::machine::islands) activation: DenseActivation<'v>,
     pub(in crate::machine::islands) values: Vec<Value>,
     pub(in crate::machine::islands) result: Value,
+    calls: Vec<room::CheckedRoom>,
+    formulas: Vec<NativeValues>,
     pub(in crate::machine::islands) certificate: &'a CertifiedStatement,
 }
 
@@ -68,47 +69,30 @@ impl CertifiedStatement {
             _ => return None,
         };
         let mut parsed = expr::statement(stream, statement.ops, false)?;
-        let mut value = parsed.take(reg)?;
+        let value = parsed.take(reg)?;
         if !parsed.spent() {
             return None;
         }
-        while let expr::Kind::Pin(inner) = value.kind {
-            value = *inner;
-        }
-        let read_site = stream
-            .source_sites
-            .get(value.pc as usize)?
-            .as_deref()?
-            .clone();
-        let read = Point {
-            site: read_site,
-            phase: Phase::Commit,
-        };
-        let input = match value.kind {
-            expr::Kind::Const(value) if scalar(value) => Input::Literal(value),
-            expr::Kind::Local {
-                local,
-                scoped: false,
-                ..
-            } if placement.unshared(local.at) => {
-                placement.verify_read(&read, local.at).ok()?;
-                Input::Binding(local.at)
-            }
-            _ => return None,
-        };
+        let mut expression = Expression::compile(exe, stream, &placement, &value)?;
+        let read = expression.first().clone();
         let source = placement.source();
         let through = Point {
             site: statement.site.clone(),
             phase: Phase::Commit,
         };
-        let route = [&read, &through].map(|at| Selection::Event {
-            at: at.clone(),
-            exit: ExitKind::Normal,
-        });
+        let route: Vec<_> = expression
+            .points()
+            .chain(std::iter::once(&through))
+            .map(|at| Selection::Event {
+                at: at.clone(),
+                exit: ExitKind::Normal,
+            })
+            .collect();
         let interval = source
             .compile_between(&read, &through, &route, route.len())
             .ok()?;
         let region = source.compile_scalar_region(interval).ok()?;
+        expression.bind_facts(exe, &region)?;
         let output = region
             .interval()
             .events()
@@ -142,16 +126,16 @@ impl CertifiedStatement {
         if placement.physical(slot) != Some(target) {
             return None;
         }
-        let exit = CompiledExit::scalar(&region).ok()?;
+        let exit = CompiledExit::scalar(exe, &region).ok()?;
         let charges = ChargeProgram::compile(exe, placement.code(), id, statement.ops).ok()?;
         let certificate = Self {
+            executable: exe.local(),
             id,
             index,
             source_pc: statement.ops.start,
             target,
             placement,
-            input,
-            read,
+            expression,
             through,
             region,
             exit,
@@ -177,32 +161,26 @@ impl CertifiedStatement {
         {
             return Err(room::Refused::Source);
         }
-        match &self.input {
-            Input::Literal(actual) => self.placement.verify_literal(&self.read, *actual),
-            Input::Binding(at) => self.placement.verify_read(&self.read, *at),
-        }
+        self.expression.verify(stream, &self.placement)
     }
 
-    pub(in crate::machine::islands) fn evaluate<'a>(
+    pub(in crate::machine::islands) fn evaluate<'a, 'v>(
         &'a self,
-        code: compile::CodeId,
-        slots: &[SlotState],
+        exe: &Executable,
+        (code, slots): (compile::CodeId, &'v [SlotState]),
         invocation: &Invocation,
         ledger: &Ledger,
         heap: &PagedHeap,
-    ) -> Result<Option<EvaluatedStatement<'a>>, HeapFault> {
+        arena: &mut Arena,
+    ) -> Result<Option<EvaluatedStatement<'a, 'v>>, HeapFault> {
+        if exe.local() != self.executable {
+            return Ok(None);
+        }
         let Some(activation) = self
             .placement
             .capture(code, invocation, ledger, heap, slots)?
         else {
             return Ok(None);
-        };
-        let result = match self.input {
-            Input::Literal(value) => value,
-            Input::Binding(at) => match slots.get(at as usize) {
-                Some(SlotState::Value(value)) if scalar(*value) => *value,
-                _ => return Ok(None),
-            },
         };
         let mut values = vec![Value::Null; self.region.fact_count()];
         for (slot, fact) in self.region.entries() {
@@ -211,21 +189,44 @@ impl CertifiedStatement {
             };
             values[fact.index()] = value;
         }
-        for (_, fact) in self.region.results() {
-            values[fact.index()] = result;
-        }
+        let Some(evaluated) = self
+            .expression
+            .evaluate(exe, slots, arena, heap, &mut values)?
+        else {
+            return Ok(None);
+        };
         Ok(Some(EvaluatedStatement {
             activation,
             values,
-            result,
+            result: evaluated.result,
+            calls: evaluated.calls,
+            formulas: evaluated.formulas,
             certificate: self,
         }))
     }
 }
 
-impl EvaluatedStatement<'_> {
-    pub(in crate::machine::islands) fn bind<'a>(
-        &'a self,
+impl<'a> EvaluatedStatement<'a, '_> {
+    pub(in crate::machine::islands) fn debt(&self) -> Option<room::charges::ChargeDebt<'a>> {
+        let values = self
+            .certificate
+            .charges
+            .formulas()
+            .map(|(at, function, count)| {
+                let native = self
+                    .formulas
+                    .iter()
+                    .find(|native| native.at == *at && native.function == function)?;
+                (native.arguments.len() == count).then_some(room::charges::FormulaValues {
+                    arguments: &native.arguments,
+                    result: native.result,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        self.certificate.charges.bind(&values)
+    }
+    pub(in crate::machine::islands) fn bind(
+        &self,
         invocation: &Invocation,
         ledger: &Ledger,
         arena: &mut Arena,
@@ -239,7 +240,7 @@ impl EvaluatedStatement<'_> {
             &self.activation,
             ScalarRegionValues {
                 values: &self.values,
-                calls: &[],
+                calls: &self.calls,
             },
         )
     }

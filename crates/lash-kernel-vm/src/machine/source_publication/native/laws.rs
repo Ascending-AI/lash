@@ -65,6 +65,23 @@ impl KernelMachine {
                 .unwrap()
                 .unwrap()
         };
+        let mut wrong = recipe(0, contract(0, &arena));
+        wrong.known = Some((doc::Value::Int(8), 0));
+        assert!(
+            wrong
+                .prepare_boundary(&mut arena, &[owner(0)])
+                .unwrap()
+                .is_none(),
+            "same-price native result must match its canonical prepared entry"
+        );
+        let mut exact = recipe(0, contract(0, &arena));
+        exact.known = Some((doc::Value::Int(7), 0));
+        let exact = exact
+            .prepare_boundary(&mut arena, &[owner(0)])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(exact.storage.value(), doc::Value::Int(7)));
+        drop(exact);
         let balance = ledger.borrow().balance().unwrap();
         let identity = arena.next_provisional();
         let allocations = arena.allocations();

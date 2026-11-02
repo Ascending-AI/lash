@@ -13,18 +13,35 @@ use lash_kernel_state::kernel_internals::{
 pub(crate) struct BindingPlacement {
     source: Arc<Source>,
     code: CodeId,
-    slots: Box<[Slot]>,
+    layout: Arc<PlacementLayout>,
 }
 
-/// Actual source values captured at a region entry. The checked placement,
-/// invocation and ledger revision travel with them. Equal holding prices do
-/// not allow a caller to substitute a value from another physical binding.
-pub(crate) struct DenseActivation {
+struct PlacementLayout {
+    slots: Box<[Slot]>,
+    shared: Box<[bool]>,
+    bindings: Box<[Option<u32>]>,
+    captures: Box<[Option<u32>]>,
+}
+impl PlacementLayout {
+    fn physical(&self, slot: Slot) -> Option<u32> {
+        match slot {
+            Slot::Binding(index) => self.bindings.get(index as usize).copied().flatten(),
+            Slot::Capture(index) => self.captures.get(index as usize).copied().flatten(),
+            _ => None,
+        }
+    }
+}
+
+/// A view of the activation's actual initialized binding range. The values
+/// remain in their persistent slab homes; entry allocates no mirror and scans
+/// no bindings. The borrow retains the values until the prefix is prepared.
+/// Source identity, invocation and ledger revision authenticate the view.
+pub(crate) struct DenseActivation<'v> {
     source: Arc<Source>,
     invocation: Invocation,
     stamp: logical::Stamp,
-    slots: Box<[Slot]>,
-    values: Box<[Option<Value>]>,
+    layout: Arc<PlacementLayout>,
+    values: &'v [SlotState],
 }
 
 impl BindingPlacement {
@@ -43,6 +60,9 @@ impl BindingPlacement {
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut slots = Vec::with_capacity(body.slots.len());
+        let mut shared = Vec::with_capacity(body.slots.len());
+        let mut bindings = Vec::new();
+        let mut captures = Vec::new();
         for &index in body.slots_by_at.iter() {
             if !seen.insert(index) {
                 return Err(Refused::Source);
@@ -64,30 +84,39 @@ impl BindingPlacement {
             else {
                 return Err(Refused::Source);
             };
+            let homes = match slot {
+                Slot::Binding(_) => &mut bindings,
+                Slot::Capture(_) => &mut captures,
+                _ => return Err(Refused::Source),
+            };
+            let (Slot::Binding(index) | Slot::Capture(index)) = slot else {
+                unreachable!();
+            };
+            homes.resize(homes.len().max(index as usize + 1), None);
+            if homes[index as usize].replace(slots.len() as u32).is_some() {
+                return Err(Refused::Source);
+            }
             slots.push(slot);
+            shared.push(binding.shared);
         }
         Ok(Self {
             source,
             code,
-            slots: slots.into(),
+            layout: Arc::new(PlacementLayout {
+                slots: slots.into(),
+                shared: shared.into(),
+                bindings: bindings.into(),
+                captures: captures.into(),
+            }),
         })
     }
 
     pub(crate) fn unshared(&self, physical: u32) -> bool {
-        self.slots.get(physical as usize).is_some_and(|slot| {
-            self.source.bindings.iter().any(|binding| {
-                !binding.shared
-                    && self.source.binding_root(binding.index, TaskId::MAIN, 0)
-                         .is_some_and(|owner| matches!(owner, logical::Owner::Value { slot: actual, .. } if actual == *slot))
-            })
-        })
+        self.layout.shared.get(physical as usize) == Some(&false)
     }
 
     pub(crate) fn physical(&self, slot: Slot) -> Option<u32> {
-        self.slots
-            .iter()
-            .position(|candidate| *candidate == slot)
-            .and_then(|at| u32::try_from(at).ok())
+        self.layout.physical(slot)
     }
 
     /// Validate a lowered source read against lexical resolution, rather than
@@ -114,15 +143,15 @@ impl BindingPlacement {
         }
     }
 
-    pub(crate) fn capture(
+    pub(crate) fn capture<'v>(
         &self,
         code: CodeId,
         invocation: &Invocation,
         ledger: &Ledger,
         heap: &PagedHeap,
-        physical: &[SlotState],
-    ) -> Result<Option<DenseActivation>, doc::heap::HeapFault> {
-        if code != self.code || physical.len() != self.slots.len() {
+        physical: &'v [SlotState],
+    ) -> Result<Option<DenseActivation<'v>>, doc::heap::HeapFault> {
+        if code != self.code || physical.len() != self.layout.slots.len() {
             return Ok(None);
         }
         let logical::Owner::Frame { task, .. } = invocation.frame() else {
@@ -140,19 +169,13 @@ impl BindingPlacement {
             source: Arc::clone(&self.source),
             invocation: invocation.clone(),
             stamp: ledger.stamp(),
-            slots: self.slots.clone(),
-            values: physical
-                .iter()
-                .map(|state| match state {
-                    SlotState::Value(value) => Some(*value),
-                    SlotState::Empty | SlotState::Cell(_) => None,
-                })
-                .collect(),
+            layout: Arc::clone(&self.layout),
+            values: physical,
         }))
     }
 }
 
-impl DenseActivation {
+impl DenseActivation<'_> {
     pub(crate) fn current(
         &self,
         source: &Arc<Source>,
@@ -163,8 +186,14 @@ impl DenseActivation {
             && ledger.is_current(&self.stamp)
             && invocation == &self.invocation
     }
+    pub(crate) fn state(&self, slot: Slot) -> Option<SlotState> {
+        let at = self.layout.physical(slot)?;
+        self.values.get(at as usize).copied()
+    }
     pub(crate) fn value(&self, slot: Slot) -> Option<Value> {
-        let at = self.slots.iter().position(|candidate| *candidate == slot)?;
-        self.values.get(at).copied().flatten()
+        match self.state(slot)? {
+            SlotState::Value(value) => Some(value),
+            SlotState::Empty | SlotState::Cell(_) => None,
+        }
     }
 }

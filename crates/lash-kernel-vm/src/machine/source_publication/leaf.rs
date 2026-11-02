@@ -59,28 +59,6 @@ impl KernelMachine {
             return Ok(false);
         };
         self.logical_flush()?;
-        let activation = {
-            let store = self.logical.ledger();
-            let task = self
-                .tasks
-                .get_mut(running.task.0 as usize)?
-                .ok_or_else(|| fault("no task"))?;
-            let frame = task.frames.last_mut()?.ok_or_else(|| fault("no frame"))?;
-            let Some(roots) = &frame.logical else {
-                return Ok(false);
-            };
-            let Ok(placement) = room::placement::BindingPlacement::compile(running.exe, frame.code)
-            else {
-                return Ok(false);
-            };
-            placement.capture(
-                frame.code,
-                roots.invocation(),
-                &store.borrow(),
-                &self.heap,
-                frame.slot_states(),
-            )?
-        };
         let Some(bank) = self.regs.prepare_source_leaf(
             running.stream,
             pc,
@@ -120,6 +98,18 @@ impl KernelMachine {
             .logical
             .as_ref()
             .ok_or_else(|| malformed("precise source has no entered invocation"))?;
+        let store = self.logical.ledger();
+        let Ok(placement) = room::placement::BindingPlacement::compile(running.exe, frame.code)
+        else {
+            return Ok(false);
+        };
+        let activation = placement.capture(
+            frame.code,
+            roots.invocation(),
+            &store.borrow(),
+            &self.heap,
+            frame.slots.states(),
+        )?;
         let start = Position {
             at: at.clone(),
             unpaid: Some(at.clone()),

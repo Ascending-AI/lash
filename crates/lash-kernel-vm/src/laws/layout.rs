@@ -483,6 +483,14 @@ pub(super) fn scalar_probes(
         }
     }
     impl NativeFunction for Scalar {
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, NativeError> {
+            Self::answer(self.0, args.values())
+                .map(|value| lash_kernel_doc::NativeResourceContract::returned(args, &value))
+                .transpose()
+        }
         fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
             Self::answer(self.0, call.args.values())
                 .ok_or_else(|| NativeError::refused("scalar", "outside the scalar domain"))
@@ -787,6 +795,31 @@ fn scalar_layouts_agree() {
         "literal/copy prefixes must publish through the compiled certificate"
     );
     println!("compiled scalar prefixes published: {certified}");
+    let arithmetic = scalar_document(
+        "let answer = flat.add(3, flat.mul(2, 2)) do perform 0(answer) as Any return answer",
+    );
+    packet_modes(&arithmetic, super::embedder::ROOMY, u64::MAX, false, false);
+    let arithmetic_certified = crate::machine::islands::take_certified_statements();
+    assert!(
+        arithmetic_certified > 0,
+        "the arithmetic binding must publish its whole expression certificate"
+    );
+    println!("compiled arithmetic prefixes published: {arithmetic_certified}");
+    for slice in [1, 2, 3, 7] {
+        packet_modes(&arithmetic, super::embedder::ROOMY, slice, true, true);
+    }
+    for charge_limit in 0..24 {
+        packet_modes(
+            &arithmetic,
+            Bounds {
+                charge_limit,
+                ..super::embedder::ROOMY
+            },
+            u64::MAX,
+            true,
+            true,
+        );
+    }
     for slice in [1, 2, 3, 7] {
         packet_modes(&prefix, super::embedder::ROOMY, slice, true, true);
     }

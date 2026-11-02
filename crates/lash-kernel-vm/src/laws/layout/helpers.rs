@@ -35,6 +35,17 @@ pub(in crate::laws) fn helper_probes(
     let mut out = call_probes(registry, ids);
     struct BoundaryNative;
     impl lash_kernel_doc::NativeFunction for BoundaryNative {
+        fn prepare(&self) -> Option<lash_kernel_doc::PreparedNative> {
+            Some(lash_kernel_doc::PreparedNative {
+                pair: None,
+                entry: |args| match args {
+                    [lash_kernel_doc::Value::Int(0 | 2)] => Some(lash_kernel_doc::Value::Int(7)),
+                    _ => None,
+                },
+                charged_entry: None,
+                operation: "law.boundary",
+            })
+        }
         fn call(
             &self,
             call: lash_kernel_doc::NativeCall<'_, '_>,

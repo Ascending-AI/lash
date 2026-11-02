@@ -50,17 +50,19 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let ledger = store.borrow();
         let Some(evaluated) = certificate
             .evaluate(
-                frame.state.callee.plan.code,
-                frame.slots,
+                self.exe,
+                (frame.state.callee.plan.code, frame.slots),
                 &invocation,
                 &ledger,
                 self.heap,
+                self.arena,
             )
             .map_err(|error| self.halt(error.into()))?
         else {
             return Err(miss(self));
         };
-        let Some(debt) = certificate.charges.bind(&[]) else {
+        let result = evaluated.result;
+        let Some(debt) = evaluated.debt() else {
             return Err(miss(self));
         };
         let Some(bound) = evaluated
@@ -69,6 +71,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Err(miss(self));
         };
+        drop(evaluated);
         let callee = frame.state.callee;
         let source = &self.exe.code(callee.plan.code).source_room;
         let document = self
@@ -124,6 +127,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         ) {
             Ok(Some(accepted)) => accepted,
             Ok(None) => {
+                witnessed!(Scalar, Prefix);
                 self.scratch.exit.stands = Some(Stands::Statement);
                 self.scratch.exit.at = Some(certificate.source_pc);
                 return Err(Stop);
@@ -134,7 +138,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
         };
         drop(ledger);
-        let result = evaluated.result;
         let published = accepted.publish_region(&mut frontier, &mut store.borrow_mut(), || {
             frame.slots[certificate.target as usize] = SlotState::Value(result);
             let Some(Position::Block(_, next)) = frame.state.control.last_mut() else {
@@ -163,6 +166,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if let Some(tape) = self.recorder {
             debt.record(tape);
         }
+        witnessed!(Scalar, Commit);
         #[cfg(test)]
         CERTIFIED.with(|count| count.set(count.get().saturating_add(1)));
         #[cfg(any(test, feature = "perf-witness"))]
