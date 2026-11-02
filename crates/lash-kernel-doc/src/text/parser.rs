@@ -1232,7 +1232,8 @@ impl Parser {
                 || self.is_word("join")
                 || self.is_word("await")
                 || self.is_word("yield")
-                || self.is_word("cancel"));
+                || self.is_word("cancel")
+                || self.is_word("cancel_effect"));
         self.peek_at(offset) == &Token::LParen && !reserved
     }
 
