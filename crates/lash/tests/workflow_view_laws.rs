@@ -497,7 +497,7 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
         );
     }
     let authored = lash::typescript::lower(
-        "export async function send(title: string): Promise<void> { await inbox.sendItem({title: title.toUpperCase()}); return; }",
+        "export async function send(title: string): Promise<void> { await inbox.sendItem({title: title.replace(\"x\", \"y\")}); return; }",
         &environment, lash::dialect::Mode::Module,
     ).unwrap().document.into_document();
     let unit = export_unit(&authored, "send");
@@ -525,7 +525,7 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
         .collect();
     assert!(
         !authored_calls.is_empty(),
-        "the upper-case call is an authored library call"
+        "the replace call is an authored library call"
     );
     for action in authored_calls {
         assert_eq!(view.node_at(&action.site).unwrap().site, action.site);

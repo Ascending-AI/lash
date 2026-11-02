@@ -120,10 +120,10 @@ pub(super) fn closure(
                             count.clone(),
                         ],
                     }),
-                    then: Box::new(Expr::Act(Box::new(ActExpr {
-                        kind: ActKind::Call(Callee::Local(helper(helpers, "ts.pad")?)),
+                    then: Box::new(Expr::Call {
+                        function: helper(helpers, "ts.pad")?,
                         args: vec![Expr::Variable(args.clone()), count],
-                    }))),
+                    }),
                     r#else: Box::new(Expr::Variable(args.clone())),
                 },
             )];
