@@ -226,6 +226,50 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             return Err(self.at(read.unpaid()));
         }
+        if let (Input::Native(value), Some(frontier)) = (value, activation.frontier.as_mut())
+            && interval.acquisition(source).is_some()
+        {
+            // The proven prefix's shared admission: the memory envelope and
+            // the charge window. Its journal is the value's own holding.
+            let holding = Holding::from_native(self.arena, self.heap.pages(), &value)
+                .map_err(|error| self.halt(error.into()))?;
+            let store = self.logical.ledger();
+            let mut ledger = store.borrow_mut();
+            let peak = ledger
+                .balance()
+                .and_then(|balance| balance.total())
+                .map_err(|error| self.halt(error.into()))?
+                .checked_add(holding.bytes());
+            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
+            if peak.is_none_or(|peak| peak > self.memory_bound)
+                || self.charged > self.bound
+                || depth > self.call_depth
+                || !ledger
+                    .acquire(output, holding, self.heap.pages())
+                    .map_err(|error| self.halt(error.into()))?
+            {
+                return Err(self.at(read.unpaid()));
+            }
+            frontier.proven().map_err(|error| self.halt(error.into()))?;
+            let total = ledger
+                .balance()
+                .and_then(|balance| balance.total())
+                .map_err(|error| self.halt(error.into()))?;
+            drop(ledger);
+            self.logical_memory.set(total);
+            frame.regs[reg as usize] = value;
+            #[cfg(any(test, feature = "testing"))]
+            {
+                crate::machine::islands::witness::packet_read_published();
+                if at.phase == room::Phase::Open {
+                    crate::machine::islands::witness::callee_read_published();
+                }
+                crate::machine::islands::witness::source_loop_published(
+                    &self.source_loops(&frame.state.control),
+                );
+            }
+            return Ok(true);
+        }
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.packet-read");
@@ -239,26 +283,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             occurrence: Occurrence {
                 task: self.task,
                 invocation: activation.invocation.id(),
-                loops: frame
-                    .state
-                    .control
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, control)| match control {
-                        Position::Loop {
-                            id,
-                            started,
-                            cursor,
-                            ..
-                        } => Some((
-                            self.exe.stmt(*id).site.clone(),
-                            started.saturating_sub(u64::from(
-                                cursor.is_some() || index + 1 < frame.state.control.len(),
-                            )),
-                        )),
-                        _ => None,
-                    })
-                    .collect(),
+                loops: self.source_loops(&frame.state.control),
                 action: None,
             },
         };
@@ -344,6 +369,28 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
         }
         Ok(true)
+    }
+
+    /// The read's runtime loop occurrence: an entered body counts its
+    /// started iteration, a header read the one before it.
+    fn source_loops(&self, controls: &[Position]) -> Vec<(lash_kernel_value::sites::Site, u64)> {
+        controls
+            .iter()
+            .enumerate()
+            .filter_map(|(index, control)| match control {
+                Position::Loop {
+                    id,
+                    started,
+                    cursor,
+                    ..
+                } => Some((
+                    self.exe.stmt(*id).site.clone(),
+                    started
+                        .saturating_sub(u64::from(cursor.is_some() || index + 1 < controls.len())),
+                )),
+                _ => None,
+            })
+            .collect()
     }
 
     pub(in crate::machine::islands::execute) fn source_inputs<const N: usize>(

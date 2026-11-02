@@ -841,6 +841,43 @@ impl CompiledInterval {
     pub(crate) fn events(&self) -> impl ExactSizeIterator<Item = &Event> {
         self.steps.iter().map(|step| &step.event)
     }
+    /// A proven pure acquisition: one normal event that only acquires its own
+    /// operand owner, with peak and retained delta exactly that owner's local
+    /// bytes, no inputs, releases, entities, members or scratch. For such an
+    /// interval the checked journal is fully determined by the value's holding,
+    /// so its shared admission is the memory envelope and charge window alone.
+    pub(crate) fn acquisition(&self, source: &Source) -> Option<&Owner> {
+        let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
+            return None;
+        };
+        let event = &step.event;
+        let publication = &step.publication;
+        let owner = event.output.as_ref()?;
+        let local = |amount: &Amount| {
+            amount.fixed == 0
+                && amount.terms.len() == 1
+                && amount.terms.get(&Measure::Local(owner.clone())) == Some(&1)
+        };
+        (matches!(owner, Owner::Operand(site) if *site == event.point.site)
+            && event.point.site != source.site
+            && step.selected == ExitKind::Normal
+            && step.normal == ExitKind::Normal
+            && event.inputs.is_empty()
+            && event.entities.is_empty()
+            && local(&event.peak)
+            && local(&event.delta)
+            && !publication.borrowed_inputs
+            && publication.restored_roles.is_none()
+            && publication.assignment.is_none()
+            && !publication.member
+            && publication.field.is_none()
+            && !source
+                .room
+                .scratch
+                .iter()
+                .any(|lease| lease.at == event.point))
+        .then_some(owner)
+    }
     /// Bind canonical event facts once, then evaluate indexed polynomials.
     /// No source node, child vector, or AST traversal is used here.
     pub(crate) fn evaluate_interval(

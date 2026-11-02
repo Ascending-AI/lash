@@ -36,6 +36,9 @@ pub(crate) struct Frontier {
     link: lash_kernel_value::content_ids::LinkId,
     kernel: doc::KernelVersion,
     position: Position,
+    /// A proven acquisition committed past `position` without recording its
+    /// coordinate. The next checked interval must hand off to its own start.
+    proven: bool,
     revision: u64,
     identity: std::rc::Rc<()>,
 }
@@ -165,6 +168,7 @@ impl Source {
             link,
             kernel,
             position,
+            proven: false,
             revision: 0,
             identity: std::rc::Rc::new(()),
         })
@@ -187,6 +191,7 @@ impl Bound {
     fn current(&self, frontier: &Frontier) -> bool {
         std::rc::Rc::ptr_eq(&self.frontier, &frontier.identity)
             && self.revision == frontier.revision
+            && !frontier.proven
             && self.position == frontier.position
             && self.link == frontier.link
             && self.kernel == frontier.kernel
@@ -196,6 +201,24 @@ impl Bound {
 impl Frontier {
     pub(crate) fn position(&self) -> &Position {
         &self.position
+    }
+    /// Whether an interval starting at `start` needs a handoff first.
+    pub(crate) fn departs(&self, start: &Position) -> bool {
+        self.proven || &self.position != start
+    }
+    /// Commit a proven acquisition in the defining body. It advances this
+    /// frontier past its recorded coordinate and expires every capability
+    /// bound to the older frontier; the ledger edit itself is the caller's.
+    pub(crate) fn proven(&mut self) -> Result<(), HeapFault> {
+        if self.position.unpaid.is_none() {
+            return Err(fault("proven source event after the defining Leave"));
+        }
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| fault("source frontier overflow"))?;
+        self.proven = true;
+        Ok(())
     }
     /// The runtime supplies canonical current coordinates after exact execution.
     /// No previously accepted suffix can survive this transition.
@@ -214,6 +237,7 @@ impl Frontier {
         ledger.handoff()?;
         self.revision = revision;
         self.position = position;
+        self.proven = false;
         Ok(())
     }
     #[expect(clippy::too_many_arguments, reason = "one checked source occurrence")]
@@ -229,7 +253,8 @@ impl Frontier {
         allowance: Allowance,
         resources: ResourceFacts,
     ) -> Result<EvaluatedInterval, Refused> {
-        if self.position.unpaid.is_none()
+        if self.proven
+            || self.position.unpaid.is_none()
             || !self.source.valid_position(&self.position)
             || interval.owner() != self.source.owner
             || interval.defining_source() != &self.source.site

@@ -238,7 +238,7 @@ impl Context<'_> {
     ) -> Result<bool, Halt> {
         let store = self.logical.ledger();
         if let Some(frontier) = frontier.as_mut()
-            && frontier.position() != &prefix.start
+            && frontier.departs(&prefix.start)
         {
             frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
         }
