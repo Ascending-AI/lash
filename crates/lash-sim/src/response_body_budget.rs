@@ -131,11 +131,6 @@ async fn witness(
                     assert_eq!(output.assistant_message(), Some("done"));
                 } else {
                     assert!(!output.is_success(), "{lane} accepted a refused response");
-                    let expected = if excess {
-                        "lash:http_response_body_too_large"
-                    } else {
-                        "lash:provider_http_error"
-                    };
                     if excess {
                         assert_eq!(
                             calls.load(Ordering::SeqCst),
@@ -150,20 +145,11 @@ async fn witness(
                         )
                         .await;
                         if excess {
-                            assert!(
-                                output
-                                    .activities
-                                    .iter()
-                                    .filter_map(|activity| match &activity.event {
-                                        lash::TurnEvent::Error(error) => error.envelope.as_ref(),
-                                        _ => None,
-                                    })
-                                    .any(|error| error
-                                        .code
-                                        .as_ref()
-                                        .is_some_and(|code| code.to_string() == expected)),
-                                "{lane}: {:?}",
-                                output.outcome.error_cause()
+                            let cause = output.outcome.error_cause().expect("typed terminal stop");
+                            assert_eq!(
+                                cause.provider_validation,
+                                Some(lash::turn::TurnFailureCode::HttpResponseBodyTooLarge),
+                                "{lane}: {cause:?}",
                             );
                         }
                         assert_eq!(
@@ -171,6 +157,29 @@ async fn witness(
                             1,
                             "{lane}: refusal must not retry"
                         );
+                        let call = &output_model_calls[0];
+                        assert!(output.activities.iter().any(|activity| matches!(
+                            &activity.event,
+                            lash::TurnEvent::ModelCallRecorded { call_id } if call_id == &call.call_id
+                        )), "the output identifies its retained failed call");
+                        if excess {
+                            assert_eq!(call.attempts.len(), 1);
+                        }
+                        assert_eq!(call.attempts.len(), calls.load(Ordering::SeqCst));
+                        for attempt in &call.attempts {
+                            assert_eq!(attempt.outcome, lash::provider::AttemptOutcome::Failed);
+                            if excess {
+                                assert_eq!(
+                                    attempt
+                                        .error
+                                        .as_ref()
+                                        .and_then(|error| error.code.as_ref())
+                                        .map(ToString::to_string)
+                                        .as_deref(),
+                                    Some("lash:http_response_body_too_large"),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -201,7 +210,6 @@ async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
 /// A refused response's report names its typed code, and records the one
 /// model call the refusal spent.
 #[tokio::test]
-#[ignore = "FIG-5334: a turn's report through send() carries no errors and no failed model call"]
 async fn a_refused_response_s_report_names_its_typed_code_on_sqlite_memory() {
     let memory: Arc<dyn lash_execution_contracts::backend::StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()

@@ -580,6 +580,7 @@ commands = [
   ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked", "laws::forms::charges_follow_the_cost_table", "--", "--exact"],
   ["cargo", "check", "-p", "lash-kernel-migrate", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-migrate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--locked"],

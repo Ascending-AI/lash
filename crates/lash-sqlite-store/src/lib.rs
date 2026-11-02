@@ -66,7 +66,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
-use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use flate2::{Compression, write::ZlibEncoder};
 use lash_core_store::queued_work_vocabulary::DeliveryPolicy;
 use lash_core_store::queued_work_vocabulary::QueuedWorkAuthority;
 use lash_core_store::queued_work_vocabulary::QueuedWorkBatch;

@@ -161,6 +161,30 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-kernel-state__fv_5e32932c",
+    build_script = None,
+    crate_features = [
+        "perf-witness",
+        "synthetic-next",
+    ],
+    crate_name = "lash_kernel_state",
+    declared_features = [
+        "perf-witness",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-state", "lash_kernel_state"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-state",
+    package_name = "lash-kernel-state",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_0749491a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_fc0aa5ae", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_facf61e4", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_6196308d", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_fda3f3c0", "//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_1c27eb5b"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-kernel-state__fv_8dfb84f2",
     build_script = None,
     crate_features = [],

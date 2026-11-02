@@ -614,6 +614,44 @@ fn charges_follow_the_cost_table() {
     // A loop: the statement, the iterable's nodes, and one test per
     // iteration and one that ends it.
     assert_eq!(charged("for x in (1, 2) { }"), 1 + (1 + 2 + 2) + 3);
+    // Six units for the statement and iterable, plus three continuation
+    // tests at the version's price: 9 for One, 12 for SyntheticNext.
+    for &kernel in lash_kernel_doc::KernelVersion::ALL {
+        let expected = match kernel {
+            lash_kernel_doc::KernelVersion::One => 9,
+            #[cfg(feature = "synthetic-next")]
+            lash_kernel_doc::KernelVersion::SyntheticNext => 12,
+        };
+        for limit in [expected - 1, expected, expected + 1] {
+            let mut embedder = Embedder::with(
+                "main { for x in (1, 2) { } }",
+                Setup {
+                    bare_kernel: Some(kernel),
+                    bounds: crate::Bounds {
+                        charge_limit: limit,
+                        ..super::embedder::ROOMY
+                    },
+                    ..Default::default()
+                },
+            );
+            let end = embedder.run_to_end(&[]);
+            assert_eq!(embedder.machine.meters().charged, Some(expected));
+            if limit < expected {
+                assert!(
+                    matches!(
+                        end,
+                        End::Error(crate::RunError::Bound(crate::BoundExceeded {
+                            bound: crate::Bound::Charge,
+                            ..
+                        }))
+                    ),
+                    "{kernel:?}: {end:?}"
+                );
+            } else {
+                assert!(matches!(end, End::Finished(_)), "{kernel:?}: {end:?}");
+            }
+        }
+    }
     // Map/set literals charge every written entry, including equivalent
     // keys; copying out and iteration charge only the surviving entries.
     assert_eq!(charged("let m = map{1: 2, 1.0: 3} return m"), 8 + 2 + 7);

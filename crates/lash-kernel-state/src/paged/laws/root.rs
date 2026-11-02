@@ -320,3 +320,98 @@ fn saved_meters_preserve_a_nonzero_next_join_on_decode() {
         original
     );
 }
+
+/// S4: a fixed root grammar retains each field's meaning across codec changes.
+#[test]
+fn a_baseline_checkpoint_root_keeps_every_field() {
+    // seq(21), limits seq(2), memory 31, charge 37, kernel 1.
+    let vector: &[u8] = &[
+        9, 21, 9, 2, 3, 31, 3, 37, 3, 1, // document: bytes(32), digest 1.
+        8, 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, // link: bytes(32), digest 2.
+        8, 32, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        2, 2, 2, 2, // closure: child reference 3.
+        11, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+        3, 3, 3, // helper library: bytes(32), digest 4.
+        8, 32, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        4, 4, 4, 4,
+        // owner: child reference 5; Entry tag 1; functions: nonempty tag 1, three fields.
+        11, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 12, 1, 0, 12, 1, 3, // functions page 6, two rows, cost 41; Parked tag 0.
+        11, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 3, 2, 3, 41, 12, 0, 0, // heap page 7.
+        11, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, // tasks: nonempty, page 8, 3 rows, cost 43.
+        12, 1, 3, 11, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+        8, 8, 8, 8, 8, 8, 3, 3, 3, 43, // ready: nonempty, page 9, 4 rows, cost 47.
+        12, 1, 3, 11, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
+        9, 9, 9, 9, 9, 9, 3, 4, 3, 47, // waits: nonempty, page 10, 5 rows, cost 53.
+        12, 1, 3, 11, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+        10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 3, 5, 3, 53,
+        // joins: nonempty, page 11, 6 rows, cost 59.
+        12, 1, 3, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11,
+        11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 3, 6, 3, 59,
+        // withdrawn: nonempty, page 12, 7 rows, cost 61.
+        12, 1, 3, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12,
+        12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 3, 7, 3, 61,
+        // unreported: nonempty, page 13, 8 rows, cost 67.
+        12, 1, 3, 11, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 3, 8, 3, 67,
+        // reads: nonempty, page 14, 9 rows, cost 71.
+        12, 1, 3, 11, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14,
+        14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 3, 9, 3, 71,
+        // session: nonempty, page 15, 10 rows, cost 73.
+        12, 1, 3, 11, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+        15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 3, 10, 3, 73,
+        // host: two text names, "host" and "input"; meters seq(4): 79, 83, 89, 97.
+        9, 2, 7, 4, 104, 111, 115, 116, 7, 5, 105, 110, 112, 117, 116, 9, 4, 3, 79, 3, 83, 3, 89, 3,
+        97,
+    ];
+    let root: CheckpointRoot = decode_body(vector).expect("baseline root");
+    let page = |byte| PageRef {
+        id: PageId([byte; 32]),
+        grant: PageGrant::NONE,
+    };
+    let keyed = |byte, len, cost| KeyedRoot::NonEmpty {
+        page: page(byte),
+        len,
+        cost: LogicalBytes(cost),
+    };
+    let sequence = |byte, len, cost| SequenceRoot::NonEmpty {
+        page: page(byte),
+        len,
+        cost: LogicalBytes(cost),
+    };
+    assert_eq!(root.limits.memory, Some(31));
+    assert_eq!(root.limits.charge, 37);
+    assert_eq!(root.kernel, 1);
+    assert_eq!(root.document, DocumentId::from_bytes([1; 32]));
+    assert_eq!(root.link, lash_kernel_value::LinkId::from_bytes([2; 32]));
+    assert_eq!(root.closure, PageId([3; 32]));
+    assert_eq!(
+        root.helper_library,
+        lash_kernel_value::HelperLibraryId::from_bytes([4; 32])
+    );
+    assert_eq!(root.owner, PageId([5; 32]));
+    assert_eq!(root.target, CellTargetKind::Entry);
+    assert!(matches!(root.status, RootStatus::Parked));
+    assert_eq!(root.functions, keyed(6, 2, 41));
+    assert_eq!(root.heap, page(7));
+    assert_eq!(root.tasks, keyed(8, 3, 43));
+    assert_eq!(root.ready, sequence(9, 4, 47));
+    assert_eq!(root.waits, keyed(10, 5, 53));
+    assert_eq!(root.joins, keyed(11, 6, 59));
+    assert_eq!(root.withdrawn, keyed(12, 7, 61));
+    assert_eq!(root.unreported, sequence(13, 8, 67));
+    assert_eq!(root.reads, keyed(14, 9, 71));
+    assert_eq!(root.session, keyed(15, 10, 73));
+    assert_eq!(
+        root.host,
+        ["host", "input"].map(lash_kernel_value::names::Name::new)
+    );
+    assert_eq!(root.meters.charged, Some(79));
+    assert_eq!(root.meters.waits_issued, 83);
+    assert_eq!(root.meters.next_join, 89);
+    assert_eq!(root.meters.live_tasks, 97);
+    assert_eq!(encode_body(&root), vector);
+}

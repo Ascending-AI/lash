@@ -185,11 +185,31 @@ pub(crate) fn compress_blob(content: &[u8]) -> Result<Vec<u8>, StoreError> {
 }
 
 pub(crate) fn decompress_blob(content: &[u8]) -> Result<Vec<u8>, StoreError> {
-    let mut decoder = ZlibDecoder::new(content);
+    let mut decoder = flate2::Decompress::new(true);
     let mut out = Vec::new();
-    std::io::Read::read_to_end(&mut decoder, &mut out)
-        .map_err(|error| stored_data_corrupt("compressed artifact blob", error))?;
-    Ok(out)
+    let mut chunk = [0; 8192];
+    loop {
+        let before_in = decoder.total_in();
+        let before_out = decoder.total_out();
+        let status = decoder
+            .decompress(
+                &content[before_in as usize..],
+                &mut chunk,
+                flate2::FlushDecompress::None,
+            )
+            .map_err(|error| stored_data_corrupt("compressed artifact blob", error))?;
+        out.extend_from_slice(&chunk[..(decoder.total_out() - before_out) as usize]);
+        if status == flate2::Status::StreamEnd {
+            return Ok(out);
+        }
+        // EOF alone is not success: the zlib checksum must have completed.
+        if decoder.total_in() == before_in && decoder.total_out() == before_out {
+            return Err(stored_data_corrupt(
+                "compressed artifact blob",
+                "truncated zlib stream",
+            ));
+        }
+    }
 }
 
 pub(crate) fn encode_artifact_blob(
@@ -429,6 +449,43 @@ mod guarded_surface_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn damaged_compressed_artifacts_refuse() {
+        let content = vec![b'x'; 8192];
+        let encoded = encode_artifact_blob(
+            &BlobArtifactDescriptor::checkpoint_component(),
+            BuiltinBlobProfile::Compact,
+            &content,
+            SQLITE_BLOB_ENVELOPE_VERSION,
+        )
+        .unwrap();
+        assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
+        let envelope: StoredBlobEnvelope = rmp_serde::from_slice(&encoded).unwrap();
+        assert_eq!(envelope.compression, "Zlib");
+        let mut damaged = envelope.content.clone();
+        *damaged.last_mut().unwrap() ^= 1;
+        let cases = std::iter::once(damaged)
+            .chain((0..envelope.content.len()).map(|len| envelope.content[..len].to_vec()));
+        for compressed in cases {
+            let damaged = encode_msgpack(
+                &StoredBlobEnvelope {
+                    version: envelope.version,
+                    compression: envelope.compression.clone(),
+                    content: compressed,
+                },
+                "SQLite stored blob envelope",
+            )
+            .unwrap();
+            assert!(
+                matches!(
+                    decode_artifact_blob(&damaged),
+                    Err(StoreError::StoredDataCorrupt { .. })
+                ),
+                "damaged compressed data must refuse"
+            );
+        }
+    }
 
     #[test]
     fn blob_envelope_carries_no_descriptor_field() {

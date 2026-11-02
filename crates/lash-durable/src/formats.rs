@@ -125,7 +125,8 @@ fn escape(id: &str) -> String {
 /// every live node decoding any candidate also decodes, so a newer format is
 /// never written while a node that lacks it serves the same actors. A node
 /// that decodes none of the candidates serves other actors and does not
-/// hold the choice back. With no candidate decoded fleet-wide, the oldest;
+/// hold the choice back. With no serving nodes, the newest candidate is
+/// unconstrained. With serving nodes but no common candidate, the oldest;
 /// `None` only for no candidates.
 #[must_use]
 pub fn fleet_writable<'a>(
@@ -182,5 +183,113 @@ mod tests {
             [FormatSurface::engine("a", 1), FormatSurface::new("b", 1)],
         );
         assert_ne!(forged, honest);
+        for (literal, separator) in [("a%2Cb", "a,b"), ("a%40b", "a@b")] {
+            assert_ne!(
+                FormatSet::of(ActorKind::Session, [FormatSurface::new(literal, 1)]),
+                FormatSet::of(ActorKind::Session, [FormatSurface::new(separator, 1)]),
+            );
+        }
+
+        use std::collections::{BTreeMap, BTreeSet};
+        let alphabet = ["%", ",", "@", "0", "2", "4", "C", "é"];
+        let mut ids = vec![
+            String::new(),
+            "a%2Cb".into(),
+            "a,b".into(),
+            "a%40b".into(),
+            "a@b".into(),
+        ];
+        for a in alphabet {
+            ids.push(a.into());
+            for b in alphabet {
+                ids.push(format!("{a}{b}"));
+            }
+        }
+        let surfaces: Vec<_> = ids
+            .into_iter()
+            .flat_map(|id| [0, 1, u32::MAX].map(|version| FormatSurface::new(id.clone(), version)))
+            .collect();
+        let mut by_spelling = BTreeMap::new();
+        for first in &surfaces {
+            for second in &surfaces {
+                let members = [first.clone(), second.clone()];
+                let normalized: BTreeSet<_> =
+                    members.iter().map(|s| (s.id.clone(), s.version)).collect();
+                let spelling = FormatSet::of(ActorKind::Session, members.clone());
+                let repeated = FormatSet::of(
+                    ActorKind::Session,
+                    [second.clone(), first.clone(), second.clone()],
+                );
+                assert_eq!(spelling, repeated);
+                if let Some(previous) = by_spelling.insert(spelling, normalized.clone()) {
+                    assert_eq!(
+                        previous, normalized,
+                        "distinct sets must have distinct spellings"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fleet_choice_obeys_capability_intersection() {
+        let candidates: Vec<_> = ["newest", "middle", "oldest"].map(FormatSet::new).into();
+        let node = |mask: u8, duplicate| crate::NodeCapability {
+            decodes: candidates
+                .iter()
+                .enumerate()
+                .filter(|(at, _)| mask & (1 << at) != 0)
+                .flat_map(|(_, set)| {
+                    std::iter::repeat_n(set.clone(), if duplicate { 2 } else { 1 })
+                })
+                .chain([FormatSet::new("unrelated")])
+                .collect(),
+            ..Default::default()
+        };
+        assert_eq!(
+            fleet_writable(&candidates, &[node(1, false), node(4, false)]),
+            Some(&candidates[2])
+        );
+        assert_eq!(fleet_writable(&[], &[node(7, false)]), None);
+        // ADR 0106 §2 chooses the newest candidate every serving node decodes.
+        // With none serving there is no reader constraining publication.
+        assert_eq!(fleet_writable(&candidates, &[]), Some(&candidates[0]));
+        assert_eq!(
+            fleet_writable(&candidates, &[node(0, false)]),
+            Some(&candidates[0])
+        );
+        for a in 0..8 {
+            for b in 0..8 {
+                for c in 0..8 {
+                    let masks = [a, b, c];
+                    let relevant: Vec<_> = masks.into_iter().filter(|mask| *mask != 0).collect();
+                    let common = relevant
+                        .iter()
+                        .fold(7, |intersection, mask| intersection & mask);
+                    let expected = if relevant.is_empty() {
+                        0
+                    } else {
+                        (0..3).find(|at| common & (1 << at) != 0).unwrap_or(2)
+                    };
+                    for order in [
+                        [0, 1, 2],
+                        [0, 2, 1],
+                        [1, 0, 2],
+                        [1, 2, 0],
+                        [2, 0, 1],
+                        [2, 1, 0],
+                    ] {
+                        for duplicate in [false, true] {
+                            let live = order.map(|at| node(masks[at], duplicate));
+                            assert_eq!(
+                                fleet_writable(&candidates, &live),
+                                Some(&candidates[expected]),
+                                "{masks:?}, {order:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

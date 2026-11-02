@@ -322,3 +322,69 @@ impl EffectLedger {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_kernel_value::sites::{Site, Unit, testkit};
+
+    #[test]
+    fn restored_membership_rejects_aliases_and_unissued_parks() {
+        let identity =
+            |at| testkit::effect(testkit::root_task(), Site::new(Unit::Main, [at]), 1, vec![]);
+        let admitted = |run, ordinal| AdmittedEffect {
+            operation: OperationId { run, ordinal },
+            call: lash_protocol_types::ToolCallId::fixture(&format!("call-{run}-{ordinal}")),
+        };
+        let pending = |wait, execution| PendingEffect {
+            wait: testkit::wait_id(wait),
+            effect: None,
+            standing: Standing::Admitted(execution),
+            cancellation_requested: false,
+        };
+        let first = admitted(6, 2);
+        let second = admitted(5, 3);
+        for (entries, cancelling, expected) in [
+            (
+                [
+                    (identity(1), pending(11, first.clone())),
+                    (identity(2), pending(11, second.clone())),
+                ]
+                .into(),
+                vec![],
+                LedgerRefusal::SharedWait {
+                    wait: testkit::wait_id(11),
+                },
+            ),
+            (
+                [(identity(1), pending(11, first.clone()))].into(),
+                vec![first.clone()],
+                LedgerRefusal::SharedExecution {
+                    operation: first.operation,
+                },
+            ),
+            (
+                [(identity(1), pending(11, admitted(7, 4)))].into(),
+                vec![],
+                LedgerRefusal::UnissuedPark { park: 7, parks: 7 },
+            ),
+        ] {
+            assert_eq!(
+                EffectLedger::restored(entries, cancelling, 7, Growth::default()),
+                Err(expected)
+            );
+        }
+        let valid = EffectLedger::restored(
+            [
+                (identity(1), pending(11, first)),
+                (identity(2), pending(12, second)),
+            ]
+            .into(),
+            vec![admitted(4, 5)],
+            7,
+            Growth::default(),
+        )
+        .expect("distinct membership in issued parks, including the adjacent park");
+        assert_eq!(valid.executions().count(), 3);
+    }
+}

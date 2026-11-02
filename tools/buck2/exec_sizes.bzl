@@ -898,6 +898,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-kernel-view:kernel_view_schema_generator__bin__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-view:lash-kernel-view__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test": {"cpu_count": 3, "memory_kb": 524288},
+    "//crates/lash-kernel-vm:lash-kernel-vm__unit_test__fv_a22653df": {"cpu_count": 3, "memory_kb": 524288},
     "//crates/lash-kernel-vm:linked_dispatch__test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-llm-tools:lash-llm-tools__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-llm-transport:lash-llm-transport__unit_test": {"cpu_count": 1, "memory_kb": 262144},

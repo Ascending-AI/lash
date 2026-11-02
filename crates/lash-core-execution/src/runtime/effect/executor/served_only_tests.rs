@@ -40,6 +40,11 @@ async fn a_served_only_executor_refuses_and_trips_its_guard() {
         .await
         .expect_err("a served-only effect never runs live");
     assert_eq!(error.code, refusal.code);
+    for key in [Some("outside"), None] {
+        let later = guard.admit(key).expect_err("a refusal is absorbing");
+        assert_eq!(later.code, refusal.code);
+        assert_eq!(later.message, refusal.message);
+    }
     assert!(!ran.load(Ordering::SeqCst), "the effect did not run");
     assert_eq!(
         guard.tripped().map(|tripped| tripped.code),

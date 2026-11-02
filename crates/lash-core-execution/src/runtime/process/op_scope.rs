@@ -268,6 +268,13 @@ mod controller_tests {
             .expect_err("guard refuses the command write");
         assert_eq!(error.code, refusal.code);
         assert_eq!(error.message, refusal.message);
+        for key in [Some("outside"), None] {
+            let later = cloned
+                .admit_journal_write_at(key)
+                .expect_err("another clone keeps the first refusal");
+            assert_eq!(later.code, refusal.code);
+            assert_eq!(later.message, refusal.message);
+        }
         let tripped = guard.tripped().expect("guard recorded the refusal");
         assert_eq!(tripped.code, refusal.code);
         assert_eq!(tripped.message, refusal.message);

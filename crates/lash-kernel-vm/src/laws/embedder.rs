@@ -400,6 +400,8 @@ impl Host for World {
 
 /// How a law starts a run.
 pub(crate) struct Setup {
+    /// A document with no library functions, at this kernel version.
+    pub(crate) bare_kernel: Option<lash_kernel_doc::KernelVersion>,
     pub(crate) bounds: Bounds,
     pub(crate) layout: Layout,
     pub(crate) numbers: &'static str,
@@ -414,6 +416,7 @@ pub(crate) struct Setup {
 impl Default for Setup {
     fn default() -> Self {
         Self {
+            bare_kernel: None,
             bounds: ROOMY,
             layout: Layout::default(),
             numbers: "by_spelling",
@@ -518,7 +521,14 @@ impl Embedder {
         setup: Setup,
         prepared: Option<PreparedLibrary>,
     ) -> Result<Self, crate::StartError> {
-        let library = shared_library(setup.native_twice, setup.probes);
+        let library = match setup.bare_kernel {
+            Some(kernel) => Library {
+                registry: Arc::new(FunctionRegistry::new()),
+                ids: BTreeMap::new(),
+                header: format!("kernel {}\n", kernel.number()),
+            },
+            None => shared_library(setup.native_twice, setup.probes),
+        };
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let mut document = document(&text, &library.registry);
         if setup.cleanup {
