@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use lash_protocol_types::AppendVec;
-use lash_protocol_types::llm::types::LlmMessage;
 use lash_protocol_types::session_model::message::message_content_equal;
 use lash_protocol_types::{
     session_model::BaseRenderCache, session_model::Message, session_model::MessageSequence,
@@ -123,34 +122,6 @@ impl<E: Clone> TurnWindow<E> {
             .zip(sequence.iter())
             .take_while(|(window, message)| message_content_equal(*window, *message))
             .count()
-    }
-
-    pub(super) fn shared_retained_render(
-        &self,
-        rendered: &lash_protocol_types::llm::types::RequestMessages,
-    ) -> usize {
-        self.rendered
-            .shared_retained_prefix(rendered)
-            .unwrap_or_else(|| {
-                self.rendered
-                    .rendered_retained(
-                        self.messages.as_slice(),
-                        &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(
-                        ),
-                    )
-                    .iter()
-                    .zip(rendered.iter())
-                    .take_while(|(before, now)| before == now)
-                    .count()
-            })
-    }
-
-    /// The window's messages, rendered as a model prompt.
-    pub(super) fn render(
-        &self,
-        policy: &lash_protocol_types::session_model::message::HistoryPresentation,
-    ) -> AppendVec<LlmMessage> {
-        self.rendered.rendered(self.messages.as_slice(), policy)
     }
 
     pub(super) fn render_cache(&self) -> Arc<BaseRenderCache> {

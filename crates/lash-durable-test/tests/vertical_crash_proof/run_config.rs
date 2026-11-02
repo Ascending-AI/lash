@@ -567,7 +567,6 @@ fn root_spec() -> lash::SessionSpec {
 /// One law's store, clock and backend: a deployment creates the session and
 /// sends its one input, and nodes run it.
 struct Harness {
-    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     clock: Arc<SimClock>,
     database: Arc<dyn DurableStore>,
     backend: Backend,
@@ -581,8 +580,7 @@ impl Harness {
         Self {
             clock,
             database,
-            backend: shipped_backend(stores.clone()),
-            stores,
+            backend: shipped_backend(stores),
         }
     }
 

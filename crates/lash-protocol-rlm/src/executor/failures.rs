@@ -2,6 +2,8 @@
 
 use super::*;
 
+/// How a broker failure answers the cell. Nothing about the guest: the
+/// cell's last checkpoint stands.
 pub(super) fn broker_failure(
     state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,

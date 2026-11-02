@@ -826,16 +826,15 @@ mod tests {
                         .parts
                         .iter()
                         .enumerate()
-                        .filter_map(move |(part, value)| {
-                            value.attachment().is_some().then(|| {
-                                (
-                                    HistoryPartId {
-                                        message: message.id.clone(),
-                                        part,
-                                    },
-                                    "omitted by the original plugin".to_owned(),
-                                )
-                            })
+                        .filter(|(_, value)| value.attachment().is_some())
+                        .map(move |(part, _)| {
+                            (
+                                HistoryPartId {
+                                    message: message.id.clone(),
+                                    part,
+                                },
+                                "omitted by the original plugin".to_owned(),
+                            )
                         })
                 })
                 .collect())

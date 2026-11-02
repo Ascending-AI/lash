@@ -1401,9 +1401,6 @@ async fn cell_pages(
     })
 }
 
-/// How a broker failure answers the cell. Nothing about the guest: the
-/// cell's last checkpoint stands.
-
 fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
         read_facts: Default::default(),

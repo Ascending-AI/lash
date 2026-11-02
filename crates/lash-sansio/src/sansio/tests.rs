@@ -1550,11 +1550,6 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
     }));
 }
 
-/// Pins the durable encoding of a waiting turn: one `Waiting` state carrying
-/// the effect id and the pending work, never the runtime delivery flag. The
-/// production decoder must read each shape back to the same bytes, and the
-/// restored machine must redeliver the effect the live machine delivered.
-
 /// The outstanding effect is delivered after every side effect the same
 /// step queued: the model call's `LlmRequest` emit and the progress record
 /// reach the host before the effect that hands it the next work.
