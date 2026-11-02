@@ -317,11 +317,25 @@ pub struct Admission {
     /// Its FrozenRequest.
     pub request: NodeId,
     pub disposition: Disposition,
+    /// How far the run had come at the park that requested it: a run
+    /// that follows its journal must stand at the same point there.
+    pub progress: ParkProgress,
+}
+
+/// How far a run had come at a park: what a re-run must match there
+/// besides the effects it requests (FIG-7585). The charge is the run's
+/// cumulative exact charge, which the kernel meters deterministically
+/// (none when it is not metered exactly); the prints are how many values
+/// it printed so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ParkProgress {
+    pub charge: Option<u64>,
+    pub prints: u64,
 }
 
 impl TokenCodec for Admission {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(10);
         out.text(&self.exec.stored());
         self.run.document.encode(out);
         // The closure's digest, not a reference: an admission does not
@@ -340,10 +354,12 @@ impl TokenCodec for Admission {
             }
             Disposition::Refused => out.sum(2, 0),
         }
+        self.progress.charge.encode(out);
+        out.unsigned(self.progress.prints);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(10)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let run = RunFingerprint {
             document: DocumentId::decode(input)?,
@@ -377,6 +393,10 @@ impl TokenCodec for Admission {
             }
             other => return Err(unsupported(other)),
         };
+        let progress = ParkProgress {
+            charge: Option::decode(input)?,
+            prints: input.unsigned()?,
+        };
         Ok(Self {
             exec,
             run,
@@ -385,6 +405,7 @@ impl TokenCodec for Admission {
             effect_name,
             request,
             disposition,
+            progress,
         })
     }
 }
@@ -694,6 +715,8 @@ pub struct FrozenAdmission {
     /// The execution it was admitted as, with its pin; none for a sleep or
     /// a refusal.
     pub execution: Option<(OperationId, PinnedMember)>,
+    /// How far the run had come at the park.
+    pub progress: ParkProgress,
 }
 
 impl AdmissionBook {
@@ -822,6 +845,7 @@ impl AdmissionBook {
             effect_name: frozen.effect_name,
             request,
             disposition,
+            progress: frozen.progress,
         };
         let node = admission.stage(staging)?;
         let write = admission.write(node);

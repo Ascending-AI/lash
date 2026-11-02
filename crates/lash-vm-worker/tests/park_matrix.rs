@@ -8,8 +8,7 @@
 //! before any body runs, after one outcome commits, after two, and on):
 //!
 //! - **P1, admitted before executed:** a body runs only once the
-//!   transaction that saved the state standing on its effect, with its
-//!   admission, stands.
+//!   transaction that committed its admission stands.
 //! - **P2, no committed effect runs again:** each effect's `Once` body
 //!   runs at most once.
 //! - **P3, identities hold:** an effect identity is admitted under one
@@ -21,6 +20,12 @@
 //! Delivery law: the same committed outcomes, delivered to two machines
 //! resumed from one saved state in opposite orders, leave both machines at
 //! a park the broker commits.
+//!
+//! Divergence law (FIG-7585): a run that follows its journal stands where
+//! its first run stood at each park, its cumulative exact charge included.
+//! A re-run that computes more between two parks, then asks for the same
+//! next call with the same arguments, is refused at that park, naming its
+//! charge, before anything is admitted again.
 //!
 //! Number law (`K-EFF-005`): through the admitted-execution lifecycle and
 //! its run records, a result's numbers reach the machine as written, and an
@@ -162,7 +167,61 @@ main {{
         serde_json::to_string(&lash_kernel_doc::print_definition(&worker))
             .expect("the linked park fixture is valid")
     );
-    let document = Arc::new(parse_document(&text).expect("the linked park fixture is valid"));
+    linked(parse_document(&text).expect("the linked park fixture is valid"))
+}
+
+/// The divergence law's program: entry `go(slow)` performs `work(0)`,
+/// loops when `slow`, then performs `work(1)`. Either way its effects, their
+/// sites and their arguments are the same, and so is its document.
+fn diverging_program() -> Program {
+    let go = lash_kernel_doc::parse_definition(
+        r#"function go(slow: Bool) -> Any
+kernel 1
+metering statements
+import 0 operation tools.work(index: Int) -> Any
+body {
+  let first = perform 0(0) as Any
+  let last = 0
+  if slow {
+    for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+      set last = x
+    }
+  }
+  let second = perform 0(1) as Any
+  return [first, second]
+}
+"#,
+    )
+    .expect("the divergence fixture is valid");
+    let text = format!(
+        r#"kernel 1
+numbers float
+import 0 operation tools.work(index: Int) -> Any
+definition {}
+main {{}}
+"#,
+        serde_json::to_string(&lash_kernel_doc::print_definition(&go))
+            .expect("the divergence fixture is valid")
+    );
+    let mut document = parse_document(&text).expect("the divergence fixture is valid");
+    let id = go.identity();
+    let signature = document.functions[&id].signature.clone();
+    document.exports.insert(
+        "go".into(),
+        lash_kernel_doc::Export::Function(lash_kernel_doc::FunctionExport {
+            function: id,
+            signature,
+            convention: lash_kernel_doc::StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    linked(document)
+}
+
+/// The program `document`, linked against the law's published operations.
+fn linked(document: lash_kernel_doc::Document) -> Program {
+    let document = Arc::new(document);
     let package = operation_package(&document);
     let advertisement = lash_kernel_value::PackageAdvertisement::Enumerated(package);
     let context = publication_context();
@@ -355,38 +414,26 @@ async fn stored_root(database: &dyn DurableStore) -> Result<(ExecRoot, HydratedG
     Ok((root, graph))
 }
 
-/// Whether the latest root's membership names `operation`'s admission: the
-/// root and the admission commit in one transaction, so a root that names
-/// it means its admission stood.
-async fn admitted_in_root(
+/// Whether `operation`'s admission stands: the journal row its park
+/// committed it with (FIG-7585), which a body starts only after.
+async fn admitted_in_journal(
     database: &dyn DurableStore,
     operation: OperationId,
 ) -> Result<(), String> {
-    let (root, graph) = stored_root(database).await?;
-    let membership = root
-        .effect_membership
-        .ok_or_else(|| format!("root {:?} has no effect membership", graph.root))?;
-    let mut decoder = GraphDecoder::new(&graph, OWNER_READ_LIMITS);
-    let (_, resolved) = EffectMembership::load(&mut decoder, membership, &exec(), &LawArgs)
-        .map_err(|error| {
-            format!(
-                "load root {:?} membership {membership:?}: {error:?}",
-                graph.root
-            )
-        })?;
-    if resolved.values().any(|resolved| {
-        matches!(resolved.admission.disposition,
-            Disposition::Execution { operation: admitted, .. } if admitted == operation)
+    let rows = database
+        .effect_admissions(&exec())
+        .await
+        .map_err(|error| format!("read the execution's admissions: {error:?}"))?;
+    if rows.iter().any(|row| {
+        row.member.as_ref().is_some_and(|member| {
+            member.run.0 == operation.run && member.member == operation.ordinal
+        })
     }) {
         Ok(())
     } else {
         Err(format!(
-            "root {:?} membership {membership:?} does not admit {operation:?}: {:?}",
-            graph.root,
-            resolved
-                .values()
-                .map(|resolved| &resolved.admission.disposition)
-                .collect::<Vec<_>>()
+            "no committed admission names {operation:?}: {:?}",
+            rows.iter().map(|row| &row.member).collect::<Vec<_>>()
         ))
     }
 }
@@ -440,17 +487,24 @@ impl Shared {
 
     /// The run's machines, holding the virtual clock across each call.
     fn machines(&self, program: &Program) -> Result<InProcess<NoReads>, String> {
+        self.machines_from(program, start(program))
+    }
+
+    /// The run's machines, starting as `start` says.
+    fn machines_from(
+        &self,
+        program: &Program,
+        start: RunStart,
+    ) -> Result<InProcess<NoReads>, String> {
         let clock = self
             .clock
             .lock()
             .expect("clock")
             .clone()
             .expect("the database opened first");
-        Ok(
-            InProcess::new(program.clone(), bounds(), start(program), NoReads)
-                .map_err(|error| error.to_string())?
-                .with_hold(Arc::new(move || Box::new(clock.hold()))),
-        )
+        Ok(InProcess::new(program.clone(), bounds(), start, NoReads)
+            .map_err(|error| error.to_string())?
+            .with_hold(Arc::new(move || Box::new(clock.hold()))))
     }
 
     fn violation(&self, violation: String) {
@@ -465,6 +519,9 @@ enum Drive {
     Broker,
     /// The first park by hand, to deliver its outcomes in two orders.
     TwoOrders,
+    /// The divergence law: the run, then a re-run of it that computes
+    /// more between its parks, from the same journal.
+    Diverges,
 }
 
 struct ParkScenario {
@@ -540,6 +597,11 @@ impl Scenario for ParkScenario {
 
     async fn check(&self, nodes: &SimNodes, _cut: Option<&lash_durable_test::Cut>) -> Vec<String> {
         let mut violations = self.shared.violations.lock().expect("violations").clone();
+        // The divergence law ends its actor once it judged the re-run: its
+        // verdict is the activation's own.
+        if let Drive::Diverges = self.drive {
+            return violations;
+        }
         let bodies = self.shared.bodies.lock().expect("bodies").clone();
         let mut runs: BTreeMap<OperationId, usize> = BTreeMap::new();
         for body in &bodies {
@@ -767,6 +829,18 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
+            if let Drive::Diverges = self.drive {
+                let refusal = Box::pin(diverges(&self.shared, &broker, &self.program)).await;
+                if let Err(why) = refusal {
+                    self.shared.violation(why);
+                }
+                let Ok(mut tx) = owned.begin().await else {
+                    return Exit::Released;
+                };
+                tx.give_up(Release::Terminal);
+                let _ = owned.commit(tx, DONE).await;
+                return Exit::Released;
+            }
             if let Drive::TwoOrders = self.drive
                 && let Err(why) =
                     Box::pin(two_orders(&self.shared, &broker, &host, &self.program)).await
@@ -834,6 +908,63 @@ impl Activation for ParkActivation {
         }
         Exit::Released
     }
+}
+
+/// `program` started at `go(slow)`.
+fn going(program: &Program, slow: bool) -> RunStart {
+    RunStart {
+        target: Target::Entry(lash_kernel_value::names::Name::new("go")),
+        args: vec![Datum::Bool(slow)],
+        ..start(program)
+    }
+}
+
+/// The divergence law: the run of `go(false)` ends over its journal, which
+/// no end records; `go(true)` from that journal is refused at its second
+/// park, on its charge.
+async fn diverges(
+    shared: &Shared,
+    broker: &KernelBroker<'_>,
+    program: &Program,
+) -> Result<(), String> {
+    let first = shared.machines_from(program, going(program, false))?;
+    match Box::pin(broker.run(&first, &CancellationToken::new())).await {
+        Ok(KernelEnd::Ended {
+            end: End::Finished(_),
+            ..
+        }) => {}
+        other => return Err(format!("the first run finishes: {other:?}")),
+    }
+    let admitted = || async {
+        broker
+            .store
+            .context()
+            .durable_reads()
+            .map_err(|error| error.to_string())?
+            .effect_admissions(&exec())
+            .await
+            .map(|rows| rows.len())
+            .map_err(|error| error.to_string())
+    };
+    let before = admitted().await?;
+    let again = shared.machines_from(program, going(program, true))?;
+    let refusal = match Box::pin(broker.run(&again, &CancellationToken::new())).await {
+        Err(lash_vm_broker::kernel::KernelFailure::Diverged(refusal)) => refusal,
+        other => {
+            return Err(format!(
+                "the re-run that computes more is refused: {other:?}"
+            ));
+        }
+    };
+    if !refusal.contains("at park 2") || !refusal.contains("its charge differs") {
+        return Err(format!(
+            "the refusal names the second park and its charge: {refusal}"
+        ));
+    }
+    if admitted().await? != before {
+        return Err("the refused re-run committed no admission".to_owned());
+    }
+    Ok(())
 }
 
 /// The delivery and number laws, on the run's first park: commit it, let
@@ -1059,6 +1190,7 @@ async fn admissions(
             wait: request.wait,
             effect: Some(request.use_),
             admit: AdmitAs::Execution(Box::new(draft)),
+            progress: lash_vm_broker::kernel::graph::ParkProgress::default(),
         });
     }
     Ok(admit)
@@ -1113,7 +1245,7 @@ impl MemberBodies for LawBodies {
                 // The state and the admission commit in one transaction, so
                 // a stored ledger that names the execution means its
                 // admission stood.
-                let admitted_first = admitted_in_root(database.as_ref(), operation).await;
+                let admitted_first = admitted_in_journal(database.as_ref(), operation).await;
                 let token = shared.tokens.fetch_add(1, Ordering::SeqCst) as u64;
                 shared.bodies.lock().expect("bodies").push(Body {
                     operation,
@@ -1341,11 +1473,11 @@ async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: T
     // them and admits the sum, and the end commits last.
     report.assert_baseline_labels(&[
         REGISTER,
-        CommitLabel::CELL_SNAPSHOT_ADMIT,
+        CommitLabel::CELL_ADMIT,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::ROUND_OUTCOME,
-        CommitLabel::CELL_SNAPSHOT_ADMIT,
+        CommitLabel::CELL_ADMIT,
         CommitLabel::ROUND_OUTCOME,
         CommitLabel::CELL_SNAPSHOT,
         DONE,
@@ -1437,8 +1569,33 @@ async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numb
     }
 }
 
+/// The divergence law, uncut.
+async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge(tier: Tier) {
+    let shared: Arc<Shared> = Arc::default();
+    Matrix::new()
+        .faults(&[])
+        .run(|| ParkScenario {
+            shared: Arc::clone(&shared),
+            drive: Drive::Diverges,
+            program: diverging_program(),
+            tier,
+            first_claimant: None,
+            keep: Mutex::default(),
+        })
+        .await
+        .assert_held();
+}
+
 // Each tier mounts the same kernel laws; PostgreSQL selection requires a service.
 mod sqlite_memory {
+    #[tokio::test]
+    async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge() {
+        super::a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_charge(
+            super::Tier::SqliteMemory,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn every_park_cut_is_reached_when_b_claims_before_a() {
         super::every_park_cut_is_reached_when_b_claims_before_a(super::Tier::SqliteMemory).await;

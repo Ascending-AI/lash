@@ -128,6 +128,8 @@ pub struct EffectAdmission {
     /// The effect performed; none for a sleep.
     pub effect: Option<OperationUse>,
     pub admit: AdmitAs,
+    /// How far the run had come at the park that requests it.
+    pub progress: super::graph::ParkProgress,
 }
 
 /// One call a save admitted, as the host records it in its own state.
@@ -446,6 +448,7 @@ struct Requested {
     effect: Option<OperationUse>,
     standing: Option<Standing>,
     request: Option<FrozenRequest>,
+    progress: super::graph::ParkProgress,
 }
 
 /// A park's requests: the waits it stands on, the drafts its round
@@ -467,6 +470,7 @@ impl Requests {
                 wait,
                 effect,
                 admit,
+                progress,
             } = admission;
             let (standing, request) = match admit {
                 AdmitAs::Execution(draft) => {
@@ -486,6 +490,7 @@ impl Requests {
                 effect,
                 standing,
                 request,
+                progress,
             });
         }
         Self {
@@ -594,6 +599,7 @@ impl DurableSnapshotStore {
                             effect_name: entry.effect,
                             request,
                             execution: Some((operation, pin)),
+                            progress: entry.progress,
                         },
                     )
                     .map_err(refused)?;
@@ -627,6 +633,7 @@ impl DurableSnapshotStore {
                             effect_name: entry.effect,
                             request,
                             execution: None,
+                            progress: entry.progress,
                         },
                     )
                     .map_err(refused)?;

@@ -1008,6 +1008,10 @@ impl KernelEffects for CellHost<'_> {
         }
     }
 
+    fn prints(&self) -> u64 {
+        self.prints.lock_recover().len() as u64
+    }
+
     fn journaled(&self, admissions: &[(lash_core::ToolCallId, NodeId)]) {
         let mut graph = self.graph.lock_recover();
         for (call, admission) in admissions {

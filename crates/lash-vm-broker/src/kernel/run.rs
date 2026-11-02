@@ -176,6 +176,13 @@ pub trait KernelEffects: Projections + Send + Sync {
         )
     }
 
+    /// How many values the run printed so far: a park's journal entry
+    /// records it, and a run that follows its journal must have printed as
+    /// many at that park (FIG-7585).
+    fn prints(&self) -> u64 {
+        0
+    }
+
     /// The run starts again from its last checkpoint on this activation:
     /// the host's record of its effects, reads and prints goes back to what
     /// it held at that checkpoint ([`mark`](Self::mark)), and the run
@@ -599,6 +606,9 @@ impl KernelBroker<'_> {
             None => None,
         };
         let journal = self.store.journal(self.effects).await?;
+        // A run follows records its earlier runs' commits left out of the
+        // cache: it reads them from the store.
+        self.store.reload_records().await;
         // The host knows every call the checkpoint stands on and the journal
         // admitted before any drive folds them: one that started and never
         // settled runs again (or is interrupted) as its own call, not as a
@@ -801,6 +811,7 @@ impl KernelBroker<'_> {
         requests: Vec<Request>,
         outstanding: u64,
         live: u64,
+        progress: super::graph::ParkProgress,
     ) -> Result<Vec<EffectAdmission>, KernelFailure> {
         let park = ledger.next_park();
         let mut admit = Vec::with_capacity(requests.len());
@@ -828,6 +839,7 @@ impl KernelBroker<'_> {
                         wait: request.wait,
                         effect: Some(request.use_),
                         admit: how,
+                        progress,
                     }
                 }
             });
@@ -906,6 +918,9 @@ struct Journal {
     batch: usize,
     /// The admissions the machine requested again so far.
     matched: usize,
+    /// The parks the machine made so far, from where it started: what a
+    /// divergence names.
+    parks: u64,
     /// The deliveries no commit recorded yet, in order.
     pending: Vec<(EffectId, lash_durable::domain::Delivery)>,
 }
@@ -917,6 +932,7 @@ impl Journal {
             journal,
             batch: 0,
             matched: 0,
+            parks: 0,
             pending: Vec::new(),
         }
     }
@@ -930,6 +946,7 @@ impl Journal {
     fn restart(&mut self) {
         self.batch = 0;
         self.matched = 0;
+        self.parks = 0;
     }
 
     /// Whether the run's next commit takes a checkpoint.
@@ -958,8 +975,43 @@ fn journal_calls(journal: &CellJournal) -> Vec<(lash_protocol_types::ToolCallId,
         .collect()
 }
 
-fn diverged(message: impl Into<String>) -> KernelFailure {
-    KernelFailure::Diverged(message.into())
+/// What of a park a run that follows its journal must match.
+#[derive(Clone, Copy, Debug)]
+enum Field {
+    /// The effect, its operation, its wait or its call identity.
+    Call,
+    /// The frozen request: the call's arguments.
+    Arguments,
+    /// How many effects it requested against what the journal admitted.
+    Issued,
+    /// The run's cumulative exact charge.
+    Charge,
+    /// How many values it printed.
+    Prints,
+    /// The document or execution closure it runs.
+    Code,
+}
+
+impl Field {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Arguments => "arguments",
+            Self::Issued => "issued count",
+            Self::Charge => "charge",
+            Self::Prints => "prints",
+            Self::Code => "document or closure",
+        }
+    }
+}
+
+/// The typed refusal of a run that left its journal at park `park`: the
+/// field that differed, and how.
+fn diverged(park: u64, field: Field, detail: impl std::fmt::Display) -> KernelFailure {
+    KernelFailure::Diverged(format!(
+        "the run left its journal at park {park}: its {} differs ({detail})",
+        field.name()
+    ))
 }
 
 #[async_trait::async_trait]
@@ -1033,6 +1085,19 @@ impl<S: Machines> lash_core_execution::kernel_runner::KernelOwner for CellKernel
 }
 
 impl<S: Machines> CellKernelOwner<'_, '_, S> {
+    /// How far the run has come: its cumulative exact charge, from the
+    /// machine's latest receipt, and the values it printed.
+    fn progress(&self) -> super::graph::ParkProgress {
+        super::graph::ParkProgress {
+            charge: self
+                .machine
+                .as_ref()
+                .and_then(DrivenMachine::meters)
+                .and_then(|meters| meters.charged),
+            prints: self.broker.effects.prints(),
+        }
+    }
+
     /// An in-turn run's park (FIG-7585): its requests are admitted, or,
     /// while the machine follows its journal, matched against what the
     /// journal admitted; then the machine takes its next recorded batch, or
@@ -1044,6 +1109,8 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         let cancels = !park.cancel_requests.is_empty();
         let requests = park.requests;
         let (outstanding, live) = (park.outstanding, park.live);
+        self.journal.parks += 1;
+        let at = self.journal.parks;
         let journal = &self.journal;
         let recorded = requests
             .iter()
@@ -1054,19 +1121,28 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         let replayed = !requests.is_empty() && recorded == requests.len();
         if recorded != 0 && !replayed {
             return Err(diverged(
-                "a park requests effects its journal admitted beside effects it did not",
+                at,
+                Field::Issued,
+                format_args!(
+                    "{recorded} of its {} effects are ones the journal admitted",
+                    requests.len()
+                ),
             ));
         }
         if replayed {
-            self.replay_requests(requests, outstanding, live).await?;
+            self.replay_requests(at, requests, outstanding, live)
+                .await?;
         } else if !requests.is_empty() || cancels {
             if !requests.is_empty() && journal.matched < journal.journal.admitted.len() {
-                return Err(diverged(format!(
-                    "the run requests a new effect after {} of the {} effects its journal \
-                     admitted",
-                    journal.matched,
-                    journal.journal.admitted.len()
-                )));
+                return Err(diverged(
+                    at,
+                    Field::Issued,
+                    format_args!(
+                        "a new effect after {} of the {} its journal admitted",
+                        journal.matched,
+                        journal.journal.admitted.len()
+                    ),
+                ));
             }
             let stop = if !requests.is_empty() && self.journal.due() {
                 self.checkpoint(requests, outstanding, live).await?
@@ -1107,10 +1183,14 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                     .iter()
                     .find(|settled| &settled.identity == effect)
                     .ok_or_else(|| {
-                        diverged(format!(
-                            "the journal delivers effect {effect} here, which the run does not \
-                             stand on or whose outcome is not committed"
-                        ))
+                        diverged(
+                            at,
+                            Field::Call,
+                            format_args!(
+                                "the journal delivers effect {effect} here, which the run does \
+                                 not stand on or whose outcome is not committed"
+                            ),
+                        )
                     })?;
                 running
                     .deliver(outcome.wait, outcome.outcome.clone())
@@ -1194,6 +1274,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
     /// each must be the effect, request, call and park the journal holds.
     async fn replay_requests(
         &mut self,
+        at: u64,
         requests: Vec<Request>,
         outstanding: u64,
         live: u64,
@@ -1208,11 +1289,22 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
             .broker
             .ceilings
             .grow(self.ledger.growth(), requests.len() as u64, 0)
-            .map_err(|_| diverged("the journal admitted effects past the run's lifetime bound"))?;
+            .map_err(|_| {
+                diverged(
+                    at,
+                    Field::Issued,
+                    "the journal admitted effects past the run's lifetime bound",
+                )
+            })?;
         self.ledger.grown(growth);
         let park = self.ledger.next_park();
         let mut executions = 0_u64;
         let count = requests.len();
+        // The run stands where its first run stood at this park: the same
+        // cumulative charge (the kernel meters it deterministically) and as
+        // many prints, so compute between parks that diverged is refused
+        // even when the next call matches (FIG-7585).
+        let progress = self.progress();
         for Request::Effect(request) in requests {
             let journal = &self.journal;
             let recorded = journal
@@ -1223,17 +1315,43 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                 .clone();
             if recorded.admission.run != fingerprint {
                 return Err(diverged(
-                    "the run executes another document or closure than its journal recorded",
+                    at,
+                    Field::Code,
+                    "it executes another document or closure than its journal recorded",
+                ));
+            }
+            let recorded_progress = recorded.admission.progress;
+            if let (Some(then), Some(now)) = (recorded_progress.charge, progress.charge)
+                && then != now
+            {
+                return Err(diverged(
+                    at,
+                    Field::Charge,
+                    format_args!("{now} charge units where its journal recorded {then}"),
+                ));
+            }
+            if recorded_progress.prints != progress.prints {
+                return Err(diverged(
+                    at,
+                    Field::Prints,
+                    format_args!(
+                        "{} prints where its journal recorded {}",
+                        progress.prints, recorded_progress.prints
+                    ),
                 ));
             }
             if recorded.admission.wait != request.wait
                 || recorded.admission.effect_name != Some(request.use_)
             {
-                return Err(diverged(format!(
-                    "effect {} waits as another wait or performs another operation than its \
-                     journal admitted",
-                    request.identity
-                )));
+                return Err(diverged(
+                    at,
+                    Field::Call,
+                    format_args!(
+                        "effect {} waits as another wait or performs another operation than \
+                         its journal admitted",
+                        request.identity
+                    ),
+                ));
             }
             let call = self.broker.identities.child_call_id(park, executions);
             let standing = match self
@@ -1246,20 +1364,33 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                     executions += 1;
                     match &recorded.admission.disposition {
                         super::graph::Disposition::Execution { operation, pin }
-                            if pin.call == call
-                                && operation.run == park
-                                && draft.request == recorded.request =>
+                            if pin.call == call && operation.run == park =>
                         {
+                            if draft.request != recorded.request {
+                                return Err(diverged(
+                                    at,
+                                    Field::Arguments,
+                                    format_args!(
+                                        "effect {} is called with other arguments than its \
+                                         journal admitted",
+                                        request.identity
+                                    ),
+                                ));
+                            }
                             Standing::Admitted(AdmittedEffect {
                                 operation: *operation,
                                 call,
                             })
                         }
                         _ => {
-                            return Err(diverged(format!(
-                                "effect {} is not the call its journal admitted",
-                                request.identity
-                            )));
+                            return Err(diverged(
+                                at,
+                                Field::Call,
+                                format_args!(
+                                    "effect {} is not the call its journal admitted",
+                                    request.identity
+                                ),
+                            ));
                         }
                     }
                 }
@@ -1272,10 +1403,14 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                         },
                     ) if *recorded == error && *args == request.args => Standing::Refused(error),
                     _ => {
-                        return Err(diverged(format!(
-                            "effect {} is refused where its journal admitted it",
-                            request.identity
-                        )));
+                        return Err(diverged(
+                            at,
+                            Field::Call,
+                            format_args!(
+                                "effect {} is refused where its journal admitted it",
+                                request.identity
+                            ),
+                        ));
                     }
                 },
             };
@@ -1288,10 +1423,11 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                     cancellation_requested: false,
                 },
             ) {
-                return Err(diverged(format!(
-                    "the run requests effect {} twice",
-                    request.identity
-                )));
+                return Err(diverged(
+                    at,
+                    Field::Call,
+                    format_args!("it requests effect {} twice", request.identity),
+                ));
             }
         }
         if executions > 0 {
@@ -1352,7 +1488,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         }
         let admit = self
             .broker
-            .admissions(&self.ledger, requests, outstanding, live)
+            .admissions(&self.ledger, requests, outstanding, live, self.progress())
             .await?;
         let save = ParkSave {
             document: self.document,
@@ -1407,7 +1543,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
         }
         let admit = self
             .broker
-            .admissions(&self.ledger, requests, outstanding, live)
+            .admissions(&self.ledger, requests, outstanding, live, self.progress())
             .await?;
         let identities: Vec<EffectId> = admit.iter().map(|admit| admit.identity.clone()).collect();
         let delivered = self.journal.pending.clone();

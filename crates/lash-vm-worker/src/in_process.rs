@@ -92,7 +92,10 @@ enum Command {
     Run {
         slice: u64,
         cancel: bool,
-        reply: tokio::sync::oneshot::Sender<Result<MachineStep, KernelFailure>>,
+        /// The step, with the machine's meters after it.
+        reply: tokio::sync::oneshot::Sender<
+            Result<(MachineStep, lash_kernel_vm::Meters), KernelFailure>,
+        >,
     },
     Deliver {
         wait: WaitId,
@@ -109,6 +112,8 @@ enum Command {
 pub struct InProcessMachine {
     commands: mpsc::Sender<Command>,
     hold: Option<CallHold>,
+    /// The meters the machine reported after its latest run.
+    meters: Option<lash_kernel_vm::Meters>,
 }
 
 struct Cancelling<'a, H> {
@@ -220,7 +225,8 @@ impl InProcessMachine {
                                 step => port.flush().map(|()| step).map_err(|fault| {
                                     KernelFailure::from(lash_kernel_vm::MachineError::Heap(fault))
                                 }),
-                            });
+                            })
+                            .map(|step| (step, machine.meters()));
                         let _ = reply.send(step);
                     }
                     Command::Deliver {
@@ -258,7 +264,11 @@ impl InProcessMachine {
             .await
             .map_err(|_| fault("the machine thread ended"))??;
         drop(held);
-        Ok(Self { commands, hold })
+        Ok(Self {
+            commands,
+            hold,
+            meters: None,
+        })
     }
 
     async fn ask<T>(
@@ -279,13 +289,20 @@ impl InProcessMachine {
 
 #[async_trait::async_trait]
 impl DrivenMachine for InProcessMachine {
+    fn meters(&self) -> Option<lash_kernel_vm::Meters> {
+        self.meters
+    }
+
     async fn run(&mut self, slice: u64, cancel: bool) -> Result<MachineStep, KernelFailure> {
-        self.ask(|reply| Command::Run {
-            slice,
-            cancel,
-            reply,
-        })
-        .await
+        let (step, meters) = self
+            .ask(|reply| Command::Run {
+                slice,
+                cancel,
+                reply,
+            })
+            .await?;
+        self.meters = Some(meters);
+        Ok(step)
     }
 
     async fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<(), KernelFailure> {

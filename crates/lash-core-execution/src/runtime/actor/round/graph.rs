@@ -1220,14 +1220,15 @@ pub struct AdmittedPin {
 
 /// The fields of an Admission body a round's fold reads: its execution
 /// identity, run fingerprint, effect identity, wait and effect name are
-/// skipped as whole trees, its request and disposition read.
+/// skipped as whole trees, its request and disposition read, and the run's
+/// progress at its park skipped.
 struct AdmissionPinView(Option<AdmittedPin>);
 
 impl TokenCodec for AdmissionPinView {
     fn encode(&self, _out: &mut TokenWriter) {}
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(10)?;
         input.text()?;
         input.skip_tree()?;
         input.skip_tree()?;
@@ -1236,7 +1237,7 @@ impl TokenCodec for AdmissionPinView {
         input.skip_tree()?;
         NodeId::decode(input)?;
         let (variant, fields) = input.sum()?;
-        Ok(Self(match variant {
+        let pin = match variant {
             0 => {
                 TokenReader::expect_fields(fields, 3)?;
                 Some(AdmittedPin {
@@ -1250,7 +1251,10 @@ impl TokenCodec for AdmissionPinView {
                 None
             }
             other => return Err(unsupported(other)),
-        }))
+        };
+        input.skip_tree()?;
+        input.unsigned()?;
+        Ok(Self(pin))
     }
 }
 
