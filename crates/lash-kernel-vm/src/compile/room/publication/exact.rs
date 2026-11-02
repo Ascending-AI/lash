@@ -14,6 +14,20 @@ pub(crate) struct ExactRoots<'v> {
     pub(crate) outputs: Vec<(RootOwner, ExactValue)>,
 }
 
+/// Detached preparations expose actual bodies and their source-ordered phase
+/// schedule while registration still permits the source verifier to read them.
+/// Native arguments must agree with the evaluated source operands, followed
+/// only by omitted optional arguments padded with Absent.
+#[derive(Default)]
+pub(crate) struct ExternalFacts<'a> {
+    pub(crate) operands: &'a [doc::Value],
+    pub(crate) arguments: &'a [doc::Value],
+    pub(crate) member: Option<&'a MemberEdit>,
+    pub(crate) entities: &'a [logical::VirtualEntity],
+    pub(crate) scratch: &'a [logical::ScratchEvent],
+    pub(crate) native: Option<&'a doc::NativeResourceContract>,
+}
+
 /// A dynamic choice is an evaluated source fact. Its successor is derived
 /// again from source syntax, rather than accepted from a physical code cursor.
 #[derive(Clone, Copy, Default)]
@@ -96,16 +110,7 @@ impl ExactEvent {
         allowance: Allowance,
         resources: ResourceFacts,
     ) -> Result<BoundEvent, Refused> {
-        // These exact adapters run after their canonical stream charge close.
-        // A nonzero or still-open charge requires a ChargeDebt region instead.
-        if frontier.proven
-            || !Arc::ptr_eq(&self.source, &frontier.source)
-            || frontier.position.at != self.at
-            || frontier.position.unpaid.as_ref() != Some(&self.at)
-            || next.at != self.at
-            || next.unpaid.as_ref() != Some(&self.unpaid)
-            || next.occurrence != frontier.position.occurrence
-            || allowance.before != 0
+        if allowance.before != 0
             || allowance.units != 0
             || allowance.close.is_some()
             || allowance.strict
@@ -114,22 +119,150 @@ impl ExactEvent {
         {
             return Err(Refused::Source);
         }
+        self.bind_view(
+            frontier,
+            ledger,
+            arena,
+            heap,
+            execution,
+            roots,
+            next,
+            allowance,
+            resources,
+            ExternalFacts::default(),
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one authenticated external source event"
+    )]
+    pub(crate) fn bind_external(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        execution: &mut impl Execution,
+        roots: ExactRoots<'_>,
+        next: Position,
+        allowance: Allowance,
+        resources: ResourceFacts,
+        external: ExternalFacts<'_>,
+        debt: &crate::compile::room::charges::ChargeDebt<'_>,
+    ) -> Result<BoundEvent, Refused> {
+        if !debt.matches(&self.source, &self.at, &self.at)
+            || allowance.units != debt.units()
+            || !allowance.strict
+            || allowance.before != 0
+            || allowance.close.is_some()
+            || !allowance.occurrences.is_empty()
+        {
+            return Err(Refused::Source);
+        }
+        if external.native.is_some()
+            && (external.operands.len() != roots.inputs.len()
+                || external.arguments.len() < external.operands.len()
+                || !external
+                    .arguments
+                    .iter()
+                    .zip(external.operands)
+                    .all(|(a, b)| a.same(b))
+                || external.arguments[external.operands.len()..]
+                    .iter()
+                    .any(|v| !matches!(v, doc::Value::Absent)))
+        {
+            return Err(Refused::Facts);
+        }
+        if let Some(edit) = external.member {
+            let event = self.interval.events().next().ok_or(Refused::Path)?;
+            if external.operands.len() != event.inputs.len()
+                || edit.next.as_ref().is_some_and(|next| {
+                    external
+                        .operands
+                        .last()
+                        .is_none_or(|value| !next.same(value))
+                })
+            {
+                return Err(Refused::Facts);
+            }
+        }
+        if external.native.is_some() || external.member.is_some() {
+            let slots = self.source.owner_slots()?;
+            let event = self.interval.events().next().ok_or(Refused::Path)?;
+            let expected: Vec<_> = event
+                .inputs
+                .iter()
+                .map(|input| {
+                    slots
+                        .root(input, next.occurrence.task, next.occurrence.invocation)
+                        .ok_or(Refused::Source)
+                })
+                .collect::<Result<_, _>>()?;
+            if expected != roots.inputs {
+                return Err(Refused::Source);
+            }
+        }
+        self.bind_view(
+            frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one exact source event and its actual facts"
+    )]
+    fn bind_view(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        execution: &mut impl Execution,
+        roots: ExactRoots<'_>,
+        next: Position,
+        allowance: Allowance,
+        resources: ResourceFacts,
+        external: ExternalFacts<'_>,
+    ) -> Result<BoundEvent, Refused> {
+        if frontier.proven
+            || !Arc::ptr_eq(&self.source, &frontier.source)
+            || frontier.position.at != self.at
+            || frontier.position.unpaid.as_ref() != Some(&self.at)
+            || next.at != self.at
+            || next.unpaid.as_ref() != Some(&self.unpaid)
+            || next.occurrence != frontier.position.occurrence
+        {
+            return Err(Refused::Source);
+        }
         let slots = self.source.owner_slots()?;
         let view = EventView {
             inputs: &roots.inputs,
             outputs: &roots.outputs,
             borrowed: &[],
-            member: None,
-            entities: &[],
+            member: external.member,
+            entities: external.entities,
             frame: None,
-            scratch: &[],
-            native: None,
-            journal: None,
+            scratch: external.scratch,
+            native: external.native,
         };
         let mut handles = Vec::new();
         let room = self
             .interval
             .evaluate_checked(execution, |event, site, facts| {
+                if external.native.is_none()
+                    && event.peak.measures().any(|measure| {
+                        matches!(
+                            measure,
+                            Measure::CallPeak {
+                                callee: CallSource::Native(_),
+                                ..
+                            }
+                        )
+                    })
+                {
+                    return Err(Refused::Facts);
+                }
                 handles.extend_from_slice(facts.dependencies().ok_or(Refused::Facts)?);
                 EventContext {
                     earlier: &[],
@@ -143,11 +276,12 @@ impl ExactEvent {
                 .check(event, site, &view, facts)?;
                 // A local move preserves its actual provenance, including page and
                 // frozen roots. Equal-sized Native values cannot replace that move.
-                if site.assignment.is_some()
-                    || matches!(
-                        event.output,
-                        Some(Owner::Binding { .. } | Owner::SessionCell { .. })
-                    )
+                if external.member.is_none()
+                    && (site.assignment.is_some()
+                        || matches!(
+                            event.output,
+                            Some(Owner::Binding { .. } | Owner::SessionCell { .. })
+                        ))
                 {
                     if event.inputs.len() != 1 || roots.outputs.len() != 1 {
                         return Err(Refused::Retained);
@@ -164,7 +298,8 @@ impl ExactEvent {
                         return Err(Refused::Retained);
                     }
                 }
-                if matches!(event.output, Some(Owner::Operand(_)))
+                if external.native.is_none()
+                    && matches!(event.output, Some(Owner::Operand(_)))
                     && let Ok(input) = self.source.scalar_input(&slots, &event.point)
                 {
                     let expected = match input {
@@ -236,23 +371,40 @@ impl BoundEvent {
             .roots
             .outputs
             .iter()
-            .map(|(owner, value)| {
-                let root = match value {
-                    ExactValue::Native(value) => RootValue::Value(value),
-                    ExactValue::Existing(owner) => RootValue::Existing(*owner),
-                    ExactValue::Capture(handle) => RootValue::Capture(*handle),
-                    ExactValue::Page(value) => RootValue::Page(value),
-                    ExactValue::Frozen(value) => RootValue::Frozen(value),
-                    ExactValue::Frame => RootValue::Frame,
-                    ExactValue::Departure => RootValue::Departure,
-                };
-                (*owner, root)
-            })
+            .map(|(owner, value)| (*owner, root_value(value)))
             .collect();
+        let transaction =
+            ledger.prepare_source_boundary(registration, heap, &self.roots.inputs, &outputs)?;
+        self.finish_external(frontier, ledger, transaction)
+    }
+
+    /// Finish against the transaction prepared from the same actual graph.
+    /// The transaction owns registration; no borrowed activation escapes bind.
+    pub(crate) fn finish_external<'a>(
+        self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        mut transaction: BoundaryTransaction<'a>,
+    ) -> Result<PreparedEvent<'a>, PublicationError> {
+        if !current(&self.frontier, self.revision, &self.before, frontier) {
+            return Err(PublicationError::Miss("external source frontier changed"));
+        }
+        let outputs: Vec<_> = self
+            .roots
+            .outputs
+            .iter()
+            .map(|(owner, value)| (*owner, root_value(value)))
+            .collect();
+        if !transaction.matches_roots(ledger, &self.roots.inputs, &outputs) {
+            return Err(PublicationError::Miss("external boundary roots changed"));
+        }
+        let mut transaction = transaction.bind_dependencies(self.dependencies)?;
+        if !transaction.is_current(ledger) {
+            return Err(PublicationError::Miss(
+                "external source dependencies changed",
+            ));
+        }
         let before = ledger.balance()?.total()?;
-        let transaction = ledger
-            .prepare_source_boundary(registration, heap, &self.roots.inputs, &outputs)?
-            .bind_dependencies(self.dependencies)?;
         let balance = self.room.balance();
         if i128::from(transaction.balance()?.total()?) - i128::from(before)
             != balance.retained_delta
@@ -435,5 +587,17 @@ impl Source {
             }
         }
         Err(Refused::Path)
+    }
+}
+
+fn root_value(value: &ExactValue) -> RootValue<'_> {
+    match value {
+        ExactValue::Native(value) => RootValue::Value(value),
+        ExactValue::Existing(owner) => RootValue::Existing(*owner),
+        ExactValue::Capture(handle) => RootValue::Capture(*handle),
+        ExactValue::Page(value) => RootValue::Page(value),
+        ExactValue::Frozen(value) => RootValue::Frozen(value),
+        ExactValue::Frame => RootValue::Frame,
+        ExactValue::Departure => RootValue::Departure,
     }
 }

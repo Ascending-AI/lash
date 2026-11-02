@@ -178,6 +178,25 @@ pub(in crate::machine) struct Prefix {
     pub(in crate::machine) allowance: Allowance,
 }
 
+/// An external storage owner binds actual facts while it still owns
+/// registration, then finishes against that same transaction.
+pub(in crate::machine) struct ExternalEntry<'a> {
+    pub(in crate::machine) event: &'a room::publication::ExactEvent,
+    pub(in crate::machine) frontier: &'a Frontier,
+    pub(in crate::machine) ledger: &'a lash_kernel_state::kernel_internals::logical::Ledger,
+    pub(in crate::machine) heap: &'a PagedHeap,
+    pub(in crate::machine) prefix: Prefix,
+    pub(in crate::machine) resources: crate::admission::ResourceFacts,
+}
+pub(in crate::machine) trait BoundaryPreparation {
+    type Prepared;
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault>;
+}
+
 /// An envelope miss leaves its island at the instruction for exact source.
 /// Exact source is the run's verdict point.
 pub(in crate::machine) enum Admission<'a> {

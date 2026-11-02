@@ -78,6 +78,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             || self.arena.any_cold()
             || function.limit.is_some()
             || function.shares_params
+            || args.len() > function.arity
         {
             return Ok(ValuePublication::Unavailable);
         }
@@ -109,6 +110,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if registers.len() != args.len() {
             return Ok(ValuePublication::Unavailable);
         }
+        let mut arguments = args.to_vec();
+        arguments.resize(function.arity, Value::Absent);
         // Check the complete source consumer before evaluating a prepared
         // answer. Unsupported expressions retain their original handler.
         let answer = if prepared {
@@ -120,7 +123,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .signature
                 .params
                 .iter()
-                .zip(args)
+                .zip(&arguments)
                 .all(|(param, value)| {
                     (param.optional && matches!(value, Value::Absent))
                         || crate::compile::import_result_fits(&param.ty, *value)
@@ -134,7 +137,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 }
                 Some((value, units))
             } else {
-                let Some(answer) = entry.answer(args, self.charging) else {
+                let Some(answer) = entry.answer(&arguments, self.charging) else {
                     return Ok(ValuePublication::Unavailable);
                 };
                 if !scalar(&answer.value)
@@ -145,7 +148,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 {
                     return Ok(ValuePublication::Unavailable);
                 }
-                let Some(answer) = self.answered(function, fast, args, answer) else {
+                let Some(answer) = self.answered(function, fast, &arguments, answer) else {
                     return Ok(ValuePublication::Unavailable);
                 };
                 Some(answer)
@@ -160,7 +163,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Unavailable);
         };
         let contract = match native.resource_contract(doc::Args::new(
-            args,
+            &arguments,
             self.arena.objects(),
             &self.arena.semantics(),
         )) {
@@ -358,7 +361,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let prepare = native_storage::NativeStorage {
             contract: contract.clone(),
             function,
-            args: args.to_vec(),
+            args: arguments,
             output,
             at: prefix.start.at.clone(),
             release,

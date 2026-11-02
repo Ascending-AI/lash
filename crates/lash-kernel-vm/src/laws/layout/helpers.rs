@@ -39,7 +39,9 @@ pub(in crate::laws) fn helper_probes(
             Some(lash_kernel_doc::PreparedNative {
                 pair: None,
                 entry: |args| match args {
-                    [lash_kernel_doc::Value::Int(0 | 2)] => Some(lash_kernel_doc::Value::Int(7)),
+                    [lash_kernel_doc::Value::Int(0 | 2 | 6)] => {
+                        Some(lash_kernel_doc::Value::Int(7))
+                    }
                     _ => None,
                 },
                 charged_entry: None,
@@ -53,7 +55,11 @@ pub(in crate::laws) fn helper_probes(
             use lash_kernel_doc::{NativeError, NewObject, Value};
             match call.args.values() {
                 [Value::Int(0 | 2)] => Ok(Value::Int(7)),
-                [Value::Int(1 | 3)] => {
+                [Value::Int(6)] => {
+                    call.counter.spend(2)?;
+                    Ok(Value::Int(7))
+                }
+                [Value::Int(1 | 3)] | [Value::Absent] => {
                     call.counter.spend(2)?;
                     Ok(call
                         .new
@@ -77,11 +83,25 @@ pub(in crate::laws) fn helper_probes(
                 NativeResourceHolding as Holding, NativeResourceOrigin as Origin,
                 NativeResourceOwner as Owner, NativeResourceRelease as Release, Value,
             };
-            let [Value::Int(mode)] = args.values() else {
-                return Ok(None);
+            let mode = match args.values() {
+                [Value::Int(mode)] => *mode,
+                [Value::Absent] => 1,
+                _ => return Ok(None),
             };
             Ok(match mode {
                 0 | 5 => Some(Contract::value(Exit::Returned, 17, Origin::Immutable)),
+                6 => Some(Contract {
+                    exit: Exit::Returned,
+                    events: vec![Event::Scratch {
+                        owner: Owner(0),
+                        bytes: 40,
+                        release: Release::Exit,
+                    }],
+                    output: Holding {
+                        bytes: 17,
+                        origin: Origin::Immutable,
+                    },
+                }),
                 2 => Some(Contract::value(Exit::Returned, 16, Origin::Immutable)),
                 1 | 3 => Some(Contract {
                     exit: Exit::Returned,
@@ -111,7 +131,7 @@ pub(in crate::laws) fn helper_probes(
                                     origin: Origin::Immutable,
                                 },
                                 Holding {
-                                    bytes: if *mode == 3 { 16 } else { 17 },
+                                    bytes: if mode == 3 { 16 } else { 17 },
                                     origin: Origin::Immutable,
                                 },
                             ],
@@ -133,6 +153,16 @@ pub(in crate::laws) fn helper_probes(
         "resident.boundary",
         registry
             .register(boundary, Some(std::sync::Arc::new(BoundaryNative)))
+            .unwrap(),
+    ));
+
+    let optional = lash_kernel_doc::parse_definition(
+        "function resident.optional(value?: Int) -> Any\nkernel 1\ncharge sum(1, size(value), size(result))\nnative\n",
+    ).unwrap();
+    out.push((
+        "resident.optional",
+        registry
+            .register(optional, Some(std::sync::Arc::new(BoundaryNative)))
             .unwrap(),
     ));
 
@@ -764,8 +794,8 @@ const LOOKALIKE_COUNTERS: &str = r#"main {
 /// charge event and source continuation while entering the common loop.
 #[test]
 fn helper_frames_agree() {
-    // FIG-7614: exercise the staged ABI itself, since core has not enabled
-    // authenticated region placement yet. A fallback-only green cannot pass.
+    // FIG-7614: exercise detached storage and authenticated external source
+    // acceptance directly. A fallback-only green cannot pass.
     let boundary = Embedder::with(
         "main { return resident.boundary(0) }",
         Setup {
@@ -776,6 +806,16 @@ fn helper_frames_agree() {
     boundary
         .machine
         .assert_native_boundary_law(boundary.library.ids["resident.boundary"]);
+    let external = Embedder::with(
+        "main { return resident.optional() }",
+        Setup {
+            probes: Some(helper_probes),
+            ..Setup::default()
+        },
+    );
+    external
+        .machine
+        .assert_external_native_boundary_law(external.library.ids["resident.optional"]);
     use super::ExecutionMode as Mode;
     use crate::machine::islands::witness::{self, Exit, Family};
     use crate::perf_witness::execution::{self, Owner};

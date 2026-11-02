@@ -35,15 +35,8 @@ pub(in crate::machine) struct PreparedNative {
     output: Owner,
     contract: doc::NativeResourceContract,
     function: lash_kernel_value::FunctionId,
-    #[allow(
-        dead_code,
-        reason = "core charge binding consumes the retained actual operands"
-    )]
     arguments: Vec<Value>,
-    #[allow(
-        dead_code,
-        reason = "core must extend FormulaValues for detached heap results"
-    )]
+    given: usize,
     measurements: Vec<(crate::compile::Source, doc::Measure, u64)>,
     depth: u32,
     at: Point,
@@ -92,33 +85,7 @@ impl StoragePreparation for NativeStorage<'_> {
         allowance.depth = allowance.depth.max(u64::from(storage.depth));
     }
     fn facts(storage: &PreparedNative, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        let facts = facts
-            .0
-            .get_mut(&storage.at)
-            .ok_or_else(|| malformed("native value lost its release event"))?;
-        facts.values.insert(
-            Measure::Release(storage.release.clone()),
-            i128::from(storage.released),
-        );
-        facts.values.insert(
-            Measure::NativeScratch {
-                at: storage.at.site.clone(),
-                function: storage.function,
-            },
-            i128::from(
-                storage
-                    .contract
-                    .peak_scratch_bytes()
-                    .ok_or_else(|| malformed("native scratch schedule changed"))?,
-            ),
-        );
-        facts.call = Some((
-            storage.at.site.clone(),
-            room::CallSource::Native(storage.function),
-            room::CheckedRoom::native(storage.function, &storage.contract)
-                .ok_or_else(|| malformed("native result contract changed"))?,
-        ));
-        Ok(())
+        storage.bind_facts(facts)
     }
 }
 
@@ -129,21 +96,139 @@ struct DetachedNative<'a> {
     entities: Vec<VirtualEntity>,
 }
 
-/// Core authenticates source exit/entry/charges before accepting this boundary.
-/// No event journal is evaluated or published by this path.
-#[allow(dead_code, reason = "core owns authenticated region entrypoint wiring")]
+/// Detached storage remains unpublished until exact source acceptance.
+/// This transaction contains no event journal.
 pub(in crate::machine) struct NativeBoundary<'a> {
     pub(in crate::machine) transaction: BoundaryTransaction<'a>,
     pub(in crate::machine) storage: PreparedNative,
 }
 
+/// The charge program comes from the canonical compiler at the genuine
+/// unpaid suffix. Storage contributes measured arguments/results, never fees.
+pub(in crate::machine) struct SourceNative<'a> {
+    pub(in crate::machine) recipe: NativeStorage<'a>,
+    pub(in crate::machine) charges: &'a room::charges::ChargeProgram,
+    pub(in crate::machine) inputs: Vec<Owner>,
+    pub(in crate::machine) operands: Vec<Value>,
+}
+impl BoundaryPreparation for SourceNative<'_> {
+    type Prepared = (
+        PreparedNative,
+        lash_kernel_state::kernel_internals::logical::Holding,
+    );
+    fn prepare<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+    ) -> Result<Option<(room::publication::PreparedEvent<'a>, Self::Prepared)>, HeapFault> {
+        use room::publication::{ExactRoots, ExternalFacts};
+        let ExternalEntry {
+            event,
+            frontier,
+            ledger,
+            heap,
+            mut prefix,
+            resources,
+        } = entry;
+        let Some((
+            NativeBoundary {
+                transaction,
+                storage,
+            },
+            (bound, holding),
+        )) = self.recipe.prepare_boundary_with(
+            arena,
+            &self.inputs,
+            |arena, storage, page, entities| {
+                storage.bind_facts(&mut prefix.facts)?;
+                let formulas: Vec<_> = self.charges.formulas().collect();
+                let values = if formulas.is_empty() {
+                    vec![]
+                } else {
+                    if formulas.len() != 1
+                        || formulas[0].1 != storage.function
+                        || formulas[0].2 != storage.given
+                    {
+                        return Ok(None);
+                    }
+                    vec![storage.formula_values()]
+                };
+                let Some(debt) = self.charges.bind_measured(&values, |_, source, measure| {
+                    storage.measure(source, measure)
+                }) else {
+                    return Ok(None);
+                };
+                prefix.allowance.units = debt.units();
+                prefix.allowance.depth = prefix.allowance.depth.max(storage.depth());
+                let scratch = scratch_events(storage.output, storage.contract())?;
+                let Ok(bound) = event.bind_external(
+                    frontier,
+                    ledger,
+                    arena,
+                    heap,
+                    &mut prefix.facts,
+                    ExactRoots {
+                        inputs: self.inputs.clone(),
+                        outputs: vec![(storage.output, PV::Page(page.clone()))],
+                        ..Default::default()
+                    },
+                    prefix.next,
+                    prefix.allowance,
+                    resources,
+                    ExternalFacts {
+                        operands: &self.operands,
+                        arguments: storage.arguments(),
+                        member: None,
+                        entities,
+                        scratch: &scratch,
+                        native: Some(storage.contract()),
+                    },
+                    &debt,
+                ) else {
+                    return Ok(None);
+                };
+                let holding = lash_kernel_state::kernel_internals::logical::Holding::from_page(
+                    heap.pages(),
+                    page,
+                )?;
+                Ok(Some((bound, holding)))
+            },
+        )?
+        else {
+            return Ok(None);
+        };
+        match bound.finish_external(frontier, ledger, transaction) {
+            Ok(prepared) => Ok(Some((prepared, (storage, holding)))),
+            Err(PublicationError::Miss(_)) => Ok(None),
+            Err(PublicationError::Heap(error)) => Err(error),
+        }
+    }
+}
+
 impl NativeStorage<'_> {
-    #[allow(dead_code, reason = "core owns authenticated region entrypoint wiring")]
     pub(in crate::machine) fn prepare_boundary<'a>(
         self,
         arena: &'a mut Arena,
         inputs: &[Owner],
     ) -> Result<Option<NativeBoundary<'a>>, HeapFault> {
+        Ok(self
+            .prepare_boundary_with(arena, inputs, |_, _, _, _| Ok(Some(())))?
+            .map(|(boundary, ())| boundary))
+    }
+
+    /// Bind source facts before the transaction takes registration's arena
+    /// borrow. Returning None abandons storage and all provisional identities.
+    pub(in crate::machine) fn prepare_boundary_with<'a, C>(
+        self,
+        arena: &'a mut Arena,
+        inputs: &[Owner],
+        bind: impl FnOnce(
+            &Arena,
+            &PreparedNative,
+            &doc::heap::PageValue,
+            &[VirtualEntity],
+        ) -> Result<Option<C>, HeapFault>,
+    ) -> Result<Option<(NativeBoundary<'a>, C)>, HeapFault> {
         let ledger = std::rc::Rc::clone(&self.ledger);
         let heap = self.heap;
         let mut handles: Vec<_> = self.args.iter().filter_map(Value::handle).collect();
@@ -152,12 +237,15 @@ impl NativeStorage<'_> {
             return Ok(None);
         };
         let Some(DetachedNative {
-            registration,
+            mut registration,
             storage,
             page,
             entities,
         }) = self.prepare_storage(arena, inputs)?
         else {
+            return Ok(None);
+        };
+        let Some(bound) = bind(registration.arena(), &storage, &page, &entities)? else {
             return Ok(None);
         };
         let Some(transaction) = ledger.borrow().prepare_native_boundary(
@@ -173,10 +261,13 @@ impl NativeStorage<'_> {
         else {
             return Ok(None);
         };
-        Ok(Some(NativeBoundary {
-            transaction,
-            storage,
-        }))
+        Ok(Some((
+            NativeBoundary {
+                transaction,
+                storage,
+            },
+            bound,
+        )))
     }
 
     fn prepare_storage<'a>(
@@ -188,7 +279,18 @@ impl NativeStorage<'_> {
             return Ok(None);
         };
         if !supports(&self.contract)
-            || self.args.len() > self.function.arity
+            || self.args.len() != self.function.arity
+            || !self
+                .function
+                .header
+                .signature
+                .params
+                .iter()
+                .zip(&self.args)
+                .all(|(param, value)| {
+                    (param.optional && matches!(value, Value::Absent))
+                        || crate::compile::import_result_fits(&param.ty, *value)
+                })
             || self.function.limit.is_some()
             || self.function.shares_params
             || self.function.specialization.resource
@@ -209,6 +311,9 @@ impl NativeStorage<'_> {
             _ => return Ok(None),
         }
         let known = match self.known {
+            // A scalar Pair/entry does not prove the installed implementation
+            // has no scratch. Only its input-evaluated contract can do so.
+            Some(_) if !self.contract.events.is_empty() => None,
             Some((value, depth)) => {
                 if depth != 0
                     || !crate::compile::scalar(&value)
@@ -279,6 +384,9 @@ impl NativeStorage<'_> {
             }
             (value, counter.spent(), 0, nursery.into_new())
         };
+        if !crate::compile::import_result_fits(&self.function.header.signature.result, value) {
+            return Ok(None);
+        }
         let allocated = !new.is_empty();
         let first = arena.next_provisional().ordinal;
         let handles: Vec<_> = new
@@ -402,11 +510,12 @@ impl NativeStorage<'_> {
                 contract: self.contract,
                 function: self.function.specialization.function,
                 arguments: self.args,
+                given: inputs.len(),
                 measurements,
                 units,
                 work,
                 known: self.known.is_some(),
-                depth,
+                depth: depth.max(u32::from(self.function.operation())),
                 at: self.at,
                 release: self.release,
                 released,
@@ -418,17 +527,50 @@ impl NativeStorage<'_> {
 }
 
 impl PreparedNative {
-    #[allow(dead_code, reason = "core owns region charge compiler wiring")]
+    pub(in crate::machine) fn arguments(&self) -> &[Value] {
+        &self.arguments
+    }
+    pub(in crate::machine) fn depth(&self) -> u64 {
+        u64::from(self.depth)
+    }
+
+    pub(in crate::machine) fn bind_facts(
+        &self,
+        facts: &mut LeafExecution,
+    ) -> Result<(), HeapFault> {
+        let facts = facts
+            .0
+            .get_mut(&self.at)
+            .ok_or_else(|| malformed("native value lost its release event"))?;
+        facts.values.insert(
+            Measure::Release(self.release.clone()),
+            i128::from(self.released),
+        );
+        facts.values.insert(
+            Measure::NativeScratch {
+                at: self.at.site.clone(),
+                function: self.function,
+            },
+            i128::from(
+                self.contract
+                    .peak_scratch_bytes()
+                    .ok_or_else(|| malformed("native scratch schedule changed"))?,
+            ),
+        );
+        facts.call = Some((
+            self.at.site.clone(),
+            room::CallSource::Native(self.function),
+            room::CheckedRoom::native(self.function, &self.contract)
+                .ok_or_else(|| malformed("native result contract changed"))?,
+        ));
+        Ok(())
+    }
     pub(in crate::machine) fn formula_values(&self) -> room::charges::FormulaValues<'_> {
         room::charges::FormulaValues {
-            arguments: &self.arguments,
+            arguments: &self.arguments[..self.given],
             result: self.value,
         }
     }
-    #[allow(
-        dead_code,
-        reason = "core must extend FormulaValues for detached heap results"
-    )]
     pub(in crate::machine) fn measure(
         &self,
         source: crate::compile::Source,

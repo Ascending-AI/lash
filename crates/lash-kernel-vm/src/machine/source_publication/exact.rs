@@ -12,6 +12,94 @@ impl crate::machine::KernelMachine {
 }
 
 impl Context<'_> {
+    pub(in crate::machine) fn publish_external<S: BoundaryPreparation>(
+        self,
+        invocation: &Invocation,
+        frontier: &mut Option<Frontier>,
+        prefix: Prefix,
+        prepare: S,
+        semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
+    ) -> Result<bool, Halt> {
+        self.logical.flush(self.arena, self.heap)?;
+        let store = self.logical.ledger();
+        if let Some(frontier) = frontier.as_mut()
+            && frontier.departs(&prefix.start)
+        {
+            frontier.handoff(&mut store.borrow_mut(), prefix.start.clone())?;
+        }
+        let ledger = store.borrow();
+        if frontier.is_none() {
+            *frontier = Some(
+                self.source
+                    .frontier(
+                        &ledger,
+                        self.heap,
+                        invocation,
+                        self.link,
+                        self.kernel,
+                        prefix.start.clone(),
+                    )
+                    .map_err(|_| malformed("external source frontier failed authentication"))?,
+            );
+        }
+        let frontier = frontier
+            .as_mut()
+            .ok_or_else(|| malformed("external frontier disappeared"))?;
+        let Ok(event) =
+            ExactEvent::compile(self.source, Arc::clone(&prefix.interval), Successor::Normal)
+        else {
+            return Ok(false);
+        };
+        if prefix.allowance.safe_point != *self.resources.charged {
+            return Ok(false);
+        }
+        let Some(resources) = self.resources.facts(&prefix.allowance) else {
+            return Ok(false);
+        };
+        let Some((mut prepared, storage)) = prepare.prepare(
+            self.arena,
+            ExternalEntry {
+                event: &event,
+                frontier,
+                ledger: &ledger,
+                heap: self.heap,
+                prefix,
+                resources,
+            },
+        )?
+        else {
+            return Ok(false);
+        };
+        let memory_bound = match self.admission {
+            Admission::Envelope(bound) => bound,
+            Admission::Exact(mut memory) => {
+                if memory.exceeded(prepared.peak()) {
+                    prepared = prepared.collect(&ledger, self.heap)?;
+                }
+                memory.admit(prepared.peak())?
+            }
+        };
+        let Some(accepted) = prepared.admit(frontier, &ledger, self.resources, memory_bound)?
+        else {
+            return Ok(false);
+        };
+        drop(ledger);
+        let balance = accepted
+            .publish_event(frontier, &mut store.borrow_mut(), |arena, edits| {
+                semantic(arena, self.session, edits, storage)
+            })
+            .map_err(|error| match error {
+                PublicationError::Heap(error) => error,
+                PublicationError::Miss(reason) => malformed(reason),
+            })?;
+        self.logical_memory.set(balance.total()?);
+        #[cfg(any(test, feature = "testing"))]
+        crate::machine::islands::witness::source_loop_published(
+            &frontier.position().occurrence.loops,
+        );
+        Ok(true)
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "one exact evaluated source event"

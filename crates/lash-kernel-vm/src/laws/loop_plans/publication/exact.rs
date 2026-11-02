@@ -204,6 +204,80 @@ pub(super) fn events() {
         "stale discarded-input dependency must reject before any root is installed"
     );
     assert!(ledger.holding(output, heap.pages()).unwrap().is_none());
+    // An externally prepared transaction must carry the exact same value and
+    // provenance. A matching owner and price cannot replace the bound literal.
+    for value in [Value::Int(2), Value::Int(1)] {
+        let facts = resources(&mut charged, &mut counters)
+            .facts(&paid())
+            .unwrap();
+        let bound = event
+            .bind(
+                &frontier,
+                &ledger,
+                &arena,
+                heap,
+                &mut Execution(vec![dependency]),
+                roots(output, Value::Int(1)),
+                next.clone(),
+                paid(),
+                facts,
+            )
+            .unwrap();
+        let transaction = ledger
+            .prepare_source_boundary(
+                arena.registration().unwrap(),
+                heap,
+                &[],
+                &[(output, logical::RootValue::Value(&value))],
+            )
+            .unwrap();
+        if matches!(value, Value::Int(2)) {
+            assert!(
+                bound
+                    .finish_external(&frontier, &ledger, transaction)
+                    .is_err(),
+                "same-price external root substitution must reject"
+            );
+        } else {
+            drop(
+                bound
+                    .finish_external(&frontier, &ledger, transaction)
+                    .unwrap(),
+            );
+        }
+    }
+    let facts = resources(&mut charged, &mut counters)
+        .facts(&paid())
+        .unwrap();
+    let bound = event
+        .bind(
+            &frontier,
+            &ledger,
+            &arena,
+            heap,
+            &mut Execution(vec![dependency]),
+            roots(output, Value::Int(1)),
+            next.clone(),
+            paid(),
+            facts,
+        )
+        .unwrap();
+    arena.cell_set(dependency, Value::Int(3)).unwrap();
+    let value = Value::Int(1);
+    let transaction = ledger
+        .prepare_source_boundary(
+            arena.registration().unwrap(),
+            heap,
+            &[],
+            &[(output, logical::RootValue::Value(&value))],
+        )
+        .unwrap();
+    assert!(
+        bound
+            .finish_external(&frontier, &ledger, transaction)
+            .is_err(),
+        "external finish must recheck discarded entry dependencies"
+    );
     // Every insufficient exact bound leaves the paid prefix and roots intact.
     for limit in [0, before, before + 16] {
         let facts = resources(&mut charged, &mut counters)

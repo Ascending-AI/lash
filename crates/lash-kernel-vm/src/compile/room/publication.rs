@@ -16,7 +16,7 @@ use lash_kernel_state::{
 use std::collections::BTreeSet;
 mod exact;
 mod region;
-pub(crate) use exact::{ExactEvent, ExactRoots, Successor};
+pub(crate) use exact::{ExactEvent, ExactRoots, ExternalFacts, PreparedEvent, Successor};
 pub(crate) use region::CompiledExit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -507,8 +507,7 @@ struct EventView<'a> {
     entities: &'a [logical::VirtualEntity],
     frame: Option<logical::FrameEvent>,
     scratch: &'a [logical::ScratchEvent],
-    native: Option<&'a JournalEvent>,
-    journal: Option<&'a JournalEvent>,
+    native: Option<&'a doc::NativeResourceContract>,
 }
 impl<'a> From<&'a JournalEvent> for EventView<'a> {
     fn from(event: &'a JournalEvent) -> Self {
@@ -520,18 +519,31 @@ impl<'a> From<&'a JournalEvent> for EventView<'a> {
             entities: &event.entities,
             frame: event.frame,
             scratch: &event.scratch,
-            native: event.native.as_ref().map(|_| event),
-            journal: Some(event),
+            native: event.native.as_ref(),
         }
     }
 }
 impl EventView<'_> {
     fn scratch_peak(&self) -> Option<u64> {
-        if self.scratch.is_empty() {
-            Some(0)
-        } else {
-            self.journal?.scratch_peak()
+        let mut live = std::collections::BTreeMap::new();
+        let mut peak = 0;
+        for event in self.scratch {
+            match *event {
+                logical::ScratchEvent::Begin { owner, bytes } => {
+                    if live.insert(owner, bytes).is_some() {
+                        return None;
+                    }
+                }
+                logical::ScratchEvent::End { owner } => {
+                    live.remove(&owner)?;
+                }
+            }
+            peak = peak.max(
+                live.values()
+                    .try_fold(0_u64, |sum, bytes| sum.checked_add(*bytes))?,
+            );
         }
+        Some(peak)
     }
 }
 struct EventContext<'a> {
@@ -837,7 +849,7 @@ impl EventContext<'_> {
             })
             .and_then(|room| room.native_contract.as_ref());
         if let Some(contract) = native {
-            check_native(actual.journal.ok_or(Refused::Facts)?, contract, heap, arena)?;
+            check_native(actual, contract, heap, arena)?;
         }
         if actual.inputs.iter().any(|owner| !reads.contains(owner))
             || actual
@@ -932,17 +944,109 @@ impl EventContext<'_> {
 }
 
 fn check_native(
-    actual: &JournalEvent,
+    actual: &EventView<'_>,
     contract: &doc::NativeResourceContract,
     heap: &PagedHeap,
     arena: &Arena,
 ) -> Result<(), Refused> {
-    if actual
-        .matches_native(contract, heap, arena)
-        .map_err(|_| Refused::Facts)?
+    if actual.native.is_some_and(|bound| bound != contract)
+        || actual.outputs.len() != 1
+        || actual.member.is_some()
     {
-        Ok(())
-    } else {
-        Err(Refused::Facts)
+        return Err(Refused::Facts);
     }
+    let declarations: Vec<_> = contract
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            doc::NativeResourceEvent::Entity {
+                owner,
+                kind,
+                members,
+                ..
+            } => Some((*owner, *kind, members)),
+            _ => None,
+        })
+        .collect();
+    if declarations.len() != actual.entities.len() {
+        return Err(Refused::Facts);
+    }
+    let owners: std::collections::BTreeMap<_, _> = actual
+        .entities
+        .iter()
+        .zip(&declarations)
+        .map(|(entity, (owner, _, _))| (entity.entity, *owner))
+        .collect();
+    if owners.len() != actual.entities.len() {
+        return Err(Refused::Facts);
+    }
+    for (entity, (_, kind, members)) in actual.entities.iter().zip(declarations) {
+        let (actual_kind, actual_members) = entity
+            .body
+            .native_members(heap, arena, &owners)
+            .map_err(|_| Refused::Facts)?;
+        if actual_kind != kind || actual_members != *members {
+            return Err(Refused::Facts);
+        }
+    }
+    if actual.outputs[0]
+        .1
+        .native_holding(heap, arena, &owners)
+        .map_err(|_| Refused::Facts)?
+        != contract.output
+    {
+        return Err(Refused::Facts);
+    }
+    // Scratch ordering is part of the declaration, including leases ending
+    // before an allocation. Equal peaks do not authorize another schedule.
+    let logical::Owner::Value {
+        task,
+        invocation,
+        slot: logical::Slot::Operand(_),
+    } = actual.outputs[0].0
+    else {
+        return Err(Refused::Facts);
+    };
+    let owner = |index: doc::NativeResourceOwner| logical::Owner::Value {
+        task,
+        invocation,
+        slot: logical::Slot::Scratch(index.0),
+    };
+    let mut active = Vec::new();
+    let mut scratch = Vec::new();
+    for event in &contract.events {
+        active.retain(|(index, release)| {
+            if *release == doc::NativeResourceRelease::Before(event.owner()) {
+                scratch.push(logical::ScratchEvent::End {
+                    owner: owner(*index),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        if let doc::NativeResourceEvent::Scratch {
+            owner: index,
+            bytes,
+            release,
+        } = event
+        {
+            scratch.push(logical::ScratchEvent::Begin {
+                owner: owner(*index),
+                bytes: *bytes,
+            });
+            active.push((*index, *release));
+        }
+    }
+    scratch.extend(
+        active
+            .into_iter()
+            .map(|(index, _)| logical::ScratchEvent::End {
+                owner: owner(index),
+            }),
+    );
+    if scratch != actual.scratch {
+        return Err(Refused::Scratch);
+    }
+    Ok(())
 }
