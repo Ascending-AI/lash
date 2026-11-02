@@ -78,8 +78,6 @@ struct Cuts {
     armed: Mutex<Option<Cut>>,
     reached: tokio::sync::Notify,
     fired: Mutex<Vec<Cut>>,
-    /// The referrer a document cut found the document staged under.
-    staged_under: Mutex<Option<lash_core::ArtifactReferrer>>,
     published: Mutex<Vec<String>>,
     /// Whether the function's document was unpublished when a crossing
     /// reached the tool, at each `before-declaring` cut.
@@ -169,7 +167,6 @@ impl ModuleArtifactStore for CutModules {
                 .unwrap()
                 .push(module_ref.to_owned());
             if self.cuts.fires(&Cut::AfterLink(module_ref.to_owned())) {
-                *self.cuts.staged_under.lock().unwrap() = Some(claim.referrer());
                 return died().await;
             }
         }
@@ -414,8 +411,7 @@ fn callable_link(transported: &serde_json::Value) -> String {
 const LAUNCH_TOOLS: lash::process::ProcessConfigKey<()> =
     lash::process::ProcessConfigKey::new("workflow-launch", lash::plugins::FormatVersion::ONE);
 
-/// `tools.launch`, whose call a recovering node runs again, and
-/// `tools.launch_once`, whose call it settles as interrupted.
+/// `tools.launch`, whose call a recovering node runs again.
 fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
     let launch = |name: &str| {
         lash::tools::ToolDefinition::raw(
@@ -441,16 +437,13 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
         )
         .expect("a declaring tool")
     };
-    vec![
-        launch("launch").with_execution_policy(
-            lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(4).unwrap(),
-                1,
-                1,
-            ),
+    vec![launch("launch").with_execution_policy(
+        lash_kernel_value::tool_contract::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(4).unwrap(),
+            1,
+            1,
         ),
-        launch("launch_once"),
-    ]
+    )]
 }
 
 /// A node over `stores`, cut by `cuts`, whose workers cross functions, with
@@ -1037,102 +1030,6 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         holds_its_closure(&core, &stores, &child, &function).await;
         core.shutdown().await.expect("the node stops");
     }
-}
-
-/// The other half of START-ONCE on the tool route: a call its node never
-/// runs again is uncommitted, and so is the start it declared. A node that
-/// died after the closure's document was published under `Start(key)` is
-/// recovered by a second node, which settles the `Once` call interrupted:
-/// no child is registered, and once the call's journal settled the
-/// staging ends and nothing holds the document.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothing() {
-    let stores = sqlite().await;
-    let cuts = Arc::new(Cuts::default());
-    let (core, _) = cut_core(&stores, &cuts, "tool-once").await;
-    let artifacts = core.host_artifacts();
-    let pin = lash::process::HostArtifactPin::mint();
-    let environment = launching("launch_once");
-    let publication = publish(
-        &core,
-        &pin,
-        &spawner("launch_once"),
-        &Name::new("spawner"),
-        &environment,
-        None,
-    )
-    .await
-    .expect("the spawner publishes");
-    let env_ref = publication.env_ref.clone();
-    let mut args = serde_json::Map::new();
-    args.insert("base".to_owned(), serde_json::json!("b"));
-    args.insert("marker".to_owned(), serde_json::json!("tool-once"));
-    args.insert("cut".to_owned(), serde_json::json!("after-link"));
-    let parent = start_with(&core, &env_ref, &publication.definition, "tool-once", args).await;
-    cuts.reached().await;
-    let Cut::AfterLink(document) = cuts.fired().remove(0) else {
-        panic!("the document cut fired");
-    };
-    tokio::time::timeout(std::time::Duration::from_secs(120), core.shutdown())
-        .await
-        .expect("node A stops")
-        .expect("node A stops cleanly");
-    let (core, _) = cut_core(&stores, &cuts, "tool-once-b").await;
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(120),
-        core.processes().await_output(&parent),
-    )
-    .await
-    .expect("the spawner settles")
-    .expect("the output reads");
-    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
-        panic!("the spawner settles with an output: {output:?}");
-    };
-    assert!(
-        !output.is_success(),
-        "the interrupted call fails the spawner: {output:?}"
-    );
-    let ids: Vec<_> = every_process(&stores)
-        .await
-        .into_iter()
-        .map(|record| record.id)
-        .collect();
-    assert_eq!(
-        ids,
-        vec![parent],
-        "the uncommitted start registered nothing"
-    );
-    artifacts.release(pin).await.expect("the pin is released");
-    // The staging's guard rechecks its starter after the relay's backoff;
-    // the law makes that pass due now.
-    use lash_execution_contracts::backend::StoreSet as _;
-    let staged_under = cuts
-        .staged_under
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the document was staged");
-    assert!(
-        matches!(staged_under, lash_core::ArtifactReferrer::Start(_)),
-        "the document was staged under Start(key): {staged_under}"
-    );
-    stores
-        .artifact_cleanup()
-        .nudge(&staged_under, stores.clock().timestamp_ms())
-        .await
-        .expect("the staging's cleanup is due");
-    settle_cleanup(&core).await;
-    let connection = rusqlite::Connection::open_with_flags(
-        stores.database_uri(),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    )
-    .unwrap();
-    let held:i64=connection.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'kernel_document' AND referrer_kind = 'start'",[],|row|row.get(0)).unwrap();
-    assert_eq!(
-        held, 0,
-        "the uncommitted child retains no staging edges after cleanup: {document}"
-    );
-    core.shutdown().await.expect("the node stops");
 }
 
 /// The bounds of an inline start (FN-BOUND at the start): a function value

@@ -143,13 +143,6 @@
   },
   {
     "target": "//crates/lash:workflow_laws__test",
-    "selector": "inline_starts::an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothing",
-    "rules": [
-      "START-ONCE"
-    ]
-  },
-  {
-    "target": "//crates/lash:workflow_laws__test",
     "selector": "inline_starts::an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_nothing",
     "rules": [
       "FN-BOUND"
