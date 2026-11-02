@@ -74,7 +74,8 @@ impl KernelMachine {
     /// this reads the balance it last published.
     #[inline]
     pub(super) fn capacity_held(&self) -> u64 {
-        let _ = self.publish_logical_meter();
+        // An open source region publishes before its balance is read.
+        let _ = self.logical_flush();
         self.logical_memory.get()
     }
 

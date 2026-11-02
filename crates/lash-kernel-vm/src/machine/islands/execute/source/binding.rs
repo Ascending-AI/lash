@@ -60,11 +60,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(unpaid) = self.source_next_statement(frame) else {
             return Ok(None);
         };
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
-            .as_mut()
+            .as_ref()
             .ok_or_else(|| malformed("binding has no source activation"))?;
         let slots = source
             .owner_slots()
@@ -80,6 +79,62 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| malformed("binding has no canonical slot"))?;
+        let invocation = activation.invocation.id();
+        if !site.shared
+            && value.handle().is_none()
+            && match frame.slots[site.at] {
+                SlotState::Empty => true,
+                SlotState::Value(old) => old.handle().is_none(),
+                SlotState::Cell(_) => false,
+            }
+            && self
+                .logical
+                .recorded(input)
+                .is_some_and(|held| held.same(&value))
+            && interval
+                .binding_move(source, rhs)
+                .is_some_and(|owner| slots.root(owner, self.task, invocation) == Some(output))
+        {
+            // The RHS operand is still in the open region, so its move joins
+            // the region too: it adds no peak above the region's admitted
+            // envelope, and only the close charge and the window stand.
+            if site.bind && self.logical.holds(output, self.heap.pages())? {
+                return Ok(Some(false));
+            }
+            let close = self
+                .accounting
+                .then_some(site.close)
+                .flatten()
+                .map_or(0, |close| u64::from(close.total));
+            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
+            let Some(end) = self.charged.checked_add(close) else {
+                return Ok(Some(false));
+            };
+            let Some(frontier) = frame
+                .state
+                .source
+                .as_mut()
+                .and_then(|activation| activation.frontier.as_mut())
+            else {
+                return Ok(None);
+            };
+            if end > self.bound || depth > self.call_depth {
+                return Ok(Some(false));
+            }
+            frontier.proven()?;
+            self.logical.replace(input, None);
+            self.logical
+                .replace(output, Some(SourceValue::Value(value)));
+            self.charged = end;
+            frame.slots[site.at] = SlotState::Value(value);
+            return Ok(Some(true));
+        }
+        self.source_bindings(frame)?;
+        let activation = frame
+            .state
+            .source
+            .as_mut()
+            .ok_or_else(|| malformed("binding has no source activation"))?;
         self.logical.flush(self.arena, self.heap)?;
         let entity = site.shared.then(|| doc::heap::EntityId {
             family: doc::heap::FamilyId::PROVISIONAL,

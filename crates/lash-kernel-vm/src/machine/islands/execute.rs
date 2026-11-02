@@ -311,6 +311,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         #[cfg(not(any(test, feature = "perf-witness")))]
         let answer = self.execute_program(active, &mut slab);
+        // Every exit from the register program closes the open source
+        // region: suspension, call out, fault, fuel and the end alike.
+        let answer = match self.close_region() {
+            Ok(()) => answer,
+            Err(error) => Err(self.halt(error.into())),
+        };
         if !active.handoff && !(active.resident && answer.is_ok()) {
             slab.clear();
         }
@@ -325,6 +331,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let _execution =
             execution::Scope::enter(&self.scratch.census, Owner::RegisterProgram, true);
         self.execute_program(active, slab)
+    }
+
+    /// Publish the open source region as one runtime event.
+    fn close_region(&mut self) -> Result<(), crate::machine::HeapFault> {
+        self.logical.flush(self.arena, self.heap)?;
+        self.logical_memory
+            .set(self.heap.logical_balance()?.total()?);
+        Ok(())
     }
 
     fn execute_program(&mut self, active: &mut Frame<'e>, slab: &mut Slab) -> Answer {
@@ -880,7 +894,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     ) -> Result<Next, Stop> {
         self.source_clear_operands(frame)
             .and_then(|()| self.source_bindings(frame))
-            .and_then(|()| self.logical.flush(self.arena, self.heap))
+            .and_then(|()| self.logical.bounded(self.arena, self.heap))
             .map_err(|error| self.halt(error.into()))?;
         if let Some(block) = empty
             && OBSERVING

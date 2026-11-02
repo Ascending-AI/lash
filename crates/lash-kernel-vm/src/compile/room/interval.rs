@@ -180,6 +180,9 @@ pub(crate) struct CompiledInterval {
     whole: bool,
     return_loops: Option<Box<[Site]>>,
     resume: Option<Point>,
+    /// Whether this interval is a proven acquisition: decided once, since
+    /// an interval belongs to the one Source that compiled it.
+    acquires: std::sync::OnceLock<bool>,
 }
 impl Source {
     /// An issued Return leaves its entered ordinary blocks, then its Source.
@@ -463,6 +466,7 @@ impl Source {
             whole: false,
             return_loops: Some(return_loops.into()),
             resume,
+            acquires: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -547,6 +551,7 @@ impl Source {
             whole: false,
             return_loops: None,
             resume: None,
+            acquires: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -692,6 +697,7 @@ impl Source {
             whole: false,
             return_loops: None,
             resume: None,
+            acquires: std::sync::OnceLock::new(),
         });
         match key {
             Some(key) => {
@@ -760,6 +766,7 @@ impl Source {
             whole: at == &self.site,
             return_loops: None,
             resume: None,
+            acquires: std::sync::OnceLock::new(),
         });
         cache.insert(key, Arc::clone(&interval));
         Ok(interval)
@@ -846,12 +853,20 @@ impl CompiledInterval {
     /// interval the checked journal is fully determined by the value's holding,
     /// so its shared admission is the memory envelope and charge window alone.
     pub(crate) fn acquisition(&self, source: &Source) -> Option<&Owner> {
+        let owner = self.steps.first()?.event.output.as_ref()?;
+        self.acquires
+            .get_or_init(|| self.acquires_in(source))
+            .then_some(owner)
+    }
+    fn acquires_in(&self, source: &Source) -> bool {
         let ([Selection::Event { .. }], [step]) = (self.route.as_ref(), self.steps.as_ref()) else {
-            return None;
+            return false;
         };
         let event = &step.event;
         let publication = &step.publication;
-        let owner = event.output.as_ref()?;
+        let Some(owner) = event.output.as_ref() else {
+            return false;
+        };
         let local = |amount: &Amount| {
             amount.fixed == 0
                 && matches!(amount.terms.as_slice(), [(Measure::Local(at), 1)] if at == owner)
@@ -874,7 +889,6 @@ impl CompiledInterval {
                 .scratch
                 .iter()
                 .any(|lease| lease.at == event.point))
-        .then_some(owner)
     }
     /// A nested scope's Leave is a proven release when its one event only
     /// releases that scope's own owner groups: no output, entity, input,
@@ -903,8 +917,7 @@ impl CompiledInterval {
             && event.peak.fixed == 0
             && event.peak.terms.is_empty()
             && event.delta.fixed == 0
-            && event.delta.terms.len() == 1
-            && event.delta.terms.get(&release) == Some(&-1)
+            && matches!(event.delta.terms.as_slice(), [(measure, -1)] if *measure == release)
             && !publication.borrowed_inputs
             && publication.restored_roles.is_none()
             && publication.assignment.is_none()

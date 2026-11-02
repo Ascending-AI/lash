@@ -383,6 +383,7 @@ impl State {
             entities: Tree::new(false),
             refinements: 0,
             next_invocation: 0,
+            written: Written::None,
         }
     }
     fn balance(&self) -> Result<Balance, HeapFault> {
@@ -648,74 +649,30 @@ impl Ledger {
             .ok_or_else(|| invalid("logical revision overflow"))?;
         Ok(())
     }
-    /// Commit one proven acquisition of a vacant owner in place: its holding
-    /// and one incoming edge per reached entity, with no draft state, no
-    /// copied search path and no membership change. Every check precedes the
-    /// first edit, so a decline (`false`) leaves the ledger untouched. An
-    /// absent entity declines: acquiring it needs membership, which only a
-    /// checked journal publishes. Outstanding admissions expire.
-    pub fn acquire(
-        &mut self,
-        owner: Owner,
-        value: Holding,
-        access: &Access<'_>,
-    ) -> Result<bool, HeapFault> {
-        let key = owner_key(owner);
-        if matches!(
-            owner,
-            Owner::Value {
-                slot: Slot::Capture(_),
-                ..
-            }
-        ) || self
-            .state
-            .roots(owner)
-            .get_with(&key, access, |row| row.is_some())?
-        {
-            return Ok(false);
-        }
-        let row = RootHolding { owner, value };
-        codec::validate_root(&row)?;
-        let mut edges = Vec::new();
-        row.value.each_edge(access, &mut |edge| {
-            if let Identity::Object(entity) = edge.target {
-                edges.push((entity_key(entity), edge.count));
-            }
-            Ok(())
-        })?;
-        for (entity, _) in &edges {
-            if !self
-                .state
-                .entities
-                .get_with(entity, access, |row| row.is_some())?
-            {
-                return Ok(false);
-            }
-        }
-        let revision = self
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| invalid("logical revision overflow"))?;
-        for (entity, count) in edges {
-            self.state.entities.update(entity, access, |record| {
-                record.incoming = record
-                    .incoming
-                    .checked_add(count)
-                    .ok_or_else(|| invalid("incoming ownership overflow"))?;
-                Ok(true)
-            })?;
-        }
-        self.state.roots_mut(owner).write(key, row, access)?;
-        self.revision = revision;
-        // The owner holds what no runtime event published to it.
-        self.published.expire(Written::Owners(vec![owner]));
-        Ok(true)
-    }
     /// Commit one proven release of present, distinct owners in place,
     /// through the same graph edit as a checked journal: each owner's edges
     /// are released once and every entity left unowned is retired. A missing
     /// or repeated owner declines (`false`) before any edit. Outstanding
     /// admissions expire.
+    /// Whether every object `value` references is a committed entity, so a
+    /// region record holding it publishes onto entities that still exist.
+    pub fn references_committed(
+        &self,
+        value: &Holding,
+        access: &Access<'_>,
+    ) -> Result<bool, HeapFault> {
+        let mut committed = true;
+        value.each_edge(access, &mut |edge| {
+            if committed && let Identity::Object(entity) = edge.target {
+                committed = self
+                    .state
+                    .entities
+                    .get_with(&entity_key(entity), access, |row| row.is_some())?;
+            }
+            Ok(())
+        })?;
+        Ok(committed)
+    }
     pub fn release(&mut self, owners: &[Owner], access: &Access<'_>) -> Result<bool, HeapFault> {
         for (index, owner) in owners.iter().enumerate() {
             if owners[..index].contains(owner) || !self.present(*owner, access)? {
@@ -769,6 +726,9 @@ impl Ledger {
         };
         let edited = edit.roots(changes);
         self.state = edit.state;
+        // The owners written in place no longer hold what they last published.
+        self.published
+            .expire(std::mem::take(&mut self.state.written));
         edited
     }
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {

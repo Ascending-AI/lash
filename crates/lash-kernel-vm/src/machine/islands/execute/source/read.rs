@@ -199,9 +199,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             _ => None,
         };
-        self.logical
-            .flush(self.arena, self.heap)
-            .map_err(|error| self.halt(error.into()))?;
         let activation =
             frame.state.source.as_mut().ok_or_else(|| {
                 self.halt(malformed("packet read has no source activation").into())
@@ -216,47 +213,45 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 activation.invocation.id(),
             )
             .ok_or_else(|| self.halt(malformed("packet read has no canonical owner").into()))?;
-        if self
-            .logical
-            .ledger()
-            .borrow()
-            .holding(output, self.heap.pages())
-            .map_err(|error| self.halt(error.into()))?
-            .is_some()
-        {
-            return Err(self.at(read.unpaid()));
-        }
         if let (Input::Native(value), Some(frontier)) = (value, activation.frontier.as_mut())
             && interval.acquisition(source).is_some()
         {
-            // The proven prefix's shared admission: the memory envelope and
-            // the charge window. Its journal is the value's own holding.
+            if self
+                .logical
+                .holds(output, self.heap.pages())
+                .map_err(|error| self.halt(error.into()))?
+            {
+                return Err(self.at(read.unpaid()));
+            }
+            // A proven pure acquisition joins the open region: the region's
+            // envelope admits its bytes, the charge window and depth stand,
+            // and its journal record publishes with the region.
             let holding = Holding::from_native(self.arena, self.heap.pages(), &value)
                 .map_err(|error| self.halt(error.into()))?;
-            let store = self.logical.ledger();
-            let mut ledger = store.borrow_mut();
-            let peak = ledger
-                .balance()
-                .and_then(|balance| balance.total())
-                .map_err(|error| self.halt(error.into()))?
-                .checked_add(holding.bytes());
-            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-            if peak.is_none_or(|peak| peak > self.memory_bound)
-                || self.charged > self.bound
-                || depth > self.call_depth
-                || !ledger
-                    .acquire(output, holding, self.heap.pages())
+            if value.handle().is_some()
+                && !self
+                    .logical
+                    .ledger()
+                    .borrow()
+                    .references_committed(&holding, self.heap.pages())
                     .map_err(|error| self.halt(error.into()))?
             {
                 return Err(self.at(read.unpaid()));
             }
+            let bytes = holding.bytes();
+            let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
+            if self.charged > self.bound
+                || depth > self.call_depth
+                || !self
+                    .logical
+                    .admit(self.arena, self.heap, bytes, self.memory_bound)
+                    .map_err(|error| self.halt(error.into()))?
+            {
+                return Err(self.at(read.unpaid()));
+            }
+            self.logical
+                .replace(output, Some(SourceValue::Value(value)));
             frontier.proven().map_err(|error| self.halt(error.into()))?;
-            let total = ledger
-                .balance()
-                .and_then(|balance| balance.total())
-                .map_err(|error| self.halt(error.into()))?;
-            drop(ledger);
-            self.logical_memory.set(total);
             frame.regs[reg as usize] = value;
             #[cfg(any(test, feature = "testing"))]
             {
@@ -270,6 +265,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             }
             return Ok(true);
         }
+        self.logical
+            .flush(self.arena, self.heap)
+            .map_err(|error| self.halt(error.into()))?;
         let mut encoding = TokenWriter::new();
         encoding.seq(4);
         encoding.text("lash.source.packet-read");

@@ -236,6 +236,9 @@ impl Context<'_> {
         prepare: S,
         semantic: impl FnOnce(&mut Arena, &mut Session, Vec<MemberEdit>, S::Prepared),
     ) -> Result<bool, Halt> {
+        // The general protocol starts at a committed ledger: the open
+        // region publishes first.
+        self.logical.flush(self.arena, self.heap)?;
         let store = self.logical.ledger();
         if let Some(frontier) = frontier.as_mut()
             && frontier.departs(&prefix.start)

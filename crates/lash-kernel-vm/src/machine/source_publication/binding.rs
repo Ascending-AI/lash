@@ -82,7 +82,10 @@ impl KernelMachine {
         let scoped = matches!(op, Op::LetBind { .. } | Op::LetBindShared { .. });
         // Compatibility eligibility until guest admission uses logical authority
         // on every path. This estimate never supplies a logical price.
-        if shared && self.arena.borrow().sequence_bound(1) > self.capacity_headroom() {
+        if shared && {
+            let bound = self.arena.borrow().sequence_bound(1);
+            bound > self.capacity_headroom()
+        } {
             return Ok(false);
         }
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {

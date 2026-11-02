@@ -113,8 +113,16 @@ impl Publications {
 #[derive(Clone)]
 pub struct Lifecycle {
     ledger: Rc<RefCell<Ledger>>,
+    /// The open region's journal: replacements recorded since the ledger
+    /// last published, committed together as one runtime event.
     pending: Rc<RefCell<Vec<Replacement>>>,
+    /// Bytes the open region's admitted acquisitions may add above the
+    /// committed balance: an upper bound on every interior peak.
+    growth: Rc<std::cell::Cell<u64>>,
 }
+/// A region closes when its journal reaches this many records, so a lookup
+/// in it stays bounded.
+const REGION_RECORDS: usize = 256;
 /// One recorded root replacement; `None` releases the owner.
 pub(super) type Replacement = (Owner, Option<SourceValue>);
 /// Orders recorded replacements by owner, keeping each owner's last record:
@@ -138,13 +146,98 @@ impl Lifecycle {
         Self {
             ledger,
             pending: Rc::new(RefCell::new(Vec::new())),
+            growth: Rc::default(),
         }
+    }
+    /// Whether `owner` holds a value once the open region publishes: its
+    /// last record decides, else the committed ledger.
+    pub fn holds(&self, owner: Owner, access: &Access<'_>) -> Result<bool, HeapFault> {
+        if let Some((_, next)) = self
+            .pending
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(at, _)| *at == owner)
+        {
+            return Ok(next.is_some());
+        }
+        Ok(self.ledger.borrow().holding(owner, access)?.is_some())
+    }
+    /// The plain value the open region last recorded for `owner`.
+    pub fn recorded(&self, owner: Owner) -> Option<Value> {
+        match self
+            .pending
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(at, _)| *at == owner)
+        {
+            Some((_, Some(SourceValue::Value(value)))) => Some(*value),
+            _ => None,
+        }
+    }
+    /// Admit `bytes` of acquisition into the open region under `bound`: the
+    /// committed balance plus every byte the region already admitted bounds
+    /// each interior peak, so no event inside could have been refused. A
+    /// region past its record cap, or one whose upper bound no longer fits,
+    /// first publishes; the check then runs on the exact committed balance.
+    pub fn admit(
+        &self,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        bytes: u64,
+        bound: u64,
+    ) -> Result<bool, HeapFault> {
+        self.bounded(arena, heap)?;
+        let fits = |growth: u64| -> Result<bool, HeapFault> {
+            let held = self.ledger.borrow().balance()?.total()?;
+            Ok(held
+                .checked_add(growth)
+                .and_then(|held| held.checked_add(bytes))
+                .is_some_and(|peak| peak <= bound))
+        };
+        if !fits(self.growth.get())? {
+            if self.growth.get() == 0 {
+                return Ok(false);
+            }
+            self.flush(arena, heap)?;
+            if !fits(0)? {
+                return Ok(false);
+            }
+        }
+        self.growth.set(self.growth.get().saturating_add(bytes));
+        Ok(true)
     }
     pub fn ledger(&self) -> Rc<RefCell<Ledger>> {
         Rc::clone(&self.ledger)
     }
     pub fn replace(&self, owner: Owner, next: Option<SourceValue>) {
         self.pending.borrow_mut().push((owner, next));
+    }
+    /// Re-projects a binding or control slot into the open region: `next`
+    /// supersedes the owner's earlier record, and an owner without one that
+    /// still holds what the ledger last published for it records nothing.
+    pub fn rebind(&self, owner: Owner, next: Option<SourceValue>) {
+        let mut pending = self.pending.borrow_mut();
+        if let Some((_, recorded)) = pending.iter_mut().rev().find(|(at, _)| *at == owner) {
+            *recorded = next;
+            return;
+        }
+        if self
+            .ledger
+            .try_borrow()
+            .is_ok_and(|ledger| ledger.published.holds(&owner, &next))
+        {
+            return;
+        }
+        pending.push((owner, next));
+    }
+    /// Publishes the open region once its journal reaches the record cap.
+    pub fn bounded(&self, arena: &mut Arena, heap: &PagedHeap) -> Result<(), HeapFault> {
+        if self.pending.borrow().len() >= REGION_RECORDS {
+            self.flush(arena, heap)?;
+        }
+        Ok(())
     }
     /// Retire only this activation's actual operands, including unpublished
     /// replacements. The caller can reacquire live roles in the same journal.
@@ -180,6 +273,7 @@ impl Lifecycle {
         let events = arena.take_member_events();
         if pending.is_empty() && events.is_empty() {
             arena.return_member_events(events, true);
+            self.growth.set(0);
             return Ok(());
         }
         settle(&mut pending);
@@ -204,6 +298,9 @@ impl Lifecycle {
             Ok(())
         })();
         arena.return_member_events(events, result.is_ok());
+        if result.is_ok() {
+            self.growth.set(0);
+        }
         result
     }
     /// New cells consume only the execution owners of the previous cell.

@@ -749,7 +749,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     _ => return Err(self.at(*pc)),
                 };
                 self.source_clear_operands(frame)
-                    .and_then(|()| self.logical.flush(self.arena, self.heap))
+                    .and_then(|()| self.logical.bounded(self.arena, self.heap))
                     .map_err(|error| self.halt(error.into()))?;
                 self.transient = self
                     .transient

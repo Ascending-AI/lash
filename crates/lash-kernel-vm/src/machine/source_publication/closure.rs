@@ -107,9 +107,11 @@ impl KernelMachine {
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
-        if target.created.as_ref() != Some(site)
-            || self.arena.borrow().sequence_bound(target.captures.len()) > self.capacity_headroom()
-        {
+        if target.created.as_ref() != Some(site) {
+            return Ok(false);
+        }
+        let bound = self.arena.borrow().sequence_bound(target.captures.len());
+        if bound > self.capacity_headroom() {
             return Ok(false);
         }
         let lash_kernel_value::sites::Unit::Library(function) = target.site.unit else {
