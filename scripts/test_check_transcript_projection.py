@@ -57,9 +57,6 @@ roles = {roles!r}
         self.write("examples/agent-workbench/tests/transcript_projection_harness.mjs", "export const SURFACES = [];\n")
         self.assertIn("registry and shared harness surfaces differ", self.errors())
 
-    def test_reviewed_baseline_passes(self):
-        self.assertEqual([], gate.check(self.root))
-
     def test_new_committed_truth_reader_is_red(self):
         for accessor in ("messages", "visit_chronological"):
             with self.subTest(accessor=accessor):

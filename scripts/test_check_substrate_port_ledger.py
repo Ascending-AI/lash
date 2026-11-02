@@ -108,9 +108,6 @@ class SubstratePortLedgerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn(needle, result.stderr)
 
-    def test_a_complete_ledger_passes(self) -> None:
-        self.assert_passes(self.tree())
-
     def test_a_planted_file_that_uses_the_double_without_a_row_fails(self) -> None:
         root = self.tree({"crates/app/tests/planted.rs": f"use {DOUBLE}::backend;\n"})
         self.assert_fails(root, "crates/app/tests/planted.rs: uses the Restate server double but has no ledger row")

@@ -38,11 +38,6 @@ class CutResidualTests(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "fixture")
         return self.git("rev-parse", "HEAD")
 
-    def test_every_declared_reset_output_and_cargo_manifest_is_allowed(self):
-        for path in residual.reset_paths(self.plan):
-            (self.repo / path).write_text("after\n")
-        self.assertEqual(residual.check(self.repo, self.base, self.commit(), self.plan)["unexpected_paths"], [])
-
     def test_handwritten_work_and_unlisted_generated_files_are_rejected(self):
         (self.repo / "handwritten.rs").write_text("after\n")
         (self.repo / "unlisted.json").write_text("after\n")

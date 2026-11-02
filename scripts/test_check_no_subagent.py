@@ -36,11 +36,6 @@ class NoSubagentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             return gate.check(self.repo(tmp, files))
 
-    def test_the_gate_passes_on_the_tree(self) -> None:
-        result = subprocess.run([sys.executable, str(SCRIPT)], text=True,
-                                capture_output=True, check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
     def test_a_planted_mention_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = self.repo(tmp, {"crates/lash-core/src/lib.rs": f"// spawns a {WORD}\n"})

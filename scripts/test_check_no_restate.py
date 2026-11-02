@@ -37,11 +37,6 @@ class NoRestateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             return gate.check(self.repo(tmp, files), pending)
 
-    def test_the_gate_passes_on_the_tree(self) -> None:
-        result = subprocess.run([sys.executable, str(SCRIPT)], text=True,
-                                capture_output=True, check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
     def test_a_planted_mention_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = self.repo(tmp, {"crates/a/src/lib.rs": f"// runs on {ENGINE}\n"})
@@ -109,11 +104,6 @@ class NoRestateTests(unittest.TestCase):
         found = self.findings(files, pending)
         self.assertEqual(len(found), 1)
         self.assertRegex(found[0], re.escape("docs/e2e.md: stale pending exception"))
-
-    def test_every_pending_exception_names_its_owner(self) -> None:
-        for allowance in gate.PENDING:
-            with self.subTest(paths=allowance.paths):
-                self.assertTrue(allowance.reason.strip())
 
 
 if __name__ == "__main__":

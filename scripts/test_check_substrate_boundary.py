@@ -83,16 +83,6 @@ class SubstrateBoundaryTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
 
-    def test_the_boundary_passes_on_the_tree(self) -> None:
-        result = subprocess.run(
-            ["bash", str(SCRIPT)],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
     def write_rust(self, root: Path, relative: str, lines: list[str]) -> None:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)

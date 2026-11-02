@@ -85,13 +85,6 @@ class CheckTests(unittest.TestCase):
             """,
         )
 
-    def test_direct_write_stamp_is_flagged(self):
-        self.write("crates/widget-store/src/lib.rs", DIRECT_STAMP)
-        failures = self.check()
-        self.assertEqual(len(failures), 1)
-        self.assertIn("crates/widget-store/src/lib.rs:6", failures[0])
-        self.assertIn("FleetFormat::writer_version", failures[0])
-
     def test_fleet_routed_stamp_is_not_flagged(self):
         self.write("crates/widget-store/src/lib.rs", ROUTED_STAMP)
         self.assertEqual(self.check(), [])

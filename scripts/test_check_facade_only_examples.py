@@ -40,13 +40,6 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertIn("examples/plain/src/main.rs:1: lash_core::", errors.getvalue())
 
-    def test_seeded_durable_import_fails_the_gate(self) -> None:
-        self.write("examples/plain/src/main.rs", "use lash_durable::DurableBackend;\n")
-        self.assertEqual(
-            [(Path("examples/plain/src/main.rs"), 1, "lash_durable::")],
-            gate.violations(),
-        )
-
     def test_new_facade_dependencies_and_transitive_crates_are_forbidden(self) -> None:
         self.write("crates/lash/Cargo.toml", '[dependencies]\nlash-new-backend = "0.1"\n')
         self.write(

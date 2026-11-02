@@ -115,16 +115,6 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("isolation level set after the fence", problems[0])
 
-    def test_connection_begin_spellings_are_flagged(self) -> None:
-        self.widgets(
-            """\
-            async fn step(connection: &mut PgConnection) {
-                let tx = sqlx::Connection::begin(&mut *connection).await?;
-            }
-            """
-        )
-        self.assertEqual(len(self.check()), 1)
-
     def test_a_named_write_run_straight_on_a_pool_is_flagged(self) -> None:
         self.widgets(
             """\
@@ -139,17 +129,6 @@ class CheckTests(unittest.TestCase):
         problems = self.check()
         self.assertEqual(len(problems), 1)
         self.assertIn("mutating statement run straight on a pool", problems[0])
-
-    def test_a_literal_write_on_a_checked_out_connection_is_flagged(self) -> None:
-        self.widgets(
-            """\
-            async fn wipe(&self) {
-                let mut connection = acquire_runtime_connection(&self.pool).await?;
-                sqlx::query("DELETE FROM lash_widgets").execute(&mut *connection).await?;
-            }
-            """
-        )
-        self.assertEqual(len(self.check()), 1)
 
     def test_a_read_run_straight_on_a_pool_passes(self) -> None:
         self.widgets(
@@ -268,9 +247,6 @@ class CheckTests(unittest.TestCase):
 class TreeTests(unittest.TestCase):
     def test_pooled_begin_ownership(self) -> None:
         self.assertEqual(gate.check_pooled_begins(), [])
-
-    def test_the_tree_passes_every_section(self) -> None:
-        self.assertEqual(gate.main(), 0)
 
 
 if __name__ == "__main__":

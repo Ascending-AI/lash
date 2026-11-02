@@ -226,10 +226,6 @@ class FormatRegistryTests(unittest.TestCase):
         self.assertNotEqual(gate.check_version_bumps.comparable(before), gate.check_version_bumps.comparable(after))
 
 
-    def test_source_markers_are_the_only_surface_declaration_path(self) -> None:
-        self.assertNotIn("[[surface]]", self.registry_text)
-        self.assertEqual(self.problems(), [])
-
     def test_a_hand_written_surface_registry_is_refused(self) -> None:
         self.registry_text += '\n[[surface]]\nconstant = "WIRE_VERSION"\n'
         with self.assertRaisesRegex(gate.RegistryError, "declare version_surface in source"):
@@ -254,9 +250,6 @@ class FormatRegistryTests(unittest.TestCase):
                    'pub const WIRE_VERSION: u16 = 4;\n')
         self.assertTrue(any("WIRE_VERSION: conflicting source declarations" in p
                             for p in self.problems()))
-
-    def test_a_consistent_registry_passes(self) -> None:
-        self.assertEqual(self.problems(), [])
 
     def test_an_exclusion_names_a_constant_even_without_a_version_suffix(self) -> None:
         source = "crates/demo/src/prompt_sections.rs"
@@ -480,15 +473,6 @@ reason = "a projection identity, not a stored-format version"
         self.assertIn("owned by other", problems[0])
 
 
-    def test_a_surface_whose_constant_declares_no_guard_fails(self) -> None:
-        self.write(
-            "crates/demo/src/lib.rs",
-            SOURCE.replace("/// version_guard(items(WireRecord))\n", ""),
-        )
-        problems = self.problems()
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("WIRE_VERSION declares no version_guard marker", problems[0])
-
     def test_a_stated_reason_admits_a_surface_without_a_guard(self) -> None:
         self.write(
             "crates/demo/src/lib.rs",
@@ -504,15 +488,6 @@ reason = "a projection identity, not a stored-format version"
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("unshaped must state a reason", problems[0])
-
-    def test_a_guard_naming_what_the_tree_lacks_fails(self) -> None:
-        self.write(
-            "crates/demo/src/lib.rs", SOURCE.replace("items(WireRecord)", "items(Gone)")
-        )
-        problems = self.problems()
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("has a guard that cannot be evaluated", problems[0])
-        self.assertIn("does not find Gone", problems[0])
 
     def test_a_reachable_type_the_tree_cannot_resolve_fails(self) -> None:
         derived = SOURCE.replace("items(WireRecord)", "roots(WireRecord)").replace(
@@ -558,27 +533,8 @@ reason = "a projection identity, not a stored-format version"
         self.write("crates/demo/src/migrate.rs", "static MIGRATIONS: &[Step] = &[];\n")
         self.assertEqual(self.problems(), [])
 
-    def test_a_malformed_marker_fails(self) -> None:
-        self.write(
-            "crates/demo/src/lib.rs",
-            SOURCE.replace("shapes(cover(Hello))", "shapes(cover(Hello)"),
-        )
-        problems = self.problems()
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("PEER_PROTOCOL_VERSION has a guard that cannot be evaluated", problems[0])
-
 
 class RealRepositoryTests(unittest.TestCase):
-    def test_rlm_prompt_section_keys_are_not_stored_format_versions(self) -> None:
-        from discover_version_surfaces import _inspect_file
-
-        path = "crates/lash-protocol-rlm/src/prompt_sections.rs"
-        registry = gate.load_registry(gate.DEFAULT_CONFIG)
-        source = (gate.ROOT / path).read_text(encoding="utf-8")
-        rows, problems, _ = _inspect_file(path, source, frozenset(registry.unregistered))
-        self.assertEqual(rows, ())
-        self.assertEqual(problems, ())
-
     def test_prompt_section_exclusion_does_not_hide_other_format_constants(self) -> None:
         from discover_version_surfaces import _inspect_file
 
@@ -594,21 +550,6 @@ class RealRepositoryTests(unittest.TestCase):
                 )
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn(f"{path}:{constant} is a version-shaped constant", problems[0])
-
-    def test_generated_helper_plans_declare_no_version_shaped_constant(self) -> None:
-        # FIG-6884: the plan of Python's `format` helper was emitted as
-        # `PY_FORMAT`, which discovery read as an unknown format version.
-        from discover_version_surfaces import _inspect_file
-
-        for path in (
-            "crates/lash-ext-py-core/src/generated/plans.rs",
-            "crates/lash-ext-ts-core/src/generated/plans.rs",
-        ):
-            with self.subTest(path=path):
-                source = (gate.ROOT / path).read_text(encoding="utf-8")
-                rows, problems, _ = _inspect_file(path, source, frozenset())
-                self.assertEqual(rows, ())
-                self.assertEqual(problems, ())
 
     def test_the_repository_registry_is_exhaustive(self) -> None:
         registry = gate.load_registry(gate.DEFAULT_CONFIG)

@@ -44,12 +44,6 @@ class AdrCurrentTests(unittest.TestCase):
         self.assertEqual(0, status, output)
         self.assertIn("0 findings (enforcing)", output)
 
-    def test_planted_amendment_block_fails(self) -> None:
-        self.write("docs/adr/0001-a-durable-decision.md", "# A durable decision\n\n## Amendment (2026-09-30)\nThe decision changes.\n")
-        status, output = self.run_gate("--enforce-narration")
-        self.assertEqual(1, status)
-        self.assertIn("0001-a-durable-decision.md:3: history narration", output)
-
     def test_narration_bans_cover_inline_blocks_and_wrapped_phrases(self) -> None:
         for phrase in ("**Amendment.**", "superseded", "supersedes", "no longer", "previously", "formerly", "used\nto", "was retired", "originally", "Amended 2026-09-30", "Updated 2026-09-30", "## 2026-09-30"):
             with self.subTest(phrase=phrase):

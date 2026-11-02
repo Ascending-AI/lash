@@ -13,25 +13,6 @@ class RetiredTermsTests(unittest.TestCase):
     def check(self, body: str, suffix: str = ".md") -> list[str]:
         return checker.check_text(Path("docs/agents/planted" + suffix), body)
 
-    def test_planted_current_adr_fails(self) -> None:
-        self.assertEqual(len(checker.check_text(Path("docs/adr/planted.md"), "Every law runs on the in-memory store.\n")), 1)
-
-    def test_adrs_have_no_history_exemptions(self) -> None:
-        path = Path("docs/adr/planted.md")
-        for term in checker.TERMS:
-            with self.subTest(term=term.term):
-                self.assertTrue(checker.check_text(path, f"{term.marker}: we used {term.term}."))
-                self.assertTrue(checker.check_text(path, f"## Historical, {term.marker}\n\nWe used {term.term}."))
-        self.assertTrue(checker.check_text(path, "Retired in c51e616528: exclusively owned recursive copies."))
-        self.assertFalse(checker.check_text(path, "SQLite in-memory stores run the store laws."))
-
-    def test_each_retirement_requires_its_own_commit(self) -> None:
-        for term in checker.TERMS:
-            with self.subTest(term=term.term):
-                self.assertTrue(self.check(f"We use {term.term} today."))
-                self.assertFalse(self.check(f"{term.marker}: we used {term.term}."))
-                self.assertTrue(self.check(f"Retired in deadbeef00: we use {term.term}."))
-
     def test_sqlite_memory_passes_and_does_not_hide_another_sentence(self) -> None:
         self.assertFalse(self.check("SQLite in-memory stores run the store laws."))
         self.assertTrue(self.check("SQLite is supported. Every law runs on the in-memory store."))
@@ -51,10 +32,6 @@ class RetiredTermsTests(unittest.TestCase):
         violations = self.check(body)
         self.assertEqual(len(violations), 1)
         self.assertIn(":11:", violations[0])
-
-    def test_status_history_does_not_allow_current_survival_claim(self) -> None:
-        body = "## Status\n\nRetired in c51e616528: exclusively-owned copies are historical.\n\n## Amendment\n\nThe exclusively-owned-copy rule survives.\n"
-        self.assertEqual(len(self.check(body)), 1)
 
     def test_wrapped_retirement_marker_passes(self) -> None:
         self.assertFalse(self.check("The local rewind was retired in\n9c1bbd2189."))

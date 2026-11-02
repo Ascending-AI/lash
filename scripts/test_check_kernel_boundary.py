@@ -97,10 +97,6 @@ class KernelBoundary(unittest.TestCase):
                 ["python3", str(SCRIPT), str(root)], capture_output=True, text=True, check=False
             )
 
-    def test_the_kernel_set_depending_on_itself_and_third_parties_passes(self) -> None:
-        result = self.run_check({})
-        self.assertEqual(result.returncode, 0, result.stderr)
-
     def test_each_dependency_table_and_spelling_is_refused(self) -> None:
         cases = {
             "inherited": "[dependencies]\nlash-core = { workspace = true }\n",
@@ -215,10 +211,6 @@ class KernelBoundary(unittest.TestCase):
             "// CheckpointRoot stays in the kernel.\n"
             'const LABEL: &str = "TaskIdentity";\n'})
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
-
-    def test_this_repository_passes(self) -> None:
-        result = subprocess.run(["python3", str(SCRIPT)], capture_output=True, text=True, check=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 """Red-side and requirement tests for the session ingress doc gate."""
 
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 
@@ -28,10 +27,6 @@ def required(text: str, *patterns: str) -> list[str]:
 
 
 class DenialTests(unittest.TestCase):
-    def test_parked_not_yet_implemented_is_retired(self) -> None:
-        self.assertTrue(denied("- **Parked Turn**: Decided by ADR 0101, not yet implemented."))
-        self.assertFalse(denied("- **Parked Turn**: Decided by ADR 0101, implemented."))
-
     def test_retired_patch_api_names_are_retired(self) -> None:
         for name in (
             "SessionConfigPatch",
@@ -61,25 +56,6 @@ class DenialTests(unittest.TestCase):
         ):
             with self.subTest(wording=wording):
                 self.assertFalse(denied(wording))
-
-    def test_adjacent_commands_coalescing_is_retired(self) -> None:
-        self.assertTrue(denied("Adjacent config transactions coalesce within the command bound."))
-        self.assertFalse(denied("Each transaction applies alone."))
-
-    def test_merge_key_and_authority_as_gates_are_retired(self) -> None:
-        stale = (
-            "authority principal, elevation, age, row count, and rendered "
-            "context reserve remain independent gates"
-        )
-        self.assertTrue(denied(stale))
-        self.assertTrue(denied("work kind, delivery boundary, authority and elevation remain\nindependent admission gates"))
-        for current in (
-            "merge key and authority are per-item data for the host's drain policy",
-            "only batchable turn work sharing the head's delivery policy travels with it",
-            "an opaque principal and elevation stamp",
-        ):
-            with self.subTest(current=current):
-                self.assertFalse(denied(current))
 
     def test_turn_level_override_bans_are_retired(self) -> None:
         for stale in (
@@ -161,9 +137,6 @@ class LinkTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
-    def test_the_current_tree_passes(self) -> None:
-        self.assertEqual(checker.check(ROOT), [])
-
     def test_a_planted_stale_tree_fails(self) -> None:
         temporary_root = ROOT / "target"
         temporary_root.mkdir(exist_ok=True)

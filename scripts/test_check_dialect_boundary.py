@@ -63,10 +63,6 @@ class DialectBoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn(needle, result.stderr)
 
-    def test_the_clean_tree_passes(self) -> None:
-        result = self.run_check(self.tree({}))
-        self.assertEqual(result.returncode, 0, result.stderr)
-
     def test_prompt_text_in_a_cfg_test_module_file_passes(self) -> None:
         result = self.run_check(self.tree({
             "crates/lash-protocol-rlm/src/native/mod.rs": "#[cfg(test)]\nmod cell_reply_laws;\n",

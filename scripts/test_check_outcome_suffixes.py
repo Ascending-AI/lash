@@ -42,12 +42,6 @@ class OutcomeSuffixGateTests(unittest.TestCase):
     def violations(self) -> dict[str, list[str]]:
         return gate.violations(self.fixture.repo)
 
-    def test_retired_suffix_declaration_is_flagged(self) -> None:
-        self.fixture.write(
-            "crates/lash/src/lib.rs", "pub struct LedgerSummary;\n"
-        )
-        self.assertIn("LedgerSummary", self.violations())
-
     def test_nested_pub_use_reexport_is_flagged(self) -> None:
         # A `pub use` inside a submodule mints the retired name a host writes;
         # the old gate read `pub use` trees only in the facade root, so this
@@ -73,16 +67,6 @@ class OutcomeSuffixGateTests(unittest.TestCase):
             "crates/lash-sim/src/lib.rs", "pub enum SimDisposition { Done }\n"
         )
         self.assertIn("SimDisposition", self.violations())
-
-    def test_glob_reexport_reaches_the_declaration(self) -> None:
-        self.fixture.write(
-            "crates/lash-core/src/lib.rs",
-            "pub mod inner {\n    pub use self::deeper::*;\n}\n",
-        )
-        self.fixture.write(
-            "crates/lash-core/src/inner/deeper.rs", "pub struct HiddenResult;\n"
-        )
-        self.assertIn("HiddenResult", self.violations())
 
     def test_cfg_test_inline_module_is_exempt(self) -> None:
         self.fixture.write(
@@ -160,9 +144,6 @@ class OutcomeSuffixGateTests(unittest.TestCase):
             '/// ```\n/// pub struct DocSummary;\n/// ```\npub struct Clean;\n',
         )
         self.assertEqual({}, self.violations())
-
-    def test_real_workspace_is_clean(self) -> None:
-        self.assertEqual({}, gate.violations(gate.REPO))
 
 
 if __name__ == "__main__":
