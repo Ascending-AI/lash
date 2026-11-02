@@ -213,7 +213,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
-trybuild = "1"
 tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 

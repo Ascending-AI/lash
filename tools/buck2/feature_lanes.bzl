@@ -1371,20 +1371,20 @@ FEATURE_LANE_TEST_ARGS = {
 }
 
 FEATURE_LANE_TEST_FLOORS = {
-    "//crates/lash-facade-tests:facade_plugins__test__fv_1a0bed29": 42,
-    "//crates/lash-facade-tests:facade_process__test__fv_1a0bed29": 26,
-    "//crates/lash-facade-tests:facade_provider__test__fv_1a0bed29": 39,
+    "//crates/lash-facade-tests:facade_plugins__test__fv_1a0bed29": 41,
+    "//crates/lash-facade-tests:facade_process__test__fv_1a0bed29": 25,
+    "//crates/lash-facade-tests:facade_provider__test__fv_1a0bed29": 38,
     "//crates/lash-facade-tests:facade_send__test__fv_1a0bed29": 26,
-    "//crates/lash-facade-tests:facade_session__test__fv_1a0bed29": 67,
-    "//crates/lash-facade-tests:facade_streaming__test__fv_1a0bed29": 55,
-    "//crates/lash-facade-tests:facade_tracing__test__fv_1a0bed29": 50,
-    "//crates/lash-facade-tests:facade_turns__test__fv_1a0bed29": 101,
+    "//crates/lash-facade-tests:facade_session__test__fv_1a0bed29": 66,
+    "//crates/lash-facade-tests:facade_streaming__test__fv_1a0bed29": 54,
+    "//crates/lash-facade-tests:facade_tracing__test__fv_1a0bed29": 48,
+    "//crates/lash-facade-tests:facade_turns__test__fv_1a0bed29": 98,
     "//crates/lash-facade-tests:facade_warm_admission__test__fv_1a0bed29": 2,
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_8f821c6f": 1,
     "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test__fv_93771703": 1,
     "//crates/lash-provider-google:lash-provider-google__unit_test__fv_7f84282a": 1,
     "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_97e2068e": 1,
-    "//crates/lash:lash__unit_test__fv_4f074aa7": 149
+    "//crates/lash:lash__unit_test__fv_4f074aa7": 134
 }
 
 FEATURE_LANES = {

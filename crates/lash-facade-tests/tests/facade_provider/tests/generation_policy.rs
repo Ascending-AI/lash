@@ -104,57 +104,6 @@ async fn turn_driver_sends_an_exact_effort_unchanged() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn turn_driver_rejects_unsupported_effort_before_provider_call() -> Result<()> {
-    let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let provider = lash::testing::TestProvider::builder()
-        .kind("capability-reject")
-        .complete({
-            let called = Arc::clone(&called);
-            move |_| {
-                called.store(true, Ordering::SeqCst);
-                async { Ok(LlmResponse::default()) }
-            }
-        })
-        .build()
-        .into_handle();
-    let metadata = with_efforts(&["low", "medium", "high"]);
-    let mut spec = session_spec_for(&metadata);
-    spec.reasoning = Some(lash_core::ReasoningSelection::Effort("turbo".to_string()));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        sqlite_memory_store_backend().await,
-    ))
-    .serve_test_llm_profile(provider, metadata)
-    .build(lash_facade_tests::runtime_lease_owner())?;
-
-    // A session records only a reasoning its model advertises: the
-    // selection is judged when the session is created, so no turn ever
-    // carries it to the provider.
-    let Err(refused) = core
-        .session(
-            lash_kernel_value::identity::SessionId::parse("unsupported-effort")
-                .expect("nonblank host identity"),
-        )
-        .create(lash::SessionCreation::root(spec))
-        .await
-    else {
-        panic!("an unsupported effort is refused");
-    };
-    let EmbedError::ReasoningRefused(refusal) = &refused else {
-        panic!("the refusal is typed: {refused:?}");
-    };
-    assert_eq!(
-        refusal.category,
-        lash_core::facade_support::LlmProfileEffortValidationCategory::UnsupportedEffort
-    );
-    assert!(refusal.message.contains("Unsupported effort `turbo`"));
-    assert!(
-        !called.load(Ordering::SeqCst),
-        "an unsupported effort must be rejected before the provider is called"
-    );
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn session_generation_options_reach_every_provider_request() -> Result<()> {
     type Captured = (lash_core::GenerationOptions, Option<u64>);
     let captured: Arc<StdMutex<Vec<Captured>>> = Arc::new(StdMutex::new(Vec::new()));

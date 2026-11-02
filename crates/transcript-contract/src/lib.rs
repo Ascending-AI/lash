@@ -1,16 +1,13 @@
 //! Compile the production renderer without any runtime crate in scope.
 
+// `not(test)`: this crate's own unit-test build would otherwise compile the
+// imported module's `#[cfg(test)]` laws a second time; they already run in
+// lash-core-execution's unit target. The library build still proves the
+// renderer compiles with no runtime crate in scope.
+#[cfg(not(test))]
 #[expect(
     clippy::expect_used,
     reason = "shared test renderer: broken fixture assumptions abort the test"
 )]
 #[path = "../../lash-core-execution/src/testing/behavior_transcript.rs"]
 pub mod behavior_transcript;
-
-#[test]
-fn transcript_module_has_no_runtime_dependencies() {
-    use behavior_transcript::{Actor, Entry, Transcript};
-    let mut transcript = Transcript::new();
-    transcript.record(Entry::commit(Actor::session("root"), 0, 1));
-    assert!(transcript.render().contains("checkpoint.commit"));
-}

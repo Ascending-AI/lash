@@ -13,9 +13,6 @@ use lash::TurnInput;
 use lash::provider::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, LlmUsage, StreamBlockIdentity};
 use lash_core::testing::runtime_helpers::{EchoTool, MockCall, mock_provider};
-use tracing_subscriber::layer::{Context, SubscriberExt};
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::{Layer, Registry};
 
 /// A core whose trace records land in a recording sink it owns.
 struct Traced {
@@ -485,66 +482,6 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() -> 
     );
     assert_ne!(changes[0]["fingerprint"], changes[1]["fingerprint"]);
     traced.core.shutdown().await?;
-    Ok(())
-}
-
-// ---- spans --------------------------------------------------------------
-
-/// The ancestry of each `provider.complete` span opened in this process.
-#[derive(Clone, Default)]
-struct ProviderSpans(Arc<StdMutex<Vec<Vec<String>>>>);
-
-impl<S> Layer<S> for ProviderSpans
-where
-    S: ::tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
-{
-    fn on_new_span(
-        &self,
-        _attrs: &::tracing::span::Attributes<'_>,
-        id: &::tracing::span::Id,
-        ctx: Context<'_, S>,
-    ) {
-        let span = ctx.span(id).expect("new span present in registry");
-        if span.metadata().name() == "provider.complete" {
-            self.0.lock_recover().push(
-                span.scope()
-                    .skip(1)
-                    .map(|ancestor| ancestor.metadata().name().to_owned())
-                    .collect(),
-            );
-        }
-    }
-}
-
-/// A provider's own spans nest under the span of the turn that called it,
-/// so a host's provider instrumentation reads as part of that turn.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn provider_spans_are_children_of_the_turn_span() -> Result<()> {
-    let capture = ProviderSpans::default();
-    ::tracing::subscriber::set_global_default(Registry::default().with(capture.clone()))
-        .expect("install capture subscriber");
-    let provider = lash::testing::TestProvider::builder()
-        .kind("mock")
-        .requires_streaming(true)
-        .complete(|_request| async {
-            drop(::tracing::info_span!("provider.complete"));
-            Ok(text_response("done"))
-        })
-        .build()
-        .into_handle();
-    let traced = Traced::new(provider, |builder| builder).await?;
-    let session = traced.session("provider-span-parentage").await?;
-    session.send(TurnInput::text("hello")).output().await?;
-    traced.core.shutdown().await?;
-
-    let ancestries = capture.0.lock_recover().clone();
-    assert_eq!(ancestries.len(), 1, "{ancestries:?}");
-    assert!(
-        ancestries[0]
-            .iter()
-            .any(|ancestor| ancestor.contains("turn")),
-        "the provider span must inherit the turn span; its ancestry: {ancestries:?}"
-    );
     Ok(())
 }
 

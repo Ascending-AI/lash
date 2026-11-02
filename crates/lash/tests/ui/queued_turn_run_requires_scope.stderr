@@ -1,5 +1,0 @@
-error[E0599]: no method named `next_queued_turn` found for struct `LashSession` in the current scope
- --> tests/ui/queued_turn_run_requires_scope.rs:2:21
-  |
-2 |     let _ = session.next_queued_turn().run().await;
-  |                     ^^^^^^^^^^^^^^^^ method not found in `LashSession`

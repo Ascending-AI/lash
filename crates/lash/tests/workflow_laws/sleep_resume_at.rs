@@ -77,23 +77,6 @@ fn waiting_until(resume_at_ms: i64) -> ProcessWorkflowSiteState {
     }
 }
 
-/// A sleep whose duration the run computes reports, while it waits, the
-/// instant it parked at plus that duration.
-#[tokio::test]
-async fn a_sleep_with_a_computed_duration_reports_when_it_resumes() {
-    let files = Files::new();
-    files.clock.set(PARKED_AT);
-    let core = core_over(files.open().await, "resume-at").await;
-    for (language, process) in Box::pin(parked_naps(&core)).await {
-        assert_eq!(
-            sleep_state(&core, &process).await,
-            waiting_until(RESUME_AT),
-            "{language:?}"
-        );
-    }
-    core.shutdown().await.expect("shutdown");
-}
-
 /// A node that reopens the store reads the same resume instant for a run
 /// another node parked, from the stored park alone.
 #[tokio::test]

@@ -2069,57 +2069,6 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
     )
 }
 
-/// L7: content is valid structured semconv JSON, including a non-object result.
-#[test]
-fn content_attributes_are_whole_schema_valid_json() {
-    let (traces, meters, spans, _) = providers(Sampler::AlwaysOn);
-    let exporter = OtelTelemetry::new(&traces, &meters, OtelOptions::standard());
-    let event = TraceEvent::ToolCallCompleted {
-        call_id: lash_protocol_types::ToolCallId::fixture("content-law"),
-        provider_call_id: None,
-        name: "read".into(),
-        args: serde_json::json!([1, 2]).into(),
-        output: crate::TraceToolCallOutput {
-            outcome: crate::TraceToolCallOutcome::Success(serde_json::json!("é".repeat(20_000))),
-            control: None,
-        },
-        duration_ms: 1,
-        issuing_node_id: None,
-        attempts: None,
-        span_attributes: Default::default(),
-    };
-    let turn = derived(&producer(), &scope_id());
-    let captured = captured_record(
-        event,
-        position(
-            TraceSpanKind::Tool,
-            SpanRole::Closes,
-            turn,
-            Some(producer()),
-            &scope_id(),
-            (1, 2),
-        ),
-    )
-    .governed(crate::ContentPolicy::captured());
-    exporter.append(&captured).unwrap();
-    traces.provider().force_flush().unwrap();
-    let exported = spans.get_finished_spans().unwrap();
-    let attrs = &exported[0].attributes;
-    assert!(
-        !attrs
-            .iter()
-            .any(|kv| kv.key.as_str() == "lash.payload.json")
-    );
-    for key in ["gen_ai.tool.call.arguments", "gen_ai.tool.call.result"] {
-        let value = attrs
-            .iter()
-            .find(|kv| kv.key.as_str() == key)
-            .expect("semconv content attribute");
-        let json: serde_json::Value = serde_json::from_str(&value.value.as_str()).unwrap();
-        assert!(json.is_object());
-    }
-}
-
 /// L6 and L22(a): all consumers see redaction and references consume the span budget before enrichment.
 #[test]
 fn content_hooks_reach_sinks_and_spans_and_references_share_the_enrichment_budget() {

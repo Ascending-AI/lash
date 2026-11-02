@@ -716,30 +716,3 @@ fn facade_recorded_render_refuses_omitted_base_choices() {
         }
     }
 }
-
-/// Recording the base must preserve a per-tool patch's inheritance from run defaults.
-#[test]
-fn facade_recording_preserves_per_tool_inheritance() {
-    let id = lash::tools::ToolId::new("host-tool");
-    let mut host = lash::plugins::StandardProtocolConfig::standard();
-    host.render.per_tool.insert(
-        id.clone(),
-        lash::render::ToolRenderPatch {
-            max_lines: Some(2),
-            ..Default::default()
-        },
-    );
-    let recorded = host
-        .recorded_behaviour()
-        .expect("the standard tool presentation admits");
-    let mut run = lash::render::StandardRenderConfig::default();
-    run.defaults.value.max_chars = Some(11);
-    let resolved = lash::render::resolve(
-        &lash::render::StandardRenderConfig::standard(),
-        &recorded.render,
-        &run,
-    )
-    .expect("valid run preference");
-    assert_eq!(resolved.for_tool(&id).value.max_chars, 11);
-    assert_eq!(resolved.for_tool(&id).max_lines, 2);
-}

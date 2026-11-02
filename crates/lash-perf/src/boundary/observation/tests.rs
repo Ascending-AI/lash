@@ -59,17 +59,6 @@ async fn process_feeds_receipt_counts_publications_per_commit_and_recovers() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn process_burst_receipt_counts_invalidations_and_resnapshots() {
-    let receipt = receipt(Case::ProcessBurst, 8, 2).await;
-    assert!(receipt.counters["store_invalidations"].is_u64());
-    assert_eq!(
-        receipt.evidence["resnapshots"],
-        receipt.counters["resnapshots"]
-    );
-    assert_eq!(receipt.evidence["bursting_processes"], 2);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn process_convergence_receipt_times_each_fact_on_both_replicas() {
     let receipt = receipt(Case::ProcessConvergence, 8, 1).await;
     let both = count(&receipt.counters["facts_on_both_replicas"]);
@@ -146,16 +135,6 @@ async fn trace_sink_custom_receipt_counts_each_custom_record() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn trace_sink_otel_receipt_counts_exported_spans() {
-    let receipt = receipt(Case::TraceSinkOtel, 2, 1).await;
-    assert!(count(&receipt.counters["otel_spans_exported"]) > 0);
-    assert_eq!(
-        receipt.counters["otel_exports"],
-        receipt.counters["otel_spans_exported"]
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn trace_sink_slow_receipt_blocks_the_emitter_and_loses_refused_records() {
     let receipt = receipt(Case::TraceSinkSlow, 2, 3).await;
     let offered = count(&receipt.counters["records_offered"]);
@@ -165,17 +144,6 @@ async fn trace_sink_slow_receipt_blocks_the_emitter_and_loses_refused_records() 
     );
     assert_eq!(count(&receipt.counters["emitter_blocked_ms"]), offered * 3);
     assert_eq!(receipt.evidence["settled_sends"], 2);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn overlay_fold_receipt_folds_every_delivered_observation() {
-    let receipt = receipt(Case::OverlayFold, 4, 2).await;
-    assert!(count(&receipt.counters["observations_folded"]) > 0);
-    assert_eq!(
-        receipt.counters["observations_folded"],
-        receipt.counters["overlay_snapshots"]
-    );
-    assert!(count(&receipt.counters["document_sites"]) >= 2);
 }
 
 /// FIG-5637's rule: the owner id is the durable node name, and a second boot

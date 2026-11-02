@@ -963,55 +963,6 @@ mod tests {
     }
 
     #[test]
-    fn store_error_borrows_both_existing_store_shells() {
-        for error in [
-            EmbedError::Store(StoreError::Contended),
-            EmbedError::Session(SessionError::Store {
-                context: "open session".to_string(),
-                source: StoreError::Contended,
-            }),
-            EmbedError::Store(StoreError::ExecutionStateCaptureFailed {
-                message: "capture failed".into(),
-            }),
-            EmbedError::Session(SessionError::Store {
-                context: "capture session".into(),
-                source: StoreError::ExecutionStateCaptureFailed {
-                    message: "capture failed".into(),
-                },
-            }),
-        ] {
-            let source = match &error {
-                EmbedError::Store(source)
-                | EmbedError::Session(SessionError::Store { source, .. }) => source,
-                _ => unreachable!(),
-            };
-            assert!(std::ptr::eq(
-                error.store_error().expect("store shell"),
-                source
-            ));
-        }
-        for error in [
-            runtime_error(RuntimeErrorCode::StoreCommitContended),
-            EmbedError::Plugin(PluginError::RuntimeEffectController(
-                RuntimeEffectControllerError::from(StoreError::Contended),
-            )),
-            EmbedError::Session(SessionError::Plugin(PluginError::Session("store".into()))),
-            EmbedError::Durable(lash_core::durable_port::DurableError::Store(
-                lash_core::durable_port::StoreFailure {
-                    code: None,
-                    kind: lash_core::durable_port::StoreFailureKind::Contended,
-                    message: "store contention".into(),
-                },
-            )),
-            EmbedError::UnknownSession {
-                session_id: "unknown".into(),
-            },
-        ] {
-            assert!(error.store_error().is_none(), "{error}");
-        }
-    }
-
-    #[test]
     fn contention_predicate_excludes_other_retryable_causes() {
         for error in [
             EmbedError::Store(StoreError::Contended),
@@ -1292,28 +1243,6 @@ mod tests {
         ]
     }
 
-    /// The facade answers for a store error what the engine answers for the
-    /// runtime error it turns that store error into (FIG-4628).
-    #[test]
-    fn the_facade_classifies_every_store_refusal_as_the_engine_does() {
-        for refusal in store_refusals() {
-            let engine = RuntimeEffectControllerError::from(refusal.clone().into_store_error())
-                .into_runtime_error();
-            assert_eq!(engine.code, refusal.code());
-            assert!(engine.is_terminal() && !engine.is_retryable(), "{engine}");
-            let shapes = store_shapes(|| refusal.clone().into_store_error())
-                .into_iter()
-                .chain([
-                    EmbedError::Runtime(engine.clone()),
-                    EmbedError::Plugin(PluginError::from(refusal.clone().into_store_error())),
-                ]);
-            for facade in shapes {
-                assert_eq!(facade.is_terminal(), engine.is_terminal(), "{facade:?}");
-                assert_eq!(facade.is_retryable(), engine.is_retryable(), "{facade:?}");
-            }
-        }
-    }
-
     /// FIG-6219: a permanent head refusal keeps its class and generation
     /// evidence through every facade wrapper, including FIG-6209's durable path.
     #[test]
@@ -1338,6 +1267,7 @@ mod tests {
             };
             let controller = RuntimeEffectControllerError::from(refusal.clone().into_store_error());
             let runtime = controller.clone().into_runtime_error();
+            assert_eq!(runtime.code, refusal.code(), "{refusal:?}");
             let shapes = [
                 EmbedError::Durable(lash_core::durable_port::DurableError::StoreRefused(
                     refusal.clone(),

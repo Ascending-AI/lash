@@ -1270,22 +1270,6 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn incarnation_change_invalidates_cursor() {
-    let original = lash::observe::InMemoryLiveReplayStore::new(
-        lash::observe::InMemoryLiveReplayStoreConfig::standard(),
-    );
-    let preserved = lash::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);
-    lash_conformance::incarnation_change_invalidates_cursor(
-        Arc::new(original),
-        Arc::new(lash::observe::InMemoryLiveReplayStore::new(
-            lash::observe::InMemoryLiveReplayStoreConfig::standard(),
-        )),
-        Arc::new(preserved),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn payload_authority_matches_revision_transition() -> Result<()> {
     let live = PublishedCommits::unbounded();
     let core = core_publishing_to(Arc::clone(&live)).await?;

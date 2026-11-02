@@ -3,28 +3,19 @@
 //! Two kinds of contract live here and they are enforced by two different
 //! mechanisms.
 //!
-//! *Compile-fail* contracts are trybuild fixtures: each one must fail to
-//! compile with exactly the diagnostic pinned in its `.stderr` file.
+//! *Compile-fail* contracts are the `.stderr` fixtures: each one must fail
+//! to compile with exactly the diagnostic it pins, under the direct-rustc
+//! `ui_fixtures` gate.
 //!
 //! *Compile-pass* contracts are the modules below. They assert the opposite --
 //! that a published surface is reachable and spellable from outside the crate
-//! -- and a `mod` of this test binary proves that as well as a trybuild
-//! `t.pass(..)` did: if any of them stops compiling, this binary stops
-//! building and the suite fails. Keeping them out of trybuild is what lets
-//! trybuild take its batched path. With even one `t.pass` registered,
-//! trybuild sets `has_pass`, which (a) upgrades the fixture project's
-//! dependency build from `cargo check` to `cargo build` and (b) disables the
-//! single `--keep-going` invocation in favour of one `cargo` run per fixture,
-//! each preceded by a `cargo clean --package`. The fixtures are compiled in a
-//! nested target directory that can never reuse the outer build, so that is
-//! four minutes of the seal job spent re-proving what a module of this binary
-//! proves for free.
+//! -- and a `mod` of this test binary proves that: if any of them stops
+//! compiling, this binary stops building and the suite fails.
 // The fixtures are written as standalone programs: each keeps a `fn main`
 // and imports the whole surface it is asserting on, and the surface probes
-// unwrap on values they construct themselves. Under trybuild they compiled
-// as their own crates with `-A dead_code` and were never run through clippy;
-// as modules they inherit this binary's lint scope, so the allowances they
-// relied on are spelled here, scoped to this binary only.
+// unwrap on values they construct themselves. As modules they inherit this
+// binary's lint scope, so the allowances they relied on are spelled here,
+// scoped to this binary only.
 #![allow(dead_code, unused_imports)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -43,129 +34,3 @@ mod process_surface_types_are_public;
 #[cfg(feature = "rlm")]
 #[path = "ui/rlm_facade_boundary_types_are_public.rs"]
 mod rlm_facade_boundary_types_are_public;
-
-#[test]
-fn facade_compile_time_contracts() {
-    let t = trybuild::TestCases::new();
-
-    t.compile_fail("tests/ui/operational_enums_require_future_cases.rs");
-    t.compile_fail("tests/ui/turn_snapshots_require_rest_patterns.rs");
-    t.compile_fail("tests/ui/send_outcome_fields_require_rest_patterns.rs");
-
-    t.compile_fail("tests/ui/transcript_part_kind_is_not_matchable.rs");
-    t.compile_fail("tests/ui/transcript_reply_marker_is_not_host_mintable.rs");
-    t.compile_fail("tests/ui/transcript_entry_id_is_opaque.rs");
-    if cfg!(feature = "rlm") {
-        t.compile_fail("tests/ui/rlm_protocol_event_decode_is_not_public.rs");
-    }
-    t.compile_fail("tests/ui/tool_call_fixture_requires_testing.rs");
-    t.compile_fail("tests/ui/process_fixture_requires_testing.rs");
-    register_facade_contracts(&t);
-    register_store_seam_contracts(&t);
-    register_rlm_config_builder_contracts(&t);
-}
-
-fn register_facade_contracts(t: &trybuild::TestCases) {
-    if cfg!(feature = "postgres") {
-        t.compile_fail("tests/ui/postgres_host_requires_connection.rs");
-    }
-    if cfg!(feature = "codemode") {
-        t.compile_fail("tests/ui/registered_function_is_immutable.rs");
-    }
-    t.compile_fail("tests/ui/runtime_session_service_is_sealed.rs");
-
-    t.compile_fail("tests/ui/turn_hooks_hold_only_session_reads.rs");
-    t.compile_fail("tests/ui/turn_context_has_no_prompt_or_drain_state.rs");
-    // FIG-5260: one prompt route; only the runtime composes a call's prompt.
-    t.compile_fail("tests/ui/prompt_composition_is_runtime_only.rs");
-    t.compile_fail("tests/ui/core_builder_requires_a_backend.rs");
-    t.compile_fail("tests/ui/core_builder_plugin_host_is_removed.rs");
-    t.compile_fail("tests/ui/process_execution_requires_admission.rs");
-    // FIG-4594: a core keeps no session defaults, and a root creation states
-    // its model, turn budget and tool-call limit.
-    t.compile_fail("tests/ui/core_builder_holds_no_session_defaults.rs");
-    t.compile_fail("tests/ui/session_spec_requires_its_required_parts.rs");
-    // FIG-4374: models are selected by registry key, and a recorded model is
-    // minted by the registry alone.
-    t.compile_fail("tests/ui/llm_profiles_are_selected_by_key.rs");
-    t.compile_fail("tests/ui/llm_profile_builder_requires_cache_retention.rs");
-    t.compile_fail("tests/ui/recorded_llm_profile_is_minted_by_the_registry.rs");
-    t.compile_fail("tests/ui/root_tool_provider_is_not_public.rs");
-    t.compile_fail("tests/ui/session_admin_flat_methods_are_not_public.rs");
-    t.compile_fail("tests/ui/core_delete_session_rejects_arbitrary_controller.rs");
-    t.compile_fail("tests/ui/session_turn_run_requires_scope.rs");
-    t.compile_fail("tests/ui/session_turn_stream_requires_scope.rs");
-    t.compile_fail("tests/ui/queued_turn_run_requires_scope.rs");
-    t.compile_fail("tests/ui/scoped_turn_builders_are_not_prelude.rs");
-    t.compile_fail("tests/ui/process_start_requires_operation.rs");
-    t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
-    t.compile_fail("tests/ui/session_head_meta_is_not_serializable.rs");
-    t.compile_fail("tests/ui/process_envelopes_require_durable_serde.rs");
-    t.compile_fail("tests/ui/session_head_meta_requires_assemble.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_recursive_dispatch.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_session_mutations.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
-    t.compile_fail("tests/ui/granted_attempt_context_is_not_constructible.rs");
-    // ADR 0116: no context a body holds reaches dispatch, process
-    // administration or a controller, and a plugin registers only providers.
-    t.compile_fail("tests/ui/tool_context_is_not_nameable.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_controller.rs");
-    t.compile_fail("tests/ui/attempt_context_has_no_optional_call_ids.rs");
-    t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
-    // FIG-6273: a process registrar offers only process contributions.
-    t.compile_fail("tests/ui/process_registrars_offer_only_process_contributions.rs");
-    t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
-    t.compile_fail("tests/ui/session_catalog_requires_lookup.rs");
-    // FIG-4110: context hooks hold no write service.
-    t.compile_fail("tests/ui/context_hooks_hold_no_write_service.rs");
-    t.compile_fail("tests/ui/administrative_contexts_have_no_tool_dispatch.rs");
-    t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
-    t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");
-    t.compile_fail("tests/ui/declared_start_is_sealed.rs");
-    t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
-    t.compile_fail("tests/ui/frame_key_is_not_a_frame_node_id.rs");
-    // FIG-4024: the resident runtime state changes only through the
-    // publishing install path.
-    t.compile_fail("tests/ui/runtime_resident_state_is_private.rs");
-    // FIG-4111: only the host rails mint host start keys, and only the
-    // registrar mints a process id.
-    t.compile_fail("tests/ui/model_code_cannot_mint_a_host_start_key.rs");
-    t.compile_fail("tests/ui/process_id_minting_is_sealed.rs");
-    // FIG-4375: a SQLite process registry comes only from its store set, the
-    // one place its trigger store is attached (FIG-4369).
-    // FIG-4112: only `create` takes session config; an open cannot state it.
-    t.compile_fail("tests/ui/session_open_takes_no_config.rs");
-    if cfg!(feature = "rlm") {
-        // FIG-1979: the dialect has one carrier, and a memory limit cannot be
-        // spelled as an instruction budget.
-        t.compile_fail("tests/ui/rlm_turn_options_cannot_name_a_dialect.rs");
-        t.compile_fail("tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs");
-    }
-}
-
-/// The class-1 store seams carry no silent defaults: an implementor that never
-/// states its delete-time freshness answer does not compile. The catalog's
-/// lookup answer is pinned beside the facade's other compile laws.
-///
-/// The fixture asserts an `E0046` whose `help:` line renders the async-trait
-/// desugared signature. The `testing` feature changes rustc's choice of a
-/// qualified `Pin` path, so this diagnostic law is pinned to the isolated RLM
-/// feature-boundary graph; the workspace graph exercises the testing facade
-/// separately.
-fn register_store_seam_contracts(t: &trybuild::TestCases) {
-    t.compile_fail("tests/ui/reclamation_witness_cannot_be_assembled.rs");
-    if !cfg!(feature = "rlm") || cfg!(feature = "testing") {
-        return;
-    }
-    t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
-}
-
-/// The RLM config builder has no silent defaults: `build()` is absent until
-/// every execution bound has been named, so a host that forgets one does not
-/// compile.
-fn register_rlm_config_builder_contracts(t: &trybuild::TestCases) {
-    if !cfg!(feature = "rlm") {
-        return;
-    }
-    t.compile_fail("tests/ui/rlm_config_builder_requires_every_bound.rs");
-}

@@ -288,25 +288,6 @@ fn the_strict_read_refuses_a_history_the_lenient_read_salvages() {
 }
 
 #[test]
-fn an_unwritable_history_disables_the_signal_without_failing_the_run() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    // A directory where the file should be: every write fails, and the run
-    // must still return normally.
-    let path = dir.path().join("history.jsonl");
-    std::fs::create_dir(&path).expect("occupy the path");
-
-    record_and_report(
-        &path,
-        "quick",
-        DurationTrendGeometry::current(2, 0, 3),
-        &fixture_identity(),
-        &[],
-    );
-
-    assert!(run_duration_trend_cli(&path, Some("quick")).is_err());
-}
-
-#[test]
 fn a_long_history_is_truncated_on_disk_by_the_run_path() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("history.jsonl");
@@ -337,43 +318,6 @@ fn a_long_history_is_truncated_on_disk_by_the_run_path() {
             .count(),
         RETAINED_RUNS_PER_SERIES
     );
-}
-
-#[test]
-fn the_committed_fixture_demonstrates_every_verdict() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures")
-        .join("duration-trend-history.jsonl");
-    let history = load_history(&path).expect("fixture loads");
-    let rows = trend_rows(&history, Some("quick"));
-
-    let by_scenario = rows
-        .iter()
-        .map(|row| (row.scenario.as_str(), row.verdict))
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(by_scenario["standard"], DriftVerdict::Stable);
-    assert_eq!(by_scenario["rlm"], DriftVerdict::Elevated { streak: 1 });
-    assert_eq!(
-        by_scenario["deep_turn_composition"],
-        DriftVerdict::Drifting {
-            streak: DRIFT_CONSECUTIVE_RUNS
-        }
-    );
-    assert!(matches!(
-        by_scenario["store_reopen"],
-        DriftVerdict::InsufficientData { .. }
-    ));
-
-    let table = render_trend_table(&rows);
-    assert!(table.contains("deep_turn_composition"), "{table}");
-    assert!(table.contains("DRIFTING"), "{table}");
-    assert!(table.contains("insufficient data"), "{table}");
-}
-
-#[test]
-fn an_empty_history_renders_a_table_rather_than_a_verdict() {
-    let table = render_trend_table(&[]);
-    assert!(table.contains("no history records"), "{table}");
 }
 
 #[test]

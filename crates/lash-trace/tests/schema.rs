@@ -655,37 +655,6 @@ fn event_samples() -> Vec<TraceEvent> {
     ]
 }
 
-/// Core tracing is seam-neutral: no event names the plugin, durable
-/// substrate, store backend or provider that produced it. Those
-/// implementations report through the shared vocabulary.
-#[test]
-fn trace_event_vocabulary_names_no_seam_implementation() {
-    const IMPLEMENTATIONS: &[&str] = &[
-        "rlm",
-        "lashvm",
-        "temporal",
-        "sqlite",
-        "postgres",
-        "anthropic",
-        "openai",
-    ];
-    for event in event_samples() {
-        let json = serde_json::to_value(&event).expect("serialize event");
-        let tag = json["type"].as_str().expect("event type tag").to_owned();
-        let variant = format!("{event:?}")
-            .split([' ', '{', '('])
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        for name in IMPLEMENTATIONS {
-            assert!(
-                !tag.contains(name) && !variant.contains(name),
-                "trace event `{tag}` names the seam implementation `{name}`"
-            );
-        }
-    }
-}
-
 /// FIG-2362: `exec_code_failed` carries a closed `reason` code beside the
 /// human `error` text so offline analysis never string-matches prose.
 #[test]

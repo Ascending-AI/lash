@@ -154,7 +154,6 @@ impl<K: Ord> Observations<K> {
         mut conflicts: Option<&mut Vec<WorkflowOverlayConflict>>,
     ) {
         for (key, held) in &self.0 {
-            meter::count();
             let Some(identity) = identity(key, &held.observation) else {
                 continue;
             };
@@ -399,7 +398,6 @@ impl OccurrenceHistory {
 
     /// What the occurrence's observations say of it.
     fn fold(&self) -> OccurrenceFold<'_> {
-        meter::count();
         let mut folded = OccurrenceFold::default();
         for (transition, observation) in self.iter() {
             let timestamp = observation.timestamp;
@@ -637,27 +635,5 @@ impl WorkflowOverlaySiteReport {
         self.terminal_count += 1;
         self.first_terminal.get_or_insert_with(|| terminal.clone());
         self.last_terminal = Some(terminal);
-    }
-}
-
-/// Counts the units of work the reducer does (one for each occurrence it
-/// folds and each history event it publishes), so a law can hold the cost of
-/// a snapshot and of an append to the size of what they touch.
-pub(super) mod meter {
-    #[cfg(test)]
-    thread_local! {
-        static WORK: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    }
-
-    #[inline]
-    pub(in super::super) fn count() {
-        #[cfg(test)]
-        WORK.with(|work| work.set(work.get() + 1));
-    }
-
-    /// The work done since the last call.
-    #[cfg(test)]
-    pub(in super::super) fn take() -> u64 {
-        WORK.with(|work| work.replace(0))
     }
 }

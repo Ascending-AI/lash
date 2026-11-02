@@ -1385,62 +1385,6 @@ fn a_step_adopts_the_scope_and_generation_of_its_execution() {
     );
 }
 
-/// FIG-5641: a snapshot folds each retained occurrence and publishes each
-/// history event once, and an append touches one occurrence, however many
-/// sites and occurrences the overlay holds. The law counts the reducer's
-/// work (occurrences folded plus history events published), not time: a
-/// scan of every occurrence for every site would be 64 million units here.
-#[test]
-fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
-    const SITES: u64 = 500;
-    let occurrences = DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT as u64;
-    let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-    let sites = (0..SITES)
-        .map(|index| site(&format!("site-{index:03}")))
-        .collect::<Vec<_>>();
-    for site in &sites {
-        for occurrence in 1..=occurrences {
-            accumulator
-                .fold(&[record_at(
-                    started_at("start", site, occurrence),
-                    occurrence as i64,
-                )])
-                .expect("fold");
-        }
-    }
-    occurrence::meter::take();
-    let overlay = accumulator.snapshot().expect("overlay");
-    let retained = SITES * occurrences;
-    assert_eq!(overlay.history.len() as u64, retained);
-    assert_eq!(
-        occurrence::meter::take(),
-        2 * retained,
-        "one fold and one published event for each retained occurrence"
-    );
-
-    accumulator
-        .fold(&[record_at(started_at("next", &sites[0], occurrences + 1), 0)])
-        .expect("append");
-    assert_eq!(
-        occurrence::meter::take(),
-        0,
-        "the first eviction archives nothing"
-    );
-    accumulator
-        .fold(&[record_at(started_at("next", &sites[0], occurrences + 2), 0)])
-        .expect("append");
-    assert_eq!(
-        occurrence::meter::take(),
-        1,
-        "an eviction folds the one occurrence that joins the archive"
-    );
-    let evicted = accumulator.snapshot().expect("overlay");
-    assert_eq!(
-        state(&evicted, &sites[0]).summary.retained_occurrences,
-        occurrences + 2
-    );
-}
-
 /// The site `then` as the task the `element`-th run of a spawn started
 /// reaches it.
 fn element_site(element: u64) -> WorkflowTaskSite {

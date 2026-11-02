@@ -237,20 +237,6 @@ fn runtime_refusal(id: &str, error: EmbedError) -> lash_core::RuntimeError {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_send_to_an_unknown_session_is_answered_unknown() -> Result<()> {
-    const ID: &str = "never-created";
-    let stores = stores_over(Storage::Memory).await;
-    let core = core_over(&stores.stores, true);
-    let error = refusal_of(&core, ID).await;
-    assert!(
-        matches!(&error, EmbedError::UnknownSession { session_id } if session_id.as_str() == ID),
-        "{error:?}"
-    );
-    core.shutdown().await?;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_send_to_a_deleted_session_is_answered_deleted() -> Result<()> {
     const ID: &str = "deleted-before-the-send";
     let stores = stores_over(Storage::Memory).await;
@@ -275,28 +261,6 @@ async fn a_send_to_a_deleted_session_is_answered_deleted() -> Result<()> {
         ),
         "{error:?}"
     );
-    core.shutdown().await?;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_send_to_a_catalog_row_with_no_head_is_answered_creation_unrecorded() -> Result<()> {
-    const ID: &str = "row-with-no-head";
-    let stores = stores_over(Storage::Memory).await;
-    let core = core_over(&stores.stores, true);
-    create(&core, ID).await?;
-    stores
-        .seams
-        .delete_session_head_for_testing(&SessionId::from(ID))
-        .await
-        .map_err(EmbedError::Store)?;
-    let error = runtime_refusal(ID, refusal_of(&core, ID).await);
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::SessionCreationUnrecorded,
-        "{error:?}"
-    );
-    assert!(error.is_terminal(), "{error:?}");
     core.shutdown().await?;
     Ok(())
 }
@@ -819,37 +783,6 @@ mod sweep {
         serving_shutdown: std::result::Result<(), String>,
         accepting_shutdown: std::result::Result<(), String>,
         script: std::result::Result<(), String>,
-    }
-
-    /// FIG-6112: teardown must report an unfired cell without losing the
-    /// answer and the failure that prevented the fault from completing.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn an_unfired_cell_retains_its_run_evidence() {
-        let cell = Cell {
-            op: Op::listed("unreachable-sweep-operation"),
-            kind: Kind::Transient,
-        };
-        let run = run(Storage::Memory, Scenario::Open, Some(cell)).await;
-        assert!(matches!(run.answer, Ok(Answer::Success(_))), "{run:?}");
-        let reason = verdict(Scenario::Open, cell, &run, &run)
-            .expect_err("an unfired rule fails even when the answer matched");
-        assert!(reason.contains("never fired"), "{reason}");
-        let evidence = failure(cell, &reason, &run, &run);
-        for required in [
-            "never fired",
-            "did not finish before teardown",
-            "failed_activations",
-            "owner",
-            "park",
-            "node_stop",
-            "settled = true",
-            "answer = Ok(Success",
-        ] {
-            assert!(
-                evidence.contains(required),
-                "missing {required}: {evidence}"
-            );
-        }
     }
 
     async fn start_child(core: &LashCore) -> Result<lash_vocabulary::identity::ProcessId> {

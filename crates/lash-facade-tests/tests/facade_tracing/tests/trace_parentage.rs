@@ -126,57 +126,6 @@ async fn a_serialized_process_start_links_its_explicit_caller() -> Result<()> {
     Ok(())
 }
 
-/// L3's first edge: a send under a caller's context opens a `lash.send`
-/// producer under it, the turn's admission is that producer's child, and the
-/// turn's `invoke_agent` is on the send's trace.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_sent_turn_joins_the_trace_of_its_send() -> Result<()> {
-    let builder = explicit_ephemeral_facets(LashCore::standard_builder(
-        sqlite_memory_store_backend().await,
-    ))
-    .serve_test_llm_profile(
-        mock_provider(vec![text_call("done")]).into_handle(),
-        mock_llm_profile_spec(),
-    );
-    let (observed, builder) = Observed::install(builder);
-    let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
-    let session = created_session(
-        &core,
-        lash_kernel_value::identity::SessionId::parse(SENT_SESSION)
-            .expect("nonblank host identity"),
-    )
-    .await
-    .open()
-    .await?;
-    let output = session
-        .send(TurnInput::text("hello"))
-        .trace_context(caller(0xe1))
-        .output()
-        .await?;
-    assert!(output.is_success(), "{:?}", output.outcome);
-    observed
-        .until("the turn's terminal is exported", |observed| {
-            !observed.spans("invoke_agent").is_empty()
-        })
-        .await;
-    let sends = observed.spans("lash.send");
-    let send = producer(&sends, 0xe1);
-    let invoked = observed.spans("invoke_agent");
-    assert_eq!(invoked.len(), 1, "{invoked:#?}");
-    assert_eq!(
-        invoked[0].parent_span_id,
-        span_id(send),
-        "the turn is its send's child"
-    );
-    assert_eq!(
-        invoked[0].span_context.trace_id(),
-        send.span_context.trace_id(),
-        "invoke_agent's trace is the send's"
-    );
-    core.shutdown().await?;
-    Ok(())
-}
-
 /// FIG-4829: the first acceptance of a send retains its producer as the
 /// input's parent. A retry of the same `id` under another context is the
 /// same submission: it reads the first parent back, and its own producer

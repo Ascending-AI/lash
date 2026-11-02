@@ -39,9 +39,6 @@ mod cross_core_process_changes;
 mod turn_streaming;
 
 #[cfg(feature = "rlm")]
-mod recorded_carriers;
-
-#[cfg(feature = "rlm")]
 mod adr_claims;
 
 mod plugin_diagnostics;

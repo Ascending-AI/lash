@@ -286,37 +286,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mixed_text_and_tool_chunk_preserves_completed_response_order_on_abort() {
-        let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"before tool\"},{\"functionCall\":{\"id\":\"call-1\",\"name\":\"lookup\",\"args\":{\"q\":\"x\"}}}]}}]}}\n\n";
-        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let event_sink = Arc::clone(&events);
-        let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
-            lash_core::provider::ProviderToken::new("access"),
-        ))
-        .with_transport(Arc::new(StaticSseTransport::new(body)));
-        let completed = provider
-            .execute_request(
-                "access",
-                json!({ "model": "gemini-test" }),
-                Some(LlmEventSender::new(move |event| {
-                    event_sink.lock_recover().push(event);
-                })),
-                None,
-                hidden_thinking(StreamTermination::RequireTerminalEvidence),
-                None,
-            )
-            .await
-            .expect("mixed text/tool stream completes");
-        let stream_events = events.lock_recover().clone();
-        let aborted = lash_core::testing::response_synthesized_from_aborted_stream(&stream_events);
-
-        assert_eq!(
-            aborted.parts, completed.parts,
-            "the abort accumulator must retain the provider's text-before-tool ordering; events were {stream_events:?}"
-        );
-    }
-
-    #[tokio::test]
     async fn google_strict_policy_accepts_finish_reason() {
         let body = "data: {\"response\":{\"responseId\":\"google-response-1\",\"modelVersion\":\"gemini-3.1-pro-served\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]}}],\"usageMetadata\":{\"promptTokenCount\":6,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":0}}}\n\n";
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));

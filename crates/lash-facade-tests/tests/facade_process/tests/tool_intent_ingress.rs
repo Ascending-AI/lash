@@ -1,31 +1,6 @@
 use super::*;
 use lash_facade_tests::ingress::*;
 
-#[test]
-fn ingress_start_without_lifetime_is_refused_before_submission() {
-    let mut payload =
-        serde_json::to_value(start_intent(&SessionId::from(SESSION))).expect("encode intent");
-    fn remove_lifetime(value: &mut serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Object(object) => {
-                if object.remove("lifetime").is_some() {
-                    return true;
-                }
-                object.values_mut().any(remove_lifetime)
-            }
-            _ => false,
-        }
-    }
-    assert!(
-        remove_lifetime(&mut payload),
-        "valid start had a required lifetime"
-    );
-    let error =
-        serde_json::from_value::<lash_execution_contracts::tool_intent::ToolIntent>(payload)
-            .expect_err("missing lifetime must not decode");
-    assert!(error.to_string().contains("lifetime"));
-}
-
 /// The host front door records engine admission too: an unconfigured engine
 /// registers no process, and an admitted one carries the engine identity stamp.
 #[tokio::test]

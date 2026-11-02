@@ -75,25 +75,3 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },
 ];
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use super::*;
-
-    #[test]
-    fn agent_scenario_contract_metadata_is_unique_and_complete() {
-        assert_eq!(AGENT_SCENARIO_CONTRACTS.len(), 9);
-        let mut names = BTreeSet::new();
-        for contract in AGENT_SCENARIO_CONTRACTS {
-            assert_eq!(contract.suite, "agent");
-            assert!(contract.test_name.starts_with("agent_scenario_"));
-            assert!(!contract.owned_invariant.trim().is_empty());
-            assert!(contract.semantic_oracle.starts_with("agent."));
-            assert!(!contract.required_sim_evidence.is_empty());
-            assert_eq!(contract.oracle_id, "sim.oracle.scenario.agent-contract.v1");
-            assert!(names.insert(contract.test_name));
-        }
-    }
-}

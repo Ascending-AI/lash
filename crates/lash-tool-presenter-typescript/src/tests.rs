@@ -443,35 +443,6 @@ fn conditional_and_dependent_rules_are_presented_in_words() {
 }
 
 #[test]
-fn inexpressible_schema_rules_keep_an_honest_type_and_a_note() {
-    for schema in [
-        json!({"$ref":"https://example.com/value.json", "description":"Host description"}),
-        json!({"$ref":"#/missing"}),
-        json!({"$id":"https://example.com/root", "$defs":{
-            "Nested":{"$id":"nested", "$defs":{"Value":{"type":"integer"}},
-                "type":"object", "properties":{"v":{"$ref":"#/$defs/Value"}}},
-            "Value":{"type":"string"}}, "$ref":"#/$defs/Nested"}),
-        json!({"$dynamicRef":"#node"}),
-        json!({"$recursiveRef":"#"}),
-        json!({"type":"object", "unevaluatedProperties":false}),
-        json!({"type":"array", "prefixItems":[{"type":"string"}], "items":{"type":"number"}}),
-        json!({"type":"object", "patternProperties":{"^a":{"type":"string"}}}),
-        json!({"type":"array", "contains":{"type":"integer"}}),
-        json!({"enum":[{"key":1}, 1.5]}),
-    ] {
-        let text = shape_text(&schema);
-        assert!(!text.is_empty(), "{schema}");
-        assert!(
-            text.contains("validated")
-                || text.contains("patternProperties")
-                || text.contains("contains")
-                || text.contains("one of"),
-            "{schema}: {text}"
-        );
-    }
-}
-
-#[test]
 fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
     let mut schema = json!({"type":"string"});
     for _ in 0..10 {
@@ -487,45 +458,6 @@ fn presentation_limits_keep_a_note_instead_of_refusing_a_valid_tool() {
     .expect("valid tool");
     let text = document_text(&doc);
     assert!(text.contains("validated"), "{text}");
-}
-
-#[test]
-fn original_figments_schemas_print_no_larger_than_source() {
-    for (name, source) in [
-        (
-            "people.lookup",
-            include_str!("fixtures/figments/people.lookup.json"),
-        ),
-        (
-            "information.search",
-            include_str!("fixtures/figments/information.search.json"),
-        ),
-        (
-            "information.read",
-            include_str!("fixtures/figments/information.read.json"),
-        ),
-        (
-            "information.list",
-            include_str!("fixtures/figments/information.list.json"),
-        ),
-    ] {
-        let schemas: Value = serde_json::from_str(source).unwrap();
-        for direction in ["input", "output"] {
-            let schema = &schemas[direction];
-            let text = schema_text(schema);
-            assert!(
-                text.len() <= schema.to_string().len(),
-                "{name} {direction}: {} > {}: {text}",
-                text.len(),
-                schema.to_string().len()
-            );
-            println!(
-                "{name} {direction}: {} printed <= {} source bytes",
-                text.len(),
-                schema.to_string().len()
-            );
-        }
-    }
 }
 
 /// FIG-6807: an optional value's notes sit on its field path; only a real

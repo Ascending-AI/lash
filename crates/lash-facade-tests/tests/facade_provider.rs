@@ -1,4 +1,4 @@
-use lash::{EmbedError, LashCore, Result, TurnInput, async_trait};
+use lash::{LashCore, Result, TurnInput, async_trait};
 use lash_core::facade_support::PluginFactory;
 use lash_core::plugin::StaticPluginFactory;
 use lash_core::{ToolProvider, TurnActivity};

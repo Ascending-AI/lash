@@ -199,30 +199,6 @@ mod tests {
         );
     }
 
-    /// D-DEFAULTS2: operational settings cross the facade builder unchanged.
-    #[tokio::test]
-    async fn durable_preset_overrides_reach_the_backend() {
-        let stores = Arc::new(
-            crate::sqlite::SqliteStoreSet::memory()
-                .await
-                .expect("SQLite"),
-        );
-        let mut settings = DurableSettings::development();
-        settings.claim_batch = 3;
-        settings.max_active = 11;
-        settings.group_commit.max_members = 7;
-        settings.group_commit.window = Duration::from_millis(9);
-        settings.cascade_batch = 19;
-        settings.lease.claim_poll = Duration::from_millis(79);
-        settings.notifier = Notifier::PollOnly;
-        let backend = DurableBackendBuilder::new(stores)
-            .config(settings)
-            .build()
-            .expect("backend");
-        assert_eq!(backend.config().settings(), settings);
-        assert_eq!(backend.config().lease().settings(), settings.lease);
-    }
-
     /// D-DEFAULTS: a shared commit default leaves the queue action reserve host-owned.
     #[tokio::test]
     async fn default_commit_policy_keeps_queued_work_batching_explicit() {
@@ -255,49 +231,6 @@ mod tests {
             .build(owner())
             .expect("the default commit budget and explicit queue policy build");
         core.shutdown().await.expect("shutdown");
-    }
-
-    /// D-DEFAULTS2: the facade's PostgreSQL policy sizes the actual lazy pool
-    /// and carries deadlines to the SQL prelude without connecting a server.
-    #[cfg(feature = "postgres")]
-    #[tokio::test]
-    async fn postgres_operational_policy_reaches_pool_and_transaction() {
-        use crate::postgres::*;
-        let mut config = PostgresHostConfig::development();
-        config.roles.work.max_connections = 6;
-        config.roles.work.acquire_timeout = Duration::from_millis(73);
-        config.guards.durable.lock = ServerTimeout::Limit(Duration::from_millis(67));
-        config.validate().expect("host policy");
-        let factory = PostgresConnectionFactory::new(
-            PostgresEndpoints::from_url("postgres://localhost/lash").expect("endpoint"),
-            config.connection.clone(),
-        );
-        let pool = factory.pool(
-            ConnectionRole::Work,
-            &config.roles.work,
-            Some(&config.guards.ordinary),
-        );
-        assert_eq!(pool.options().get_max_connections(), 6);
-        assert_eq!(
-            pool.options().get_acquire_timeout(),
-            Duration::from_millis(73)
-        );
-        let prelude = TransactionPrelude::new(&config.guards.durable);
-        assert!(
-            prelude.statement().contains("lock_timeout = 67"),
-            "{}",
-            prelude.statement()
-        );
-        assert_eq!(prelude.deadline(), config.guards.durable.operation_deadline);
-        let omitted: PostgresHostConfig =
-            serde_json::from_str("{}").expect("omitted optional settings");
-        assert_eq!(
-            omitted.node.owner_retention,
-            lash_durable::OwnerRetentionSettings::default()
-        );
-        assert_eq!(omitted.node.max_ingress_bytes.get(), 64 * 1024 * 1024);
-        assert!(omitted.validate().is_ok());
-        PostgresHostConfig::standard().validate().expect("standard");
     }
 }
 

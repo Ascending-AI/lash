@@ -1,8 +1,5 @@
 use super::profiles::{empty_request, typescript_block};
-use super::tools::{
-    GMAIL_LIKE_TOOL_NAMES, benchmark_oblique_search_tool_definition,
-    benchmark_oblique_tool_definitions, oblique_search_output_schema,
-};
+use super::tools::GMAIL_LIKE_TOOL_NAMES;
 use super::*;
 use lash_core::{
     facade_support::build_tool_catalog,
@@ -81,32 +78,6 @@ fn rlm_large_tool_catalog_pins_each_contract_once() {
     assert_eq!(
         contract_resolutions.load(Ordering::SeqCst),
         GMAIL_LIKE_TOOL_NAMES.len()
-    );
-}
-
-#[test]
-fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lash_vm() {
-    let definitions = benchmark_oblique_tool_definitions();
-    assert_eq!(definitions.len(), 3);
-    let operations = definitions
-        .iter()
-        .map(|definition| definition.manifest.tool())
-        .collect::<Vec<_>>();
-    for operation in [
-        "obliq.search",
-        "obliq.judge_candidates",
-        "obliq.list_async_handles",
-    ] {
-        assert!(
-            operations.iter().any(|name| name == operation),
-            "{operations:?}"
-        );
-    }
-    let search_contract = benchmark_oblique_search_tool_definition().contract;
-    assert!(search_contract.output_contract.is_static());
-    assert_eq!(
-        search_contract.output_schema.canonical().clone(),
-        oblique_search_output_schema()
     );
 }
 

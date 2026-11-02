@@ -12,12 +12,9 @@ doctest = false
 workspace = true
 
 # The renderer in crates/lash-core-execution/src/testing/behavior_transcript.rs
-# uses serde_json and insta. cargo-shear cannot follow this crate's #[path] import.
+# uses serde_json. cargo-shear cannot follow this crate's #[path] import.
 [package.metadata.cargo-shear]
-ignored = ["serde_json", "insta"]
+ignored = ["serde_json"]
 
 [dependencies]
 serde_json.workspace = true
-
-[dev-dependencies]
-insta = "1"

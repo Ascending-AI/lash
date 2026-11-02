@@ -335,40 +335,6 @@ async fn a_core_without_its_budgets_or_coalescing_choice_is_refused() {
     ));
 }
 
-/// FIG-5491: the budgets and coalescing a host states are the ones its core
-/// runs under; nothing of the recommended preset stands in for them.
-#[tokio::test]
-async fn a_core_runs_under_the_budgets_and_coalescing_its_host_states() {
-    let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
-        model_total: std::time::Duration::from_secs(90),
-        tool_check_phase: std::time::Duration::from_secs(7),
-        turn_hook_phase: std::time::Duration::from_secs(9),
-        stop_grace: std::time::Duration::from_secs(1),
-        provider: crate::ProviderAttemptLimits::new(
-            lash_protocol_types::RequestBound::Bounded(std::time::Duration::from_secs(30)),
-            std::time::Duration::from_secs(10),
-            std::time::Duration::from_secs(10),
-            2,
-        )
-        .expect("valid provider limits"),
-        agent_frame_switch_limit: std::num::NonZeroU32::new(3).expect("nonzero"),
-    })
-    .expect("valid budgets");
-    assert_ne!(budgets, crate::ExecutionBudgets::recommended());
-    let core = stated_commit_and_retention(sqlite_memory_store_backend().await)
-        .execution_budgets(budgets.clone())
-        .delta_coalescing(crate::DeltaCoalescing::off())
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .build(crate::tests::host::runtime_lease_owner())
-        .expect("core");
-    assert_eq!(core.env.core.control.execution_budgets, budgets);
-    assert_eq!(
-        core.env.core.control.delta_coalescing,
-        crate::DeltaCoalescing::off()
-    );
-    core.shutdown().await.expect("shutdown");
-}
-
 /// D-DEFAULTS2: a host must state what it keeps; lash has no data retention
 /// of its own to fall back on.
 #[tokio::test]

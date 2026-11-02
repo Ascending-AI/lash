@@ -1,9 +1,0 @@
-error[E0599]: no method named `turn` found for struct `LashSession` in the current scope
- --> tests/ui/session_turn_stream_requires_scope.rs:7:10
-  |
-6 |       let _ = session
-  |  _____________-
-7 | |         .turn(lash::TurnInput::text("hello"))
-  | |         -^^^^ method not found in `LashSession`
-  | |_________|
-  |

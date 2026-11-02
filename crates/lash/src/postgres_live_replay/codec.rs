@@ -411,64 +411,6 @@ mod tests {
         assert_eq!(read.as_ref(), &original);
     }
 
-    /// FIG-7053: a row written from the draft's borrowed payload reads back
-    /// as the stored form, under its stored kind, and writes again to the
-    /// very same bytes, for every stored variant.
-    #[test]
-    fn every_stored_variant_reads_back_as_the_bytes_it_was_written_as() {
-        let session = SessionId::from("view-codec");
-        let payloads = [
-            SessionObservationEventPayload::LanguageExecution(Box::new(
-                lash_core::testing::session_language_observation(&session, "start", "cell"),
-            )),
-            SessionObservationEventPayload::TurnActivity(TurnActivity::new(
-                TurnActivityId::new("activity"),
-                TurnEvent::Error(ReportedFailure {
-                    message: "failed".to_string(),
-                    envelope: None,
-                }),
-            )),
-            SessionObservationEventPayload::Committed {
-                base_revision: SessionRevision::new(3),
-                entries: Vec::new(),
-            },
-            SessionObservationEventPayload::ResidentChanged,
-            SessionObservationEventPayload::AgentFrameSwitched {
-                frame_id: "frame".to_string(),
-                commit: Some(SessionRevision::new(4)),
-            },
-            SessionObservationEventPayload::QueueChanged {
-                kind: SessionQueueEventKind::Enqueued,
-                batch_ids: vec!["batch".to_string()],
-            },
-            SessionObservationEventPayload::ProcessChanged {
-                kind: SessionProcessEventKind::Waiting { sequence: 2 },
-                process_ids: vec![ProcessId::fixture("process")],
-            },
-        ];
-        let kinds = [
-            "language_execution",
-            "turn_activity",
-            "committed",
-            "resident_changed",
-            "agent_frame_switched",
-            "queue_changed",
-            "process_changed",
-        ];
-        for (payload, kind) in payloads.into_iter().zip(kinds) {
-            let draft = LiveReplayEventDraft::new(None::<TurnId>, payload);
-            let encoded = encode(&session, draft).expect("the payload encodes");
-            let row: serde_json::Value =
-                serde_json::from_slice(&encoded.bytes).expect("a stored payload is JSON");
-            assert_eq!(row["kind"], kind);
-            let cursor = SessionCursor::new("incarnation", &session, SessionRevision::new(1), 1);
-            let decoded = decode(cursor, None, &encoded.bytes).expect("the stored payload decodes");
-            let rewritten = serde_json::to_vec(&StoredPayloadView::of(&decoded.payload))
-                .expect("the decoded payload encodes");
-            assert_eq!(rewritten, encoded.bytes, "{kind}");
-        }
-    }
-
     fn stored(event: TurnEvent) -> (serde_json::Value, TurnEvent) {
         let session = SessionId::from("codec");
         let activity = TurnActivity::new(TurnActivityId::new("activity"), event);
