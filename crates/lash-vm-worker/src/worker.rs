@@ -975,14 +975,10 @@ impl<'embedding> Server<'embedding> {
             memory: meters.memory,
             live_tasks: meters.live_tasks,
         };
-        // A park that requests something is saved as it stands, so it is
-        // sealed now, where the parent would ask for it next. What it
-        // sealed crosses with the park, and a finished cell's carry with
+        // A park is journaled, not sealed (FIG-7585): the parent asks for a
+        // seal only where it takes a checkpoint. Pages the run sealed as its
+        // heap paged cross with the park, and a finished cell's carry with
         // the run's end.
-        let candidate = match &step {
-            Step::Parked(park) if requests_something(park) => Some(self.seal()?),
-            _ => None,
-        };
         let seal = match &step {
             Step::Parked(_) | Step::Ended(_) => port.take_batch(),
             Step::Slice => None,
@@ -1002,7 +998,6 @@ impl<'embedding> Server<'embedding> {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
                 seal,
-                candidate,
                 sites,
             },
             Step::Slice => WorkerMessage::Slice { meters, sites },
@@ -1149,21 +1144,6 @@ impl<'embedding> Server<'embedding> {
         )?;
         Ok(message)
     }
-}
-
-/// Whether a park admits work or submits explicit cancellation: both must
-/// save the guest state before it runs another stretch.
-fn requests_something(park: &lash_kernel_vm::Park) -> bool {
-    !park.cancel_requests.is_empty()
-        || park.requests.iter().any(|request| {
-            let wait = match request {
-                lash_kernel_vm::Request::Effect(effect) => effect.wait,
-            };
-            !park
-                .cancel_requests
-                .iter()
-                .any(|cancel| cancel.wait() == wait)
-        })
 }
 
 pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {

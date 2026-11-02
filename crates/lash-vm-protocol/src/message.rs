@@ -553,8 +553,8 @@ pub enum ParentMessage {
         reply: PageReply,
     },
     /// Seal the run as it stands at this safe point into a checkpoint
-    /// candidate: a run's start before its first slice, or a park whose
-    /// candidate did not cross with it.
+    /// candidate: a run's start before its first slice, or a park the
+    /// parent takes as a checkpoint.
     Seal,
     /// Physical cancellation: drop the machine where it stands.
     Cancel,
@@ -617,17 +617,15 @@ pub enum WorkerMessage {
         payload: EncodedPayload,
     },
     /// No task is ready: the effects and sleeps requested since the last
-    /// park, and the waits withdrawn since. A park that requests something
-    /// is sealed: `candidate` names its `CheckpointRoot` page in the
-    /// activation's staging, which the parent publishes with the park's
-    /// admissions. `seal` carries the pages sealed since the last batch
-    /// crossed, the root among them, so a park adds no page exchange
-    /// (FIG-6288); the parent admits them before it handles the park.
+    /// park, and the waits withdrawn since. A park is journaled, not
+    /// sealed (FIG-7585): the parent sends [`ParentMessage::Seal`] where it
+    /// takes a checkpoint. `seal` carries the pages sealed since the last
+    /// batch crossed (FIG-6288); the parent admits them before it handles
+    /// the park.
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
         seal: Option<SealBatch>,
-        candidate: Option<[u8; 32]>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sites: Option<EncodedPayload>,
     },

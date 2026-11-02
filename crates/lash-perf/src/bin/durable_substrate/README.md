@@ -234,10 +234,14 @@ not a golden count oracle, and does not replace `kernel-baseline.json` or the
 advisory `duration-trend-history.jsonl`.
 
 Each sample uses its own fresh database, core and worker pool. Heap construction
-ends at gate 0, outside the measurement. Each gate defers its outcome. The observer waits for a durable pending
-completion and for every checked-out worker to return to the idle pool, then
-supplies that external completion. Gate 1 closes the interval covering one
-released-worker resume and the next committed park. Guest updates touch
+is a cell of its own before gate 0, outside the measurement. A cell parks on its
+journal rather than a seal (FIG-7585), so each measured operation is a cell of
+its own that awaits its gate first and then operates. Each gate defers its
+outcome. The observer waits for a durable pending completion and for every
+checked-out worker to return to the idle pool, then supplies that external
+completion. The next gate closes the interval covering the released worker's
+re-run of that cell from the previous cell's checkpoint, the operation, the
+checkpoint the cell's end takes and the next cell's committed park. Guest updates touch
 one list entry or one retained object's field. The immutable-string case builds `"x".repeat(256 * population)` before measurement and reads
 only length; the source/document itself stays small. Dropping removes one binding to H objects while retaining a
 separate H-element list. The next-cell case carries the seeded state into a cell
@@ -283,8 +287,8 @@ activations' spools, and `retirement_batches` the store's bounded retirement
 steps. A sample's background sweep waits an hour; each mark drains
 retirement first, so an interval counts the steps its own park left.
 
-Publication counters come from the recorder's SQL receipt of the interval's
-one accepted owner park, so background work and the observer's reads are
+Publication counters come from the recorder's SQL receipts of the interval's
+one accepted owner park and the owner commit that put the cell's checkpoint, so background work and the observer's reads are
 excluded: `publish_statements`, `publish_rows_read` and, on SQLite,
 `publish_vm_steps` (the engine's virtual-machine steps). After the last
 gate each sample also reports a tail on the last interval's row:
@@ -294,7 +298,7 @@ machine carried and the next prompt read the cell's bindings, and
 never gated. `--heap-scenarios a,b` runs only the named scenarios.
 
 The counted laws assert, over each scenario's measured interval at two or more
-H, that a count's growth exponent stays at most 0.25: a park's sealed pages and
+H, that a count's growth exponent stays at most 0.25: a checkpoint's sealed pages and
 spooled bytes at a fixed change (list, objects, drop, resets), the pages a
 cold resume loads at a fixed working set (list, objects, resets), the pages a
 string length read loads, the pages a no-op next cell loads and seals, the

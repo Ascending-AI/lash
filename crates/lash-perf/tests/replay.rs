@@ -578,17 +578,19 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
     );
 }
 
-/// FIG-7084 / FIG-7314: five sequential code calls share root-lease commits
-/// with checkpoints and acquire all seven execution package holds together.
+/// FIG-7084 / FIG-7314 / FIG-7585: five sequential code calls park as one
+/// journaled admission commit each, take no root lease of their own (a cell's
+/// in-turn state is its journal; only a checkpoint leases a root), and acquire
+/// all seven execution package holds together.
 /// Warm turn: admission + model.start 1, model.answer 1,
-/// model.done+cell.admit 1, cell.snapshot+admit 5, round.outcome 6,
+/// model.done+cell.admit 1, cell.admit 5, round.outcome 6,
 /// turn.commit 1, pages.lease 2, package batch 1, ingress 1: exactly 19 commits.
-/// The session reader's two standalone lease commits remain pinned separately.
+/// The two standalone lease commits are the session reader's.
 /// Labeled pruning, reap and heartbeat work belongs to maintenance, not this
 /// turn-work population. WAKE-MAINTENANCE laws independently pin zero empty
 /// commits and one commit per nonempty expiry pass.
 #[test]
-fn code_call_root_leases_share_the_checkpoint_transactions() {
+fn code_calls_park_in_one_journal_commit_without_root_leases() {
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("leases.json");
     let mut cell: Vec<String> = (0..5)

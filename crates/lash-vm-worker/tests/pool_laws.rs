@@ -526,6 +526,16 @@ impl Parent {
         *self.grants.get(&id).expect("the parent granted the page")
     }
 
+    /// The checkpoint root `worker`'s run seals where it stands, as the
+    /// parent granted it.
+    fn sealed(&mut self, worker: &mut Checkout) -> PageCapability {
+        let step = worker.seal();
+        let RunStep::Sealed { candidate, .. } = self.answer(worker, step).expect("seal") else {
+            panic!("the run seals")
+        };
+        self.granted(candidate)
+    }
+
     /// One slice of `worker`'s run.
     fn run(
         &mut self,
@@ -597,25 +607,16 @@ fn requested(
     step: RunStep,
     document: &EncodedPayload,
 ) -> (lash_kernel_value::sites::WaitId, Datum) {
-    let (wait, argument, _, _) = admitted(step, document);
+    let (wait, argument, _) = admitted(step, document);
     (wait, argument)
 }
 
-/// The one effect the park requests, as the parent's admission freezes it,
-/// and the checkpoint root the park sealed.
+/// The one effect the park requests, as the parent's admission freezes it.
 fn admitted(
     step: RunStep,
     document: &EncodedPayload,
-) -> (
-    lash_kernel_value::sites::WaitId,
-    Datum,
-    EncodedPayload,
-    [u8; 32],
-) {
-    let RunStep::Parked {
-        park, candidate, ..
-    } = step
-    else {
+) -> (lash_kernel_value::sites::WaitId, Datum, EncodedPayload) {
+    let RunStep::Parked { park, .. } = step else {
         panic!("the run parks: {step:?}")
     };
     let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
@@ -647,12 +648,7 @@ fn admitted(
             args: request.args.clone(),
         },
     });
-    (
-        request.wait,
-        request.args[0].clone(),
-        admission,
-        candidate.expect("the park seals its checkpoint root"),
-    )
+    (request.wait, request.args[0].clone(), admission)
 }
 
 fn completed(value: Datum) -> EncodedPayload {
@@ -713,9 +709,9 @@ fn killed_at_a_park_and_resumed(
     let (wait, argument) = requested(parent.run(&mut first, SLICE, false).expect("run"), document);
     asked.push(argument.clone());
     first.deliver(wait, completed(argument)).expect("deliver");
-    let (wait, argument, admission, root) =
+    let (wait, argument, admission) =
         admitted(parent.run(&mut first, SLICE, false).expect("run"), document);
-    let root = parent.granted(root);
+    let root = parent.sealed(&mut first);
     asked.push(argument.clone());
     // Killed at the park: the worker is discarded, not reset.
     drop(first);
@@ -796,11 +792,11 @@ main {{
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (wait, _, admission, root) = admitted(
+    let (wait, _, admission) = admitted(
         parent.run(&mut first, SLICE, false).expect("run"),
         &document,
     );
-    let root = parent.granted(root);
+    let root = parent.sealed(&mut first);
     drop(first);
 
     let mut second = checkout(&pool);
@@ -905,11 +901,11 @@ fn a_worker_runs_code_in_a_dialect_its_host_did_not_name_and_refuses_to_save_it(
     worker
         .start(new_run(), &identity, ExecutionClass::Cell)
         .expect("start");
-    let (_, _, admission, root) = admitted(
+    let (_, _, admission) = admitted(
         parent.run(&mut worker, SLICE, false).expect("a Python run"),
         &document,
     );
-    let root = parent.granted(root);
+    let root = parent.sealed(&mut worker);
     worker.release().expect("release at the park");
     drop(pool);
 
@@ -1022,11 +1018,11 @@ fn a_parked_run_is_refused_under_another_document() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (_, _, admission, root) = admitted(
+    let (_, _, admission) = admitted(
         parent.run(&mut worker, SLICE, false).expect("run"),
         &document_a,
     );
-    let root = parent.granted(root);
+    let root = parent.sealed(&mut worker);
     worker.release().expect("release at the park");
 
     let mut next = checkout(&pool);
@@ -1353,8 +1349,8 @@ main {
         let step = parent.run(&mut first, SLICE, false).expect("run");
         let step = limited(&mut parent, &mut first, step, &mut answers, &mut asked);
         let parked = metered(&step);
-        let (wait, argument, admission, root) = admitted(step, &document);
-        let root = parent.granted(root);
+        let (wait, argument, admission) = admitted(step, &document);
+        let root = parent.sealed(&mut first);
         drop(first);
         let before = asked.len();
 

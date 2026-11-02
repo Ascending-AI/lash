@@ -507,8 +507,8 @@ pub struct RemoteMachine {
     /// The activation's page service, which answers the heap's page
     /// exchanges in this process: never another worker (FIG-6190).
     pages: SharedPages,
-    /// The root the last park sealed, until a delivery or a slice moves
-    /// the run on.
+    /// The root the last seal made, until a delivery or a slice moves the
+    /// run on.
     candidate: Option<NodeId>,
     meters: Option<crate::RunMeters>,
     ran: std::collections::BTreeMap<u32, u64>,
@@ -521,7 +521,6 @@ pub struct RemoteMachine {
 enum Stop {
     Parked {
         park: EncodedPayload,
-        candidate: Option<NodeId>,
     },
     Slice,
     Ended {
@@ -664,23 +663,14 @@ impl RemoteMachine {
                         .with(move |checkout| checkout.page_reply(id, reply))
                         .await?;
                 }
-                RunStep::Parked {
-                    park,
-                    seal,
-                    candidate,
-                    meters,
-                } => {
+                RunStep::Parked { park, seal, meters } => {
                     self.meters = Some(meters);
                     #[cfg(feature = "testing")]
                     self.service.observe_run_meter(&self.owner, meters, false);
                     #[cfg(not(feature = "testing"))]
                     let _ = meters;
                     self.admit(seal).await?;
-                    let candidate = match candidate {
-                        Some(root) => Some(Self::staged(&self.pages, root).await?),
-                        None => None,
-                    };
-                    return Ok(Stop::Parked { park, candidate });
+                    return Ok(Stop::Parked { park });
                 }
                 RunStep::Slice { .. } => return Ok(Stop::Slice),
                 RunStep::Ended { end, seal, meters } => {
@@ -823,10 +813,7 @@ impl DrivenMachine for RemoteMachine {
             .with(move |checkout| checkout.run(slice, cancel))
             .await?;
         match self.drive(step).await? {
-            Stop::Parked { park, candidate } => {
-                if candidate.is_some() {
-                    self.candidate = candidate;
-                }
+            Stop::Parked { park } => {
                 let park: ParkWire = wire::decode(PayloadKind::Park, &park).map_err(worker)?;
                 Ok(MachineStep::Parked(
                     MachinePark::try_from(park).map_err(worker)?,
@@ -861,8 +848,8 @@ impl DrivenMachine for RemoteMachine {
             .await
     }
 
-    /// The root the park sealed when its candidate crossed with it, and
-    /// otherwise the worker's answer to a seal.
+    /// The worker's answer to a seal, which the run keeps until it moves
+    /// on.
     async fn seal(&mut self) -> Result<NodeId, KernelFailure> {
         if let Some(root) = self.candidate {
             return Ok(root);

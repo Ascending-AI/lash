@@ -3,7 +3,7 @@
 //! in H at a fixed change, a cold continuation is flat in H at a fixed
 //! working set, a length read loads no payload, a cell that touches
 //! nothing loads and seals O(1) pages, the bounded retirement steps a
-//! park leaves are flat in H, a park's publication SQL is flat and within
+//! checkpoint leaves are flat in H, an interval's publication SQL is flat and within
 //! a fixed budget, and the host's page checks after the last gate grow at
 //! most linearly.
 use anyhow::{Context as _, Result, ensure};
@@ -182,18 +182,26 @@ impl Meter {
         if phase > 0
             && let Some(mark) = &state.mark
         {
-            // The interval's accepted owner parks, and the SQL their
-            // publishing transactions ran: background retirement and the
-            // observer's reads are other transactions.
-            let parks: Vec<_> = self
+            // The interval's accepted owner commits that park the cell or
+            // publish its checkpoint, and the SQL they ran: background
+            // retirement and the observer's reads are other transactions.
+            let owned: Vec<_> = self
                 .recorder
                 .transactions_since(mark.at_us)
                 .into_iter()
-                .filter(|tx| tx.ok && tx.actor == self.actor && super::turns::is_park(tx.label))
+                .filter(|tx| {
+                    tx.ok
+                        && tx.actor == self.actor
+                        && (super::turns::is_park(tx.label) || tx.exec_roots > 0)
+                })
                 .collect();
+            let parks = owned
+                .iter()
+                .filter(|tx| super::turns::is_park(tx.label))
+                .count();
             let published =
                 |field: fn(&lash_core_execution::facade_support::sql::Receipt) -> u64| {
-                    parks
+                    owned
                         .iter()
                         .filter_map(|tx| tx.sql.as_ref())
                         .map(field)
@@ -236,11 +244,11 @@ impl Meter {
                 0, // populated below from typed optional SQLite receipts
             ];
             let mut counts = available_counts(self.store, counts);
-            counts[PUBLISH_VM_STEPS] = parks
+            counts[PUBLISH_VM_STEPS] = owned
                 .iter()
                 .map(|tx| tx.sql.as_ref()?.sqlite_work.map(|work| work.vm_steps))
                 .sum();
-            let committed_parks = parks.len();
+            let committed_parks = parks;
             let row = Row {
                 scenario: self.scenario.clone(),
                 store: self.store,
@@ -287,7 +295,7 @@ struct Gate(tokio::sync::mpsc::Sender<usize>);
 impl StaticToolExecute for Gate {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let Some(phase) = call.args["phase"].as_f64().filter(|phase| {
-            phase.is_finite() && phase.fract() == 0.0 && (0.0..=3.0).contains(phase)
+            phase.is_finite() && phase.fract() == 0.0 && (0.0..=6.0).contains(phase)
         }) else {
             return lash::tools::ToolOutcome::err("invalid phase").into();
         };
@@ -319,23 +327,38 @@ fn source(scenario: &str, h: usize, cell: usize) -> String {
         "next-cell" => String::new(),
         _ => "kept[0] = -1; if (kept[0] !== -1) throw new Error(\"mutation\");".to_owned(),
     };
-    if scenario == "next-cell" {
-        if cell == 0 {
-            format!("{seed} await tools.heapGate({{phase:0}}); console.log(\"heap-seeded\");")
-        } else {
-            "await tools.heapGate({phase:1}); console.log(\"heap-ok\");".to_owned()
-        }
+    // A cell parks on its journal, not a seal (FIG-7585): a released
+    // worker re-runs the cell from the last checkpoint, which a cell's end
+    // takes. Each operation is a cell of its own between two gates, so the
+    // interval up to its second gate is the cold continuation (see
+    // [`checkpointed`]) and the interval after it the cell's checkpoint.
+    let steps = steps(scenario);
+    if cell == 0 {
+        format!("{seed} console.log(\"heap-seeded\");")
+    } else if cell <= steps {
+        let gate = 2 * (cell - 1);
+        format!(
+            "await tools.heapGate({{phase:{gate}}}); {operation} await tools.heapGate({{phase:{}}});",
+            gate + 1
+        )
     } else {
-        let steps = if scenario == "worker-resets" { 3 } else { 1 };
-        let mut body = format!("{seed} await tools.heapGate({{phase:0}});");
-        for phase in 1..=steps {
-            body.push_str(&format!(
-                "{operation} await tools.heapGate({{phase:{phase}}});"
-            ));
-        }
-        body.push_str("console.log(\"heap-ok\");");
-        body
+        format!(
+            "await tools.heapGate({{phase:{}}}); console.log(\"heap-ok\");",
+            2 * steps
+        )
     }
+}
+/// The operations `scenario` measures, each over two intervals.
+fn steps(scenario: &str) -> usize {
+    if scenario == "worker-resets" { 3 } else { 1 }
+}
+/// Whether the interval closed at gate `park` holds a cell's checkpoint:
+/// the re-run of the cell to its end, the checkpoint that end takes and
+/// the next cell's journaled park. The interval before it is the cold
+/// continuation: the re-run from the previous cell's checkpoint through
+/// the operation to the cell's journaled park, which seals nothing.
+fn checkpointed(park: usize) -> bool {
+    park % 2 == 0
 }
 fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
     let scenario = scenario.to_owned();
@@ -348,7 +371,7 @@ fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
                 let cells = request.messages.iter().filter(|message| message.role == LlmRole::Assistant)
                     .flat_map(|message| message.blocks.iter()).filter(|block| matches!(block,
                         lash_core::llm::types::LlmContentBlock::ToolCall { tool_name, .. } if tool_name == "execute_code")).count();
-                let total = if scenario == "next-cell" { 2 } else { 1 };
+                let total = steps(&scenario) + 2;
                 let text = if cells < total { source(&scenario, h, cells) } else {
                     let feedback = serde_json::to_string(&request.messages.iter().filter(|message| message.role == LlmRole::User).collect::<Vec<_>>()).unwrap_or_default();
                     if !feedback.contains("heap-ok") { eprintln!("heap feedback {scenario}/{h}: {feedback}"); }
@@ -493,7 +516,7 @@ async fn sample_with_stores(
     let handle = session
         .send(lash::TurnInput::text("measure retained state"))
         .await?;
-    let expected = if scenario == "worker-resets" { 3 } else { 1 };
+    let expected = 2 * steps(scenario);
     let result = tokio::time::timeout(LIMIT, async {
         let mut output = std::pin::pin!(handle.output());
         for phase in 0..=expected {
@@ -563,7 +586,7 @@ async fn sample_with_stores(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .rows
         .clone();
-    let expected = if scenario == "worker-resets" { 3 } else { 1 };
+    let expected = 2 * steps(scenario);
     ensure!(
         rows.len() == expected,
         "{scenario} measured {} of {expected} parks",
@@ -574,22 +597,23 @@ async fn sample_with_stores(
             row.committed_parks == 1,
             "{scenario}/{h} interval did not contain exactly one committed owner park: {row:?}"
         );
-        // Every interval steps the machine, crosses frames, commits and
-        // seals its park's changed pages; the rest may be zero.
+        // Every interval steps the machine, crosses frames and commits its
+        // park; a checkpoint interval also seals the cell's changed pages
+        // and leaves what they replaced to retire; the rest may be zero.
         let sqlite: &[&str] = if store == "sqlite" {
             &["sql_statements", "publish_vm_steps"]
         } else {
             &[]
         };
-        for &name in [
-            "vm_steps",
-            "ipc_messages",
-            "retirement_batches",
-            "pages_sealed",
-            "publish_statements",
-        ]
-        .iter()
-        .chain(sqlite)
+        let checkpoint: &[&str] = if checkpointed(row.park) {
+            &["retirement_batches", "pages_sealed"]
+        } else {
+            &[]
+        };
+        for &name in ["vm_steps", "ipc_messages", "publish_statements"]
+            .iter()
+            .chain(sqlite)
+            .chain(checkpoint)
         {
             let index = COUNTERS
                 .iter()
@@ -617,40 +641,50 @@ const FLAT: f64 = 0.25;
 /// The counted laws over each scenario's measured intervals (`park` 1),
 /// at two or more H. Counts, never wall time.
 fn laws(rows: &[Row]) -> Result<()> {
-    let interval = |scenario: &str| -> Vec<&Row> {
+    // A scenario's first operation: its continuation closes at gate 1,
+    // its checkpoint at gate 2.
+    let interval = |scenario: &str, park: usize| -> Vec<&Row> {
         rows.iter()
-            .filter(|row| row.scenario == scenario && row.park == 1)
+            .filter(|row| row.scenario == scenario && row.park == park)
             .collect()
     };
     // Every law is checked, and every one broken is named.
     let broken = std::cell::RefCell::new(Vec::new());
+    let flat_at =
+        |park: usize, scenario: &str, what: &str, counter: &dyn Fn(&Row) -> Option<u64>| {
+            if let Err(error) = flat_law(&interval(scenario, park), scenario, what, counter) {
+                broken.borrow_mut().push(error.to_string());
+            }
+        };
     let flat = |scenario: &str, what: &str, counter: &dyn Fn(&Row) -> Option<u64>| {
-        if let Err(error) = flat_law(&interval(scenario), scenario, what, counter) {
-            broken.borrow_mut().push(error.to_string());
-        }
+        flat_at(1, scenario, what, counter);
     };
-    // Checkpoint work at a fixed change D: the pages a park seals and the
-    // bytes it spools.
+    let at_checkpoint = |scenario: &str, what: &str, counter: &dyn Fn(&Row) -> Option<u64>| {
+        flat_at(2, scenario, what, counter);
+    };
+    // Checkpoint work at a fixed change D: the pages a cell's checkpoint
+    // seals and the bytes it spools.
     for scenario in [
         "list-update",
         "objects-update",
         "drop-subgraph",
         "worker-resets",
     ] {
-        flat(scenario, "checkpoint pages", &|row| {
+        at_checkpoint(scenario, "checkpoint pages", &|row| {
             row.counts[PAGES_SEALED]
         });
-        flat(scenario, "spooled bytes", &|row| row.counts[SPOOL_BYTES]);
+        at_checkpoint(scenario, "spooled bytes", &|row| row.counts[SPOOL_BYTES]);
     }
     // Reclamation at a fixed change D: the bounded steps that retire what
     // a park replaced, drained at each mark.
     for scenario in ["list-update", "objects-update", "worker-resets"] {
-        flat(scenario, "retirement steps a park leaves", &|row| {
+        at_checkpoint(scenario, "retirement steps a checkpoint leaves", &|row| {
             row.counts[RETIREMENT_BATCHES]
         });
     }
     // A cold continuation at a fixed working set W: a released worker
-    // resumes and loads only the pages the run touches.
+    // re-runs its cell from the last checkpoint and loads only the pages
+    // the run touches.
     for scenario in ["list-update", "objects-update", "worker-resets"] {
         flat(scenario, "pages a resume loads", &|row| {
             row.counts[PAGES_LOADED]
@@ -667,13 +701,16 @@ fn laws(rows: &[Row]) -> Result<()> {
             .map(|(loaded, sealed)| loaded + sealed)
     });
     // Publication follows the candidate's changed pages: the SQL engine
-    // work of the park's fenced owner transaction, which a walk of the
+    // work of the interval's fenced owner transactions, which a walk of the
     // committed closure (one statement, any rows) would grow with H.
     // SQLite's engine counts them; PostgreSQL's publication is measured,
     // not held to these two laws.
     let sqlite = rows.iter().all(|row| row.store == "sqlite");
     for scenario in SCENARIOS.into_iter().filter(|_| sqlite) {
-        flat(scenario, "publication SQL steps", &|row| {
+        flat(scenario, "publication SQL steps of a park", &|row| {
+            row.counts[PUBLISH_VM_STEPS]
+        });
+        at_checkpoint(scenario, "publication SQL steps of a checkpoint", &|row| {
             row.counts[PUBLISH_VM_STEPS]
         });
     }
@@ -1011,10 +1048,12 @@ mod tests {
         eprintln!("HEAP-METER: 12 populations in {:?}", started.elapsed());
         for row in &rows {
             eprintln!(
-                "HEAP-METER {} H={} park={} spool_bytes={} seed_ms={:.0} wall_ms={:.0}",
+                "HEAP-METER {} H={} park={} loaded={} sealed={} spool_bytes={} seed_ms={:.0} wall_ms={:.0}",
                 row.scenario,
                 row.h,
                 row.park,
+                super::counter_text(&row.counts[super::PAGES_LOADED]),
+                super::counter_text(&row.counts[super::PAGES_SEALED]),
                 super::counter_text(&row.counts[super::SPOOL_BYTES]),
                 row.seed_ns as f64 / 1e6,
                 row.wall_ns as f64 / 1e6

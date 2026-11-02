@@ -386,15 +386,14 @@ pub enum RunStep {
         id: PageExchangeId,
         request: PageRequest,
     },
-    /// No task is ready. On the persistent heap, `candidate` is the root
-    /// the park sealed, and `seal` the pages that crossed with the park:
-    /// the caller admits them and hands their grants to
-    /// [`Checkout::grant`].
+    /// No task is ready. On the persistent heap, `seal` is the pages that
+    /// crossed with the park: the caller admits them and hands their
+    /// grants to [`Checkout::grant`]. A checkpoint asks for its root with
+    /// [`Checkout::seal`].
     Parked {
         park: EncodedPayload,
         meters: RunMeters,
         seal: Option<SealBatch>,
-        candidate: Option<[u8; 32]>,
     },
     /// The slice is spent and a task is still ready.
     Slice { meters: RunMeters },
@@ -753,17 +752,8 @@ impl Checkout {
                 park,
                 meters,
                 seal,
-                candidate,
                 sites,
-            } => (
-                RunStep::Parked {
-                    park,
-                    meters,
-                    seal,
-                    candidate,
-                },
-                sites,
-            ),
+            } => (RunStep::Parked { park, meters, seal }, sites),
             WorkerMessage::Sealed { seal, candidate } => {
                 (RunStep::Sealed { seal, candidate }, None)
             }

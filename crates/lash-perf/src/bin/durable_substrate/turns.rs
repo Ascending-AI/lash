@@ -454,7 +454,8 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
             .filter(|t| {
                 t.actor == actor
                     && t.ok
-                    && (t.exec_roots > 0
+                    && (is_park(t.label)
+                        || t.exec_roots > 0
                         || t.by_kind
                             .contains_key(&lash_core_store::checkpoint_graph::NodeKind::CELL_END.0))
             })
