@@ -3,6 +3,8 @@
 //! physical recovery placement and composed-call authentication must join it
 //! before runtime consumers can elide operations under shared acceptance.
 use super::*;
+#[path = "calls.rs"]
+pub(crate) mod calls;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
     arena::{Arena, Registration},
@@ -213,6 +215,59 @@ impl Compiler<'_> {
         Ok(())
     }
     fn event(&mut self, event: &Event) -> Result<(), Refused> {
+        // Whole pure bodies use the same source algebra as scalar prefixes.
+        // Parameters are entry holdings, transferred from the caller, while
+        // the frame header exists from Enter through the final Leave.
+        if event.point.site == self.source.site && event.point.phase == Phase::Enter {
+            if !event.inputs.is_empty()
+                || event.output.is_some()
+                || !event.entities.is_empty()
+                || event.peak != Amount::fixed(Cost::FRAME)
+                || event.delta != Amount::fixed(Cost::FRAME)
+            {
+                return Err(Refused::Source);
+            }
+            let frame = Polynomial {
+                fixed: i128::from(Cost::FRAME),
+                terms: BTreeMap::new(),
+            };
+            self.peak(&frame)?;
+            self.delta.add(&frame, 1)?;
+            return Ok(());
+        }
+        if event.point.phase == Phase::Commit
+            && matches!(event.output, Some(Owner::ActiveDeparture(_)))
+            && let [input] = &*event.inputs
+        {
+            if event.peak != Amount::default()
+                || event.delta != Amount::default()
+                || !event.entities.is_empty()
+            {
+                return Err(Refused::Source);
+            }
+            let output = self.slot(event.output.as_ref().ok_or(Refused::Source)?)?;
+            let live = self.release(self.slot(input)?)?;
+            self.live.insert(output, live);
+            self.delta.add(&Polynomial::variable(live.price), 1)?;
+            return Ok(());
+        }
+        if event.point.site == self.source.site && event.point.phase == Phase::Fallthrough {
+            self.result(
+                &event.point,
+                event.output.as_ref().ok_or(Refused::Source)?,
+                Origin::Literal(Value::Null),
+            )?;
+            if event.peak != Amount::fixed(Cost::REFERENCE) || event.delta != event.peak {
+                return Err(Refused::Source);
+            }
+            // The canonical implicit return is null, whose holding is one reference.
+            self.peak(&Polynomial {
+                fixed: i128::from(Cost::REFERENCE),
+                terms: BTreeMap::new(),
+            })?;
+            self.delta.fixed += i128::from(Cost::REFERENCE);
+            return Ok(());
+        }
         let interval = self.source.compile_event(&event.point, ExitKind::Normal)?;
         if interval.acquisition(self.source).is_some() {
             let origin = match self.source.scalar_input(&self.slots, &event.point)? {
@@ -331,7 +386,27 @@ impl Compiler<'_> {
             }
             return Ok(());
         }
-        if interval.scope_release(self.source, &event.point.site) {
+        let root_leave = event.point.site == self.source.site
+            && event.point.phase == Phase::Leave
+            && event.inputs.is_empty()
+            && event.output.is_none()
+            && event.entities.is_empty()
+            && event.peak == Amount::default()
+            && event.delta
+                == Amount {
+                    fixed: -i128::from(Cost::FRAME),
+                    terms: vec![(
+                        Measure::Release(
+                            vec![
+                                Owner::Scope(self.source.site.clone()),
+                                Owner::Operands(self.source.site.clone()),
+                            ]
+                            .into(),
+                        ),
+                        -1,
+                    )],
+                };
+        if root_leave || interval.scope_release(self.source, &event.point.site) {
             // Group membership is derived from the immutable owner table. All
             // values in an entered scalar scope are known to this proof.
             let groups = [
@@ -353,6 +428,9 @@ impl Compiler<'_> {
                         self.vacant.insert(*slot);
                     }
                 }
+            }
+            if root_leave {
+                self.delta.fixed -= i128::from(Cost::FRAME);
             }
             return Ok(());
         }
@@ -383,6 +461,9 @@ impl Source {
         slots: &OwnerSlots,
         at: &Point,
     ) -> Result<ScalarInput, Refused> {
+        if at.site == self.site && at.phase == Phase::Fallthrough {
+            return Ok(ScalarInput::Literal(Value::Null));
+        }
         if at.phase != Phase::Commit
             || at.site.unit != self.site.unit
             || !at.site.path.starts_with(&self.site.path)
@@ -430,10 +511,18 @@ impl Source {
         self: &Arc<Self>,
         interval: Arc<CompiledInterval>,
     ) -> Result<ScalarRegion, Refused> {
+        self.compile_scalar(interval, false)
+    }
+
+    fn compile_scalar(
+        self: &Arc<Self>,
+        interval: Arc<CompiledInterval>,
+        body: bool,
+    ) -> Result<ScalarRegion, Refused> {
         self.verify()?;
         if interval.owner() != self.owner
             || interval.defining_source() != &self.site
-            || interval.exit() != ExitKind::Normal
+            || !(interval.exit() == ExitKind::Normal || body && interval.exit() == ExitKind::Return)
         {
             return Err(Refused::Source);
         }
@@ -450,6 +539,15 @@ impl Source {
             facts: 0,
             prices: 0,
         };
+        if body {
+            for name in &self.params {
+                let slot = compiler.slot(&Owner::Binding {
+                    declared: self.site.clone(),
+                    name: name.clone(),
+                })?;
+                compiler.entry(slot)?;
+            }
+        }
         for event in interval.events() {
             compiler.event(event)?;
         }

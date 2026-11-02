@@ -6,6 +6,7 @@ use lash_kernel_doc::{self as doc, Value};
 use lash_kernel_exec::{Op, OpRange, Weight};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::sync::Arc;
+pub(crate) mod composition;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TapeEvent {
@@ -25,6 +26,7 @@ struct Formula {
     at: Point,
     function: FunctionId,
     arguments: usize,
+    formals: usize,
     plan: compile::Plan,
 }
 
@@ -145,6 +147,7 @@ impl ChargeProgram {
                     expected.at != actual.at
                         || expected.function != actual.function
                         || expected.arguments != actual.arguments
+                        || expected.formals != actual.formals
                 })
         {
             return Err(Refused::Exit);
@@ -160,6 +163,10 @@ impl ChargeProgram {
             return Err(Refused::Facts);
         }
         Ok(())
+    }
+
+    pub(crate) fn first(&self) -> &Point {
+        &self.first
     }
 
     pub(crate) fn formulas(&self) -> impl Iterator<Item = (&Point, FunctionId, usize)> {
@@ -194,7 +201,10 @@ impl ChargeProgram {
             let mut complete = true;
             let fee = formula.plan.evaluate(|source, kind| {
                 let value = match source {
-                    compile::Source::Arg(at) => values.arguments.get(at),
+                    compile::Source::Arg(at) if at < formula.formals => {
+                        Some(values.arguments.get(at).unwrap_or(&Value::Absent))
+                    }
+                    compile::Source::Arg(_) => None,
                     compile::Source::Result => Some(&values.result),
                     compile::Source::Nothing => None,
                 };
@@ -244,6 +254,21 @@ fn point(site: &Site, op: Op) -> Point {
             _ => Phase::Commit,
         },
     }
+}
+
+fn source_point(stream: &compile::Stream, site: &Site, op: Op) -> Point {
+    if let Op::Nested { act, .. } = op
+        && stream
+            .nested
+            .get(act.ix())
+            .is_some_and(|entry| matches!(entry.kind, compile::NestedKind::Call(_)))
+    {
+        return Point {
+            site: site.clone(),
+            phase: super::Phase::Enter,
+        };
+    }
+    point(site, op)
 }
 
 /// A prefix may begin only at the original unpaid charge fence and end at
@@ -310,7 +335,7 @@ fn first(
             .get(pc as usize)
             .and_then(Option::as_deref)
             .ok_or(Refused::Source)?;
-        return Ok(point(site, op));
+        return Ok(source_point(stream, site, op));
     }
     Err(Refused::Path)
 }
@@ -373,13 +398,18 @@ fn derive(
             };
             compile::islands::verify_close(Some(&close), stream).map_err(|_| Refused::Exit)?;
             open.push(close);
-            tape.extend(
-                stream
-                    .regions
-                    .events(region.0)
-                    .iter()
-                    .map(|event| TapeEvent::Fixed(event.weight)),
-            );
+            // Formula-metered bodies retain the original region identities,
+            // but their caller's completion formula covers these forms. The
+            // stream still contains expression events for cold recovery.
+            if code.charged {
+                tape.extend(
+                    stream
+                        .regions
+                        .events(region.0)
+                        .iter()
+                        .map(|event| TapeEvent::Fixed(event.weight)),
+                );
+            }
             continue;
         }
         let site = stream
@@ -394,7 +424,7 @@ fn derive(
                         exe,
                         LibId(lib.0),
                         args.len as usize,
-                        point(site, op),
+                        source_point(stream, site, op),
                         &mut formulas,
                         &mut tape,
                         code.charging,
@@ -402,24 +432,34 @@ fn derive(
                 }
                 Op::Nested { act, args } => {
                     let nested = stream.nested.get(act.ix()).ok_or(Refused::Source)?;
-                    let lib = nested.kind.operator_lib().ok_or(Refused::Source)?;
-                    native(
-                        exe,
-                        lib,
-                        args.len as usize,
-                        point(site, op),
-                        &mut formulas,
-                        &mut tape,
-                        code.charging,
-                    )?;
+                    if let Some(lib) = nested.kind.operator_lib() {
+                        native(
+                            exe,
+                            lib,
+                            args.len as usize,
+                            source_point(stream, site, op),
+                            &mut formulas,
+                            &mut tape,
+                            code.charging,
+                        )?;
+                    } else if !matches!(
+                        nested.kind,
+                        compile::NestedKind::Call(compile::NestedCallee::Declared(_))
+                    ) {
+                        return Err(Refused::Source);
+                    }
                 }
-                Op::Bind { .. } | Op::WriteLocal { .. } | Op::End | Op::Test { .. } => {}
+                Op::Bind { .. }
+                | Op::WriteLocal { .. }
+                | Op::End
+                | Op::Test { .. }
+                | Op::Return { .. } => {}
                 // A source error/effect, guest call, dynamic branch, copy-out
                 // or body formula needs its own authenticated composition.
                 _ => return Err(Refused::Source),
             }
             closes.push(Close {
-                at: point(site, op),
+                at: source_point(stream, site, op),
                 regions: std::mem::take(&mut open).into(),
                 tape: std::mem::take(&mut tape).into(),
             });
@@ -442,16 +482,21 @@ fn native(
 ) -> Result<(), Refused> {
     let lib = exe.lib(lib);
     let function = lib.specialization.function;
-    if lib.specialization.resource != super::CallSource::Native(function) {
+    if !matches!(lib.specialization.resource, super::CallSource::Native(f) | super::CallSource::Body(f) if f == function)
+        || !lib.body_arity(arguments)
+    {
         return Err(Refused::Source);
     }
     if charging {
-        let formula = lib.header.metering.formula().ok_or(Refused::Source)?;
+        let Some(formula) = lib.header.metering.formula() else {
+            return Ok(());
+        };
         tape.push(TapeEvent::Formula(formulas.len()));
         formulas.push(Formula {
             at,
             function,
             arguments,
+            formals: lib.arity,
             plan: compile::Plan::new(formula, &lib.header.signature.params),
         });
     }
