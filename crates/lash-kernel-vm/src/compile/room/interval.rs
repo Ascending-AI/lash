@@ -290,7 +290,7 @@ impl Source {
             }
             (None, Some(target)) if departing == ExitKind::Break => Some(
                 self.room
-                    .peak_extra
+                    .events
                     .get(&point(target, Phase::Commit))
                     .ok_or(Refused::Path)?
                     .point
@@ -440,7 +440,7 @@ impl Source {
                 };
                 Step::compile(
                     self,
-                    self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone(),
+                    self.room.events.get(at).ok_or(Refused::Path)?.clone(),
                     *exit,
                     &mut variables,
                 )
@@ -476,8 +476,8 @@ impl Source {
     ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
         if selected.len() > budget.min(4096)
-            || !self.room.peak_extra.contains_key(from)
-            || !self.room.peak_extra.contains_key(through)
+            || !self.room.events.contains_key(from)
+            || !self.room.events.contains_key(through)
             || !matches!(selected.last(), Some(Selection::Event { at, .. }) if at == through)
         {
             return Err(Refused::Path);
@@ -654,7 +654,7 @@ impl Source {
         if let Some(interval) = cache.get(&key) {
             return Ok(Arc::clone(interval));
         }
-        let mut event = self.room.peak_extra.get(at).ok_or(Refused::Path)?.clone();
+        let mut event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
         if let Some(from) = from {
             event.inputs = vec![operand(from)].into();
         }
@@ -757,7 +757,7 @@ impl evaluate::Events for Trace<'_> {
         {
             return Err(Refused::Exit);
         }
-        let event = self.source.room.peak_extra.get(at).ok_or(Refused::Path)?;
+        let event = self.source.room.events.get(at).ok_or(Refused::Path)?;
         self.events.push((event.clone(), *exit));
         self.cursor += 1;
         Ok(*exit)

@@ -15,8 +15,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
             }
             _ => None,
         }),
-        peak_extra: BTreeMap::new(),
-        retained_delta: BTreeMap::new(),
+        events: BTreeMap::new(),
         scratch: Box::new([]),
         exits: Box::new([]),
     };
@@ -393,8 +392,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     });
                 }
             }
-            room.peak_extra.insert(e.point.clone(), e.clone());
-            room.retained_delta.insert(e.point.clone(), e);
+            room.events.insert(e.point.clone(), e);
         }
     }
     room.scratch = scratch.into();

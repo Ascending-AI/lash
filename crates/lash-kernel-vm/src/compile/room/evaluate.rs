@@ -107,7 +107,7 @@ struct Prices<'a, E> {
 impl<E: Execution> Events for Prices<'_, E> {
     fn step(&mut self, site: &Site, phase: Phase) -> Result<ExitKind, Refused> {
         let at = point(site, phase);
-        let e = self.source.room.peak_extra.get(&at).ok_or(Refused::Path)?;
+        let e = self.source.room.events.get(&at).ok_or(Refused::Path)?;
         let facts = self.execution.event(&at).ok_or(Refused::Facts)?;
         for scratch in self.source.room.scratch.iter().filter(|s| s.at == at) {
             scratch
@@ -122,10 +122,7 @@ impl<E: Execution> Events for Prices<'_, E> {
         self.peak = self
             .peak
             .max(self.balance.checked_add(extra).ok_or(Refused::Facts)?);
-        let delta = self.source.room.retained_delta[&at]
-            .delta
-            .evaluate(facts.as_ref())
-            .ok_or(Refused::Facts)?;
+        let delta = e.delta.evaluate(facts.as_ref()).ok_or(Refused::Facts)?;
         self.balance = self.balance.checked_add(delta).ok_or(Refused::Facts)?;
         self.peak = self.peak.max(self.balance);
         if facts.raised() {

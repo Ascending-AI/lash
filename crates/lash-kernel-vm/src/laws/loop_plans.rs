@@ -723,9 +723,9 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     // list construction's 32-byte entity + 16-byte reference + 16-byte member.
     assert!(execution.visited.iter().any(|p| p.phase == Phase::Leave));
     source_rooms(|source| {
-        for point in source.room.peak_extra.keys() {
+        for point in source.room.events.keys() {
             let mut understated = source.room.clone();
-            understated.peak_extra.get_mut(point).unwrap().peak.fixed -= 1;
+            understated.events.get_mut(point).unwrap().peak.fixed -= 1;
             assert_eq!(source.verify_room(&understated), Err(Refused::Peak));
         }
     });
@@ -763,7 +763,7 @@ fn room_shared_binding_growth() {
         (declared, Phase::Commit, 32 + 16),
     ] {
         let point = Point { site, phase };
-        let event = &source.room.peak_extra[&point];
+        let event = &source.room.events[&point];
         assert_eq!(event.peak.fixed, expected, "{point:?}");
         assert_eq!(event.delta.fixed, expected, "{point:?}");
     }
@@ -850,12 +850,7 @@ fn source_room_retained_delta_has_source_owners() {
     let selected_count = std::cell::Cell::new(0);
     source_rooms(|source| {
         let slots = source.owner_slots().unwrap();
-        for selected in source
-            .room
-            .peak_extra
-            .values()
-            .flat_map(|event| &event.inputs)
-        {
+        for selected in source.room.events.values().flat_map(|event| &event.inputs) {
             if let Owner::Selected(at) = selected {
                 selected_count.set(selected_count.get() + 1);
                 assert_eq!(
@@ -884,21 +879,15 @@ fn source_room_retained_delta_has_source_owners() {
                 .len(),
             "source owner aliases occur once in a release group"
         );
-        for point in source.room.retained_delta.keys() {
+        for point in source.room.events.keys() {
             let mut understated = source.room.clone();
-            understated
-                .retained_delta
-                .get_mut(point)
-                .unwrap()
-                .delta
-                .fixed -= 1;
+            understated.events.get_mut(point).unwrap().delta.fixed -= 1;
             assert_eq!(source.verify_room(&understated), Err(Refused::Retained));
         }
-        for (point, event) in &source.room.peak_extra {
+        for (point, event) in &source.room.events {
             if !event.entities.is_empty() {
                 let mut unowned = source.room.clone();
-                unowned.peak_extra.get_mut(point).unwrap().entities = Box::new([]);
-                unowned.retained_delta.get_mut(point).unwrap().entities = Box::new([]);
+                unowned.events.get_mut(point).unwrap().entities = Box::new([]);
                 assert_eq!(source.verify_room(&unowned), Err(Refused::Retained));
             }
         }
@@ -946,7 +935,7 @@ fn source_room_exits_preserve_charge_prefix_and_holdings() {
             &slots,
             &source.owner_slots().unwrap()
         ));
-        for event in source.room.peak_extra.values() {
+        for event in source.room.events.values() {
             for owner in event
                 .inputs
                 .iter()

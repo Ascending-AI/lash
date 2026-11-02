@@ -255,8 +255,7 @@ pub(crate) struct Scratch {
 pub(crate) struct SourceRoom {
     pub(crate) source: Site,
     pub(crate) bulk: Option<bulk::Bulk>,
-    pub(crate) peak_extra: BTreeMap<Point, Event>,
-    pub(crate) retained_delta: BTreeMap<Point, Event>,
+    pub(crate) events: BTreeMap<Point, Event>,
     pub(crate) scratch: Box<[Scratch]>,
     pub(crate) exits: Box<[Exit]>,
 }
@@ -648,8 +647,7 @@ impl Source {
             room: SourceRoom {
                 source: site,
                 bulk: None,
-                peak_extra: BTreeMap::new(),
-                retained_delta: BTreeMap::new(),
+                events: BTreeMap::new(),
                 scratch: Box::new([]),
                 exits: Box::new([]),
             },
@@ -670,7 +668,7 @@ impl Source {
             .get_or_init(|| {
                 let mut owners = std::collections::BTreeSet::new();
                 owners.insert(Owner::ActiveDeparture(self.site.clone()));
-                for event in self.room.peak_extra.values() {
+                for event in self.room.events.values() {
                     if event.point.phase == Phase::Test && matches!(&event.output, Some(Owner::Binding { declared, .. }) if *declared == child(&event.point.site, 1)) {
                         owners.insert(Owner::LoopCursor(event.point.site.clone()));
                         owners.insert(Owner::LoopHeader(event.point.site.clone()));
@@ -861,7 +859,7 @@ impl Source {
             self.first_event(&child(at, 2))
         } else {
             self.room
-                .peak_extra
+                .events
                 .get(&point(at, Phase::Commit))
                 .map(|event| event.point.clone())
                 .ok_or(Refused::Path)
@@ -914,7 +912,7 @@ impl Source {
             return self.first_event(&child(at, 2));
         }
         self.room
-            .peak_extra
+            .events
             .get(&point(
                 at,
                 if continued {
@@ -956,7 +954,7 @@ impl Source {
         } else {
             let next = point(at, Phase::Commit);
             self.room
-                .peak_extra
+                .events
                 .contains_key(&next)
                 .then_some(next)
                 .ok_or(Refused::Path)
@@ -993,7 +991,7 @@ impl Source {
                         | doc::Stmt::Assign { .. }
                         | doc::Stmt::Remove { .. }
                 )
-        ) || !self.room.peak_extra.contains_key(&point(at, Phase::Commit))
+        ) || !self.room.events.contains_key(&point(at, Phase::Commit))
         {
             return Err(Refused::Path);
         }
@@ -1045,7 +1043,7 @@ impl Source {
         };
         let _ = evaluate::walk(self, &enclosing, &mut next, 32);
         let successor = next.next.ok_or(Refused::Facts)?;
-        if !next.passed || !self.room.peak_extra.contains_key(&successor) {
+        if !next.passed || !self.room.events.contains_key(&successor) {
             return Err(Refused::Path);
         }
         cache.insert(at.clone(), successor.clone());

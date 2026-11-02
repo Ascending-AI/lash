@@ -519,7 +519,7 @@ impl LoopPlan {
             || self
                 .source_room
                 .room_if_derived()
-                .is_some_and(|room| !room.peak_extra.contains_key(&at))
+                .is_some_and(|room| !room.events.contains_key(&at))
         {
             return Err(Refused::Room(super::super::room::Refused::Source));
         }

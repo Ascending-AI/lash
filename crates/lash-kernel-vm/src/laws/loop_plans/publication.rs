@@ -625,7 +625,7 @@ fn entered_nested_scope_publication() {
         site: source.site.child(1).child(0),
         phase: Phase::Commit,
     };
-    assert!(source.room.peak_extra.contains_key(&successor));
+    assert!(source.room.events.contains_key(&successor));
     let next = Position {
         unpaid: Some(successor),
         recovery: [2; 32],

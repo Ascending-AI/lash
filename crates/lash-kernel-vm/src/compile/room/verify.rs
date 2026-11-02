@@ -83,18 +83,13 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
         for phase in phases {
             let at = point(&site, phase);
             points.insert(at.clone());
-            let peak = room.peak_extra.get(&at).ok_or(Refused::Peak)?;
-            let delta = room.retained_delta.get(&at).ok_or(Refused::Retained)?;
+            let peak = room.events.get(&at).ok_or(Refused::Peak)?;
             let (fixed_peak, terms_peak, fixed_delta, terms_delta) =
                 obligations(source, &site, node, phase);
             check(&peak.peak, fixed_peak, terms_peak, Refused::Peak)?;
-            check(&delta.delta, fixed_delta, terms_delta, Refused::Retained)?;
-            if peak.point != delta.point
-                || peak.inputs != delta.inputs
-                || peak.output != delta.output
-                || peak.entities != delta.entities
-            {
-                return Err(Refused::Retained);
+            check(&peak.delta, fixed_delta, terms_delta, Refused::Retained)?;
+            if peak.point != at {
+                return Err(Refused::Source);
             }
             let mut expected_inputs = inputs(&site, node);
             let mut output = match node {
@@ -283,7 +278,7 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
             }
         }
     }
-    if points.len() != room.peak_extra.len() || points.len() != room.retained_delta.len() {
+    if points.len() != room.events.len() {
         return Err(Refused::Source);
     }
     if exit_count != room.exits.len() {
