@@ -120,6 +120,7 @@ fn evaluate(native: &NumericFunction, args: Args<'_>) -> Result<Option<Contract>
                 |left, right| {
                     crate::numeric::scalar_cmp(&numeric(args, left)?, &numeric(args, right)?)
                 },
+                |_| {},
             )?;
             return Contract::returned(args, &super::relation(native.operation, order)?).map(Some);
         }

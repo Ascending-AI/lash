@@ -115,7 +115,7 @@ pub fn compare(
     args: &Args<'_>,
     new: &mut Nursery<'_>,
 ) -> Result<Option<Ordering>, NativeError> {
-    compare_reading(a, b, args, |a, b| number_cmp(a, b, args, new))
+    compare_reading(a, b, args, |a, b| number_cmp(a, b, args, new), |_| {})
 }
 
 /// Ordering with an input-only numeric reader. The native caller retains its
@@ -126,6 +126,7 @@ pub(crate) fn compare_reading(
     b: &Value,
     args: &Args<'_>,
     mut numbers: impl FnMut(&Value, &Value) -> Result<Option<Ordering>, NativeError>,
+    mut scratch: impl FnMut(u64),
 ) -> Result<Option<Ordering>, NativeError> {
     if let Some(answer) = scalar_compare(a, b) {
         return answer;
@@ -139,6 +140,7 @@ pub(crate) fn compare_reading(
     // The list pairs being compared, innermost last.
     let mut active: Vec<(ArenaHandle, ArenaHandle)> = Vec::new();
     while let Some(step) = pending.pop() {
+        scratch((3 * (pending.len() + 1) + 2 * active.len()) as u64 * 16);
         #[cfg(test)]
         let _steps = crate::native_contract_laws::ordering_scratch(
             (3 * (pending.len() + 1) + 2 * active.len()) as u64 * 16,

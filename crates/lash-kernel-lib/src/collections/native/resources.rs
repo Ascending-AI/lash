@@ -267,6 +267,7 @@ pub(super) fn index_range(args: Args<'_>) -> Result<Contract, NativeError> {
 pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError> {
     use super::items;
     let mut scratch = 0_u64;
+    let mut comparison_scratch = 0_u64;
     let answer = (|| {
         let (listed @ Value::List(_), ranks @ Value::List(_), Value::Bool(descending)) = (
             nth(args.values(), 0)?,
@@ -308,51 +309,9 @@ pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError>
                     .ok_or_else(overflow)?;
             }
         }
-        if !utf16
-            && !ranks.iter().all(|rank| matches!(rank, Value::Int(_)))
-            && !ranks.iter().all(|rank| matches!(rank, Value::Text(_)))
-        {
-            fn nodes(
-                args: Args<'_>,
-                value: &Value,
-                seen: &mut Vec<lash_kernel_doc::arena::ArenaHandle>,
-            ) -> Result<u64, NativeError> {
-                let mut pending = vec![*value];
-                let mut count = 0_u64;
-                while let Some(value) = pending.pop() {
-                    count = count.checked_add(1).ok_or_else(overflow)?;
-                    if matches!(value, Value::List(_) | Value::Tuple(_)) {
-                        let id = value.handle().ok_or_else(overflow)?;
-                        if seen.contains(&id) {
-                            continue;
-                        }
-                        seen.push(id);
-                        for chunk in args.sequence(&value)?.ok_or_else(overflow)?.chunks() {
-                            pending.extend_from_slice(chunk?);
-                        }
-                    }
-                }
-                Ok(count)
-            }
-            let mut count = 0_u64;
-            let mut seen = vec![];
-            for rank in &ranks {
-                count = count
-                    .checked_add(nodes(args, rank, &mut seen)?)
-                    .ok_or_else(overflow)?;
-            }
-            // A structural comparison's active path contains no repeated pair
-            // of nodes. Each pair needs at most two operand slots, two member
-            // cursors, their continuation, and two active-identity slots.
-            scratch = scratch
-                .checked_add(
-                    count
-                        .checked_mul(count)
-                        .and_then(|n| n.checked_mul(8 * Cost::REFERENCE))
-                        .ok_or_else(overflow)?,
-                )
-                .ok_or_else(overflow)?;
-        }
+        // A structural comparison's active path contains no repeated pair
+        // of nodes. Each pair needs at most two operand slots, two member
+        // cursors, their continuation, and two active-identity slots.
         let mut sorted: Vec<_> = (0..listed.len()).collect();
         let mut out = vec![0; sorted.len()];
         let mut width = 1;
@@ -373,8 +332,12 @@ pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError>
                             &ranks[a], &ranks[b], &args,
                         )?)
                     } else {
-                        crate::comparison::compare_reading(&ranks[a], &ranks[b], &args, |a, b| {
-                            let numeric =
+                        crate::comparison::compare_reading(
+                            &ranks[a],
+                            &ranks[b],
+                            &args,
+                            |a, b| {
+                                let numeric =
                                 |value: &Value| -> Result<crate::numeric::Numeric, NativeError> {
                                     match value {
                                         Value::Float(f) => Ok(crate::numeric::Numeric::Float(*f)),
@@ -383,8 +346,10 @@ pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError>
                                         )),
                                     }
                                 };
-                            crate::numeric::scalar_cmp(&numeric(a)?, &numeric(b)?)
-                        })?
+                                crate::numeric::scalar_cmp(&numeric(a)?, &numeric(b)?)
+                            },
+                            |bytes| comparison_scratch = comparison_scratch.max(bytes),
+                        )?
                     };
                     if order == Some(std::cmp::Ordering::Less) {
                         out[dest] = after;
@@ -417,6 +382,11 @@ pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError>
         }
         Err(error) => return Err(error),
     };
-    crate::resource_contracts::scratch(&mut contract, scratch)?;
+    crate::resource_contracts::scratch(
+        &mut contract,
+        scratch
+            .checked_add(comparison_scratch)
+            .ok_or_else(overflow)?,
+    )?;
     Ok(contract)
 }
