@@ -245,8 +245,19 @@ impl OwnerPromptState {
         self.prepared.prior = Some(self.prepared.texts.texts.clone());
         self.prepared.pending = Vec::with_capacity(usize::BITS as usize);
         let opening_same = self.opening.as_ref().is_some_and(|prior| prior == opening);
+        // Equal items rebuilt under new identities keep their prepared
+        // leaves, as `retain_request` keeps equal messages: past the shared
+        // identities, a value comparison costs a scan, where re-preparing
+        // would re-encode and re-link the whole history on every call.
         let shared = if opening_same {
-            self.items.shared_prefix(items)
+            let shared = self.items.shared_prefix(items);
+            shared
+                + self
+                    .items
+                    .iter_from(shared)
+                    .zip(items.iter_from(shared))
+                    .take_while(|(before, now)| before == now)
+                    .count()
         } else {
             0
         };
