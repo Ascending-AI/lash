@@ -480,6 +480,22 @@ struct EventContext<'a> {
     arena: &'a Arena,
 }
 impl EventContext<'_> {
+    fn group_candidates(&self) -> Result<Vec<logical::Owner>, Refused> {
+        let mut owners = self
+            .ledger
+            .frame_owners(
+                self.occurrence.task,
+                self.occurrence.invocation,
+                self.heap.pages(),
+            )
+            .map_err(|_| Refused::Facts)?;
+        owners.extend(
+            self.earlier
+                .iter()
+                .flat_map(|event| event.outputs.iter().map(|(owner, _)| *owner)),
+        );
+        Ok(owners)
+    }
     /// Explicit source releases are checked against the journal's preceding
     /// edits. The canonical prepared program validates every edit and price.
     fn present(&self, owner: logical::Owner) -> Result<bool, Refused> {
@@ -681,16 +697,26 @@ impl EventContext<'_> {
         {
             writes.insert(owner);
         }
+        let candidates = std::cell::OnceCell::new();
         for measure in event.peak.terms.keys().chain(event.delta.terms.keys()) {
             match measure {
                 Measure::Release(owners) | Measure::NativeRelease { owners, .. } => {
                     for owner in owners {
                         if let Some(owner) = root(owner) {
                             reads.insert(owner);
-                        } else if let Some(group) =
-                            slots.group(owner, occurrence.task, occurrence.invocation)
-                        {
-                            reads.extend(group.iter().copied());
+                        } else {
+                            let candidates = candidates
+                                .get_or_init(|| self.group_candidates())
+                                .as_ref()
+                                .map_err(|error| *error)?;
+                            if let Some(group) = slots.select_group(
+                                owner,
+                                occurrence.task,
+                                occurrence.invocation,
+                                candidates,
+                            ) {
+                                reads.extend(group.iter().copied());
+                            }
                         }
                     }
                 }

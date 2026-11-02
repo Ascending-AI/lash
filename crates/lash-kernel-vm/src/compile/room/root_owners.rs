@@ -235,12 +235,6 @@ impl OwnerSlots {
         task: TaskId,
         invocation: u64,
     ) -> Option<Box<[Root]>> {
-        if !matches!(
-            group,
-            Owner::Scope(_) | Owner::Operands(_) | Owner::Departures(_) | Owner::Sessions(_)
-        ) {
-            return None;
-        }
         let stamp = |root: &Root| match *root {
             Root::Value { slot, .. } => Root::Value {
                 task,
@@ -249,17 +243,7 @@ impl OwnerSlots {
             },
             other => other,
         };
-        let mut groups = self
-            .groups
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(members) = groups.get(group) {
-            return Some(members.iter().map(stamp).collect());
-        }
-        let members = self.resolve_group(group);
-        let stamped = members.iter().map(stamp).collect();
-        groups.insert(group.clone(), members);
-        Some(stamped)
+        self.with_group(group, |members| members.iter().map(stamp).collect())
     }
     /// Members under one placeholder invocation. Every member is either a
     /// value slot of that invocation or a session root, so the order of the
@@ -293,5 +277,58 @@ impl OwnerSlots {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
+    }
+    pub(crate) fn select_group(
+        &self,
+        group: &Owner,
+        task: TaskId,
+        invocation: u64,
+        candidates: &[Root],
+    ) -> Option<Box<[Root]>> {
+        if matches!(group, Owner::Sessions(_)) {
+            return self.group(group, task, invocation);
+        }
+        self.with_group(group, |members| {
+            candidates
+                .iter()
+                .copied()
+                .filter(|owner| match owner {
+                    Root::Value {
+                        task: t,
+                        invocation: i,
+                        slot,
+                    } => {
+                        *t == task
+                            && *i == invocation
+                            && members
+                                .binary_search(&Root::Value {
+                                    task: TaskId::MAIN,
+                                    invocation: 0,
+                                    slot: *slot,
+                                })
+                                .is_ok()
+                    }
+                    _ => false,
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+    }
+    fn with_group<T>(&self, group: &Owner, read: impl FnOnce(&[Root]) -> T) -> Option<T> {
+        if !matches!(
+            group,
+            Owner::Scope(_) | Owner::Operands(_) | Owner::Departures(_) | Owner::Sessions(_)
+        ) {
+            return None;
+        }
+        let mut groups = self
+            .groups
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let members = groups
+            .entry(group.clone())
+            .or_insert_with(|| self.resolve_group(group));
+        Some(read(members))
     }
 }

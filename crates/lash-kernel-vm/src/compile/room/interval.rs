@@ -634,6 +634,22 @@ impl Source {
         {
             return Ok(Arc::clone(interval));
         }
+        let route: Box<[Selection]> = vec![Selection::Event {
+            at: at.clone(),
+            exit: selected,
+        }]
+        .into();
+        let key = from.map(|from| Key {
+            event: true,
+            join: Some(from.clone()),
+            at: at.site.clone(),
+            bounds: None,
+            selected: route.clone(),
+        });
+        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
+        if let Some(interval) = key.as_ref().and_then(|key| cache.get(key)) {
+            return Ok(Arc::clone(interval));
+        }
         if let Some(from) = from {
             if at.phase != Phase::Commit
                 || at.site.unit != self.site.unit
@@ -659,22 +675,6 @@ impl Source {
             .any(|exit| exit.point == *at && exit.kind == selected)
         {
             return Err(Refused::Exit);
-        }
-        let route: Box<[Selection]> = vec![Selection::Event {
-            at: at.clone(),
-            exit: selected,
-        }]
-        .into();
-        let key = from.map(|from| Key {
-            event: true,
-            join: Some(from.clone()),
-            at: at.site.clone(),
-            bounds: None,
-            selected: route.clone(),
-        });
-        let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
-        if let Some(interval) = key.as_ref().and_then(|key| cache.get(key)) {
-            return Ok(Arc::clone(interval));
         }
         let mut event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
         if let Some(from) = from {

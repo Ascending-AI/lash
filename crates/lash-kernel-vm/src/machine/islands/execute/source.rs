@@ -512,11 +512,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             room::Owner::Scope(source.site.clone()),
             room::Owner::Operands(source.site.clone()),
         ];
+        let live = ledger.frame_owners(self.task, activation.invocation.id(), self.heap.pages())?;
         let released = groups
             .iter()
             .flat_map(|selector| {
                 slots
-                    .group(selector, self.task, activation.invocation.id())
+                    .select_group(selector, self.task, activation.invocation.id(), &live)
                     .into_iter()
                     .flatten()
             })

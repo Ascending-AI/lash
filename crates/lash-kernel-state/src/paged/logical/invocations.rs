@@ -142,6 +142,14 @@ impl Ledger {
             access,
         )
     }
+    pub fn frame_owners(
+        &self,
+        task: TaskId,
+        invocation: u64,
+        access: &Access<'_>,
+    ) -> Result<Vec<Owner>, HeapFault> {
+        self.owners_under(codec::invocation_key(task, invocation), access)
+    }
     pub(super) fn invocation_operands(
         &self,
         invocation: &Invocation,
@@ -163,6 +171,13 @@ impl Ledger {
             return Err(invalid("logical invocation belongs to another ledger"));
         }
         self.invocation(invocation.task, invocation.id, access)?;
+        self.owners_under(prefix, access)
+    }
+    fn owners_under(
+        &self,
+        prefix: codec::Key,
+        access: &Access<'_>,
+    ) -> Result<Vec<Owner>, HeapFault> {
         let mut cursor = prefix.as_slice().to_vec();
         let mut owners = Vec::new();
         while let Some((key, record)) = self.state.execution.after(Some(&cursor), access)? {

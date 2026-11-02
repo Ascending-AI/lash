@@ -122,10 +122,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         ];
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        let live = ledger.frame_owners(self.task, activation.invocation.id(), self.heap.pages())?;
         let mut inputs = BTreeSet::new();
         for selector in &groups {
             let owners = slots
-                .group(selector, self.task, activation.invocation.id())
+                .select_group(selector, self.task, activation.invocation.id(), &live)
                 .ok_or_else(|| malformed("nested scope has no canonical owner group"))?;
             for owner in owners {
                 if ledger.holding(owner, self.heap.pages())?.is_some() {

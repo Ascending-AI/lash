@@ -128,6 +128,7 @@ impl ReturnInput<'_> {
         let mut events = vec![departing];
         let mut facts = LeafExecution([(at.clone(), commit)].into());
         let mut leave = None;
+        let live = ledger.frame_owners(self.task, self.invocation.id(), heap.pages())?;
         for event in interval.events().skip(1) {
             if leave.is_some() {
                 return Err(malformed("return suffix has another source departure"));
@@ -190,7 +191,7 @@ impl ReturnInput<'_> {
             let mut closing = std::collections::BTreeSet::new();
             for group in &groups {
                 for owner in slots
-                    .group(group, self.task, self.invocation.id())
+                    .select_group(group, self.task, self.invocation.id(), &live)
                     .ok_or_else(|| malformed("return scope has no canonical owner group"))?
                 {
                     if !retired.contains(&owner) && ledger.holding(owner, heap.pages())?.is_some() {

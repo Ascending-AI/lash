@@ -194,9 +194,10 @@ impl KernelMachine {
         let mut inputs = BTreeSet::new();
         let store = self.logical.ledger();
         let ledger = store.borrow();
+        let live = ledger.frame_owners(task_id, invocation, self.heap.pages())?;
         for group in &groups {
             for owner in owners
-                .group(group, task_id, invocation)
+                .select_group(group, task_id, invocation, &live)
                 .ok_or_else(|| malformed("scope has no canonical owner group"))?
             {
                 if ledger.holding(owner, self.heap.pages())?.is_some() {
