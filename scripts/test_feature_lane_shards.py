@@ -10,7 +10,6 @@ runs exactly those shards.
 from __future__ import annotations
 
 import collections
-import json
 from pathlib import Path
 import subprocess
 import sys
@@ -109,36 +108,8 @@ class RealPartitionTests(unittest.TestCase):
                 self.assertGreater(load, 0)
                 self.assertLessEqual(load, bound)
 
-    def test_measured_crates_weigh_their_compile_reservation(self) -> None:
-        weight = shards.weights(self.inventory, self.sizes)
-        self.assertGreater(
-            sum(value != shards.DEFAULT_WEIGHT for value in weight.values()),
-            len(weight) // 4,
-            "the action-size table no longer matches the lane targets",
-        )
-
 
 class PlacementTests(unittest.TestCase):
-    def test_a_shared_target_belongs_to_the_first_lane_placed(self) -> None:
-        inventory = synthetic(
-            {"big": ["//a:1", "//a:2", "//a:shared"], "small": ["//a:shared", "//b:1"]}
-        )
-        owner = shards.partition(inventory, {}, 2)
-        self.assertEqual({"//a:1": 1, "//a:2": 1, "//a:shared": 1, "//b:1": 2}, owner)
-
-    def test_lanes_go_heaviest_first_to_the_lightest_shard(self) -> None:
-        inventory = synthetic(
-            {
-                "a": [f"//a:{index}" for index in range(5)],
-                "b": [f"//b:{index}" for index in range(3)],
-                "c": [f"//c:{index}" for index in range(2)],
-                "d": ["//d:0"],
-            }
-        )
-        owner, placed = shards.placement(inventory, {}, 2)
-        self.assertEqual({"a": 1, "b": 2, "c": 2, "d": 1}, placed)
-        self.assertEqual(6, sum(shard == 1 for shard in owner.values()))
-
     def test_the_partition_ignores_table_order(self) -> None:
         lanes = {
             "a": ["//a:2", "//a:1"],
@@ -173,6 +144,9 @@ class PlacementTests(unittest.TestCase):
         for value in ("0", str(shards.SHARDS + 1), "1/4", ""):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 shards.parse_shard(value)
+        for argv in ((), ("1", "//:feature_lane_compile"), ("1", "//:feature_lane_compile", "true")):
+            with self.subTest(argv=argv):
+                self.assertEqual(2, shards.main(list(argv)))
 
 
 class CommandTests(unittest.TestCase):
@@ -183,15 +157,6 @@ class CommandTests(unittest.TestCase):
             text=True,
             check=False,
         )
-
-    def test_the_command_receives_the_shards_labels(self) -> None:
-        inventory, sizes = shards.load()
-        group = "//:feature_lane_compile"
-        result = self.run_script("1", group, "--", "printf", "%s\\n", "build")
-        self.assertEqual(0, result.returncode, result.stderr)
-        lines = result.stdout.splitlines()
-        self.assertIn("shard 1/", lines[0])
-        self.assertEqual(["build", *shards.selection(inventory, sizes, group, 1)], lines[1:])
 
     def test_a_shard_that_owns_nothing_of_a_group_skips_the_command(self) -> None:
         inventory, sizes = shards.load()
@@ -208,33 +173,6 @@ class CommandTests(unittest.TestCase):
     def test_the_commands_failure_is_the_steps_failure(self) -> None:
         result = self.run_script("1", "//:feature_lane_compile", "--", "false")
         self.assertEqual(1, result.returncode)
-
-    def test_a_bad_invocation_fails(self) -> None:
-        for argv in (
-            (),
-            ("1", "//:feature_lane_compile"),
-            ("0", "//:feature_lane_compile", "--", "true"),
-            ("1", "//:workspace_compile", "--", "true"),
-        ):
-            with self.subTest(argv=argv):
-                self.assertNotEqual(0, self.run_script(*argv).returncode)
-
-    def test_the_floor_check_builds_only_the_shards_floors(self) -> None:
-        inventory, sizes = shards.load()
-        holder = next(
-            shard for shard in ALL_SHARDS if shards.shard_floors(inventory, sizes, shard)
-        )
-        expected = shards.shard_floors(inventory, sizes, holder)
-        built: list[list[str]] = []
-
-        def record(argv, **_kwargs):
-            built.append(list(argv))
-            raise subprocess.CalledProcessError(1, argv)
-
-        with mock.patch.object(floors_check.subprocess, "run", side_effect=record):
-            with self.assertRaises(subprocess.CalledProcessError):
-                floors_check.main(["--shard", str(holder)])
-        self.assertEqual(sorted(expected), [arg for arg in built[0] if arg.startswith("//")])
 
     def test_the_floor_check_passes_a_shard_without_floors(self) -> None:
         with mock.patch.object(

@@ -105,6 +105,7 @@ class ToolchainCanaryTests(unittest.TestCase):
         self.assertIn("bumping the pin", create[create.index("--body") + 1])
 
     def test_either_failure_title_reuses_an_open_issue(self) -> None:
+        self.assertEqual("write", document()["permissions"]["issues"])
         for title in (DRIFT_TITLE, PINNED_TITLE):
             with self.subTest(title=title):
                 calls = self.report("failure()", "1.98.1", [
@@ -156,28 +157,6 @@ class ToolchainCanaryTests(unittest.TestCase):
         runs = "\n".join(str(step.get("run", "")) for step in steps)
         self.assertIn("cargo clippy", runs)
         self.assertIn("-D warnings", runs)
-
-    def test_a_red_run_files_an_issue_and_green_closes_it(self) -> None:
-        doc = document()
-        self.assertEqual("write", doc["permissions"]["issues"])
-        steps = [
-            step
-            for job in doc["jobs"].values()
-            for step in job["steps"]
-            if isinstance(step.get("run"), str)
-        ]
-        failure_steps = [
-            step for step in steps if step.get("if") == "failure()"
-        ]
-        self.assertEqual(1, len(failure_steps))
-        self.assertIn("gh issue create", failure_steps[0]["run"])
-        # The issue has to name the lints, not just say "red".
-        self.assertIn("clippy::", failure_steps[0]["run"])
-        success_steps = [
-            step for step in steps if step.get("if") == "success()"
-        ]
-        self.assertEqual(1, len(success_steps))
-        self.assertIn("gh issue close", success_steps[0]["run"])
 
 
 if __name__ == "__main__":

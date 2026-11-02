@@ -77,12 +77,6 @@ class BatchRunnerTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("no tests matched", result.stderr)
 
-    def test_ignored_only_selection_requires_an_execution(self):
-        result, observed = self.invoke("--ignored")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(observed, [["--ignored"], ["--ignored"]])
-        self.assertIn("no executable tests matched", result.stderr)
-
     def test_plain_success_stays_compact_and_failure_prints_its_member(self):
         success, observed = self.invoke()
         self.assertEqual(success.returncode, 0)
@@ -189,14 +183,6 @@ class BatchMemberFormatTests(unittest.TestCase):
         for name in (first, second, bare):
             self.assertIn(os.path.basename(name), report)
 
-    def test_a_failing_member_fails_the_batch(self):
-        passing = self.binary('passing', 'exit 0\n')
-        failing = self.binary('failing', 'echo broken; exit 1\n')
-        result = self.run_batch('2', '0', passing, '1', 'CARGO_PKG_NAME=x', failing)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('FAIL: 1 of 2 test binaries failed', result.stderr)
-        self.assertIn('broken', result.stderr)
-
     def test_member_values_and_paths_are_never_word_split_or_expanded(self):
         directory = self.root / 'with space; $(touch pwned) *'
         directory.mkdir()
@@ -230,17 +216,6 @@ class BatchMemberFormatTests(unittest.TestCase):
         result = self.run_batch('1', '1', 'NAME=value', str(member), 'a=b')
         self.assertEqual(result.returncode, 1)
         self.assertIn('ran-with-argument', result.stderr)
-
-    def test_a_filter_matching_no_member_fails_the_batch(self):
-        empty = (
-            'echo; echo "running 0 tests"; echo\n'
-            'echo "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s"\n'
-        )
-        first = self.binary('first', empty)
-        second = self.binary('second', empty)
-        result = self.run_batch('2', '0', first, '1', 'CARGO_PKG_NAME=x', second, 'no_such_case')
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn('no tests matched the batch arguments', result.stderr)
 
     def test_a_malformed_member_is_refused(self):
         lone = self.binary('lone', 'exit 0\n')

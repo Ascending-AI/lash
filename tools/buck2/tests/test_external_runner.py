@@ -1053,6 +1053,12 @@ class ShardTests(unittest.TestCase):
         ])
         self.assertEqual(arguments.count('--exact'), 1)
         self.assertEqual(arguments.count('--skip'), 4)
+        # More shards than runnable cases: empty shards stay lossless.
+        wide = self.shards(8)
+        flattened = [name for shard in wide for name in shard]
+        self.assertEqual(sorted(flattened), self.unsharded())
+        self.assertEqual(len(flattened), len(set(flattened)))
+        self.assertGreaterEqual(sum(not shard for shard in wide), 3)
 
     def test_the_callers_filters_select_what_they_select_unsharded(self):
         for arguments in (
@@ -1062,6 +1068,7 @@ class ShardTests(unittest.TestCase):
             ['--skip=matrix'],
             ['--skip', 'matrix_always_replay', '--exact'],
             ['--ignored'],
+            ['--include-ignored'],
             ['--ignored', 'other::law'],
             ['-Z', 'unstable-options', '--report-time', 'law'],
             ['no_such_case'],

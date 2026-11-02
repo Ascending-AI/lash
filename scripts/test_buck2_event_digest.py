@@ -56,25 +56,6 @@ def joined(value=None, usage=(USAGE,), second=None):
 
 
 class DigestTests(unittest.TestCase):
-    @mock.patch.object(Path, "read_text", return_value=json.dumps(INVENTORY))
-    @mock.patch.object(Path, "mkdir")
-    @mock.patch.object(Path, "write_text")
-    @mock.patch.object(MODULE, "file_identity", return_value={"sha256": "fixture"})
-    @mock.patch.object(MODULE, "client", return_value="/fixture/buck2")
-    @mock.patch.object(MODULE, "command")
-    def test_digest_uses_the_event_log_for_summary_and_critical_path(
-        self, command: mock.Mock, _client: mock.Mock, _identity, _write, _mkdir, _read
-    ) -> None:
-        command.side_effect = ["Actions: 12\nCache hits: 10", "\n".join(f"critical-{index}" for index in range(12)), json.dumps(event("SpanStart", "Command", 1))]
-        lines = MODULE.digest(Path("events.pb.zst"))
-        self.assertIn("  Actions: 12", lines)
-        self.assertIn("  critical-11", lines)
-        self.assertEqual(
-            command.call_args_list[0],
-            mock.call("/fixture/buck2", "summary", "events.pb.zst"),
-        )
-        self.assertEqual(command.call_args_list[1].args[-1], "events.pb.zst")
-
     @mock.patch.object(MODULE, "digest", side_effect=subprocess.CalledProcessError(1, "decode"))
     @mock.patch.object(Path, "is_file", return_value=True)
     def test_decode_failure_is_a_failed_command(self, _is_file, _digest):

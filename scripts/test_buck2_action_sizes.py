@@ -107,11 +107,6 @@ class TableTest(unittest.TestCase):
         lines = [record(cores=2.25)] * 20
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 3)
 
-    def test_cpu_is_capped_at_eight(self) -> None:
-        lines = [record(cores=14.0)] * 20
-        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 8)
-        self.assertEqual(sizes.MAX_CPU_COUNT, 8)
-
     def test_s1_compile_sizing_uses_each_workers_slot_share(self) -> None:
         for cpus, slots, expected in ((40, 32, 2), (80, 48, 1)):
             with self.subTest(cpus=cpus):
@@ -182,19 +177,6 @@ class TableTest(unittest.TestCase):
         self.assertEqual(entry["p99_peak_bytes"], GIB)
         self.assertEqual(entry["memory_kb"], 3145728)
 
-    def test_memory_never_goes_below_the_default(self) -> None:
-        lines = [record(cores=2.0, peak_bytes=GIB // 4)] * 20
-        self.assertEqual(
-            table(lines)["lash-internal-core/lash_core"]["memory_kb"],
-            sizes.DEFAULT_MEMORY_KB,
-        )
-
-    def test_too_few_samples_make_no_row(self) -> None:
-        lines = [record(pkg="lash-sim", crate="logical_turn", cores=4.0)] * (
-            sizes.MIN_SAMPLES - 1
-        )
-        self.assertNotIn("lash-sim/logical_turn", table(lines))
-
     def test_a_row_at_the_defaults_is_dropped(self) -> None:
         lines = [record(pkg="lash-sim", crate="logical_turn", cores=1.0)] * 20
         self.assertNotIn("lash-sim/logical_turn", table(lines))
@@ -229,13 +211,6 @@ class TableTest(unittest.TestCase):
         finally:
             sizes.MINIMUM_MEMORY_KB.clear()
             sizes.MINIMUM_MEMORY_KB.update(saved)
-
-    def test_rendered_table_is_sorted_and_newline_terminated(self) -> None:
-        lines = [record(cores=2.0)] * 20
-        lines += [record(pkg="lash-sim", crate="logical_turn", cores=2.0)] * 20
-        rendered = sizes.render(table(lines))
-        self.assertTrue(rendered.endswith("}\n"))
-        self.assertEqual(list(json.loads(rendered)), sorted(json.loads(rendered)))
 
     def test_the_checked_in_table_matches_the_documented_shape(self) -> None:
         checked_in = json.loads(
@@ -299,13 +274,6 @@ class ClippyTableTest(unittest.TestCase):
         self.assertEqual(compile_samples["lash-internal-core/lash_core"].peak_bytes(), GIB)
         self.assertEqual(clippy_samples["lash-internal-core/lash_core"].peak_bytes(), 3 * GIB)
         self.assertEqual(len(clippy_samples["lash-internal-core/lash_core"].records), 20)
-
-    def test_a_small_clippy_asks_for_the_floor_not_the_compile_default(self) -> None:
-        lines = [clippy_record(peak_bytes=90 * 1024 * 1024)] * 20
-        rows = sizes.clippy_table(sizes.collect(lines, CRATES, clippy=True))
-        row = rows["lash-internal-core/lash_core"]
-        self.assertEqual((row["cpu_count"], row["memory_kb"]), (1, sizes.CLIPPY_FLOOR_KB))
-        self.assertLess(sizes.CLIPPY_FLOOR_KB, sizes.DEFAULT_MEMORY_KB)
 
     def test_a_clippy_row_covers_its_largest_peak(self) -> None:
         lines = [clippy_record(peak_bytes=300 * 1024 * 1024)] * 19

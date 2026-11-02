@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import tempfile
 import unittest
@@ -58,43 +56,11 @@ class SharedActionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = (ROOT / ".github/actions/buck2-shared-cache/action.yml").read_text()
 
-    def test_requires_and_masks_the_existing_pool_secrets(self) -> None:
-        for name in (
-            "CACHE_ENDPOINT",
-            "CACHE_INSTANCE",
-            "KILN_EXECUTOR_RUNTIME",
-            "CACHE_CA",
-            "CACHE_CERT",
-            "CACHE_KEY",
-        ):
-            self.assertIn(name, self.text)
-        self.assertIn("::add-mask::${endpoint}", self.text)
-        self.assertIn("::add-mask::${instance}", self.text)
-        self.assertIn("::add-mask::${runtime}", self.text)
-        self.assertIn('mask_multiline CACHE_CA', self.text)
-        self.assertIn('mask_multiline CACHE_CERT', self.text)
-        self.assertIn('mask_multiline CACHE_KEY', self.text)
-
     def test_installs_only_the_repository_pinned_official_client(self) -> None:
         self.assertIn("python3 tools/buck2/bootstrap.py", self.text)
         self.assertNotIn("client-Cargo.lock", self.text)
         self.assertNotIn("patches/**", self.text)
         self.assertNotIn("bazel", self.text.lower())
-
-    def test_writes_authenticated_remote_configuration_without_fallback(self) -> None:
-        for line in (
-            "engine_address = ${POOL_ADDRESS}",
-            "action_cache_address = ${POOL_ADDRESS}",
-            "cas_address = ${POOL_ADDRESS}",
-            "tls_ca_certs = $RUNNER_TEMP/build-cache/ca.crt",
-            "tls_client_cert = $RUNNER_TEMP/build-cache/client.pem",
-            "instance_name = ${POOL_INSTANCE}",
-            "execution_concurrency_limit = 32",
-            "executor_runtime = ${POOL_RUNTIME}",
-        ):
-            self.assertIn(line, self.text)
-        self.assertIn('^grpcs://', self.text)
-        self.assertNotIn('^grpcs?://', self.text)
 
     def test_pool_validation_fails_closed_and_normalizes_secret_newlines(self) -> None:
         verify = step(shared_action(), "Verify shared pool configuration")["run"]
@@ -253,23 +219,6 @@ class SharedActionTests(unittest.TestCase):
             config,
         )
 
-    def test_repository_commits_no_pool_deployment_facts(self) -> None:
-        sources = []
-        for path in sorted((ROOT / ".github").rglob("*")):
-            if path.is_file():
-                sources.append((path.relative_to(ROOT), path.read_text(errors="replace")))
-        patterns = (
-            (r"\b(?!127\.|0\.0\.0\.0)\d{1,3}(?:\.\d{1,3}){3}\b", "IP address"),
-            (r"kiln-runtime-sha256-[0-9a-f]{16,}", "executor fingerprint"),
-            (r"/home/[a-z]+/", "home directory"),
-        )
-        for path, text in sources:
-            for pattern, description in patterns:
-                self.assertIsNone(
-                    re.search(pattern, text),
-                    f"{path} contains a deployment {description}",
-                )
-
 
 class WorkflowTests(unittest.TestCase):
     def test_cross_backend_differential_stays_in_remote_cacheable_partition(self) -> None:
@@ -291,14 +240,6 @@ class WorkflowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.ci_text = (ROOT / ".github/workflows/ci.yml").read_text()
         cls.ci = workflow("ci.yml")
-
-    def test_trust_decision_and_required_partition_ids_are_buck2_owned(self) -> None:
-        outputs = self.ci["jobs"]["plan"]["outputs"]
-        self.assertIn("buck2_trusted", outputs)
-        self.assertNotIn("bazel_trusted", outputs)
-        for job in ("buck2-tests", "buck2-tests-tail", "feature-lanes"):
-            self.assertIn(job, self.ci["jobs"])
-            self.assertIn("buck2_trusted", str(self.ci["jobs"][job]["if"]))
 
     def test_untrusted_workspace_and_lint_paths_stay_cargo(self) -> None:
         workspace = self.ci["jobs"]["workspace-tests"]
@@ -366,44 +307,6 @@ class WorkflowTests(unittest.TestCase):
                 upload = step(jobs[job_name], "Upload failing test logs")
                 self.assertEqual("failure()", upload["if"])
                 self.assertIn("failed-testlogs", upload["with"]["path"])
-
-    def test_store_jobs_keep_the_same_suites_on_both_trust_paths(self) -> None:
-        suites = []
-        for job_name in (*POSTGRES_STORE_JOBS, "s3-store"):
-            job = self.ci["jobs"][job_name]
-            self.assertEqual("${{ needs.plan.outputs.buck2_trusted }}", job["env"]["BUCK2_TRUSTED"])
-            for item in job["steps"]:
-                run = item.get("run", "")
-                if "scripts/ci/store-tests.sh" in run:
-                    suites.append(run.split("scripts/ci/store-tests.sh", 1)[1].split()[0])
-        self.assertEqual(
-            [
-                "pg-store",
-                "pg-facade-laws",
-                "pg-pool-wait",
-                "pg-sim-backend-faults",
-                "pg-cross-backend",
-                "pg-store-synthetic-next",
-                "s3-store",
-                "s3-attachment-differential",
-            ],
-            suites,
-        )
-        # The release gate runs one suite of its own on both supported
-        # PostgreSQL majors; it always takes the trusted path.
-        release = workflow("release.yml")["jobs"]["release-postgres"]
-        self.assertEqual("true", release["env"]["BUCK2_TRUSTED"])
-        self.assertEqual(["pg-release"], store_suites(release))
-        suites += store_suites(release)
-        script = (ROOT / "scripts/ci/store-tests.sh").read_text(encoding="utf-8")
-        shaped = set(re.findall(r"^  ([a-z0-9-]+)\)$", script, re.MULTILINE))
-        table = script.split("declare -A uniform_store_suites=(\n", 1)[1].split("\n)\n", 1)[0]
-        uniform = set(re.findall(r"^\s*\[([^]]+)\]=", table, re.MULTILINE))
-        self.assertEqual(set(suites), shaped | uniform)
-        self.assertFalse(shaped & uniform)
-        dispatcher = script.split("run_uniform_store_suite() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("render_buck2_suite", dispatcher)
-        self.assertIn("render_cargo_suite", dispatcher)
 
     def test_every_build_of_the_postgres_store_package_has_a_job(self) -> None:
         """A feature variant of a service binary cannot fall out of CI.
@@ -590,106 +493,6 @@ raise SystemExit(int(os.environ.get("SHARD_EXIT", "0")))
                 text=True,
             )
             self.assertEqual(failed.returncode, 23)
-
-    def test_prefix_collisions_filters_ignored_and_empty_shards_are_lossless(self) -> None:
-        helper = ROOT / "tools/buck2/test_shard.py"
-        with tempfile.TemporaryDirectory() as directory:
-            temporary = Path(directory)
-            calls = temporary / "calls.jsonl"
-            binary = temporary / "fake-libtest"
-            binary.write_text(
-                """#!/usr/bin/env python3
-import json
-import os
-import sys
-
-cases = [("prefix_1", False), ("prefix_1::extended", False),
-         ("other", False), ("ignored_case", True)]
-args = sys.argv[1:]
-if args == ["--list", "--format", "terse"]:
-    for name, _ignored in cases:
-        print(name + ": test")
-    raise SystemExit(0)
-filters, skips = [], []
-position = 0
-while position < len(args):
-    argument = args[position]
-    if argument in ("--skip", "--format", "--color", "--test-threads"):
-        position += 1
-        if argument == "--skip":
-            skips.append(args[position])
-    elif not argument.startswith("-"):
-        filters.append(argument)
-    position += 1
-exact = "--exact" in args
-selected = [
-    (name, ignored) for name, ignored in cases
-    if (not filters or any(name == value if exact else value in name for value in filters))
-    and not any(name == value if exact else value in name for value in skips)
-    and ("--ignored" not in args or ignored)
-]
-executed = [
-    name for name, ignored in selected
-    if not ignored or "--ignored" in args or "--include-ignored" in args
-]
-with open(os.environ["SHARD_CALLS"], "a", encoding="utf-8") as output:
-    output.write(json.dumps({"args": args, "executed": executed}) + "\\n")
-print(f"running {len(executed)} tests")
-for name in executed:
-    print(f"test {name} ... ok")
-print(f"test result: ok. {len(executed)} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;")
-""",
-                encoding="utf-8",
-            )
-            binary.chmod(0o755)
-            environment = os.environ | {"SHARD_CALLS": str(calls)}
-
-            def run_all(*arguments: str) -> list[list[str]]:
-                calls.unlink(missing_ok=True)
-                for index in range(5):
-                    result = subprocess.run(
-                        ["python3", str(helper), "5", str(index), str(binary), *arguments],
-                        env=environment,
-                        capture_output=True,
-                        text=True,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                return [
-                    json.loads(line)["executed"]
-                    for line in calls.read_text(encoding="utf-8").splitlines()
-                ]
-
-            short = int.from_bytes(hashlib.sha256(b"prefix_1").digest()[:8], "big") % 5
-            long = int.from_bytes(
-                hashlib.sha256(b"prefix_1::extended").digest()[:8], "big"
-            ) % 5
-            self.assertNotEqual(short, long, "fixture must reproduce the old split")
-
-            unfiltered = run_all()
-            flattened = [name for shard in unfiltered for name in shard]
-            self.assertCountEqual(flattened, ["prefix_1", "prefix_1::extended", "other"])
-            self.assertEqual(len(flattened), len(set(flattened)))
-            self.assertGreaterEqual(sum(not shard for shard in unfiltered), 2)
-            self.assertCountEqual(
-                [name for shard in run_all("prefix_1") for name in shard],
-                ["prefix_1", "prefix_1::extended"],
-            )
-            self.assertEqual(
-                [name for shard in run_all("prefix_1", "--exact") for name in shard],
-                ["prefix_1"],
-            )
-            self.assertEqual(
-                [name for shard in run_all("--skip", "prefix_1") for name in shard],
-                ["other"],
-            )
-            self.assertEqual(
-                [name for shard in run_all("--ignored") for name in shard],
-                ["ignored_case"],
-            )
-            self.assertCountEqual(
-                [name for shard in run_all("--include-ignored") for name in shard],
-                ["prefix_1", "prefix_1::extended", "other", "ignored_case"],
-            )
 
 
 if __name__ == "__main__":

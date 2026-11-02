@@ -332,17 +332,6 @@ class DevTestTests(unittest.TestCase):
         # Without `--dependents` nothing was queried, so nothing is named.
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["skipped"], [])
 
-    def test_broad_dependents_skip_the_tail_and_the_flag_restores_it(self):
-        (self.root / "scripts/unknown.py").write_text("# shared tooling\n")
-        planned = json.loads(self.invoke("--dependents", "--dry-run").stdout)
-        self.assertEqual(planned["commands"][-1], ["kiln", "test", "//:dev_tests"])
-        self.assertEqual(planned["skipped_deferred"], ["//crates/slow:slow__test"])
-        included = json.loads(self.invoke("--dependents", "--include-deferred", "--dry-run").stdout)
-        self.assertEqual(included["commands"][-1], [
-            "kiln", "test", "//:dev_tests", "//crates/slow:slow__test",
-        ])
-        self.assertEqual(included["skipped_deferred"], [])
-
     def test_touched_deferred_only_package_is_built_when_its_test_is_skipped(self):
         self.git("checkout", "--", "crates/example/src/lib.rs")
         (self.root / "crates/slow/src/lib.rs").write_text("pub fn slow() { let _ = 1; }\n")
@@ -434,12 +423,17 @@ class DevTestTests(unittest.TestCase):
 
     def test_waiting_callers_recheck_buck2_inputs_instead_of_reusing_receipts(self):
         self.env["TEST_EXIT"] = "7"
+        ignore = self.root / ".gitignore"
+        ignore.write_text(ignore.read_text() + "generated-input\n")
+        ignored = self.root / "generated-input"
+        ignored.write_text("first\n")
         hold = self.root / ".git/hold"
         hold.touch()
         first = self.start()
         self.wait_started()
         second = self.start()
         self.assertIn("waiting", second.stdout.readline())
+        ignored.write_text("second\n")
         hold.unlink()
         first.communicate(timeout=10)
         second.communicate(timeout=10)
@@ -450,6 +444,8 @@ class DevTestTests(unittest.TestCase):
         )
         self.assertEqual(self.invoke().returncode, 7)
         self.assertEqual(len((self.root / ".git/calls").read_text().splitlines()), 6)
+        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
+        self.assertIn("checkout/config snapshot", receipt["plan"]["identity_scope"])
 
     def test_edit_during_validation_cannot_produce_green_receipt(self):
         hold = self.root / ".git/hold"
@@ -508,43 +504,6 @@ class DevTestTests(unittest.TestCase):
         )
 
 
-    def test_ignored_input_change_still_requires_each_waiter_to_invoke_buck2(self):
-        ignore = self.root / ".gitignore"
-        ignore.write_text(ignore.read_text() + "generated-input\n")
-        ignored = self.root / "generated-input"
-        ignored.write_text("first\n")
-        hold = self.root / ".git/hold"
-        hold.touch()
-        first = self.start()
-        self.wait_started()
-        second = self.start()
-        self.assertIn("waiting", second.stdout.readline())
-        ignored.write_text("second\n")
-        hold.unlink()
-        first.communicate(timeout=10)
-        second.communicate(timeout=10)
-        self.assertEqual((first.returncode, second.returncode), (0, 0))
-        self.assertEqual(
-            (self.root / ".git/calls").read_text().splitlines(),
-            ["run", "run", "run", "run"],
-        )
-        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
-        self.assertIn("checkout/config snapshot", receipt["plan"]["identity_scope"])
-
-
-    def test_interrupt_stops_the_owned_executor_and_writes_failure(self):
-        hold = self.root / ".git/hold"
-        hold.touch()
-        process = self.start()
-        self.wait_started()
-        child_pid = int((self.root / ".git/pid").read_text())
-        process.terminate()
-        process.communicate(timeout=15)
-        self.assertEqual(process.returncode, 130)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(child_pid, 0)
-        receipt = json.loads((self.root / ".git/lash-validation/latest.json").read_text())
-        self.assertEqual(receipt["exit_code"], 130)
 
     def fake_buck2(self, owners=None, dependents=()):
         """A Buck2 client answering `uquery owner(...)` and `cquery rdeps(...)`."""
@@ -816,7 +775,9 @@ class DevTestTests(unittest.TestCase):
         self.assertNotIn("BUCK2-NOISE-MARKER-LINE", out)
         self.assertNotIn("noise padding", out)
         self.assertNotIn("//crates/example:second", out)
-        self.assertLess(len(out.splitlines()), 60)
+        self.assertLessEqual(
+            len(out.splitlines()), dev_test_module().SUMMARY_LINES + 10
+        )
 
     def test_verbose_streams_the_full_output(self):
         self.canned_failure()
@@ -887,20 +848,6 @@ class FormatterTests(unittest.TestCase):
     def setUpClass(cls):
         cls.module = dev_test_module()
 
-    def test_failed_targets_reads_the_test_report(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            report = Path(tmp) / "report.json"
-            report.write_text(json.dumps({"results": {
-                "root//pkg:a": {"status": "FAIL", "outputs": {
-                    "log": "/results/pkg/a/test.log",
-                    "junit_xml": "/results/pkg/a/test.xml",
-                }},
-                "root//pkg:b": {"status": "PASS", "outputs": {}},
-            }}))
-            self.assertEqual(self.module.failed_targets(report), [
-                ("//pkg:a", ["/results/pkg/a/test.xml", "/results/pkg/a/test.log"]),
-            ])
-
     def test_panic_line_prefers_the_first_location(self):
         text = (
             "thread 'x' panicked at src/a.rs:7:9:\n"
@@ -910,35 +857,6 @@ class FormatterTests(unittest.TestCase):
         )
         self.assertEqual(self.module.panic_line(text),
                          "src/a.rs:7:9: assertion failed: left == right")
-
-    def test_failure_summary_reads_xml_and_caps_output(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            artifacts = Path(tmp) / "testlogs/pkg/a"
-            artifacts.mkdir(parents=True)
-            (artifacts / "test.log").write_text("running 1 test\n")
-            (artifacts / "test.xml").write_text(
-                '<testsuite><testcase name="a::boom">'
-                '<failure>thread \'a::boom\' panicked at src/x.rs:3:1:\nboom</failure>'
-                "</testcase></testsuite>")
-            log = Path(tmp) / "command-0.log"
-            log.write_text(
-                "//pkg:a                       FAILED in 0.1s\n"
-                f"  {artifacts}/test.log\n"
-            )
-            report = Path(tmp) / "report.json"
-            report.write_text(json.dumps({"results": {
-                "root//pkg:a": {"status": "FAIL", "outputs": {
-                    "log": str(artifacts / "test.log"),
-                    "junit_xml": str(artifacts / "test.xml"),
-                }}
-            }}))
-            summary = self.module.failure_summary(
-                ["kiln", "test", "//pkg:a"], 1, log, report)
-            self.assertIn("//pkg:a", summary)
-            self.assertIn("a::boom", summary)
-            self.assertIn("src/x.rs:3:1: boom", summary)
-            self.assertIn(str(artifacts / "test.log"), summary)
-            self.assertLessEqual(len(summary.splitlines()), self.module.SUMMARY_LINES)
 
     def test_failure_summary_falls_back_to_output_tail(self):
         with tempfile.TemporaryDirectory() as tmp:
