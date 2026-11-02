@@ -218,6 +218,15 @@ impl ReleasedFunctions {
     /// name its definition carries, ascending by identity
     /// ([`crate::FunctionBody::functions`]).
     pub fn listed(&self, at: usize) -> impl Iterator<Item = (FunctionId, &'static str)> {
+        self.listed_entries(at)
+            .map(|(function, name)| (function, std::str::from_utf8(name).unwrap_or_default()))
+    }
+
+    pub(crate) fn callees(&self, at: usize) -> impl Iterator<Item = FunctionId> {
+        self.listed_entries(at).map(|(function, _)| function)
+    }
+
+    fn listed_entries(&self, at: usize) -> impl Iterator<Item = (FunctionId, &'static [u8])> {
         let mut rest = self.slice(self.range(at, 12));
         std::iter::from_fn(move || {
             let id = rest.get(..ID)?;
@@ -226,7 +235,7 @@ impl ReleasedFunctions {
             let name = rest.get(ID + 4..ID + 4 + len)?;
             let function = id_at(id, 0);
             rest = &rest[ID + 4 + len..];
-            Some((function, std::str::from_utf8(name).unwrap_or_default()))
+            Some((function, name))
         })
     }
 
@@ -890,7 +899,7 @@ fn helper_closure(
             let callees = registered.callees();
             let imports = registered.imports();
             visit(function, &header, imports);
-            pending.extend(callees.iter().copied());
+            pending.extend(callees);
         } else {
             let definition = catalog.definition(&function).ok_or_else(missing)?;
             if let Some(body) = definition.body() {

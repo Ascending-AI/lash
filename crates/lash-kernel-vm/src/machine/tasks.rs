@@ -1284,8 +1284,7 @@ mod laws {
                     .find(|(id, registered)| {
                         registered
                             .callees()
-                            .iter()
-                            .all(|callee| callee == **id || registry.get(callee).is_some())
+                            .all(|callee| &callee == **id || registry.get(&callee).is_some())
                     })
                     .expect("ordinary fixture definitions remain closed")
                     .0;

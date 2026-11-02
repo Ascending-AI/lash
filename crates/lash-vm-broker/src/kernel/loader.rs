@@ -510,7 +510,7 @@ fn dependency_order(
 ) -> Result<Vec<FunctionId>, LoadRefusal> {
     let callees = |function: &FunctionId| -> BTreeSet<FunctionId> {
         let mut callees: BTreeSet<FunctionId> = match held.get(function) {
-            Some(registered) => registered.callees().clone(),
+            Some(registered) => registered.callees().collect(),
             None => stored
                 .get(function)
                 .and_then(|definition| definition.body())

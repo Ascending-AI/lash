@@ -181,7 +181,7 @@ fn validate_document_in(
             continue;
         }
         if let Some(registered) = catalog.registered(&function) {
-            pending.extend(registered.callees().iter().copied());
+            pending.extend(registered.callees());
         } else if let Some(definition) = catalog.definition(&function) {
             if let Some(body) = definition.body() {
                 pending.extend(body.functions.keys().copied());

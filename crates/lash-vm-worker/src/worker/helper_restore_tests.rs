@@ -311,8 +311,7 @@ impl Fixture {
                         .get(id)
                         .unwrap()
                         .callees()
-                        .iter()
-                        .all(|callee| selected.get(callee).is_some())
+                        .all(|callee| selected.get(&callee).is_some())
                 })
                 .unwrap();
             selected

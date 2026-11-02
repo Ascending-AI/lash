@@ -178,7 +178,7 @@ struct ReleasedSet {
 struct Facts {
     definition: OnceLock<Arc<FunctionDefinition>>,
     header: OnceLock<Arc<crate::FunctionHeader>>,
-    callees: OnceLock<BTreeSet<FunctionId>>,
+    callee_count: OnceLock<usize>,
     /// The empty requirement set for a definition with no body.
     imports:
         OnceLock<BTreeMap<lash_kernel_value::names::ImportSlot, lash_kernel_value::names::Import>>,
@@ -191,6 +191,33 @@ struct Facts {
 }
 
 type DerivedFacts = BTreeMap<TypeId, Arc<dyn Any + Send + Sync>>;
+
+struct CalleeIds<I> {
+    ids: I,
+    remaining: usize,
+}
+
+impl<I: Iterator<Item = FunctionId>> Iterator for CalleeIds<I> {
+    type Item = FunctionId;
+
+    fn next(&mut self) -> Option<FunctionId> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        Some(
+            self.ids
+                .next()
+                .unwrap_or_else(|| unreachable!("immutable callee count matches its identities")),
+        )
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<I: Iterator<Item = FunctionId>> ExactSizeIterator for CalleeIds<I> {}
 
 impl RegisteredFunction {
     fn new(
@@ -358,10 +385,29 @@ impl RegisteredFunction {
     /// Every library function the body holds, in any slot
     /// ([`crate::Node::functions_within`]): what a document reaching this
     /// function reaches through it (`K-DOC-002`).
-    pub fn callees(&self) -> &BTreeSet<FunctionId> {
-        self.facts()
-            .callees
-            .get_or_init(|| self.listed().into_iter().map(|(id, _)| id).collect())
+    pub fn callees(&self) -> impl ExactSizeIterator<Item = FunctionId> + '_ {
+        let (released, defined, remaining) = match &self.held {
+            Held::Released(set, at) => (
+                Some(set.image.callees(*at as usize)),
+                None,
+                *self
+                    .facts()
+                    .callee_count
+                    .get_or_init(|| set.image.callees(*at as usize).count()),
+            ),
+            Held::Defined(_) => {
+                let keys = self.definition().body().map(|body| body.functions.keys());
+                let count = keys.as_ref().map_or(0, |keys| keys.len());
+                (None, keys, count)
+            }
+        };
+        CalleeIds {
+            ids: released
+                .into_iter()
+                .flatten()
+                .chain(defined.into_iter().flatten().copied()),
+            remaining,
+        }
     }
 
     /// Every operation the body performs itself, with what it requires of

@@ -294,7 +294,7 @@ impl Member<'_> {
 
     fn callees(&self) -> Vec<FunctionId> {
         match self {
-            Member::Held(registered) => registered.callees().iter().copied().collect(),
+            Member::Held(registered) => registered.callees().collect(),
             Member::Stored(definition) => definition
                 .body()
                 .map(|body| {

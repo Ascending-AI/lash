@@ -771,7 +771,7 @@ impl PreparedCode {
             if let Some(registered) = library.registry().get(&id)
                 && registered.native().is_none()
             {
-                pending.extend(registered.callees().iter().copied());
+                pending.extend(registered.callees());
             }
         }
         library_reached.extend(authored);
