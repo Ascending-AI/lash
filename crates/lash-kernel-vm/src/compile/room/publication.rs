@@ -848,6 +848,9 @@ impl EventContext<'_> {
                 _ => None,
             })
             .and_then(|room| room.native_contract.as_ref());
+        if actual.native.is_some() && native.is_none() {
+            return Err(Refused::Facts);
+        }
         if let Some(contract) = native {
             check_native(actual, contract, heap, arena)?;
         }

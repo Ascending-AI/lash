@@ -110,16 +110,7 @@ impl ExactEvent {
         allowance: Allowance,
         resources: ResourceFacts,
     ) -> Result<BoundEvent, Refused> {
-        if allowance.before != 0
-            || allowance.units != 0
-            || allowance.close.is_some()
-            || allowance.strict
-            || allowance.depth != 0
-            || !allowance.occurrences.is_empty()
-        {
-            return Err(Refused::Source);
-        }
-        self.bind_view(
+        self.bind_paid_external(
             frontier,
             ledger,
             arena,
@@ -130,6 +121,41 @@ impl ExactEvent {
             allowance,
             resources,
             ExternalFacts::default(),
+        )
+    }
+
+    /// The precise stream has closed this event's canonical fixed charges.
+    /// Native completion still requires its canonical measured debt.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one already-paid external source event"
+    )]
+    pub(crate) fn bind_paid_external(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        execution: &mut impl Execution,
+        roots: ExactRoots<'_>,
+        next: Position,
+        allowance: Allowance,
+        resources: ResourceFacts,
+        external: ExternalFacts<'_>,
+    ) -> Result<BoundEvent, Refused> {
+        if allowance.before != 0
+            || allowance.units != 0
+            || allowance.close.is_some()
+            || allowance.strict
+            || allowance.depth != 0
+            || !allowance.occurrences.is_empty()
+            || external.native.is_some()
+        {
+            return Err(Refused::Source);
+        }
+        self.check_external_roots(&roots, &external, &next.occurrence)?;
+        self.bind_view(
+            frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
         )
     }
 
@@ -170,6 +196,18 @@ impl ExactEvent {
         {
             return Err(Refused::Source);
         }
+        self.check_external_roots(&roots, &external, &next.occurrence)?;
+        self.bind_view(
+            frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
+        )
+    }
+
+    fn check_external_roots(
+        &self,
+        roots: &ExactRoots<'_>,
+        external: &ExternalFacts<'_>,
+        occurrence: &Occurrence,
+    ) -> Result<(), Refused> {
         if external.native.is_some()
             && (external.operands.len() != roots.inputs.len()
                 || external.arguments.len() < external.operands.len()
@@ -205,7 +243,7 @@ impl ExactEvent {
                 .iter()
                 .map(|input| {
                     slots
-                        .root(input, next.occurrence.task, next.occurrence.invocation)
+                        .root(input, occurrence.task, occurrence.invocation)
                         .ok_or(Refused::Source)
                 })
                 .collect::<Result<_, _>>()?;
@@ -213,9 +251,7 @@ impl ExactEvent {
                 return Err(Refused::Source);
             }
         }
-        self.bind_view(
-            frontier, ledger, arena, heap, execution, roots, next, allowance, resources, external,
-        )
+        Ok(())
     }
 
     #[expect(

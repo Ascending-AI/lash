@@ -131,7 +131,7 @@ pub(super) fn events() {
             start.clone(),
         )
         .unwrap();
-    let event = ExactEvent::compile(&source, interval, Successor::Normal).unwrap();
+    let event = ExactEvent::compile(&source, Arc::clone(&interval), Successor::Normal).unwrap();
     let roots = |owner, value| ExactRoots {
         inputs: vec![],
         outputs: vec![(owner, logical::PublicationValue::Native(value))],
@@ -140,6 +140,34 @@ pub(super) fn events() {
     let mut charged = 7;
     let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
     let before = ledger.balance().unwrap().total().unwrap();
+    let resource_facts = resources(&mut charged, &mut counters)
+        .facts(&paid())
+        .unwrap();
+    let forged_native = logical::Program::new(vec![logical::JournalEvent {
+        outputs: vec![(output, logical::PublicationValue::Native(Value::Int(1)))],
+        native: Some(lash_kernel_doc::NativeResourceContract::value(
+            lash_kernel_doc::NativeResourceExit::Returned,
+            17,
+            lash_kernel_doc::NativeResourceOrigin::Immutable,
+        )),
+        ..Default::default()
+    }]);
+    assert!(
+        frontier
+            .evaluate_interval(
+                Arc::clone(&interval),
+                &mut Execution(vec![]),
+                &ledger,
+                &arena,
+                heap,
+                forged_native,
+                next.clone(),
+                paid(),
+                resource_facts
+            )
+            .is_err(),
+        "a non-native source event must reject native facts"
+    );
     // 1 and 2 have the same canonical holding. The source literal still decides.
     for (owner, value, position, allowance) in [
         (output, Value::Int(2), next.clone(), paid()),
@@ -284,7 +312,7 @@ pub(super) fn events() {
             .facts(&paid())
             .unwrap();
         let bound = event
-            .bind(
+            .bind_paid_external(
                 &frontier,
                 &ledger,
                 &arena,
@@ -294,6 +322,7 @@ pub(super) fn events() {
                 next.clone(),
                 paid(),
                 facts,
+                ExternalFacts::default(),
             )
             .unwrap();
         let prepared = bound
