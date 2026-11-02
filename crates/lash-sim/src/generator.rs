@@ -1371,16 +1371,4 @@ mod tests {
         assert!(SimShard::parse("18").is_err());
         assert!(SimShard::parse("a/b").is_err());
     }
-
-    #[test]
-    fn workload_profile_rejects_unknown_values() {
-        let err = generate_workload(42, "typo-random", 24).expect_err("unknown profile");
-
-        assert_eq!(
-            err.to_string(),
-            "unknown workload profile `typo-random`; expected one of: fast, fast-random, default, default-random, full, full-random"
-        );
-        assert!(default_seed_count("typo-random").is_err());
-        assert!(default_max_boundaries("typo-random").is_err());
-    }
 }

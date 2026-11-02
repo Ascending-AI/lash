@@ -447,6 +447,25 @@ mod tests {
             recorded,
             "a run that states nothing runs under the recorded namespace"
         );
+
+        let resolved = crate::render::ResolvedRlmRender::resolve(
+            &RlmRenderPatch {
+                print: lash_render::RenderParamsPatch {
+                    max_chars: Some(123),
+                    max_depth: Some(4),
+                    ..Default::default()
+                },
+                preview: lash_render::RenderParamsPatch {
+                    layout: Some(lash_render::Layout::Pretty),
+                    ..Default::default()
+                },
+            },
+            &print(None, Some(1)),
+        );
+        assert_eq!(resolved.print.max_chars, 123);
+        assert_eq!(resolved.print.max_depth, 1);
+        assert_eq!(resolved.preview.layout, lash_render::Layout::Pretty);
+        assert_eq!(resolved.preview.max_chars, 1000);
     }
 
     /// FIG-4652: a run's options have no field for a pin, so a payload

@@ -462,13 +462,7 @@ mod tests {
         assert!(catalog.has_callable_tool(&op("read_file")));
         assert!(!catalog.has_callable_tool(&op("write_file")));
         assert_eq!(catalog.callable_tools().len(), 1);
-    }
 
-    /// FIG-6873: every projection agrees with the membership it projects. A
-    /// catalog filtered from a warmed parent is a generation of its own: it
-    /// inherits none of the parent's views.
-    #[test]
-    fn projections_agree_with_membership() {
         let parent =
             ToolCatalog::from_tool_definitions(vec![tool("read_file"), tool("write_file")]);
         let names = |catalog: &ToolCatalog| -> Vec<String> {

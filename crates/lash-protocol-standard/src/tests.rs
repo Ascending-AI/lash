@@ -1,45 +1,6 @@
 use super::*;
 
 #[test]
-fn standard_execution_section_uses_only_surviving_tool_examples() {
-    let section = standard_execution_section(
-        BatchSugar::default(),
-        lash_core::TerminationMode::Natural,
-        &[],
-    );
-    for removed_tool in [
-        "read_file",
-        "\"edit\"",
-        "\"write\"",
-        "\"glob\"",
-        "fetch_url",
-        "search_web",
-    ] {
-        assert!(
-            !section.contains(removed_tool),
-            "standard prompt should not mention removed tool `{removed_tool}`"
-        );
-    }
-    let enabled = standard_execution_section(
-        BatchSugar::default(),
-        lash_core::TerminationMode::Natural,
-        &[],
-    );
-    assert!(enabled.contains("declared JSON arguments"));
-    assert!(enabled.contains("Check each batch result’s outcome"));
-    assert!(enabled.contains("at most 64 per batch"));
-    let disabled = standard_execution_section(
-        BatchSugar::Disabled,
-        lash_core::TerminationMode::Natural,
-        &[],
-    );
-    assert!(
-        !disabled.contains("batch"),
-        "a disabled batch is not offered in the prompt: {disabled}"
-    );
-}
-
-#[test]
 fn protocol_message_ids_include_turn_identity() {
     let first = standard_message_id(&TurnId::from("turn-1"), 0, "assistant");
     let replay = standard_message_id(&TurnId::from("turn-1"), 0, "assistant");

@@ -59,6 +59,15 @@ fn ingress_sessions_opened_fails_when_no_session_was_observed() {
         "sim.oracle.ingress-session-opened.v1",
         declared.session_count(),
     );
+
+    let undeclared = WorkloadExpectations::default();
+    assert_eq!(undeclared.session_count(), 0);
+    assert!(ingress_sessions_opened(&empty_summary(), &undeclared).is_passed());
+    assert!(
+        undeclared
+            .sessions_missing_from(std::iter::empty())
+            .is_empty()
+    );
 }
 
 #[test]
@@ -116,22 +125,5 @@ fn generated_final_value_channel_fails_when_no_declared_turn_ran() {
         &verdict,
         "sim.oracle.generated-final-value-semantic-channel.v1",
         declared.provider_turn_count,
-    );
-}
-
-/// An undeclared trace (one recorded before the declaration existed) imposes no
-/// floor — the guards key on the declaration, never on an ad hoc emptiness
-/// suspicion. Generated runs always declare, so this path is only reachable for
-/// promoted legacy fixtures.
-#[test]
-fn an_undeclared_workload_imposes_no_coverage_floor() {
-    let undeclared = WorkloadExpectations::default();
-
-    assert_eq!(undeclared.session_count(), 0);
-    assert!(ingress_sessions_opened(&empty_summary(), &undeclared).is_passed());
-    assert!(
-        undeclared
-            .sessions_missing_from(std::iter::empty())
-            .is_empty()
     );
 }

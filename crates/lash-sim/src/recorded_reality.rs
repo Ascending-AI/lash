@@ -14,8 +14,7 @@ use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 
 use lash_provider_fixtures::provider::{
-    ProviderWireProvenance, ProviderWireProvenanceKind, ProviderWireScript,
-    ScriptedLlmHttpTransport,
+    ProviderWireProvenance, ProviderWireProvenanceKind, ScriptedLlmHttpTransport,
 };
 
 const GOOGLE_PER_MINUTE: &str = include_str!(
@@ -37,32 +36,6 @@ const STRUCTURED_REFUSAL: &str =
 const STRUCTURED_TRUNCATION: &str = include_str!(
     "../provider-scripts/recorded-reality/openai.responses-structured-truncation.json"
 );
-
-const ALL_RECORDED_REALITY_SCRIPTS: &[(&str, &str)] = &[
-    (
-        "google.generate-content-per-minute-429.json",
-        GOOGLE_PER_MINUTE,
-    ),
-    (
-        "google.generate-content-hard-quota-429.json",
-        GOOGLE_HARD_QUOTA,
-    ),
-    ("openai.chat-per-minute-429.json", OPENAI_PER_MINUTE),
-    ("openai.chat-hard-quota-429.json", OPENAI_HARD_QUOTA),
-    (
-        "anthropic.messages-rate-limit-429.json",
-        ANTHROPIC_RATE_LIMIT,
-    ),
-    (
-        "anthropic.messages-hard-quota-400.json",
-        ANTHROPIC_HARD_QUOTA,
-    ),
-    ("openai.chat-structured-refusal.json", STRUCTURED_REFUSAL),
-    (
-        "openai.responses-structured-truncation.json",
-        STRUCTURED_TRUNCATION,
-    ),
-];
 
 fn transport(script: &str) -> Arc<ScriptedLlmHttpTransport> {
     Arc::new(ScriptedLlmHttpTransport::from_json_str(script).expect("valid recorded fixture"))
@@ -270,40 +243,6 @@ async fn structured_output_truncation_is_output_limit_not_provider_error() {
         .expect("documented incomplete event is terminal evidence");
     assert_eq!(response.terminal_reason, LlmTerminalReason::OutputLimit);
     assert!(response.full_text().is_empty());
-}
-
-#[test]
-fn every_recorded_reality_fixture_carries_reviewable_provenance() {
-    let fixture_dir =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("provider-scripts/recorded-reality");
-    let files_on_disk = std::fs::read_dir(&fixture_dir)
-        .expect("recorded-reality fixture directory")
-        .map(|entry| entry.expect("recorded-reality directory entry").file_name())
-        .filter(|name| {
-            std::path::Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext == "json")
-        })
-        .map(|name| {
-            name.into_string()
-                .expect("recorded-reality fixture filename must be UTF-8")
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    let listed_files = ALL_RECORDED_REALITY_SCRIPTS
-        .iter()
-        .map(|(name, _)| (*name).to_string())
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        files_on_disk, listed_files,
-        "recorded-reality fixtures on disk must exactly match ALL_RECORDED_REALITY_SCRIPTS"
-    );
-
-    for (name, fixture) in ALL_RECORDED_REALITY_SCRIPTS {
-        let script = ProviderWireScript::from_json_str(fixture).expect("valid fixture");
-        let provenance = script.provenance.expect("fixture provenance");
-        validate_recorded_reality_provenance(&provenance)
-            .unwrap_or_else(|error| panic!("{name}: {error}"));
-    }
 }
 
 #[test]

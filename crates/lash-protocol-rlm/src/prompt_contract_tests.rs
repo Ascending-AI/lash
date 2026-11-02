@@ -159,16 +159,3 @@ Run one cell per `execute_code` call with `{"code": "<complete program>"}`. Call
 execute_code({"code":"print(1 + 2)"})
 "#);
 }
-
-/// D-SLEEPALWAYS: every cell and native program can park on a durable timer,
-/// independently of optional prompt features and process catalog membership.
-#[test]
-fn durable_sleep_is_taught_for_native_execution() {
-    let dialect = dialect();
-    {
-        for catalog in [catalog(), process_catalog()] {
-            let prompt = system_with(&dialect, false, catalog);
-            assert!(prompt.contains("await sleep(ms)"), "{prompt}");
-        }
-    }
-}

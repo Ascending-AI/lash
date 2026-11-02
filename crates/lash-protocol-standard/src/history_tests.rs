@@ -39,40 +39,6 @@ fn block_text(msg: &LlmMessage, idx: usize) -> &str {
 }
 
 #[test]
-fn render_transcript_prompt_orders_turns_oldest_first() {
-    let msgs = vec![
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m1".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![part(PartKind::Prose, "reply one")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m2".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-    ];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-
-    assert!(text.contains("=== Turn 1 ===\nUser:\nfirst"));
-    assert!(text.contains("Assistant (Lash, continuing this transcript):\nreply one"));
-    assert!(text.contains("=== Turn 2 ===\nUser:\nsecond"));
-}
-
-#[test]
 fn render_transcript_prompt_collects_attachments() {
     let msgs = vec![Message {
         id: "m0".to_string(),

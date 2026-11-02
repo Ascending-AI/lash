@@ -193,6 +193,3 @@ pub fn quick_seed_sweep(full: usize) -> usize {
 
 #[cfg(test)]
 mod runtime_feedback;
-
-#[cfg(test)]
-mod runtime_provider_tests;

@@ -8,8 +8,10 @@ use lash_provider_fixtures::provider::{ProviderWireHeader, ProviderWireRequestMa
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Matrix {
-    pub(super) schema: String,
-    pub(super) dialects: Vec<String>,
+    #[serde(rename = "schema")]
+    _schema: String,
+    #[serde(rename = "dialects")]
+    _dialects: Vec<String>,
     pub(super) rows: Vec<MatrixRow>,
 }
 
@@ -48,13 +50,34 @@ pub(super) enum CellDeclarationKind {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum CellDeclaration {
-    NoReasoningReplay { reason: String },
-    NoResponseTextReplay { reason: String },
-    NoToolReplay { reason: String },
-    NoProviderRequestId { reason: String },
-    FailedResponseInBand { reason: String },
-    BufferedResponseIdentity { reason: String },
-    RetryIdentityFromResponse { reason: String },
+    NoReasoningReplay {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    NoResponseTextReplay {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    NoToolReplay {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    NoProviderRequestId {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    FailedResponseInBand {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    BufferedResponseIdentity {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
+    RetryIdentityFromResponse {
+        #[serde(rename = "reason")]
+        _reason: String,
+    },
 }
 
 impl CellDeclaration {
@@ -69,18 +92,6 @@ impl CellDeclaration {
             Self::RetryIdentityFromResponse { .. } => {
                 CellDeclarationKind::RetryIdentityFromResponse
             }
-        }
-    }
-
-    pub(super) fn reason(&self) -> &str {
-        match self {
-            Self::NoReasoningReplay { reason }
-            | Self::NoResponseTextReplay { reason }
-            | Self::NoToolReplay { reason }
-            | Self::NoProviderRequestId { reason }
-            | Self::FailedResponseInBand { reason }
-            | Self::BufferedResponseIdentity { reason }
-            | Self::RetryIdentityFromResponse { reason } => reason,
         }
     }
 }

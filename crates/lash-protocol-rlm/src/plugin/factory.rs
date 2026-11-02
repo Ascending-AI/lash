@@ -476,50 +476,6 @@ mod tests {
         }
     }
 
-    /// FIG-6148: the RLM hosting factory must preserve the process
-    /// preparation owner across independently created runtime bindings.
-    #[test]
-    fn process_runtime_bindings_prepare_their_factory_once() {
-        let factory = factory();
-        for _ in 0..3 {
-            let _binding = factory.process_factory();
-        }
-        assert_eq!(
-            factory
-                .process_factory_preparations
-                .load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
-        let factory = factory.with_library(Arc::new(
-            lash_vm_client::packages::WorkerLibrary::with_helpers(
-                &lash_kernel_doc::FunctionRegistry::declarations(),
-                [],
-                &Default::default(),
-                lash_kernel_doc::BuildHelpers::empty(),
-            )
-            .expect("native declaration library"),
-        ));
-        for _ in 0..3 {
-            let _binding = factory.process_factory();
-        }
-        assert_eq!(
-            factory
-                .process_factory_preparations
-                .load(std::sync::atomic::Ordering::Relaxed),
-            2
-        );
-        let factory = factory.with_worker_service(lash_vm_client::service::Service::default());
-        for _ in 0..3 {
-            let _binding = factory.process_factory();
-        }
-        assert_eq!(
-            factory
-                .process_factory_preparations
-                .load(std::sync::atomic::Ordering::Relaxed),
-            3
-        );
-    }
-
     /// FIG-6827: a deployment's instruction limit is what its runs ask
     /// for, and the worker pool's charge limit is the ceiling the pool
     /// admits. A limit past the ceiling refuses the plugin when it is

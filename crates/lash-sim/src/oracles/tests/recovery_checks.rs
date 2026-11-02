@@ -223,7 +223,35 @@ fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_durabl
 }
 
 #[test]
-fn scheduler_owned_runtime_completion_oracle_passes_with_all_eight_kinds_present() {
+fn scheduler_owned_runtime_completion_oracle_fails_when_kind_is_missing() {
+    for missing_kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
+        let mut events = Vec::new();
+        let mut seq = 0u64;
+        for &kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
+            if kind == *missing_kind {
+                continue;
+            }
+            events.push(delivered_with_payload(
+                seq as usize,
+                &format!("boundary:{seq}"),
+                "session-001",
+                kind,
+                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, seq)}),
+                json!({}),
+            ));
+            seq += 1;
+        }
+        let verdict =
+            scheduler_owned_runtime_completions(&events, &WorkloadExpectations::default());
+        assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
+        assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
+        assert!(
+            verdict.message.contains(&format!("{missing_kind:?}")),
+            "expected message to name missing {missing_kind:?}, got: {}",
+            verdict.message
+        );
+    }
+
     let events = vec![
         delivered_with_payload(
             0,
@@ -294,37 +322,6 @@ fn scheduler_owned_runtime_completion_oracle_passes_with_all_eight_kinds_present
     let verdict = scheduler_owned_runtime_completions(&events, &WorkloadExpectations::default());
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
     assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
-}
-
-#[test]
-fn scheduler_owned_runtime_completion_oracle_fails_when_kind_is_missing() {
-    for missing_kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
-        let mut events = Vec::new();
-        let mut seq = 0u64;
-        for &kind in SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS {
-            if kind == *missing_kind {
-                continue;
-            }
-            events.push(delivered_with_payload(
-                seq as usize,
-                &format!("boundary:{seq}"),
-                "session-001",
-                kind,
-                json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, seq)}),
-                json!({}),
-            ));
-            seq += 1;
-        }
-        let verdict =
-            scheduler_owned_runtime_completions(&events, &WorkloadExpectations::default());
-        assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
-        assert_eq!(verdict.oracle_id, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE);
-        assert!(
-            verdict.message.contains(&format!("{missing_kind:?}")),
-            "expected message to name missing {missing_kind:?}, got: {}",
-            verdict.message
-        );
-    }
 }
 
 #[test]

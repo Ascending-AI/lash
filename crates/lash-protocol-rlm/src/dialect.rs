@@ -883,6 +883,31 @@ impl DialectSession {
 }
 
 #[cfg(test)]
+pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
+    CodeModeDialectServices {
+        documents: None,
+        kernel: crate::executor::KernelCarry::default(),
+        presentation: crate::RlmPresentationConfig::standard(),
+        tool_presentation: crate::dialect::CellDialect::typescript()
+            .tool_presenter()
+            .presenter()
+            .admit_config(&serde_json::json!({}))
+            .unwrap_or_default(),
+        workers: lash_vm_client::service::Service::default(),
+        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        code_renderer: Default::default(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn typescript_test_dialect() -> SessionDialect {
+    SessionDialect::new(
+        crate::dialect::CellDialect::typescript(),
+        test_dialect_services(),
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -954,32 +979,3 @@ mod tests {
         assert!(!prompt.contains("TypeScript"), "{prompt}");
     }
 }
-
-#[cfg(test)]
-pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
-    CodeModeDialectServices {
-        documents: None,
-        kernel: crate::executor::KernelCarry::default(),
-        presentation: crate::RlmPresentationConfig::standard(),
-        tool_presentation: crate::dialect::CellDialect::typescript()
-            .tool_presenter()
-            .presenter()
-            .admit_config(&serde_json::json!({}))
-            .unwrap_or_default(),
-        workers: lash_vm_client::service::Service::default(),
-        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-        code_renderer: Default::default(),
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn typescript_test_dialect() -> SessionDialect {
-    SessionDialect::new(
-        crate::dialect::CellDialect::typescript(),
-        test_dialect_services(),
-    )
-}
-
-#[cfg(test)]
-#[path = "dialect/prompt_walker_tests.rs"]
-mod prompt_walker_tests;

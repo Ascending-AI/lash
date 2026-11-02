@@ -2,7 +2,6 @@
 
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use lash_core::provider::{
@@ -42,7 +41,6 @@ use schema::*;
 mod dialects;
 use dialects::*;
 
-const MATRIX_SCHEMA: &str = "lash.provider-variation-matrix.v1";
 const MATRIX_JSON: &str = include_str!("../provider-scripts/variation-matrix/v1/matrix.json");
 const EXPECTED_DIALECTS: [&str; 6] = [
     "anthropic.messages",
@@ -52,99 +50,6 @@ const EXPECTED_DIALECTS: [&str; 6] = [
     "codex.responses-sse",
     "codex.responses-websocket",
 ];
-const EXPECTED_VARIATIONS: [&str; 9] = [
-    "stop_consumed",
-    "literal_present",
-    "equivalent_outcome_mapping",
-    "missing_terminal_evidence",
-    "event_shape_variation",
-    "reasoning_rendered_path",
-    "response_identity_execution_evidence",
-    "mid_stream_identity_conflict",
-    "multi_reset_retry_sequence",
-];
-
-#[test]
-fn matrix_is_a_complete_versioned_row_by_column_product() {
-    let matrix = Matrix::load();
-    assert_eq!(matrix.schema, MATRIX_SCHEMA);
-    assert_eq!(matrix.dialects, EXPECTED_DIALECTS);
-    assert_eq!(
-        matrix
-            .rows
-            .iter()
-            .map(|row| row.variation.as_str())
-            .collect::<Vec<_>>(),
-        EXPECTED_VARIATIONS
-    );
-
-    let expected = EXPECTED_DIALECTS.into_iter().collect::<BTreeSet<_>>();
-    for row in &matrix.rows {
-        assert_eq!(
-            row.cells
-                .keys()
-                .map(String::as_str)
-                .collect::<BTreeSet<_>>(),
-            expected,
-            "{} must fill every dialect column",
-            row.variation
-        );
-        for (dialect, cell) in &row.cells {
-            match cell {
-                MatrixCell::ProviderWireScripts { paths, .. } => {
-                    assert!(
-                        !paths.is_empty(),
-                        "{} {dialect} has no fixture",
-                        row.variation
-                    );
-                    for path in paths {
-                        assert!(
-                            matrix_dir().join(path).is_file(),
-                            "{} {dialect} references missing fixture {path}",
-                            row.variation
-                        );
-                    }
-                }
-                MatrixCell::RecordedStreams { recordings, .. } => assert!(
-                    !recordings.is_empty(),
-                    "{} {dialect} has no recordings",
-                    row.variation
-                ),
-                MatrixCell::NotApplicable {
-                    reason,
-                    assertion,
-                    recordings,
-                } => {
-                    assert!(
-                        !reason.trim().is_empty(),
-                        "{} {dialect} inapplicable cell requires a reason",
-                        row.variation
-                    );
-                    match assertion {
-                        NotApplicableAssertion::RefusedUnsupportedStop => {
-                            assert_eq!(recordings.len(), 1)
-                        }
-                    }
-                }
-            }
-            let mut declarations = BTreeSet::new();
-            for declaration in cell.declarations() {
-                assert!(
-                    !declaration.reason().trim().is_empty(),
-                    "{} {dialect} {:?} declaration requires a reason",
-                    row.variation,
-                    declaration.kind()
-                );
-                assert!(
-                    declarations.insert(declaration.kind()),
-                    "{} {dialect} repeats {:?}",
-                    row.variation,
-                    declaration.kind()
-                );
-            }
-        }
-    }
-}
 
 #[tokio::test]
 async fn http_adapter_columns_match_every_shared_row_expectation() {

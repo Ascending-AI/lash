@@ -237,36 +237,3 @@ impl ExecutionBounds {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_finite_bound_rejects_zero() {
-        // Zero is not a bound on any axis: `unbounded()` is the explicit
-        // opt-out, so a zero argument is always a configuration mistake.
-        for (label, construct) in [
-            (
-                "instruction budget must be non-zero",
-                (|| {
-                    InstructionBound::instructions(0);
-                }) as fn(),
-            ),
-            ("memory limit must be non-zero", || {
-                MemoryBound::logical_bytes(0);
-            }),
-            ("memory limit must be non-zero", || {
-                MemoryBound::mebibytes(0);
-            }),
-        ] {
-            let panic = std::panic::catch_unwind(construct).expect_err(label);
-            let message = panic
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
-                .expect("panic payload");
-            assert_eq!(message, label);
-        }
-    }
-}

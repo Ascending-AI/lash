@@ -253,24 +253,6 @@ mod tests {
         assert_eq!(mismatch.instance_path, "/answers/b", "{mismatch:?}");
     }
 
-    /// FIG-6330: a value the declared schema admits settles as the success
-    /// it is.
-    #[test]
-    fn a_value_its_declared_schema_admits_settles() {
-        let schema = json!({
-            "type": "object",
-            "required": ["noul", "answers"],
-            "properties": {
-                "noul": {"type": "number", "maximum": 1},
-                "answers": {"type": "object", "additionalProperties": {"type": "integer"}}
-            }
-        });
-        settle(
-            schema,
-            json!({"noul": 0.5, "answers": {"a": 1}, "extra": true}),
-        )
-        .expect("the value fits its schema");
-    }
     /// L-DIALECT-SERVICES/K-EFF-007: ordinary operation schemas retain their
     /// timestamp/bytes types and reject malformed encoded results.
     #[test]

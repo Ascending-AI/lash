@@ -267,13 +267,6 @@ pub(super) fn projection_test_config(
 }
 
 #[test]
-fn rlm_projector_sends_no_stop_sequence_without_caller_stops() {
-    let request = project_iteration_request(&projector(100), &[], 0, "test-model");
-    assert!(request.generation.stop_sequences.is_empty());
-    assert!(!request.generation.stop_sequences_suppressed_by_protocol());
-}
-
-#[test]
 fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
     for caller_stops in [
         vec!["caller-boundary".to_string()],
@@ -293,6 +286,10 @@ fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
         assert!(request.generation.stop_sequences.is_empty());
         assert!(request.generation.stop_sequences_suppressed_by_protocol());
     }
+
+    let request = project_iteration_request(&projector(100), &[], 0, "test-model");
+    assert!(request.generation.stop_sequences.is_empty());
+    assert!(!request.generation.stop_sequences_suppressed_by_protocol());
 }
 
 pub(crate) fn message_text(message: &LlmMessage) -> String {

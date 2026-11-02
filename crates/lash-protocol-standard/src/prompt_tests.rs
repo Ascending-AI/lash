@@ -104,6 +104,42 @@ async fn the_standard_sections_compose_the_protocol_prompt() {
     Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most 64 per batch); make dependent calls after their inputs return. Check each batch result’s outcome before using its body. Answer in prose only when no tool is needed.
 
     ");
+
+    let section = standard_execution_section(
+        BatchSugar::default(),
+        lash_core::TerminationMode::Natural,
+        &[],
+    );
+    for removed_tool in [
+        "read_file",
+        "\"edit\"",
+        "\"write\"",
+        "\"glob\"",
+        "fetch_url",
+        "search_web",
+    ] {
+        assert!(
+            !section.contains(removed_tool),
+            "standard prompt should not mention removed tool `{removed_tool}`"
+        );
+    }
+    let enabled = standard_execution_section(
+        BatchSugar::default(),
+        lash_core::TerminationMode::Natural,
+        &[],
+    );
+    assert!(enabled.contains("declared JSON arguments"));
+    assert!(enabled.contains("Check each batch result’s outcome"));
+    assert!(enabled.contains("at most 64 per batch"));
+    let disabled = standard_execution_section(
+        BatchSugar::Disabled,
+        lash_core::TerminationMode::Natural,
+        &[],
+    );
+    assert!(
+        !disabled.contains("batch"),
+        "a disabled batch is not offered in the prompt: {disabled}"
+    );
 }
 
 /// Host interaction policy never follows a tool's name (FIG-5432).

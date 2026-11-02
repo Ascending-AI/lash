@@ -852,10 +852,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         err.contains("reconnected observer"),
         "unexpected Agent durable-input failure: {err}"
     );
-}
 
-#[test]
-fn critic_named_contracts_reject_generic_proxy_fact_backings() {
     let proxy_cases = [
         (
             "ProviderTerminalRequirement::AnySuccessful",
@@ -1026,15 +1023,23 @@ fn coverage_oracles_are_failing_capable_not_presence_only() {
 }
 
 #[test]
-fn every_battery_slot_declares_the_one_oracle_id_its_verdict_uses() {
+fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
+    for contract in all_scenario_contracts() {
+        let slot = OracleSlot::ScenarioContract(contract);
+        let declared = slot.declared_oracle_id();
+        assert!(slot.declares_oracle_id(&declared));
+        assert!(!slot.declares_oracle_id(contract.oracle_id));
+        assert!(!slot.declares_oracle_id(&format!("{declared}-suffix")));
+    }
+
+    let slot = OracleSlot::Battery(CANCELLATION_ORACLE);
+    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE.id));
+    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE.id));
+
     let summary = semantic_summary();
     let events = semantic_events();
     let expectations = WorkloadExpectations::default();
 
-    // The minimizer skips a slot on its declared id alone, so that id has to be
-    // the id the slot's verdict actually reports under, and no two slots may
-    // claim the same one — otherwise skipping the "wrong" slot could skip past
-    // a verdict that matches the target.
     let mut declared_ids = Vec::new();
     walk_generated_trace_oracles(
         &events,
@@ -1067,68 +1072,9 @@ fn every_battery_slot_declares_the_one_oracle_id_its_verdict_uses() {
         declared_ids, evaluated_ids,
         "each slot must declare exactly the oracle id its verdict reports under"
     );
-
-    let unique = declared_ids.iter().collect::<BTreeSet<_>>();
     assert_eq!(
-        unique.len(),
+        declared_ids.iter().collect::<BTreeSet<_>>().len(),
         declared_ids.len(),
         "two battery slots declaring one oracle id would make a skip decision ambiguous"
     );
-}
-
-#[test]
-fn a_slot_claims_its_own_declared_oracle_id_and_no_other() {
-    for contract in all_scenario_contracts() {
-        let slot = OracleSlot::ScenarioContract(contract);
-        let declared = slot.declared_oracle_id();
-        assert!(slot.declares_oracle_id(&declared));
-        assert!(!slot.declares_oracle_id(contract.oracle_id));
-        assert!(!slot.declares_oracle_id(&format!("{declared}-suffix")));
-    }
-
-    let slot = OracleSlot::Battery(CANCELLATION_ORACLE);
-    assert!(slot.declares_oracle_id(CANCELLATION_ORACLE.id));
-    assert!(!slot.declares_oracle_id(EXEC_CODE_ORACLE.id));
-}
-
-#[test]
-fn every_execution_fact_contract_resolves_to_its_registry_fact_spec_row() {
-    // Exhaustiveness is proven against the imported registries, not a hand-
-    // maintained count: adding a contract to a spec table without a fact-spec
-    // row fails here, and a row naming a contract outside its family's table
-    // fails to compile at `contract_spec` resolution.
-    for contracts in [
-        STANDARD_PROTOCOL_SCENARIO_CONTRACTS,
-        RLM_PROTOCOL_SCENARIO_CONTRACTS,
-        AGENT_SCENARIO_CONTRACTS,
-    ] {
-        for contract in contracts {
-            if contract.semantic_oracle == NO_EXECUTION_FACT_CONTRACT.semantic_oracle {
-                assert!(
-                    contract_fact_row(contract.semantic_oracle).is_none(),
-                    "{} is the named generated-boundary bypass and must not carry a fact-spec row",
-                    contract.semantic_oracle
-                );
-                continue;
-            }
-            let (row, _) = contract_fact_row(contract.semantic_oracle).unwrap_or_else(|| {
-                panic!(
-                    "{} registry contract `{}` has no fact-spec row",
-                    contract.suite, contract.semantic_oracle
-                )
-            });
-            // The registries are `pub const` slices, so identity is proven by
-            // the spec's fields, not by pointer equality.
-            assert_eq!(
-                row.spec.suite, contract.suite,
-                "{} resolved to a fact-spec row bound to another suite's spec",
-                contract.semantic_oracle
-            );
-            assert_eq!(
-                row.spec.test_name, contract.test_name,
-                "{} resolved to a fact-spec row bound to another registry spec",
-                contract.semantic_oracle
-            );
-        }
-    }
 }

@@ -314,12 +314,6 @@ pub(super) fn suspend_resume_event(
 }
 
 #[test]
-fn suspend_resume_oracle_passes_when_turn_parked_then_resumed() {
-    let events = vec![suspend_resume_event(true, 0, 1)];
-    assert!(generated_suspend_resume(&events).is_passed());
-}
-
-#[test]
 fn suspend_resume_oracle_fails_when_turn_ran_synchronously() {
     // The tool completed before the scheduler delivered the completion
     // boundary: the turn never actually parked.
@@ -327,6 +321,9 @@ fn suspend_resume_oracle_fails_when_turn_ran_synchronously() {
     let verdict = generated_suspend_resume(&events);
     assert!(!verdict.is_passed());
     assert_eq!(verdict.oracle_id, GENERATED_SUSPEND_RESUME_ORACLE);
+
+    let events = vec![suspend_resume_event(true, 0, 1)];
+    assert!(generated_suspend_resume(&events).is_passed());
 }
 
 #[test]
@@ -715,8 +712,6 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                 "session": "session-001",
 
                 "source_key": "contract-execution/session-001/standard-max-turn-after-tool-result",
-
-
 
                 "contract_execution": standard_max_turn_execution_fixture()
             }),

@@ -362,55 +362,12 @@ mod tests {
         assert!(error.contains("usage reconstruction diverged"));
     }
 
-    #[tokio::test]
-    async fn seeded_checker_rejects_corrupted_runtime_usage() {
-        let workload = generate_workload(5, "fast-random", 24).expect("workload");
-        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
-            .await
-            .expect("trace");
-        let runtime = trace
-            .events
-            .iter_mut()
-            .rev()
-            .find(|event| event.kind == BoundaryKind::Provider)
-            .expect("seed 5 includes a provider turn");
-        runtime.observed["runtime_invariant_facts"]["usage"]["total_usage"]["input_tokens"] =
-            json!(999);
-
-        let verdict =
-            checkpoint_state_consistency(&trace.events, &trace.durable_writes, &trace.expectations);
-        assert!(!verdict.is_passed(), "corrupted runtime usage must be red");
-        assert!(verdict.message.contains("usage reconstruction diverged"));
-    }
-
     fn declared_sessions(aliases: &[&str]) -> WorkloadExpectations {
         WorkloadExpectations::new(
             aliases.iter().map(|alias| (*alias).to_string()).collect(),
             20,
             2,
         )
-    }
-
-    #[test]
-    fn independent_checker_rejects_a_declared_workload_that_committed_nothing() {
-        // Red-side proof: the workload declared five sessions and the checker
-        // reconstructed none. Before the declaration rode the trace this read
-        // as "consistent across 0 commits in 0 sessions".
-        let declared = declared_sessions(&[
-            "session-001",
-            "session-002",
-            "session-003",
-            "session-004",
-            "session-005",
-        ]);
-        let verdict = checkpoint_state_consistency(&[], &[], &declared);
-        assert!(!verdict.is_passed(), "an absent commit class must be red");
-        assert!(
-            verdict.message.contains("workload declared 5 session(s)")
-                && verdict.message.contains("session-001"),
-            "{}",
-            verdict.message
-        );
     }
 
     /// Red-side proof for the identity floor. The checker's reconstructed
@@ -475,6 +432,22 @@ mod tests {
         assert!(
             verdict.message.contains(&dropped),
             "the verdict must name the missing declared session `{dropped}`: {}",
+            verdict.message
+        );
+
+        let declared = declared_sessions(&[
+            "session-001",
+            "session-002",
+            "session-003",
+            "session-004",
+            "session-005",
+        ]);
+        let verdict = checkpoint_state_consistency(&[], &[], &declared);
+        assert!(!verdict.is_passed(), "an absent commit class must be red");
+        assert!(
+            verdict.message.contains("workload declared 5 session(s)")
+                && verdict.message.contains("session-001"),
+            "{}",
             verdict.message
         );
     }

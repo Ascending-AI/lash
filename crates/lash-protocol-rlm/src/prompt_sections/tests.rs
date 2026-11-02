@@ -278,6 +278,45 @@ fn the_context_budget_section_keeps_its_omit_clamp_and_prior_usage_rules() {
     .expect("the section renders");
     assert!(undecomposed.contains("finish concisely"), "{undecomposed}");
     assert!(!undecomposed.contains("continue_as"), "{undecomposed}");
+
+    for used in [60, 90, 100, 110] {
+        let text = budget(
+            RlmSections {
+                prompt_features: crate::protocol::RlmPromptFeatures {
+                    images: false,
+                    decomposition: false,
+                },
+                ..budgeted(Some(100))
+            },
+            Call {
+                committed_usage: Some(usage(used)),
+                ..Call::default()
+            },
+        )
+        .expect("the section renders");
+        assert!(text.contains("finish concisely"), "{text}");
+        assert!(!text.contains("continue_as"), "{text}");
+        assert!(!text.contains("frame switch"), "{text}");
+    }
+    for (configured, context, expected) in [
+        (100_000, 41_000, 40_999),
+        (30_000, 41_000, 30_000),
+        (100_000, 200_000, 100_000),
+    ] {
+        let text = budget(
+            budgeted(Some(configured)),
+            Call {
+                committed_usage: Some(usage(expected)),
+                context_window_tokens: Some(context),
+                ..Call::default()
+            },
+        )
+        .expect("the section renders");
+        assert!(
+            text.contains(&format!("frame switch threshold: {expected}")),
+            "{text}"
+        );
+    }
 }
 
 /// PLACEMENT (FIG-5257): the host's plan places a section exactly where it
