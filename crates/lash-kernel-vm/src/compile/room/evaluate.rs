@@ -140,7 +140,7 @@ impl<E: Execution> Events for Prices<'_, E> {
             }
             return Err(Refused::Exit);
         }
-        for m in e.peak.terms.keys() {
+        for m in e.peak.measures() {
             if let Measure::CallPeak { at, callee } = m {
                 return Ok(match facts.call(at, *callee).ok_or(Refused::Facts)?.exit {
                     ExitKind::Raise => ExitKind::Raise,

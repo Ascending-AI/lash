@@ -315,11 +315,18 @@ pub(super) fn body(source: &Source, room: &SourceRoom) -> Result<(), Refused> {
 fn check(
     actual: &Amount,
     fixed: i128,
-    terms: Vec<(Measure, i128)>,
+    mut terms: Vec<(Measure, i128)>,
     why: Refused,
 ) -> Result<(), Refused> {
-    let expected: BTreeMap<_, _> = terms.into_iter().collect();
-    if actual.fixed != fixed || actual.terms != expected {
+    terms.sort_by(|(left, _), (right, _)| left.cmp(right));
+    terms.dedup_by(|later, earlier| {
+        if later.0 != earlier.0 {
+            return false;
+        }
+        earlier.1 = later.1;
+        true
+    });
+    if actual.fixed != fixed || actual.terms != terms {
         Err(why)
     } else {
         Ok(())

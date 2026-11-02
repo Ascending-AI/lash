@@ -120,7 +120,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .events()
             .next()
             .ok_or_else(|| malformed("session event disappeared"))?;
-        for measure in event.delta.terms.keys() {
+        for measure in event.delta.measures() {
             if matches!(measure, Measure::Release(_)) {
                 measures.insert(measure.clone(), i128::from(released));
             }

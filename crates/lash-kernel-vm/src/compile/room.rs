@@ -135,7 +135,7 @@ pub(crate) enum Measure {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Amount {
     pub(crate) fixed: i128,
-    pub(crate) terms: BTreeMap<Measure, i128>,
+    terms: Vec<(Measure, i128)>,
 }
 impl Amount {
     fn fixed(n: u64) -> Self {
@@ -145,8 +145,14 @@ impl Amount {
         }
     }
     fn term(mut self, m: Measure, coefficient: i128) -> Self {
-        *self.terms.entry(m).or_default() += coefficient;
+        match self.terms.binary_search_by(|(measure, _)| measure.cmp(&m)) {
+            Ok(at) => self.terms[at].1 += coefficient,
+            Err(at) => self.terms.insert(at, (m, coefficient)),
+        }
         self
+    }
+    pub(crate) fn measures(&self) -> impl ExactSizeIterator<Item = &Measure> {
+        self.terms.iter().map(|(measure, _)| measure)
     }
     fn evaluate(&self, facts: &dyn Facts) -> Option<i128> {
         self.terms.iter().try_fold(self.fixed, |sum, (m, c)| {
@@ -703,7 +709,7 @@ impl Source {
                     owners.extend(event.output.iter().cloned());
                     owners.extend(event.entities.iter().cloned());
                     for amount in [&event.peak, &event.delta] {
-                        for measure in amount.terms.keys() {
+                        for measure in amount.measures() {
                             match measure {
                                 Measure::Local(owner) => {
                                     owners.insert(owner.clone());

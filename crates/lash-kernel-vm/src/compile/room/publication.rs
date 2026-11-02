@@ -723,7 +723,7 @@ impl EventContext<'_> {
             writes.insert(owner);
         }
         let candidates = std::cell::OnceCell::new();
-        for measure in event.peak.terms.keys().chain(event.delta.terms.keys()) {
+        for measure in event.peak.measures().chain(event.delta.measures()) {
             match measure {
                 Measure::Release(owners) | Measure::NativeRelease { owners, .. } => {
                     for owner in owners {
@@ -791,8 +791,7 @@ impl EventContext<'_> {
         }
         let native = event
             .peak
-            .terms
-            .keys()
+            .measures()
             .find_map(|measure| match measure {
                 Measure::CallPeak { at, callee } => facts.call(at, *callee),
                 _ => None,

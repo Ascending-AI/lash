@@ -371,7 +371,7 @@ pub(super) fn body(authority: &Description) -> SourceRoom {
                     owners: owners.clone(),
                 });
             }
-            for measure in e.peak.terms.keys() {
+            for measure in e.peak.measures() {
                 if let Measure::CallPeak {
                     callee: CallSource::Native(function),
                     ..

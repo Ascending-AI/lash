@@ -253,8 +253,7 @@ impl KernelMachine {
                 .next()
                 .ok_or_else(|| malformed("binding event disappeared"))?
                 .delta
-                .terms
-                .keys()
+                .measures()
             {
                 if matches!(measure, Measure::Release(_)) {
                     measures.insert(measure.clone(), i128::from(released));

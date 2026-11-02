@@ -73,9 +73,8 @@ impl Step {
     ) -> Result<Self, Refused> {
         let indices: BTreeMap<_, _> = event
             .peak
-            .terms
-            .keys()
-            .chain(event.delta.terms.keys())
+            .measures()
+            .chain(event.delta.measures())
             .cloned()
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -946,7 +945,7 @@ fn event_exit(event: &Event, facts: &dyn Facts, normal: ExitKind) -> Result<Exit
         }
         return Ok(ExitKind::Raise);
     }
-    for measure in event.peak.terms.keys() {
+    for measure in event.peak.measures() {
         if let Measure::CallPeak { at, callee } = measure {
             return Ok(
                 if facts.call(at, *callee).ok_or(Refused::Facts)?.exit == ExitKind::Raise {
