@@ -226,7 +226,7 @@ def expand_labels(tokens, inventory, operation, skipped=None):
     # and a `manual` target is selected only by its own label, as under Bazel.
     selectable = [target for target in ordinary if target.get('label') and field in target]
     groups = {
-        'build_label': {'//:workspace_compile': 'workspace_build_targets', '//:feature_lane_compile': 'feature_lane_build_targets'},
+        'build_label': {'//:workspace_compile': 'workspace_build_targets', '//:feature_lane_compile': 'feature_lane_build_targets', '//:workspace_clippy': 'workspace_clippy_build_targets'},
         'check_label': {'//:facade_production_check': 'facade_production_check_targets', '//:workspace_check': 'workspace_check_targets', '//:workspace_compile': 'workspace_check_targets', '//:feature_lane_compile': 'feature_lane_check_targets'},
         'clippy_label': {'//:workspace_clippy': 'workspace_clippy_build_targets'},
         'doc_label': {},

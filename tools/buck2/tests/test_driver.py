@@ -63,6 +63,14 @@ class DriverTests(unittest.TestCase):
                 self.assertIn('//lib:test[check]', command)
                 self.assertNotIn('//lib:lib[static]', command)
 
+    def test_build_expands_the_workspace_clippy_group_alongside_plain_targets(self):
+        inventory = {
+            'packages': [],
+            'workspace_clippy_build_targets': ['//lib:lib__clippy[clippy.txt]', '//lib:lib__unit_test__clippy[clippy.txt]'],
+        }
+        command = self.command(['build', '//:schema_checks', '//:workspace_clippy'], inventory)
+        self.assertEqual(command[-3:], ['//:schema_checks', '//lib:lib__clippy[clippy.txt]', '//lib:lib__unit_test__clippy[clippy.txt]'])
+
     def test_focused_clippy_and_doc_select_real_outputs_and_reject_unknown(self):
         inventory = {'packages': [{'targets': [{'label': '//lib:lib', 'clippy_label': '//lib:lib[clippy.txt]', 'doc_label': '//lib:lib[doc]'}]}]}
         self.assertIn('//lib:lib[clippy.txt]', self.command(['clippy', '//lib:lib'], inventory))

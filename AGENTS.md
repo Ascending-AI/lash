@@ -34,7 +34,8 @@ the rest and reds are fixed forward:
   ([entry format](docs/host-upgrades/unreleased/README.md)).
 
 To land a change, commit it, source `./env.sh`, then run `scripts/land` from
-your fork. It rebases onto main, runs the required workspace `kiln clippy`,
+your fork. It rebases onto main, runs the required workspace checks —
+`//:schema_checks` and `//:workspace_clippy` in one Buck2 invocation —
 and pushes. It takes `/workspace/kiln/lash/land.lock` only for the final
 fetch/base check and push; do not wrap it in an outer `flock`.
 `scripts/land --dry-run` does everything except push and never takes the lock.

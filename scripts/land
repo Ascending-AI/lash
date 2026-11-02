@@ -203,8 +203,7 @@ def main():
         # guards and the post-cut evidence. Do not project it a second time.
         run("python3", "scripts/perf-gates.py", "check-sources")
         run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
-        run("kiln", "build", "//:schema_checks")
-        run("kiln", "clippy")
+        run("kiln", "build", "//:schema_checks", "//:workspace_clippy")
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))
             return
