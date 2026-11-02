@@ -1078,7 +1078,7 @@ impl Former<'_> {
                             .get_lib(lib)?
                             .collection_method()
                             .then_some(())?;
-                        construction_restart(&self.tables.stream, head, commit)
+                        collection_restart(&self.tables.stream, head, commit)
                     })
                     .is_some()
         })
@@ -1657,11 +1657,11 @@ fn verify_expr(expr: &Expr, stream: &super::Stream, calls: &mut Vec<usize>) -> R
 /// One argument-list construction may overwrite an input of the fixed
 /// region it closes. Its other forms are pure register reads and literals.
 /// Keeping that input before construction makes a refused close restartable.
-pub(crate) fn construction_restart(
+pub(crate) fn collection_restart(
     stream: &super::Stream,
     head: u32,
     commit: u32,
-) -> Option<(u32, Vec<u32>)> {
+) -> Option<(u32, u32)> {
     let span = stream.ops.get(head as usize..commit as usize)?;
     let mut made = None;
     let mut written = Vec::new();
@@ -1669,14 +1669,8 @@ pub(crate) fn construction_restart(
     for (at, op) in span.iter().enumerate() {
         match op {
             Op::Region { .. } | Op::Const { .. } | Op::Local { .. } => {}
-            Op::MakeTuple { .. }
-            | Op::MakeList { .. }
-            | Op::MakeSet { .. }
-            | Op::MakeMap { .. }
-            | Op::MakeRecord { .. }
-                if at + 1 == span.len() =>
-            {
-                made = Some(head + at as u32);
+            Op::MakeList { items } if made.is_none() && at + 1 == span.len() => {
+                made = Some((head + at as u32, items.start.0));
             }
             _ => return None,
         }
@@ -1687,5 +1681,15 @@ pub(crate) fn construction_restart(
         }
         written.extend(op.writes());
     }
-    (!inputs.is_empty()).then_some((made?, inputs.into_iter().map(|reg| reg.0).collect()))
+    let (pc, reg) = made?;
+    let lost: Vec<_> = inputs
+        .into_iter()
+        .filter(|input| written.contains(input))
+        .collect();
+    (lost.len() == 1
+        && lost[0].0 == reg
+        && !span[..span.len() - 1]
+            .iter()
+            .any(|op| op.writes().is_some_and(|at| at.0 == reg)))
+    .then_some((pc, reg))
 }
