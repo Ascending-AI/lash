@@ -171,6 +171,20 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
 
 #[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
+    const CHILD_ENV: &str = "LASH_FIG843_CYCLE_CACHE_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        cache_build_rejects_cycles_in_inactive_components_scenario();
+        return;
+    }
+
+    crate::test_watchdog::assert_exact_test_completes(
+        "session_graph::tests::cache_build_rejects_cycles_in_inactive_components",
+        CHILD_ENV,
+        "session graph cycle check",
+    );
+}
+
+fn cache_build_rejects_cycles_in_inactive_components_scenario() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
         parent_node_id: parent_node_id.map(lash_vocabulary::identity::NodeId::fixture),

@@ -75,8 +75,6 @@ mod tests {
     struct FacadeTestStore {
         commit_attempts: AtomicUsize,
         materialized_session: Option<SessionId>,
-        planner_validates_budget: bool,
-        advances_revision: bool,
         replayed: bool,
     }
 
@@ -117,12 +115,6 @@ mod tests {
             commit: RuntimeCommit,
         ) -> Result<RuntimeCommitReceipt, StoreError> {
             self.commit_attempts.fetch_add(1, Ordering::SeqCst);
-            if self.planner_validates_budget {
-                super::super::RuntimeCommitPlanner::prepare(
-                    commit.clone(),
-                    super::super::FleetFormat::current(),
-                )?;
-            }
             let realized_node_timestamps = commit
                 .graph
                 .appended_nodes()
@@ -137,7 +129,7 @@ mod tests {
             Ok(RuntimeCommitReceipt {
                 committed_at_ms: 0,
                 schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
-                head_revision: commit.expected_head_revision + u64::from(self.advances_revision),
+                head_revision: commit.expected_head_revision,
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,
                 committed_leaf_node_id: commit
