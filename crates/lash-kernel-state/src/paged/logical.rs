@@ -20,7 +20,7 @@ mod member_batch;
 pub use dependencies::Dependencies;
 mod graph;
 mod invocations;
-pub use invocations::Invocation;
+pub use invocations::{Invocation, InvocationRange};
 mod lifecycle;
 pub use lifecycle::{Lifecycle, SourceValue};
 use lifecycle::{Publications, Written};

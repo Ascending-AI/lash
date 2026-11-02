@@ -55,31 +55,7 @@ fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Al
             aliases.insert(owner.clone(), Owner::Operand(at.clone()));
         }
         if let Owner::Visible { at, name } = owner {
-            let selected = scopes
-                .iter()
-                .filter(|(candidate, scope)| {
-                    let Owner::Binding {
-                        declared,
-                        name: candidate_name,
-                    } = candidate
-                    else {
-                        return false;
-                    };
-                    if candidate_name != name
-                        || at.unit != scope.unit
-                        || !at.path.starts_with(&scope.path)
-                    {
-                        return false;
-                    }
-                    if declared.path.len() == scope.path.len() + 1
-                        && declared.path.starts_with(&scope.path)
-                    {
-                        return at.path.get(scope.path.len()) > declared.path.last();
-                    }
-                    true
-                })
-                .max_by_key(|(candidate, scope)| (scope.path.len(), (*candidate).clone()));
-            if let Some((binding, _)) = selected {
+            if let Some(binding) = visible(&scopes, at, name) {
                 aliases.insert(owner.clone(), binding.clone());
             } else if source.site.unit == Unit::Main {
                 aliases.insert(
@@ -93,6 +69,31 @@ fn resolve(source: &Description, owners: &BTreeSet<Owner>) -> Result<(Scopes, Al
         }
     }
     Ok((scopes, aliases))
+}
+
+pub(super) fn visible<'a>(scopes: &'a Scopes, at: &Site, name: &Name) -> Option<&'a Owner> {
+    scopes
+        .iter()
+        .filter(|(candidate, scope)| {
+            let Owner::Binding {
+                declared,
+                name: candidate_name,
+            } = candidate
+            else {
+                return false;
+            };
+            if candidate_name != name || at.unit != scope.unit || !at.path.starts_with(&scope.path)
+            {
+                return false;
+            }
+            if declared.path.len() == scope.path.len() + 1 && declared.path.starts_with(&scope.path)
+            {
+                return at.path.get(scope.path.len()) > declared.path.last();
+            }
+            true
+        })
+        .max_by_key(|(candidate, scope)| (scope.path.len(), (*candidate).clone()))
+        .map(|(binding, _)| binding)
 }
 pub(super) fn cell_assignments(source: &Description) -> Result<BTreeMap<Site, Name>, Refused> {
     let mut owners = BTreeSet::new();

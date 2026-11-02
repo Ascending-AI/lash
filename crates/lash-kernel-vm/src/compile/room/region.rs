@@ -1,7 +1,7 @@
 //! Scalar lifetime compilation. Interior owners occur only in the proof.
-//! This is the ownership component of a region certificate. Charge, recovery
-//! and composed-call authentication must join it before a runtime consumer
-//! can elide source operations under shared acceptance.
+//! This compiles ownership and cold logical roles. Canonical charges,
+//! physical recovery placement and composed-call authentication must join it
+//! before runtime consumers can elide operations under shared acceptance.
 use super::*;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
@@ -76,6 +76,7 @@ impl ScalarFact {
 struct Live {
     fact: ScalarFact,
     price: usize,
+    entry: Option<Slot>,
 }
 struct Entry {
     slot: Slot,
@@ -84,12 +85,26 @@ struct Entry {
 struct ResultFact {
     at: Point,
     live: Live,
+    origin: Origin,
+}
+#[derive(Clone, Copy)]
+enum Origin {
+    Literal(Value),
+    Read(Live),
+    Computed,
 }
 struct CallFact {
     at: Site,
     callee: CallSource,
     result: Live,
     price: usize,
+}
+
+/// Cold logical roles after a source event. Placement must retain every fact
+/// named here, even if the useful kernel no longer needs that value.
+struct Recovery {
+    after: Point,
+    roles: Box<[(Slot, ScalarFact)]>,
 }
 
 /// The checked source owner compiles the topology once. The hot product has
@@ -106,6 +121,7 @@ pub(crate) struct ScalarRegion {
     delta: Polynomial,
     facts: usize,
     prices: usize,
+    recovery: Box<[Recovery]>,
 }
 
 struct Compiler<'a> {
@@ -132,6 +148,7 @@ impl Compiler<'_> {
         let live = Live {
             fact: ScalarFact(self.facts),
             price: self.prices,
+            entry: None,
         };
         self.facts += 1;
         self.prices += 1;
@@ -144,7 +161,8 @@ impl Compiler<'_> {
         if self.vacant.contains(&slot) || self.entries.iter().any(|entry| entry.slot == slot) {
             return Err(Refused::Retained);
         }
-        let live = self.fresh();
+        let mut live = self.fresh();
+        live.entry = Some(slot);
         self.entries.push(Entry { slot, live });
         self.live.insert(slot, live);
         Ok(live)
@@ -155,7 +173,7 @@ impl Compiler<'_> {
         self.delta.add(&Polynomial::variable(live.price), -1)?;
         Ok(live)
     }
-    fn result(&mut self, at: &Point, owner: &Owner) -> Result<Live, Refused> {
+    fn result(&mut self, at: &Point, owner: &Owner, origin: Origin) -> Result<Live, Refused> {
         let slot = self.slot(owner)?;
         if self.live.contains_key(&slot) {
             return Err(Refused::Retained);
@@ -164,10 +182,22 @@ impl Compiler<'_> {
         if !self.entries.iter().any(|entry| entry.slot == slot) {
             self.vacant.insert(slot);
         }
-        let live = self.fresh();
+        let live = match origin {
+            Origin::Read(input) => {
+                let live = Live {
+                    fact: ScalarFact(self.facts),
+                    price: input.price,
+                    entry: input.entry,
+                };
+                self.facts += 1;
+                live
+            }
+            _ => self.fresh(),
+        };
         self.results.push(ResultFact {
             at: at.clone(),
             live,
+            origin,
         });
         self.live.insert(slot, live);
         Ok(live)
@@ -183,16 +213,26 @@ impl Compiler<'_> {
     fn event(&mut self, event: &Event) -> Result<(), Refused> {
         let interval = self.source.compile_event(&event.point, ExitKind::Normal)?;
         if interval.acquisition(self.source).is_some() {
-            let result =
-                self.result(&event.point, event.output.as_ref().ok_or(Refused::Source)?)?;
+            let origin = match self.source.scalar_input(&self.slots, &event.point)? {
+                ScalarInput::Literal(value) => Origin::Literal(value),
+                ScalarInput::Binding(slot) => Origin::Read(self.entry(slot)?),
+            };
+            let result = self.result(
+                &event.point,
+                event.output.as_ref().ok_or(Refused::Source)?,
+                origin,
+            )?;
             let price = Polynomial::variable(result.price);
             self.peak(&price)?;
             self.delta.add(&price, 1)?;
             return Ok(());
         }
         if interval.native_commit(self.source) {
-            let result =
-                self.result(&event.point, event.output.as_ref().ok_or(Refused::Source)?)?;
+            let result = self.result(
+                &event.point,
+                event.output.as_ref().ok_or(Refused::Source)?,
+                Origin::Computed,
+            )?;
             let extra = match event.peak.measures().next() {
                 Some(Measure::CallPeak {
                     at,
@@ -330,7 +370,56 @@ impl Compiler<'_> {
     }
 }
 
+enum ScalarInput {
+    Literal(Value),
+    Binding(Slot),
+}
+
 impl Source {
+    fn scalar_input(&self, slots: &OwnerSlots, at: &Point) -> Result<ScalarInput, Refused> {
+        if at.phase != Phase::Commit
+            || at.site.unit != self.site.unit
+            || !at.site.path.starts_with(&self.site.path)
+        {
+            return Err(Refused::Source);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        for index in &at.site.path[self.site.path.len()..] {
+            node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+        }
+        match node {
+            doc::Node::Expr(doc::Expr::Literal(literal)) => {
+                let value = match literal {
+                    doc::Literal::Null => Value::Null,
+                    doc::Literal::Absent => Value::Absent,
+                    doc::Literal::Bool(value) => Value::Bool(*value),
+                    doc::Literal::Int(value) => Value::Int(value.word().ok_or(Refused::Facts)?),
+                    doc::Literal::Float(value) => Value::Float(*value),
+                    _ => return Err(Refused::Source),
+                };
+                Ok(ScalarInput::Literal(value))
+            }
+            doc::Node::Expr(doc::Expr::Variable(name)) => {
+                let binding =
+                    root_owners::visible(&slots.scopes, &at.site, name).ok_or(Refused::Source)?;
+                let Owner::Binding { declared, name } = binding else {
+                    return Err(Refused::Source);
+                };
+                if self.shared.get(&(declared.clone(), name.clone())) == Some(&true) {
+                    return Err(Refused::Source);
+                }
+                match slots.root(binding, TaskId::MAIN, 0) {
+                    Some(logical::Owner::Value {
+                        slot: slot @ Slot::Binding(_),
+                        ..
+                    }) => Ok(ScalarInput::Binding(slot)),
+                    _ => Err(Refused::Source),
+                }
+            }
+            _ => Err(Refused::Source),
+        }
+    }
+
     pub(crate) fn compile_scalar_region(
         self: &Arc<Self>,
         interval: Arc<CompiledInterval>,
@@ -359,7 +448,7 @@ impl Source {
             compiler.event(event)?;
         }
         compiler.peak(&Polynomial::default())?;
-        let region = ScalarRegion {
+        let mut region = ScalarRegion {
             source: Arc::clone(self),
             interval,
             entries: compiler.entries.into(),
@@ -371,7 +460,11 @@ impl Source {
             delta: compiler.delta,
             facts: compiler.facts,
             prices: compiler.prices,
+            recovery: Box::new([]),
         };
+        // The independent source replay supplies cold logical liveness. It
+        // cannot inherit the emitter's canceled temporary lifetime claims.
+        region.recovery = region.verify_lifetimes()?.into();
         region.verify()?;
         Ok(region)
     }
@@ -396,10 +489,34 @@ impl ScalarRegion {
     pub(crate) fn understate_peak_for_law(&mut self) {
         self.peaks = Box::new([]);
     }
+    #[cfg(test)]
+    pub(crate) fn remove_recovery_role_for_law(&mut self) {
+        let recovery = self
+            .recovery
+            .iter_mut()
+            .find(|map| !map.roles.is_empty())
+            .unwrap_or_else(|| unreachable!("law region has live recovery roles"));
+        recovery.roles = recovery.roles[1..].into();
+    }
     /// The verifier evaluates the original source Amount expressions over
     /// symbolic holdings. It does not use the emitter's acquisition/move
     /// classifications or trust its canceled lifetimes and peak expressions.
     pub(crate) fn verify(&self) -> Result<(), Refused> {
+        let expected = self.verify_lifetimes()?;
+        if self.recovery.len() != expected.len()
+            || self
+                .recovery
+                .iter()
+                .zip(expected)
+                .any(|(actual, expected)| {
+                    actual.after != expected.after || actual.roles != expected.roles
+                })
+        {
+            return Err(Refused::Exit);
+        }
+        Ok(())
+    }
+    fn verify_lifetimes(&self) -> Result<Vec<Recovery>, Refused> {
         let slots = self.source.owner_slots()?;
         let root = |owner: &Owner| match slots.root(owner, TaskId::MAIN, 0) {
             Some(logical::Owner::Value { slot, .. }) => Some(slot),
@@ -412,6 +529,7 @@ impl ScalarRegion {
             .collect();
         let mut delta = Polynomial::default();
         let mut result_index = 0;
+        let mut recovery = Vec::new();
         for event in self.interval.events() {
             let result = self
                 .results
@@ -419,6 +537,43 @@ impl ScalarRegion {
                 .filter(|result| result.at == event.point);
             if result.is_some() {
                 result_index += 1;
+            }
+            if let Some(result) = result {
+                match result.origin {
+                    Origin::Literal(value) => {
+                        let ScalarInput::Literal(expected) =
+                            self.source.scalar_input(&slots, &event.point)?
+                        else {
+                            return Err(Refused::Facts);
+                        };
+                        if !value.same(&expected) || result.live.entry.is_some() {
+                            return Err(Refused::Facts);
+                        }
+                    }
+                    Origin::Read(input) => {
+                        let ScalarInput::Binding(slot) =
+                            self.source.scalar_input(&slots, &event.point)?
+                        else {
+                            return Err(Refused::Facts);
+                        };
+                        if live.get(&slot) != Some(&input)
+                            || result.live.price != input.price
+                            || result.live.entry != input.entry
+                        {
+                            return Err(Refused::Facts);
+                        }
+                    }
+                    Origin::Computed => {
+                        if !self
+                            .source
+                            .compile_event(&event.point, ExitKind::Normal)?
+                            .native_commit(&self.source)
+                            || result.live.entry.is_some()
+                        {
+                            return Err(Refused::Source);
+                        }
+                    }
+                }
             }
             let members = |owner: &Owner| -> Result<Vec<Slot>, Refused> {
                 if let Some(slot) = root(owner) {
@@ -535,6 +690,10 @@ impl ScalarRegion {
                     live.insert(output, input.ok_or(Refused::Retained)?);
                 }
             }
+            recovery.push(Recovery {
+                after: event.point.clone(),
+                roles: live.iter().map(|(slot, live)| (*slot, live.fact)).collect(),
+            });
         }
         if result_index != self.results.len()
             || delta != self.delta
@@ -545,7 +704,7 @@ impl ScalarRegion {
         if !self.peaks.iter().any(|peak| peak.dominates(&delta)) {
             return Err(Refused::Peak);
         }
-        Ok(())
+        Ok(recovery)
     }
     pub(crate) fn entries(&self) -> impl Iterator<Item = (Slot, ScalarFact)> + '_ {
         self.entries
@@ -559,6 +718,12 @@ impl ScalarRegion {
     }
     pub(crate) fn fact_count(&self) -> usize {
         self.facts
+    }
+    pub(crate) fn recovery_after(&self, point: &Point) -> Option<&[(Slot, ScalarFact)]> {
+        self.recovery
+            .iter()
+            .find(|map| &map.after == point)
+            .map(|map| &*map.roles)
     }
     pub(crate) fn bind<'a>(
         &'a self,
@@ -618,8 +783,16 @@ impl ScalarRegion {
             }
         }
         for result in &self.results {
-            prices[result.live.price] =
-                i128::from(price(&values.values[result.live.fact.0], arena)?);
+            let value = &values.values[result.live.fact.0];
+            let expected = match result.origin {
+                Origin::Literal(value) => Some(value),
+                Origin::Read(input) => Some(values.values[input.fact.0]),
+                Origin::Computed => None,
+            };
+            if expected.is_some_and(|expected| !value.same(&expected)) {
+                return Ok(None);
+            }
+            prices[result.live.price] = i128::from(price(value, arena)?);
         }
         for (call, room) in self.calls.iter().zip(values.calls) {
             let Some(balance) = room.for_call(call.callee, None) else {
@@ -680,7 +853,10 @@ impl BoundScalarRegion<'_> {
             .map(|(slot, live)| {
                 (
                     self.invocation.owner(*slot),
-                    RootValue::Value(&self.values[live.fact.0]),
+                    live.entry.map_or_else(
+                        || RootValue::Value(&self.values[live.fact.0]),
+                        |entry| RootValue::Existing(self.invocation.owner(entry)),
+                    ),
                 )
             })
             .collect();

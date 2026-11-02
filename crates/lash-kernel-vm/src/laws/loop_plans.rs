@@ -824,6 +824,31 @@ fn scalar_region_lifetimes() {
     for (at, fact) in region.results() {
         values[fact.index()] = Value::Bool(at == &from);
     }
+    // Equal holding prices do not authenticate a source read or literal.
+    // The condition reads the old binding; the assignment computes false.
+    for (_, fact) in region.results() {
+        let mut wrong = values.clone();
+        let Value::Bool(value) = wrong[fact.index()] else {
+            unreachable!();
+        };
+        wrong[fact.index()] = Value::Bool(!value);
+        assert!(
+            region
+                .bind(
+                    &ledger,
+                    &mut arena,
+                    heap,
+                    &invocation,
+                    ScalarRegionValues {
+                        values: &wrong,
+                        calls: &[],
+                    },
+                )
+                .unwrap()
+                .is_none(),
+            "a same-price substituted read or literal is not the certified value"
+        );
+    }
     let bound = region
         .bind(
             &ledger,
@@ -878,6 +903,18 @@ fn scalar_region_lifetimes() {
             .bytes(),
         16
     );
+    let recovery = region.recovery_after(&from).unwrap();
+    assert!(
+        recovery.iter().any(|(owner, _)| *owner == slot),
+        "the original binding survives the condition's operand acquisition"
+    );
+    let saved_read = region.results().find(|(at, _)| *at == &from).unwrap().1;
+    assert!(
+        recovery.iter().any(|(_, fact)| *fact == saved_read),
+        "an evaluated operand has a recovery role before the condition consumes it"
+    );
+    region.remove_recovery_role_for_law();
+    assert_eq!(region.verify(), Err(room::Refused::Exit));
     region.understate_peak_for_law();
     assert_eq!(region.verify(), Err(room::Refused::Peak));
 }

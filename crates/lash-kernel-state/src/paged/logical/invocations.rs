@@ -8,6 +8,69 @@ pub struct Invocation {
     id: u64,
     ledger: Rc<()>,
 }
+
+/// Prospective identities for a compiled prefix's synchronous activations.
+/// Reserving is pure. Only a matching prepared exit consumes the completed
+/// range; abandoned work and conservative admission misses consume no IDs.
+/// This process-local authority is affine and is never part of a sealed root.
+pub struct InvocationRange {
+    stamp: Stamp,
+    task: TaskId,
+    first: u64,
+    end: u64,
+}
+impl InvocationRange {
+    pub fn len(&self) -> u64 {
+        self.end - self.first
+    }
+    pub fn is_empty(&self) -> bool {
+        self.first == self.end
+    }
+    pub fn invocation(&self, offset: u64) -> Option<Invocation> {
+        let id = self.first.checked_add(offset)?;
+        (id < self.end).then(|| Invocation {
+            task: self.task,
+            id,
+            ledger: Rc::clone(&self.stamp.identity),
+        })
+    }
+}
+
+impl Prepared {
+    /// Add completed, physically elided calls to this same atomic exit.
+    /// The compiler owns their source/peak proof; the ledger owns identity
+    /// allocation and rejects stale, foreign or retained activations. A stop
+    /// inside a call uses ordinary frame entry for that uncompleted suffix.
+    pub fn complete_invocations(
+        mut self,
+        range: InvocationRange,
+        completed: u64,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        if !Rc::ptr_eq(&self.identity, &range.stamp.identity)
+            || self.revision != range.stamp.revision
+            || self.next.next_invocation != range.first
+            || completed > range.len()
+        {
+            return Err(invalid("invocation range does not belong to this exit"));
+        }
+        let next = range
+            .first
+            .checked_add(completed)
+            .ok_or_else(|| invalid("logical invocation overflow"))?;
+        let start = codec::invocation_key(range.task, range.first);
+        let end = codec::invocation_key(range.task, range.end);
+        // One ordered lookup checks the entire reserved activation range. No
+        // frame insertion/deletion or per-call owner walk is needed.
+        if let Some((key, _)) = self.next.execution.after(Some(start.as_slice()), access)?
+            && key.as_slice() < end.as_slice()
+        {
+            return Err(invalid("completed invocation retains a source owner"));
+        }
+        self.next.next_invocation = next;
+        Ok(self)
+    }
+}
 impl PartialEq for Invocation {
     fn eq(&self, other: &Self) -> bool {
         self.task == other.task && self.id == other.id && Rc::ptr_eq(&self.ledger, &other.ledger)
@@ -33,8 +96,16 @@ impl Invocation {
     }
 }
 impl Ledger {
-    /// A pure prospective activation. Its cursor is advanced only by an
-    /// accepted Enter event; abandoned prefixes consume no activation ID.
+    pub fn reserve_invocations(&self, task: TaskId, count: u64) -> Option<InvocationRange> {
+        Some(InvocationRange {
+            stamp: self.stamp(),
+            task,
+            first: self.state.next_invocation,
+            end: self.state.next_invocation.checked_add(count)?,
+        })
+    }
+    /// A pure prospective activation. Accepted entry or a compiled call exit
+    /// advances its cursor; abandoned prefixes consume no activation ID.
     pub fn prospective_invocation(&self, task: TaskId) -> Invocation {
         Invocation {
             task,
