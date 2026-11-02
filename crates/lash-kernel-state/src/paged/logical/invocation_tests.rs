@@ -85,8 +85,10 @@ pub(super) fn completed_prefix() {
     assert!(ledger.commit(stale).is_err());
     assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first);
 
+    let mut left_arena = crate::arena::Arena::new();
+    let mut right_arena = crate::arena::Arena::new();
     let left = ledger
-        .prepare([], &access)
+        .prepare_source_boundary(left_arena.registration().unwrap(), &heap, &[], &[])
         .unwrap()
         .complete_invocations(
             ledger.reserve_invocations(TaskId::MAIN, 4).unwrap(),
@@ -95,7 +97,7 @@ pub(super) fn completed_prefix() {
         )
         .unwrap();
     let right = ledger
-        .prepare([], &access)
+        .prepare_source_boundary(right_arena.registration().unwrap(), &heap, &[], &[])
         .unwrap()
         .complete_invocations(
             ledger.reserve_invocations(TaskId::MAIN, 4).unwrap(),
@@ -103,19 +105,17 @@ pub(super) fn completed_prefix() {
             &access,
         )
         .unwrap();
-    ledger
-        .commit(
-            left.admit(u64::MAX)
-                .unwrap_or_else(|_| panic!("empty exit fits")),
-        )
+    left.admit(u64::MAX)
+        .unwrap_or_else(|_| panic!("empty exit fits"))
+        .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
         .unwrap();
     assert!(
-        ledger
-            .commit(
-                right
-                    .admit(u64::MAX)
-                    .unwrap_or_else(|_| panic!("empty exit fits"))
-            )
+        right
+            .admit(u64::MAX)
+            .unwrap_or_else(|_| panic!("empty exit fits"))
+            .publish(&mut ledger, |_, _| panic!(
+                "stale boundary cannot mutate storage"
+            ))
             .is_err()
     );
     assert_eq!(ledger.prospective_invocation(TaskId::MAIN).id(), first + 2);

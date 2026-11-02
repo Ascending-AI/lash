@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 mod bulk;
+pub(crate) mod charges;
 mod derive;
 mod evaluate;
 mod interval;

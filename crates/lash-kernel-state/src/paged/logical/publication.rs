@@ -12,15 +12,38 @@ pub struct MemberEdit {
     pub member: Member,
     pub next: Option<Value>,
 }
-pub struct PreparedPublication<'a> {
+/// One canonical arena/ledger boundary. It contains surviving roots and
+/// actual graph edits, not a record of each interior scalar lifetime.
+/// Registration and dependency authentication remain owned until commit.
+pub struct BoundaryTransaction<'a> {
     registration: Registration<'a>,
     dependencies: Dependencies,
     prepared: Prepared,
     members: Vec<MemberEdit>,
 }
-pub struct AcceptedPublication<'a>(PreparedPublication<'a>);
+pub struct AcceptedBoundary<'a>(BoundaryTransaction<'a>);
 
 impl Ledger {
+    /// Prepare the live-out transfer of a compiled source prefix. Resident and
+    /// cold values use the same source projection and membership rules as an
+    /// exact operation. The compiler separately proves interior lifetimes.
+    pub fn prepare_source_boundary<'a>(
+        &self,
+        mut registration: Registration<'a>,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<BoundaryTransaction<'a>, HeapFault> {
+        let prepared =
+            self.prepare_source_ownership(registration.arena(), heap, inputs, outputs)?;
+        let dependencies = projection_dependencies(self, registration.arena(), &prepared, outputs)?;
+        Ok(BoundaryTransaction {
+            registration,
+            dependencies,
+            prepared,
+            members: Vec::new(),
+        })
+    }
     pub fn prepare_enter_publication<'a>(
         &self,
         task: TaskId,
@@ -28,7 +51,7 @@ impl Ledger {
         access: &Access<'_>,
         inputs: &[Owner],
         bindings: &[(Slot, RootValue<'_>)],
-    ) -> Result<(Invocation, PreparedPublication<'a>), HeapFault> {
+    ) -> Result<(Invocation, BoundaryTransaction<'a>), HeapFault> {
         let (invocation, prepared) =
             self.prepare_enter(task, registration.arena(), access, inputs, bindings)?;
         let outputs: Vec<_> = bindings
@@ -39,7 +62,7 @@ impl Ledger {
             projection_dependencies(self, registration.arena(), &prepared, &outputs)?;
         Ok((
             invocation,
-            PreparedPublication {
+            BoundaryTransaction {
                 registration,
                 dependencies,
                 prepared,
@@ -53,10 +76,10 @@ impl Ledger {
         mut registration: Registration<'a>,
         access: &Access<'_>,
         outputs: &[(Owner, RootValue<'_>)],
-    ) -> Result<PreparedPublication<'a>, HeapFault> {
+    ) -> Result<BoundaryTransaction<'a>, HeapFault> {
         let prepared = self.prepare_leave(invocation, registration.arena(), access, outputs)?;
         let dependencies = projection_dependencies(self, registration.arena(), &prepared, outputs)?;
-        Ok(PreparedPublication {
+        Ok(BoundaryTransaction {
             registration,
             dependencies,
             prepared,
@@ -69,10 +92,10 @@ impl Ledger {
         access: &Access<'_>,
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
-    ) -> Result<PreparedPublication<'a>, HeapFault> {
+    ) -> Result<BoundaryTransaction<'a>, HeapFault> {
         let prepared = self.prepare_ownership(registration.arena(), access, inputs, outputs)?;
         let dependencies = projection_dependencies(self, registration.arena(), &prepared, outputs)?;
-        Ok(PreparedPublication {
+        Ok(BoundaryTransaction {
             registration,
             dependencies,
             prepared,
@@ -89,7 +112,7 @@ impl Ledger {
         next: Option<Value>,
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
-    ) -> Result<PreparedPublication<'a>, MemberFault> {
+    ) -> Result<BoundaryTransaction<'a>, MemberFault> {
         let PreparedMember {
             prepared,
             dependencies,
@@ -103,7 +126,7 @@ impl Ledger {
             inputs,
             outputs,
         )?;
-        Ok(PreparedPublication {
+        Ok(BoundaryTransaction {
             registration,
             dependencies,
             prepared,
@@ -116,7 +139,29 @@ impl Ledger {
     }
 }
 
-impl<'a> PreparedPublication<'a> {
+impl<'a> BoundaryTransaction<'a> {
+    /// Keep the exact input/callee/cell versions used by the certificate,
+    /// including values which do not survive this exit. Output projection
+    /// alone cannot authenticate a discarded input or a resolved callee.
+    pub fn bind_dependencies(mut self, dependencies: Dependencies) -> Result<Self, HeapFault> {
+        self.dependencies.extend(dependencies)?;
+        Ok(self)
+    }
+
+    /// Invocation reservations settle with the same roots, edits and revision.
+    /// A failed or abandoned boundary consumes none of its reserved IDs.
+    pub fn complete_invocations(
+        mut self,
+        range: InvocationRange,
+        completed: u64,
+        access: &Access<'_>,
+    ) -> Result<Self, HeapFault> {
+        self.prepared = self
+            .prepared
+            .complete_invocations(range, completed, access)?;
+        Ok(self)
+    }
+
     pub(super) fn from_program(
         registration: Registration<'a>,
         dependencies: Dependencies,
@@ -235,15 +280,15 @@ impl<'a> PreparedPublication<'a> {
         });
         Ok(self)
     }
-    pub fn admit(self, bound: u64) -> Result<AcceptedPublication<'a>, Box<Self>> {
+    pub fn admit(self, bound: u64) -> Result<AcceptedBoundary<'a>, Box<Self>> {
         if self.prepared.peak() <= bound {
-            Ok(AcceptedPublication(self))
+            Ok(AcceptedBoundary(self))
         } else {
             Err(Box::new(self))
         }
     }
 }
-impl AcceptedPublication<'_> {
+impl AcceptedBoundary<'_> {
     /// All fallible semantic storage preparation is owned by the caller's
     /// canonical mutation guard. A stale journal invokes no semantic edit.
     /// The registration is committed inside the same infallible publication.
@@ -252,7 +297,7 @@ impl AcceptedPublication<'_> {
         ledger: &mut Ledger,
         semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>),
     ) -> Result<(), HeapFault> {
-        let PreparedPublication {
+        let BoundaryTransaction {
             mut registration,
             dependencies,
             prepared,

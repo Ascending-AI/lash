@@ -511,7 +511,7 @@ fn source_transfers_release_bodies_once_and_preserve_nested_aliases() {
         arena: &'a mut crate::arena::Arena,
         access: &Access<'_>,
         value: &lash_kernel_doc::Value,
-    ) -> (Invocation, PreparedPublication<'a>) {
+    ) -> (Invocation, BoundaryTransaction<'a>) {
         ledger
             .prepare_enter_publication(
                 TaskId::MAIN,

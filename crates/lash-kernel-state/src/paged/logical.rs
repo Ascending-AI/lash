@@ -35,7 +35,7 @@ mod publication;
 use members::PreparedMember;
 pub use members::{Member, MemberFault};
 pub use ownership::RootValue;
-pub use publication::{AcceptedPublication, MemberEdit, PreparedPublication};
+pub use publication::{AcceptedBoundary, BoundaryTransaction, MemberEdit};
 mod warming;
 pub use warming::WarmFact;
 mod values;

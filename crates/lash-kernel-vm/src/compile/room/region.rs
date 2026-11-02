@@ -5,7 +5,7 @@
 use super::*;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
-    arena::Arena,
+    arena::{Arena, Registration},
     kernel_internals::{
         PagedHeap,
         logical::{self, Holding, Ledger, RootValue, Slot},
@@ -828,15 +828,14 @@ impl BoundScalarRegion<'_> {
     pub(crate) fn peak(&self) -> u64 {
         self.peak
     }
-    /// Only live-out roots are staged. No constituent event creates a runtime
-    /// journal entry. The caller must carry the shared resource acceptance and
-    /// exact source frontier through this preparation and its atomic commit.
-    pub(crate) fn prepare(
+    /// The common boundary owns canonical storage grants and authenticates
+    /// actual surviving roots. It does not expand canceled temporary events.
+    pub(crate) fn prepare_boundary<'a>(
         self,
         ledger: &Ledger,
-        arena: &mut Arena,
+        registration: Registration<'a>,
         heap: &PagedHeap,
-    ) -> Result<Option<logical::Prepared>, doc::heap::HeapFault> {
+    ) -> Result<Option<logical::BoundaryTransaction<'a>>, doc::heap::HeapFault> {
         if !ledger.is_current(&self.stamp) {
             return Ok(None);
         }
@@ -860,8 +859,10 @@ impl BoundScalarRegion<'_> {
                 )
             })
             .collect();
+        // Preparing authenticates result holdings through the canonical source
+        // projection. No naked retained-byte delta authorizes this transfer.
         let before = ledger.balance()?.total()?;
-        let prepared = ledger.prepare_source_ownership(arena, heap, &inputs, &outputs)?;
+        let prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
         let after = prepared.balance()?.total()?;
         if i128::from(after) - i128::from(before) != self.delta {
             return Ok(None);

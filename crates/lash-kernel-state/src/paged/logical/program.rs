@@ -344,11 +344,11 @@ pub struct EvaluatedProgram {
     next_provisional: EntityId,
 }
 pub struct PreparedProgram<'a> {
-    publication: PreparedPublication<'a>,
+    publication: BoundaryTransaction<'a>,
     entities: Vec<VirtualEntity>,
 }
 pub struct AcceptedProgram<'a> {
-    publication: AcceptedPublication<'a>,
+    publication: AcceptedBoundary<'a>,
     entities: Vec<VirtualEntity>,
 }
 
@@ -658,7 +658,7 @@ impl EvaluatedProgram {
             .map(|(entity, body)| VirtualEntity { entity, body })
             .collect();
         Ok(PreparedProgram {
-            publication: PreparedPublication::from_program(
+            publication: BoundaryTransaction::from_program(
                 registration,
                 dependencies,
                 prepared,

@@ -6,6 +6,7 @@
 //! occurrences state it. A closure an island calls keeps the code it found
 //! by its site, as an ordinary call keeps it (FIG-6844).
 
+mod charges;
 mod interval;
 mod publication;
 
@@ -606,6 +607,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     room_shared_binding_growth();
     room_unpooled_immutable_growth();
     scalar_region_lifetimes();
+    charges::compiled_charges();
     interval::member_read_suffix();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
@@ -870,7 +872,7 @@ fn scalar_region_lifetimes() {
     let before = ledger.balance().unwrap().total().unwrap();
     assert!(
         bound
-            .prepare(&ledger, &mut arena, heap)
+            .prepare_boundary(&ledger, arena.registration().unwrap(), heap)
             .unwrap()
             .unwrap()
             .admit(before + 15)
@@ -890,9 +892,15 @@ fn scalar_region_lifetimes() {
         )
         .unwrap()
         .unwrap();
-    let prepared = bound.prepare(&ledger, &mut arena, heap).unwrap().unwrap();
-    ledger
-        .commit(prepared.admit(before + 16).ok().unwrap())
+    let prepared = bound
+        .prepare_boundary(&ledger, arena.registration().unwrap(), heap)
+        .unwrap()
+        .unwrap();
+    prepared
+        .admit(before + 16)
+        .ok()
+        .unwrap()
+        .publish(&mut ledger, |_, edits| assert!(edits.is_empty()))
         .unwrap();
     assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
     assert_eq!(
