@@ -515,6 +515,9 @@ struct Reader<'s> {
     regs: Vec<Option<Expr>>,
     /// The regions headed and not yet closed.
     open: Vec<Close>,
+    /// Whether an op in the open regions took a value computed before their
+    /// head: an exit at that head cannot replay them from there.
+    consumed: bool,
     /// Each expression local this run bound and has not ended: its
     /// variable, its register and its value.
     lets: Vec<(LocalRef, u32, Expr, u64, u32)>,
@@ -529,6 +532,7 @@ impl<'s> Reader<'s> {
             stream,
             regs: Vec::new(),
             open: Vec::new(),
+            consumed: false,
             lets: Vec::new(),
             scope,
         }
@@ -548,7 +552,11 @@ impl<'s> Reader<'s> {
     }
 
     fn take(&mut self, at: Reg) -> Option<Expr> {
-        self.regs.get_mut(at.ix())?.take()
+        let expr = self.regs.get_mut(at.ix())?.take()?;
+        if self.open.first().is_some_and(|open| expr.pc < open.head) {
+            self.consumed = true;
+        }
+        Some(expr)
     }
 
     fn operands(&mut self, args: RegRange) -> Option<Box<[Expr]>> {
@@ -557,6 +565,7 @@ impl<'s> Reader<'s> {
 
     /// The regions an op that charges here closes.
     fn close(&mut self) -> Closes {
+        self.consumed = false;
         std::mem::take(&mut self.open).into()
     }
 
@@ -572,13 +581,14 @@ impl<'s> Reader<'s> {
         let mut pc = start;
         while pc < end {
             let op = *stream.ops.get(pc as usize)?;
-            let read =
-                matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. }).then(|| {
-                    SourceRead {
-                        pc,
-                        quote: units(&self.open),
-                        unpaid: self.miss(pc),
-                    }
+            // A read publishes ahead of its region's charge only where a miss
+            // can replay the region from its head.
+            let read = (matches!(op, Op::Const { .. } | Op::Local { .. } | Op::Session { .. })
+                && !self.consumed)
+                .then(|| SourceRead {
+                    pc,
+                    quote: units(&self.open),
+                    unpaid: self.miss(pc),
                 });
             let (reg, kind) = match op {
                 Op::Region { region, total } => {
