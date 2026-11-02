@@ -102,6 +102,74 @@ pub(super) fn compiled_charges() {
         let native_tape = crate::observe::ChargeTape::new();
         native_debt.record(&native_tape);
         assert_eq!(native_tape.steps(), [Weight::Atomic(9)]);
+        let pending = (stmt.ops.start..close - 1)
+            .rev()
+            .find_map(|pc| {
+                if let Op::Region { region, total } = stream.ops[pc as usize] {
+                    Some(crate::compile::expr::Close {
+                        region: region.0,
+                        head: pc,
+                        total,
+                    })
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let packet =
+            ChargeProgram::native_packet(&exe, body.code, statement, close - 1, Some(pending))
+                .unwrap();
+        let packet_debt = packet.bind(&values[..1]).unwrap();
+        assert_eq!(
+            packet_debt.units(),
+            9 + u64::from(pending.total),
+            "the packet pays the original pending close exactly once before native completion"
+        );
+        let packet_tape = crate::observe::ChargeTape::new();
+        packet_debt.record(&packet_tape);
+        let expected_tape: Vec<_> = stream
+            .regions
+            .events(pending.region)
+            .iter()
+            .map(|event| event.weight)
+            .chain(std::iter::once(Weight::Atomic(9)))
+            .collect();
+        assert_eq!(packet_tape.steps(), expected_tape);
+        let precise_need = native_debt.native_allowance(7).unwrap();
+        let packet_need = packet_debt.native_allowance(7).unwrap();
+        assert!(!precise_need.strict && packet_need.strict);
+        // This native-only declaration has no logical body/frame to reserve.
+        assert_eq!((precise_need.depth, packet_need.depth), (0, 0));
+        assert!(precise_need.close.is_none() && packet_need.close.is_none());
+        for need in [&precise_need, &packet_need] {
+            assert_eq!(need.safe_point, 7);
+            let accepted = crate::admission::Window::new(0, need.units, need.units).admit(
+                (),
+                need.before,
+                need.units,
+                need.close,
+                need.strict,
+            );
+            assert_eq!(
+                accepted.is_some(),
+                !need.strict,
+                "precise native completion is inclusive; speculative packet entry is strict"
+            );
+        }
+        assert!(
+            ChargeProgram::native_packet(&exe, body.code, statement, close - 1, None).is_err(),
+            "a packet cannot erase its pending source close"
+        );
+        let wrong = crate::compile::expr::Close {
+            total: pending.total + 1,
+            ..pending
+        };
+        assert!(
+            ChargeProgram::native_packet(&exe, body.code, statement, close - 1, Some(wrong))
+                .is_err(),
+            "the close keeps its original source identity and total"
+        );
+
         let prefix = ChargeProgram::compile(
             &exe,
             body.code,

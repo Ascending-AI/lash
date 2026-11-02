@@ -7,6 +7,7 @@ pub(super) fn derive(
     code: compile::CodeId,
     statement: compile::StmtId,
     range: OpRange,
+    pending: Option<Option<expr::Close>>,
 ) -> Result<(Vec<Close>, Vec<Formula>, Point), Refused> {
     let (stream, stmt, _) = exe.statement(statement);
     if range.len != 1 || range.start < stmt.ops.start || range.end() > stmt.ops.end() {
@@ -14,7 +15,15 @@ pub(super) fn derive(
     }
     // Verify the original source/physical graph, even though this coverage
     // deliberately contains none of its already-completed fixed closes.
-    canonical_span(exe, code, statement, stmt.ops)?;
+    let canonical = match stmt.form {
+        compile::Form::While { test, .. }
+            if range.start >= test.start && range.end() <= test.end() =>
+        {
+            test
+        }
+        _ => stmt.ops,
+    };
+    canonical_span(exe, code, statement, canonical)?;
     let op = *stream
         .ops
         .get(range.start as usize)
@@ -41,6 +50,41 @@ pub(super) fn derive(
     }
     let mut formulas = Vec::new();
     let mut tape = Vec::new();
+    let mut regions = Vec::new();
+    if let Some(pending) = pending {
+        // This is the original source close, not a fee chosen by a packet.
+        // Every earlier close was completed; only the current region remains.
+        for pc in canonical.start..range.start {
+            match stream.ops[pc as usize] {
+                Op::Region { region, total } => {
+                    let close = expr::Close {
+                        region: region.0,
+                        head: pc,
+                        total,
+                    };
+                    compile::islands::verify_close(Some(&close), stream)
+                        .map_err(|_| Refused::Exit)?;
+                    regions.push(close);
+                }
+                op if !op.kind().in_region() => regions.clear(),
+                _ => {}
+            }
+        }
+        if regions.as_slice() != pending.as_slice() {
+            return Err(Refused::Exit);
+        }
+        if exe.code(code).charged {
+            for close in &regions {
+                tape.extend(
+                    stream
+                        .regions
+                        .events(close.region)
+                        .iter()
+                        .map(|event| TapeEvent::Fixed(event.weight)),
+                );
+            }
+        }
+    }
     completion(
         exe,
         lib,
@@ -53,12 +97,40 @@ pub(super) fn derive(
     Ok((
         vec![Close {
             at: at.clone(),
-            regions: Box::new([]),
+            regions: regions.into(),
             tape: tape.into(),
         }],
         formulas,
         at,
     ))
+}
+
+pub(super) fn depth(
+    exe: &Executable,
+    statement: compile::StmtId,
+    pc: u32,
+    packet: bool,
+) -> Result<u64, Refused> {
+    let (stream, _, _) = exe.statement(statement);
+    let lib = match stream.ops.get(pc as usize) {
+        Some(Op::Call { lib, .. } | Op::Operator { lib, .. }) => LibId(lib.0),
+        _ => return Err(Refused::Source),
+    };
+    let function = exe.lib(lib);
+    let extra = if packet {
+        function
+            .specialization
+            .prepared
+            .as_ref()
+            .map_or(0, |(entry, _)| entry.depth())
+    } else {
+        0
+    };
+    Ok(match (function.operation(), extra) {
+        (true, 0 | 1) => 1,
+        (true, extra) | (false, extra @ 1..) => u64::from(extra) + 1,
+        (false, 0) => 0,
+    })
 }
 
 impl ChargeProgram {
@@ -69,15 +141,52 @@ impl ChargeProgram {
         pc: u32,
     ) -> Result<Self, Refused> {
         let range = OpRange { start: pc, len: 1 };
-        let (closes, formulas, at) = derive(exe, code, statement, range)?;
+        let (closes, formulas, at) = derive(exe, code, statement, range, None)?;
         let program = Self {
             source: Arc::clone(&exe.code(code).source_room),
             coverage: Coverage::NativeCompletion,
+            native_depth: Some(depth(exe, statement, pc, false)?),
             statement,
             range,
             closes: closes.into(),
             formulas: formulas.into(),
             fixed: 0,
+            recording: exe.charging(),
+            first: at.clone(),
+            through: at,
+        };
+        program.verify(exe, code)?;
+        Ok(program)
+    }
+    /// A speculative packet still owes its authenticated original close.
+    /// Its debt bills that close before native completion, with strict slice
+    /// admission. The supplied physical metadata must equal the source close.
+    pub(crate) fn native_packet(
+        exe: &Executable,
+        code: compile::CodeId,
+        statement: compile::StmtId,
+        pc: u32,
+        pending: Option<expr::Close>,
+    ) -> Result<Self, Refused> {
+        let range = OpRange { start: pc, len: 1 };
+        let (closes, formulas, at) = derive(exe, code, statement, range, Some(pending))?;
+        let fixed = closes
+            .iter()
+            .flat_map(|close| &close.tape)
+            .try_fold(0_u64, |sum, event| match event {
+                TapeEvent::Fixed(weight) => sum.checked_add(weight.units()),
+                TapeEvent::Formula(_) => Some(sum),
+            })
+            .ok_or(Refused::Facts)?;
+        let program = Self {
+            source: Arc::clone(&exe.code(code).source_room),
+            coverage: Coverage::NativePacket(pending),
+            native_depth: Some(depth(exe, statement, pc, true)?),
+            statement,
+            range,
+            closes: closes.into(),
+            formulas: formulas.into(),
+            fixed,
             recording: exe.charging(),
             first: at.clone(),
             through: at,

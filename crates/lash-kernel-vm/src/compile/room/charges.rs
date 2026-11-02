@@ -12,6 +12,7 @@ mod native_completion;
 enum Coverage {
     Span,
     NativeCompletion,
+    NativePacket(Option<expr::Close>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,6 +42,7 @@ struct Formula {
 pub(crate) struct ChargeProgram {
     source: Arc<Source>,
     coverage: Coverage,
+    native_depth: Option<u64>,
     statement: compile::StmtId,
     range: OpRange,
     closes: Box<[Close]>,
@@ -71,6 +73,24 @@ impl ChargeDebt<'_> {
         Arc::ptr_eq(source, &self.program.source)
             && &self.program.first == first
             && &self.program.through == through
+    }
+    /// The suffix compiler owns strictness, the original pending close and
+    /// operation/template depth. Consumers cannot supply those independently.
+    pub(crate) fn native_allowance(&self, safe_point: u64) -> Option<crate::admission::Allowance> {
+        let strict = match self.program.coverage {
+            Coverage::Span => return None,
+            Coverage::NativeCompletion => false,
+            Coverage::NativePacket(_) => true,
+        };
+        Some(crate::admission::Allowance {
+            occurrences: vec![],
+            before: 0,
+            units: self.units,
+            close: None,
+            strict,
+            depth: self.program.native_depth?,
+            safe_point,
+        })
     }
     pub(crate) fn units(&self) -> u64 {
         self.units
@@ -122,6 +142,7 @@ impl ChargeProgram {
         let program = Self {
             source,
             coverage: Coverage::Span,
+            native_depth: None,
             statement,
             range,
             closes: closes.into(),
@@ -153,9 +174,30 @@ impl ChargeProgram {
                 )
             }
             Coverage::NativeCompletion => {
-                native_completion::derive(exe, code, self.statement, self.range)?
+                native_completion::derive(exe, code, self.statement, self.range, None)?
+            }
+            Coverage::NativePacket(close) => {
+                native_completion::derive(exe, code, self.statement, self.range, Some(close))?
             }
         };
+        let native_depth = match self.coverage {
+            Coverage::Span => None,
+            Coverage::NativeCompletion => Some(native_completion::depth(
+                exe,
+                self.statement,
+                self.range.start,
+                false,
+            )?),
+            Coverage::NativePacket(_) => Some(native_completion::depth(
+                exe,
+                self.statement,
+                self.range.start,
+                true,
+            )?),
+        };
+        if self.native_depth != native_depth {
+            return Err(Refused::Source);
+        }
         if first != self.first
             || closes.last().map(|close| &close.at) != Some(&self.through)
             || closes != *self.closes
