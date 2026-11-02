@@ -17,6 +17,7 @@ pub(super) enum DurableReadMethod {
     RunFactsOf,
     RunFactsWithin,
     ExecRoot,
+    EffectAdmissions,
     CellRoots,
     CellRootsWithin,
     PendingWaits,
@@ -44,6 +45,7 @@ impl DurableReadMethod {
             Self::RunFactsOf => "run_facts_of",
             Self::RunFactsWithin => "run_facts_within",
             Self::ExecRoot => "exec_root",
+            Self::EffectAdmissions => "effect_admissions",
             Self::CellRoots => "cell_roots",
             Self::CellRootsWithin => "cell_roots_within",
             Self::PendingWaits => "pending_waits",
@@ -136,6 +138,13 @@ pub(super) async fn drive(
         DurableReadMethod::ExecRoot => format!(
             "{:?}",
             store.exec_root(&exec).await.expect("execute exec_root")
+        ),
+        DurableReadMethod::EffectAdmissions => format!(
+            "{:?}",
+            store
+                .effect_admissions(&exec)
+                .await
+                .expect("execute effect_admissions")
         ),
         DurableReadMethod::CellRoots => format!(
             "{:?}",

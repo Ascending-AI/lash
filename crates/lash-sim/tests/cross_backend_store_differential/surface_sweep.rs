@@ -439,6 +439,9 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
                 durable_read_coverage::DurableReadMethod::ExecRoot,
             )),
             surface(SurfaceMethod::DurableRead(
+                durable_read_coverage::DurableReadMethod::EffectAdmissions,
+            )),
+            surface(SurfaceMethod::DurableRead(
                 durable_read_coverage::DurableReadMethod::CellRoots,
             )),
             surface(SurfaceMethod::DurableRead(

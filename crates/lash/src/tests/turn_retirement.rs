@@ -194,6 +194,25 @@ impl World {
             .collect()
     }
 
+    /// The ledger owner of the one cell `run` of `session` journaled an
+    /// admission under: an in-turn cell's durable state is its journal
+    /// until a checkpoint roots it (FIG-7585).
+    fn journaled_cell(
+        &self,
+        session: &str,
+        run: &str,
+    ) -> Option<lash_core::durable_port::domain::OwnerKey> {
+        let cells: std::collections::BTreeSet<String> = self
+            .rows(&format!("effect_admissions c/{session}/{run}/"))
+            .into_iter()
+            .filter_map(|row| row.strip_prefix("effect_admissions ").map(str::to_owned))
+            .collect();
+        assert!(cells.len() <= 1, "the turn journaled one cell: {cells:?}");
+        cells.into_iter().next().map(|cell| {
+            lash_core::durable_port::domain::OwnerKey::parse(&cell).expect("a cell's ledger owner")
+        })
+    }
+
     /// The hash of every stored blob.
     fn blobs(&self) -> std::collections::BTreeSet<String> {
         lash_sqlite_store::testing::read_rows_for_testing(&self.stores, "SELECT hash FROM blobs")
@@ -323,16 +342,14 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
     let key = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         let key = world.keys.recv().await.expect("the tools outlive the law");
         let store = world.stores.durable_store();
-        let turn = lash_vocabulary::identity::TurnId::fixture(run);
         // The key is sent inside the body, before Pending commits. Cancel
         // only after that result is durable, while the approval is pending.
         loop {
-            let roots = store.cell_roots(session.session_id(), &turn).await?;
-            let [root] = roots.as_slice() else {
-                panic!("the admitted approval retains its one cell: {roots:?}");
+            let Some(cell) = world.journaled_cell(session_name, run) else {
+                panic!("the admitted approval journals its one cell");
             };
             {
-                let facts = store.run_facts(&root.exec.owner()).await?;
+                let facts = store.run_facts(&cell).await?;
                 if facts.rows.iter().any(|row| row.kind == RunFactKind::XWait) {
                     // Pending alone leaves the live cell able to observe a
                     // terminal cancellation. Join that observer before the
@@ -410,10 +427,8 @@ async fn a_cancelled_turn_retires_the_cell_it_stopped_in_and_keeps_its_transcrip
         ));
     }
     assert!(
-        !world
-            .rows(&format!("exec_snapshots c/{session_name}/{run}/"))
-            .is_empty(),
-        "the parked cell holds its root"
+        world.journaled_cell(session_name, run).is_some(),
+        "the parked cell holds its journal"
     );
     let cancel = handle
         .cancel()
@@ -950,7 +965,7 @@ fn transcript(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_ledger() -> Result<()>
 {
-    use lash_core::durable_port::domain::{DurableReads as _, OwnerKey, RunFactKind};
+    use lash_core::durable_port::domain::{DurableReads as _, RunFactKind};
 
     let (session_name, run) = ("transcript-cell", "transcript-cell-run");
     let return_gate = Arc::new(tokio::sync::Notify::new());
@@ -962,22 +977,12 @@ async fn a_recovered_cell_turn_reads_its_calls_from_its_transcript_without_its_l
         .await?;
     let input = handle.input_id().clone();
     let key = world.parked().await;
-    assert!(
-        !world
-            .rows(&format!("exec_snapshots c/{session_name}/{run}/"))
-            .is_empty(),
-        "the parked cell's recovery state is saved before the terminal"
-    );
     // Receiving a key proves admission, not that the body's Pending result
     // committed. Hold that gap open, then wait for the recorded park before
     // losing the node: an unrecorded Once result recovers as Interrupted.
-    let snapshots = world.rows(&format!("exec_snapshots c/{session_name}/{run}/"));
-    let owner = OwnerKey::parse(
-        snapshots[0]
-            .strip_prefix("exec_snapshots ")
-            .expect("a cell snapshot key"),
-    )
-    .expect("the cell's ledger owner");
+    let owner = world
+        .journaled_cell(session_name, run)
+        .expect("the parked cell's recovery state, its journal, is saved before the terminal");
     let store = world.stores.durable_store();
     assert!(
         store

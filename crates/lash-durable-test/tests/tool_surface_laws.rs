@@ -1017,21 +1017,32 @@ impl Deployment {
 }
 
 async fn cell_starts(deployment: &Deployment, name: &str) -> usize {
-    let roots = deployment
-        .backend
-        .durable()
-        .cell_roots(
-            &session_id(name),
-            &lash_vocabulary::identity::TurnId::parse(name).expect("a turn id"),
+    // A journaled cell has no root until a checkpoint (FIG-7585): the
+    // turn's call index names the cell each admitted call ran under.
+    let reads = deployment.backend.durable();
+    let calls = reads
+        .tool_calls(
+            &lash_durable::domain::CallOwner::Turn(
+                session_id(name),
+                lash_vocabulary::identity::TurnId::parse(name).expect("a turn id"),
+            ),
+            &lash_durable::domain::ToolCallSelection::List {
+                after: None,
+                limit: 128,
+            },
         )
         .await
-        .expect("read the cell roots");
+        .expect("read the turn's calls");
+    let cells: std::collections::BTreeSet<_> = calls
+        .rows
+        .into_iter()
+        .map(|row| row.execution)
+        .filter(|execution| matches!(execution, lash_durable::domain::OwnerKey::Cell(..)))
+        .collect();
     let mut starts = 0;
-    for root in roots {
-        starts += deployment
-            .backend
-            .durable()
-            .run_facts(&root.exec.owner())
+    for cell in cells {
+        starts += reads
+            .run_facts(&cell)
             .await
             .expect("read the call ledger")
             .rows

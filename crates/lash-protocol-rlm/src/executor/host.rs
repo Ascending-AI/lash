@@ -853,6 +853,48 @@ impl KernelEffects for CellHost<'_> {
             .any(|call| call.output.tool_panic_stop().is_some())
     }
 
+    /// A call the cell's journal admitted takes its place in the ledger
+    /// and the trace as its admission left it: its member is registered on
+    /// resume ([`Self::resumed`]), and it is judged by the contract its
+    /// admission pinned when it runs, not by this build's surface.
+    async fn readmit(
+        &self,
+        request: &EffectRequest,
+        recorded: &FrozenRequest,
+    ) -> Result<(), ParentFault> {
+        let FrozenRequest::Tool { call, .. } = recorded else {
+            return Ok(());
+        };
+        let control = match self.operation(request.use_).await? {
+            Ok((_, _, controls)) => !controls.is_empty(),
+            Err(_) => false,
+        };
+        {
+            let mut ledgers = self.ledgers.lock_recover();
+            let read = call.read.is_some();
+            if read {
+                ledgers.reads += 1;
+            }
+            ledgers.calls.push(LedgerCall {
+                control,
+                read,
+                operation: request.use_,
+                effect: request.identity.clone(),
+                state: LedgerCallState::Pending {
+                    call_id: call.id.clone(),
+                },
+            });
+        }
+        if let Some(trace) = &self.trace {
+            trace.origin(&request.identity, &request.origin);
+            trace.call_started(&request.identity, &call.id);
+            self.sites
+                .lock_recover()
+                .insert(call.id.clone(), request.identity.clone());
+        }
+        Ok(())
+    }
+
     fn resumed(&self, executions: &[(AdmittedEffect, FrozenRequest)]) -> Result<(), ParentFault> {
         for (_, request) in executions {
             let FrozenRequest::Tool { call, .. } = request else {

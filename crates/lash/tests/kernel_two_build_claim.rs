@@ -333,12 +333,32 @@ async fn in_state(
     panic!("the process did not become {state:?} within half a minute: {last:?}")
 }
 
+/// The stored rows of every cell of `session`'s `run`: its journal
+/// (`effect_admissions`) and, once a checkpoint roots it, its root.
+fn cell_rows(
+    stores: &lash_sqlite_store::SqliteStoreSet,
+    session: &lash_kernel_value::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
+) -> Vec<String> {
+    let cells = format!(
+        " {}",
+        lash_durable::domain::ExecKey::turn_cells(session, run)
+    );
+    lash_sqlite_store::testing::engine_rows_for_testing(stores)
+        .expect("the engine rows read")
+        .into_iter()
+        .filter(|row| row.contains(&cells))
+        .collect()
+}
+
 /// The actor row of `session` once the cell of its open turn has parked:
-/// the cell's snapshot is committed. The session's revision standing still
-/// says nothing of a park: the turn holds the model response that asked for
-/// the cell until the cell's first save (FIG-6000), so a cell that is still
-/// lowering has committed nothing since the model call started.
+/// the cell journaled its first admission (FIG-7585). The session's
+/// revision standing still says nothing of a park: the turn holds the
+/// model response that asked for the cell until the cell's first save
+/// (FIG-6000), so a cell that is still lowering has committed nothing since
+/// the model call started.
 async fn parked_cell(
+    stores: &lash_sqlite_store::SqliteStoreSet,
     backend: &lash::Backend,
     session: &str,
 ) -> lash_core::durable_port::ActorSnapshot {
@@ -349,11 +369,9 @@ async fn parked_cell(
     for _ in 0..3000 {
         last = reads.turn(&id).await.expect("the turn row is read");
         if let Some(turn) = &last
-            && !reads
-                .cell_roots(&id, &turn.run)
-                .await
-                .expect("the cell roots are read")
-                .is_empty()
+            && cell_rows(stores, &id, &turn.run)
+                .iter()
+                .any(|row| row.starts_with("effect_admissions "))
         {
             return reads
                 .actor(&actor)
@@ -525,11 +543,12 @@ fn cell_finishes(view: &lash::persistence::SessionReadView) -> Vec<serde_json::V
 async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
     const SESSION: &str = "paged-cell-upgrade";
     let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
-    let stores: Arc<dyn StoreSet> = Arc::new(
+    let sqlite = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
             .await
             .unwrap(),
     );
+    let stores: Arc<dyn StoreSet> = sqlite.clone();
     let build_n = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -537,12 +556,13 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
         .unwrap();
     build_n.spawn({
         let stores = stores.clone();
+        let sqlite = sqlite.clone();
         async move {
             let (backend, old) = idling(&stores, Build::N, "cell-old", &[BIND, "function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(double(twice(10)) + 2);"]);
             let opened = session(&old, SESSION).await;
             assert!(opened.send(lash::TurnInput::text("save double")).output().await.unwrap().is_success());
             tokio::spawn(async move { let _ = opened.send(lash::TurnInput::text("finish the saved cell")).output().await; });
-            parked_cell(&backend, SESSION).await;
+            parked_cell(&sqlite, &backend, SESSION).await;
             waiting(&backend, &ActorKey::session(SESSION).unwrap()).await;
             old.drain().await.unwrap();
             std::mem::forget(old);
@@ -619,8 +639,8 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
         (Build::WithoutSuccession, "explicit_successor_required"),
         (Build::Unmapped, "document"),
     ] {
-        let stores: Arc<dyn StoreSet> =
-            Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+        let sqlite = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+        let stores: Arc<dyn StoreSet> = sqlite.clone();
         let id = lash_kernel_value::identity::SessionId::fixture("refused-cell-carry");
         let actor = ActorKey::session(id.as_str()).unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -630,12 +650,13 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
             .unwrap();
         runtime.spawn({
             let stores = stores.clone();
+            let sqlite = sqlite.clone();
             let id = id.clone();
             async move {
                 let (backend, old) = idling(&stores, Build::N, "refusal-old", &["function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(twice(21));"]);
                 let opened = session(&old, id.as_str()).await;
                 tokio::spawn(async move { let _ = opened.send(lash::TurnInput::text("park")).output().await; });
-                parked_cell(&backend, id.as_str()).await;
+                parked_cell(&sqlite, &backend, id.as_str()).await;
                 waiting(&backend, &ActorKey::session(id.as_str()).unwrap()).await;
                 old.drain().await.unwrap();
                 std::mem::forget(old);
@@ -644,7 +665,7 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
         runtime.shutdown_background();
         let (backend, successor) = idling(&stores, build, "refusal-new", &[]);
         let turn = backend.durable().turn(&id).await.unwrap().unwrap();
-        let before = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
+        let before = cell_rows(&sqlite, &id, &turn.run);
         let formats = backend
             .durable()
             .actor(&actor)
@@ -673,8 +694,8 @@ async fn session_succession_refuses_typed_before_rewriting_without_a_complete_co
             );
         }
         assert_eq!(parked.formats, formats);
-        let after = backend.durable().cell_roots(&id, &turn.run).await.unwrap();
-        assert_eq!(before, after, "refusal rewrote the execution root");
+        let after = cell_rows(&sqlite, &id, &turn.run);
+        assert_eq!(before, after, "refusal rewrote the cell's journal or root");
         successor.shutdown().await.unwrap();
     }
 }

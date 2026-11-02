@@ -162,7 +162,9 @@ pub const COVERAGE: [(CommitLabel, Coverage); 54] = [
     ),
     (
         CommitLabel::CELL_SNAPSHOT_ADMIT,
-        Coverage::Cases(&[Case::Process]),
+        Coverage::Unemitted(
+            "a run journals its parks and commits a checkpoint that carries admissions only once its journal passes `CHECKPOINT_BATCHES` (600) delivery batches (lash-vm-broker kernel/run.rs, FIG-7585), which no case's run reaches; the park matrix's `a_run_past_its_journal_bound_resumes_from_its_mid_run_checkpoint` cuts it under every fault",
+        ),
     ),
     (
         CommitLabel::CELL_ADMIT,
@@ -176,10 +178,7 @@ pub const COVERAGE: [(CommitLabel, Coverage); 54] = [
         CommitLabel::CELL_INJECT,
         Coverage::Cases(&[Case::CellKilled]),
     ),
-    (
-        CommitLabel::CELL_SNAPSHOT,
-        Coverage::Cases(&[Case::Process]),
-    ),
+    (CommitLabel::CELL_SNAPSHOT, Coverage::Cases(&[Case::Cell])),
     (
         CommitLabel::SESSION_CLOSE_BEGIN,
         Coverage::Cases(&[Case::Close]),

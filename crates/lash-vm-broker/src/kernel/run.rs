@@ -92,6 +92,22 @@ pub trait KernelEffects: Projections + Send + Sync {
         live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault>;
 
+    /// A run that follows its journal reached `request`, which its journal
+    /// admitted as `recorded`: the host takes the call up as it stands,
+    /// without judging it again (FIG-7611). The default keeps nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`ParentFault`] when the host cannot take the call up.
+    async fn readmit(
+        &self,
+        request: &EffectRequest,
+        recorded: &FrozenRequest,
+    ) -> Result<(), ParentFault> {
+        let _ = (request, recorded);
+        Ok(())
+    }
+
     /// The outcome the `perform` admitted as `effect` is answered with for
     /// `output`, its execution's final record; `None` while it is not
     /// final. The default reads a completed record's payload as the result.
@@ -1359,64 +1375,80 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                 ));
             }
             let call = self.broker.identities.child_call_id(park, executions);
-            let standing = match self
-                .broker
-                .effects
-                .admit(&request, call.clone(), outstanding, live)
-                .await?
-            {
-                Ok(draft) => {
+            let standing = match (&recorded.admission.disposition, &recorded.request) {
+                // A call its journal admitted stands admitted under the
+                // contract its admission pinned: it is judged by that
+                // contract alone when it runs, never admitted again against
+                // this build's surface (OP-LINK-ONE, FIG-7611).
+                (
+                    super::graph::Disposition::Execution { operation, pin },
+                    RecordedRequest::Tool { args, .. },
+                ) => {
+                    if pin.call != call || operation.run != park {
+                        return Err(diverged(
+                            at,
+                            Field::Call,
+                            format_args!(
+                                "effect {} is not the call its journal admitted",
+                                request.identity
+                            ),
+                        ));
+                    }
+                    if *args != request.args {
+                        return Err(diverged(
+                            at,
+                            Field::Arguments,
+                            format_args!(
+                                "effect {} is called with other arguments than its journal \
+                                 admitted",
+                                request.identity
+                            ),
+                        ));
+                    }
+                    self.broker
+                        .effects
+                        .readmit(&request, &recorded.request)
+                        .await?;
                     executions += 1;
-                    match &recorded.admission.disposition {
-                        super::graph::Disposition::Execution { operation, pin }
-                            if pin.call == call && operation.run == park =>
-                        {
-                            if draft.request != recorded.request {
-                                return Err(diverged(
-                                    at,
-                                    Field::Arguments,
-                                    format_args!(
-                                        "effect {} is called with other arguments than its \
-                                         journal admitted",
-                                        request.identity
-                                    ),
-                                ));
-                            }
-                            Standing::Admitted(AdmittedEffect {
-                                operation: *operation,
-                                call,
-                            })
+                    Standing::Admitted(AdmittedEffect {
+                        operation: *operation,
+                        call,
+                    })
+                }
+                (_, recorded_request) => match self
+                    .broker
+                    .effects
+                    .admit(&request, call.clone(), outstanding, live)
+                    .await?
+                {
+                    Ok(_) => {
+                        return Err(diverged(
+                            at,
+                            Field::Call,
+                            format_args!(
+                                "effect {} is admitted where its journal refused it",
+                                request.identity
+                            ),
+                        ));
+                    }
+                    Err(error) => match recorded_request {
+                        RecordedRequest::Refused {
+                            error: recorded,
+                            args,
+                        } if *recorded == error && *args == request.args => {
+                            Standing::Refused(error)
                         }
                         _ => {
                             return Err(diverged(
                                 at,
                                 Field::Call,
                                 format_args!(
-                                    "effect {} is not the call its journal admitted",
+                                    "effect {} is refused otherwise than its journal recorded",
                                     request.identity
                                 ),
                             ));
                         }
-                    }
-                }
-                Err(error) => match (&recorded.admission.disposition, &recorded.request) {
-                    (
-                        super::graph::Disposition::Refused,
-                        RecordedRequest::Refused {
-                            error: recorded,
-                            args,
-                        },
-                    ) if *recorded == error && *args == request.args => Standing::Refused(error),
-                    _ => {
-                        return Err(diverged(
-                            at,
-                            Field::Call,
-                            format_args!(
-                                "effect {} is refused where its journal admitted it",
-                                request.identity
-                            ),
-                        ));
-                    }
+                    },
                 },
             };
             if !self.ledger.stand(

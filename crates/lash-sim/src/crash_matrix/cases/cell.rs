@@ -8,17 +8,17 @@
 //! sleep still pending, and its end commits on its own (`cell.snapshot`).
 //!
 //! The killed variant's cell computes past its first slice first, so the
-//! model response commits on its own (`model.done`) and the cell snapshots
-//! with the operation's admission (`cell.snapshot+admit`); it holds the
+//! model response commits on its own (`model.done`) and the cell journals
+//! the operation's admission (`cell.admit`); it holds the
 //! operation's first body forever and the host
 //! kills the node running it, then restarts it: another owner reaps the
 //! dead one, restores the turn and finds the operation started without an
-//! outcome, so it injects `Interrupted` into the cell (`cell.inject`), never
-//! entering the body again. It races no sleep, so its end commits with
+//! outcome, so it runs the cell again from its start against its journal
+//! and injects `Interrupted` (`cell.inject`), never entering the body again. It races no sleep, so its end commits with
 //! `turn.commit` even with a host plugin's checkpoint callback (FIG-6162).
 //!
-//! Laws: the turn answered; the cell's program is entered fresh only by an
-//! activation that found no snapshot of it; unless its call was settled
+//! Laws: the turn answered; the cell's program is entered fresh at most once
+//! per activation that held no live VM of it; unless its call was settled
 //! `Interrupted`, every model call after the cell binds what the cell
 //! bound; the killed variant's operation settled `Interrupted` with its
 //! body entered at most once.
@@ -95,36 +95,21 @@ impl Workload for CellCase {
             Some(end) if end.kind() == RunTerminalKind::Answered => {}
             other => violations.push(format!("the cell's turn ended {other:?}")),
         }
-        // NR, no program re-entry: a fresh entry of the program happens only
-        // while no snapshot of the cell is committed, so a second one only
-        // when the cut fell before the first snapshot committed.
-        let trace = nodes.script().trace();
-        // The cell's first snapshot commits the model response that asked
-        // for it (FIG-6000).
-        let first_snapshot = trace.iter().position(|write| {
-            (write.point.label == CommitLabel::CELL_ADMIT
-                || write.point.label == CommitLabel::MODEL_DONE_CELL_ADMIT)
-                && write.committed()
-        });
-        let cut_at = cut.and_then(|cut| {
-            trace
-                .iter()
-                .position(|write| write.point == cut.point && write.cut == Some(cut.fault))
-        });
-        let before_snapshot = match (cut_at, first_snapshot) {
-            (Some(at), Some(snapshot)) => at <= snapshot,
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
-        // A soak's faults are many, not one cut: its kills before a first
-        // snapshot each enter the program once more. The matrix holds the
-        // one-cut bound.
+        // NR, no program re-entry: a cell journals its admissions and
+        // delivery order instead of snapshotting its heap, so an activation
+        // that holds no live VM of the cell runs it again from its start
+        // against that journal (FIG-7585). An activation enters the program
+        // at most once: the first, plus one more for the cut and one for the
+        // kill, each of which ends the activation holding the VM.
+        //
+        // A soak's faults are many, not one cut: each of its kills enters
+        // the program once more. The matrix holds the one-cut bound.
         let soak = world.noted(SOAK);
+        let bound = 1 + usize::from(cut.is_some()) + usize::from(self.killed);
         for (exec, entered) in world.tripwire().counts().vm_programs {
             if soak {
                 break;
             }
-            let bound = if before_snapshot { 2 } else { 1 };
             if entered > bound {
                 violations.push(format!(
                     "no program re-entry: {exec:?} was entered fresh {entered} times"
