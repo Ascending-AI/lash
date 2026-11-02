@@ -294,6 +294,18 @@ impl KernelMachine {
             let frame = self.frame(task)?;
             // The statement the call stood in is left behind, with the
             // continuation it saved there.
+            if let (Some(roots), Some(id), Some(act), Some(_)) = (
+                &frame.logical,
+                frame.awaiting,
+                frame.nested,
+                frame.pending.peek(),
+            ) {
+                let bank = roots.bank();
+                let entry = &exe.statement(id).0.nested[act.ix()];
+                for role in &entry.roles {
+                    bank.release(bank.continuation(&role.site)?);
+                }
+            }
             frame.awaiting = None;
             frame.nested = None;
             frame.pending.take();

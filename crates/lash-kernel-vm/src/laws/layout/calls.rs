@@ -865,6 +865,7 @@ fn direct_call_entry_agrees() {
     }
     let mut comparisons = 0;
     for body in [
+        "let f = fn(x) { if flat.lt(x, 1) { throw x } return x } let i = 0 while flat.lt(i, 2) { try { print flat.add(7, apply f(i)) } catch err { print err } set i = flat.add(i, 1) } return i",
         SAVED_MEMBER,
         SAVED_MEMBER_PARK,
         SUPERSEDED_RETURN,
