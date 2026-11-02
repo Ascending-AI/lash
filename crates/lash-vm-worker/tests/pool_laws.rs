@@ -2033,7 +2033,14 @@ fn pool_library(source: &str) -> Arc<lash_vm_client::packages::WorkerLibrary> {
     )
 }
 
-fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) {
+fn pool_call(
+    worker: &mut Checkout,
+    definition: &str,
+) -> (
+    EndWire,
+    Option<u64>,
+    Option<lash_kernel_state::semantic::Checkpoint>,
+) {
     let definition = lash_kernel_doc::parse_definition(definition).expect("definition");
     let _function = definition.identity();
     let name = definition.name.clone();
@@ -2041,6 +2048,7 @@ fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) 
         "kernel 1\nnumbers by_spelling\ndefinition {}\nmain {{ let x = invoke {name}(7) return x }}", serde_json::to_string(&lash_kernel_doc::print_definition(&definition)).expect("the linked worker fixture is valid")
     )).expect("fixture document");
     let bytes = EncodedPayload(document.canonical_bytes());
+    let mut parent = Parent::new(&[&bytes]);
     worker
         .start(
             fresh(&bytes, Target::Main, Vec::new()),
@@ -2048,14 +2056,22 @@ fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) 
             ExecutionClass::Cell,
         )
         .expect("start");
-    let step = worker.run(SLICE, false).expect("run");
+    let step = parent.run(worker, SLICE, false).expect("run");
     let RunStep::Ended { end, meters, .. } = step else {
         panic!("fixture ends: {step:?}")
     };
-    (
-        wire::decode(PayloadKind::End, &end).expect("end"),
-        meters.charged,
-    )
+    let mut end: EndWire = wire::decode(PayloadKind::End, &end).expect("end");
+    let carry = match &mut end {
+        EndWire::Finished { carry, .. } => carry.take().map(|carry| {
+            let session = carry
+                .session(|_| Ok(PageGrant::NONE))
+                .expect("the carry decodes");
+            lash_kernel_state::semantic::session(&session, Box::new(Staged(parent.spool.clone())))
+                .expect("the carried session projects")
+        }),
+        _ => None,
+    };
+    (end, meters.charged, carry)
 }
 
 /// K-LIB-002: the same shipped package function, run with a native by the

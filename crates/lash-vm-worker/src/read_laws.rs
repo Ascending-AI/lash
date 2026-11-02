@@ -245,10 +245,10 @@ fn run_scripted(
     loop {
         match machine.run(&mut host, u64::MAX).expect("the run steps") {
             Step::Slice => {}
-            Step::Ended(end) => {
-                let carry = match &end {
-                    End::Finished(finished) => finished.carry.as_ref().map(|root| {
-                        lash_kernel_state::semantic::session(root, Box::new(pages.clone()))
+            Step::Ended(mut end) => {
+                let carry = match &mut end {
+                    End::Finished(finished) => finished.carry.take().map(|root| {
+                        lash_kernel_state::semantic::session(&root, Box::new(pages.clone()))
                             .expect("the carried session projects")
                     }),
                     _ => None,
@@ -416,8 +416,13 @@ fn a_read_is_charged_exactly_as_the_same_perform_recorded_in_both_dialects() {
                 "{dialect}, {what}: a recorded perform parks"
             );
             assert_eq!(
-                (&read.end, &read.prints, read.charged),
-                (&recorded.end, &recorded.prints, recorded.charged),
+                (&read.end, &read.carry, &read.prints, read.charged),
+                (
+                    &recorded.end,
+                    &recorded.carry,
+                    &recorded.prints,
+                    recorded.charged
+                ),
                 "{dialect}, {what}: a read ends, prints and is charged as the same perform recorded"
             );
         }
@@ -573,9 +578,16 @@ if (pages.length > 3) await cenote.readDocument({ document: { collection: 'wiki'
         assert_eq!(read.parks, 0);
         assert_eq!(recorded.parks, 4);
         assert_eq!(
-            (&read.end, &read.prints, &read.calls, read.charged),
+            (
+                &read.end,
+                &read.carry,
+                &read.prints,
+                &read.calls,
+                read.charged
+            ),
             (
                 &recorded.end,
+                &recorded.carry,
                 &recorded.prints,
                 &recorded.calls,
                 recorded.charged

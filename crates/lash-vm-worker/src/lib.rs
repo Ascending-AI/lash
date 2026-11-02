@@ -44,8 +44,6 @@ pub mod in_process;
 mod page_laws;
 #[cfg(all(test, feature = "dialect-typescript", feature = "dialect-python"))]
 mod read_laws;
-#[cfg(all(test, unix))]
-mod turn_laws;
 #[cfg(feature = "dialect-typescript")]
 pub use embedding::typescript;
 pub use embedding::{EmbedError, Embedder, Embedding};
