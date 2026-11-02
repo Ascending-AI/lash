@@ -30,20 +30,34 @@ impl SourceValue {
 #[derive(Clone)]
 pub struct Lifecycle {
     ledger: Rc<RefCell<Ledger>>,
-    pending: Rc<RefCell<BTreeMap<Owner, Option<SourceValue>>>>,
+    pending: Rc<RefCell<Vec<Replacement>>>,
+}
+/// One recorded root replacement; `None` releases the owner.
+pub(super) type Replacement = (Owner, Option<SourceValue>);
+/// Orders recorded replacements by owner, keeping each owner's last record:
+/// the one final replacement per owner the runtime event publishes.
+fn settle(pending: &mut Vec<Replacement>) {
+    pending.sort_by_key(|(owner, _)| *owner);
+    pending.dedup_by(|later, earlier| {
+        let same = later.0 == earlier.0;
+        if same {
+            std::mem::swap(later, earlier);
+        }
+        same
+    });
 }
 impl Lifecycle {
     pub fn new(ledger: Rc<RefCell<Ledger>>) -> Self {
         Self {
             ledger,
-            pending: Rc::new(RefCell::new(BTreeMap::new())),
+            pending: Rc::new(RefCell::new(Vec::new())),
         }
     }
     pub fn ledger(&self) -> Rc<RefCell<Ledger>> {
         Rc::clone(&self.ledger)
     }
     pub fn replace(&self, owner: Owner, next: Option<SourceValue>) {
-        self.pending.borrow_mut().insert(owner, next);
+        self.pending.borrow_mut().push((owner, next));
     }
     /// Retire only this activation's actual operands, including unpublished
     /// replacements. The caller can reacquire live roles in the same journal.
@@ -57,14 +71,14 @@ impl Lifecycle {
             .borrow()
             .invocation_operands(invocation, access)?;
         let mut pending = self.pending.borrow_mut();
-        for owner in owners {
-            pending.insert(owner, None);
-        }
         let first = invocation.owner(Slot::Operand(0));
         let last = invocation.owner(Slot::Operand(u32::MAX));
-        for (_, value) in pending.range_mut(first..=last) {
-            *value = None;
+        for (owner, value) in pending.iter_mut() {
+            if (first..=last).contains(owner) {
+                *value = None;
+            }
         }
+        pending.extend(owners.into_iter().map(|owner| (owner, None)));
         Ok(())
     }
     /// Rekeys the ledger to the durable ids the projections since the last
@@ -81,6 +95,7 @@ impl Lifecycle {
             arena.return_member_events(events, true);
             return Ok(());
         }
+        settle(&mut pending);
         let result = (|| {
             let mut ledger = self.ledger.borrow_mut();
             let mut registration = arena

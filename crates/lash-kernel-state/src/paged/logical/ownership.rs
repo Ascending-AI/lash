@@ -80,7 +80,7 @@ impl Ledger {
         &self,
         arena: &mut Arena,
         heap: &PagedHeap,
-        replacements: &BTreeMap<Owner, Option<SourceValue>>,
+        replacements: &[super::lifecycle::Replacement],
         members: &[crate::arena::MemberEvent],
     ) -> Result<Prepared, HeapFault> {
         let access = heap.pages();
