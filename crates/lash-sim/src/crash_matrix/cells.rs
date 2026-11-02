@@ -49,8 +49,10 @@ use super::world::{BodyEntry, World};
 const MODEL: &str = "lash-sim-cell-model";
 
 /// The charge units one slice of a [`TurnScript::CellKilled`] cell's run
-/// may spend.
-const KILLED_SLICE: u64 = 20_000;
+/// may spend. Its stretch runs this many loop iterations: each charges at
+/// least its loop test, so the stretch spends several slices, while the
+/// worker computes only what crossing them needs.
+const KILLED_SLICE: u64 = 2_000;
 
 /// The cell the model writes for `session`: one `Once` tool call naming it,
 /// which a [`TurnScript::CellKilled`] session's cell makes after a stretch
@@ -60,9 +62,9 @@ const KILLED_SLICE: u64 = 20_000;
 fn cell(session: &str) -> String {
     let killed = session.starts_with(&format!("{}-", TurnScript::CellKilled.name()));
     let stretch = if killed {
-        "let n = 0;\nfor (let i = 0; i < 20000; i++) { n = n + i; }\n"
+        format!("let n = 0;\nfor (let i = 0; i < {KILLED_SLICE}; i++) {{ n = n + i; }}\n")
     } else {
-        ""
+        String::new()
     };
     let call = format!("tools.extWrite({{ x: 7, session: \"{session}\" }})");
     let awaited = if killed {
