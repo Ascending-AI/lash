@@ -1403,6 +1403,7 @@ fn typed_repeat_agrees() {
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set s = flat.add(s, previous) set i = flat.add(previous, 1.0) } if true { do perform 0(s) as Any } return s",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
         "let i = 0 let s = 0 while flat.lt(i, 4) { set s = flat.add(s, flat.mul(i, i)) let previous = flat.identity(i) set i = flat.add(previous, 1) } return (s, i)",
+        "let i = 0.0 let s = -0.0 while flat.lt(i, 3.0) { set s = flat.add(s, flat.div(i, 0.0)) set i = flat.add(i, 1.0) } return s",
     ] {
         let source = scalar_document(body);
         crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));
@@ -1430,6 +1431,67 @@ fn typed_repeat_agrees() {
                 false,
                 true,
             );
+        }
+    }
+    // The conversion after the reduction must keep its original tape
+    // position and leave the same next iteration at every tight resource edge.
+    let reordered = scalar_document(
+        "let i = 0 let s = 0 while flat.lt(i, 4) { set s = flat.add(s, flat.mul(i, i)) let previous = flat.identity(i) set i = flat.add(previous, 1) } return (s, i)",
+    );
+    for record in [false, true] {
+        for layout in [Layout(0), Layout(1), Layout(2), Layout(u64::MAX)] {
+            for (slice, cold) in [(u64::MAX, false), (3, true)] {
+                let run = |mode| {
+                    observe_scalar_selected(
+                        &reordered,
+                        layout,
+                        record,
+                        cold,
+                        false,
+                        super::embedder::ROOMY,
+                        ScalarSelection {
+                            mode,
+                            slice,
+                            detailed: true,
+                        },
+                    )
+                };
+                let expected = run(ExecutionMode::Source);
+                assert_eq!(
+                    expected.0.0,
+                    format!("finished {:?}", Datum::Tuple(vec![int(14), int(4)]))
+                );
+                assert_eq!(run(ExecutionMode::Generic), expected, "generic {layout:?}");
+                assert_eq!(
+                    run(ExecutionMode::Specialized),
+                    expected,
+                    "reordered {layout:?}, cold={cold}, tape={record}"
+                );
+            }
+        }
+        for memory in [0, 64, 128, 256, 512, 1024, 2048, 4096] {
+            collect(packet_modes(
+                &reordered,
+                Bounds {
+                    memory,
+                    ..super::embedder::ROOMY
+                },
+                u64::MAX,
+                false,
+                record,
+            ));
+        }
+        for call_depth in [0, 1, 2, 3] {
+            collect(packet_modes(
+                &reordered,
+                Bounds {
+                    call_depth,
+                    ..super::embedder::ROOMY
+                },
+                u64::MAX,
+                false,
+                record,
+            ));
         }
     }
     // K-CHG-001 / K-VAL-020: a mixed-domain test misses before work;
