@@ -35,7 +35,7 @@ pub(crate) enum TransferTarget {
     NativeInput,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Phase {
     Enter,
     Open,
@@ -51,7 +51,7 @@ pub(crate) enum Phase {
     Fallthrough,
     Leave,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Point {
     pub(crate) site: Site,
     pub(crate) phase: Phase,
@@ -72,7 +72,7 @@ pub(crate) struct Prefix<'a> {
 /// Incoming names the task-owned result arriving at an entered call. Restore
 /// transfers it and the call's saved source operands without new holdings.
 /// No selector refers to physical registers.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Owner {
     Operand(Site),
     Selected(Site),
@@ -279,13 +279,15 @@ pub(crate) struct Source {
     verified: OnceLock<Result<(), Refused>>,
     owners: OnceLock<Result<Arc<OwnerSlots>, Refused>>,
     intervals: std::sync::Mutex<BTreeMap<interval::Key, Arc<CompiledInterval>>>,
+    events: std::sync::Mutex<interval::Events>,
+    leaves: std::sync::Mutex<interval::Leaves>,
     first_events: std::sync::Mutex<BTreeMap<Site, Point>>,
     next_commits: std::sync::Mutex<BTreeMap<Site, Point>>,
 }
 
 /// Source selectors receive stable indices within this exact immutable body.
 /// No layout, physical slot or execution history contributes to their identity.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct OwnerSlots {
     pub(crate) owner: doc::constant_pool::PoolOwner,
     pub(crate) source: Site,
@@ -294,7 +296,27 @@ pub(crate) struct OwnerSlots {
     scopes: BTreeMap<Owner, Site>,
     aliases: BTreeMap<Owner, Owner>,
     binding_slots: BTreeMap<Owner, (u32, bool)>,
+    groups: std::sync::Mutex<
+        std::collections::HashMap<
+            Owner,
+            Box<[lash_kernel_state::kernel_internals::logical::Owner]>,
+        >,
+    >,
 }
+/// Equal source identities and selectors resolve equal groups; the group
+/// memo is derived and does not take part.
+impl PartialEq for OwnerSlots {
+    fn eq(&self, other: &Self) -> bool {
+        self.owner == other.owner
+            && self.source == other.source
+            && self.slots == other.slots
+            && self.controls == other.controls
+            && self.scopes == other.scopes
+            && self.aliases == other.aliases
+            && self.binding_slots == other.binding_slots
+    }
+}
+impl Eq for OwnerSlots {}
 impl OwnerSlots {
     pub(crate) fn get(&self, owner: &Owner) -> Option<u32> {
         self.slots.get(owner).copied()
@@ -516,6 +538,8 @@ impl Source {
             verified: OnceLock::new(),
             owners: OnceLock::new(),
             intervals: Default::default(),
+            events: Default::default(),
+            leaves: Default::default(),
             first_events: Default::default(),
             next_commits: Default::default(),
             seed: Some(Seed {
@@ -553,6 +577,8 @@ impl Source {
             verified: OnceLock::new(),
             owners: OnceLock::new(),
             intervals: Default::default(),
+            events: Default::default(),
+            leaves: Default::default(),
             first_events: Default::default(),
             next_commits: Default::default(),
         }
@@ -739,6 +765,7 @@ impl Source {
                     scopes,
                     aliases,
                     binding_slots,
+                    groups: Default::default(),
                 }))
             })
             .clone()

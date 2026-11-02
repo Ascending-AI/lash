@@ -227,12 +227,44 @@ impl OwnerSlots {
             slot,
         })
     }
+    /// A group's members are fixed by this immutable body; only the
+    /// invocation stamp varies, so each group is resolved once.
     pub(crate) fn group(
         &self,
         group: &Owner,
         task: TaskId,
         invocation: u64,
     ) -> Option<Box<[Root]>> {
+        if !matches!(
+            group,
+            Owner::Scope(_) | Owner::Operands(_) | Owner::Departures(_) | Owner::Sessions(_)
+        ) {
+            return None;
+        }
+        let stamp = |root: &Root| match *root {
+            Root::Value { slot, .. } => Root::Value {
+                task,
+                invocation,
+                slot,
+            },
+            other => other,
+        };
+        let mut groups = self
+            .groups
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(members) = groups.get(group) {
+            return Some(members.iter().map(stamp).collect());
+        }
+        let members = self.resolve_group(group);
+        let stamped = members.iter().map(stamp).collect();
+        groups.insert(group.clone(), members);
+        Some(stamped)
+    }
+    /// Members under one placeholder invocation. Every member is either a
+    /// value slot of that invocation or a session root, so the order of the
+    /// set does not depend on the invocation it is later stamped with.
+    fn resolve_group(&self, group: &Owner) -> Box<[Root]> {
         let included = |owner: &Owner| match (group, owner) {
             (Owner::Scope(at), Owner::Binding { .. }) => self
                 .scopes
@@ -254,20 +286,12 @@ impl OwnerSlots {
             (Owner::Sessions(_), Owner::SessionCell { .. }) => true,
             _ => false,
         };
-        if !matches!(
-            group,
-            Owner::Scope(_) | Owner::Operands(_) | Owner::Departures(_) | Owner::Sessions(_)
-        ) {
-            return None;
-        }
-        Some(
-            self.slots
-                .keys()
-                .filter(|owner| included(owner))
-                .filter_map(|owner| self.root(owner, task, invocation))
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect(),
-        )
+        self.slots
+            .keys()
+            .filter(|owner| included(owner))
+            .filter_map(|owner| self.root(owner, TaskId::MAIN, 0))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 }

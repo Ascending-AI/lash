@@ -16,6 +16,13 @@ pub(super) struct Key {
     selected: Box<[Selection]>,
 }
 
+/// Single source events by their point: each point has at most a few
+/// selected exits. A hit was validated when it was compiled.
+pub(super) type Events = std::collections::HashMap<Point, Vec<(ExitKind, Arc<CompiledInterval>)>>;
+/// Authenticated leaf reads by their site: the read event and its next
+/// unpaid point.
+pub(super) type Leaves = std::collections::HashMap<Site, (Point, Point, Arc<CompiledInterval>)>;
+
 struct Linear {
     fixed: i128,
     terms: Box<[(usize, i128)]>,
@@ -565,6 +572,9 @@ impl Source {
         at: &Site,
     ) -> Result<(Point, Point, Arc<CompiledInterval>), Refused> {
         self.verify()?;
+        if let Some(leaf) = self.leaves.lock().map_err(|_| Refused::Source)?.get(at) {
+            return Ok(leaf.clone());
+        }
         if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
             return Err(Refused::Path);
         }
@@ -593,7 +603,12 @@ impl Source {
             _ => return Err(Refused::Path),
         };
         let interval = self.compile_event(&event, ExitKind::Normal)?;
-        Ok((event, unpaid, interval))
+        let leaf = (event, unpaid, interval);
+        self.leaves
+            .lock()
+            .map_err(|_| Refused::Source)?
+            .insert(at.clone(), leaf.clone());
+        Ok(leaf)
     }
 
     /// Exact execution supplies the selected child's authenticated operand.
@@ -613,6 +628,12 @@ impl Source {
         from: Option<&Site>,
     ) -> Result<Arc<CompiledInterval>, Refused> {
         self.verify()?;
+        if from.is_none()
+            && let Some(compiled) = self.events.lock().map_err(|_| Refused::Source)?.get(at)
+            && let Some((_, interval)) = compiled.iter().find(|(exit, _)| *exit == selected)
+        {
+            return Ok(Arc::clone(interval));
+        }
         if let Some(from) = from {
             if at.phase != Phase::Commit
                 || at.site.unit != self.site.unit
@@ -639,19 +660,20 @@ impl Source {
         {
             return Err(Refused::Exit);
         }
-        let key = Key {
+        let route: Box<[Selection]> = vec![Selection::Event {
+            at: at.clone(),
+            exit: selected,
+        }]
+        .into();
+        let key = from.map(|from| Key {
             event: true,
-            join: from.cloned(),
+            join: Some(from.clone()),
             at: at.site.clone(),
             bounds: None,
-            selected: vec![Selection::Event {
-                at: at.clone(),
-                exit: selected,
-            }]
-            .into(),
-        };
+            selected: route.clone(),
+        });
         let mut cache = self.intervals.lock().map_err(|_| Refused::Source)?;
-        if let Some(interval) = cache.get(&key) {
+        if let Some(interval) = key.as_ref().and_then(|key| cache.get(key)) {
             return Ok(Arc::clone(interval));
         }
         let mut event = self.room.events.get(at).ok_or(Refused::Path)?.clone();
@@ -664,7 +686,7 @@ impl Source {
             owner: self.owner,
             source: self.site.clone(),
             at: at.site.clone(),
-            route: key.selected.clone(),
+            route,
             steps: vec![step].into(),
             variables,
             exit: selected,
@@ -672,7 +694,20 @@ impl Source {
             return_loops: None,
             resume: None,
         });
-        cache.insert(key, Arc::clone(&interval));
+        match key {
+            Some(key) => {
+                cache.insert(key, Arc::clone(&interval));
+            }
+            None => {
+                drop(cache);
+                self.events
+                    .lock()
+                    .map_err(|_| Refused::Source)?
+                    .entry(at.clone())
+                    .or_default()
+                    .push((selected, Arc::clone(&interval)));
+            }
+        }
         Ok(interval)
     }
     pub(crate) fn compile_interval(
