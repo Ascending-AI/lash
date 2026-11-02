@@ -141,17 +141,25 @@ impl Repeat {
             exe,
         };
         let test = cx.binary(unpin(cond), true)?;
-        let before = if update_at > 0 {
+        // Lowerings may preserve the induction value either before the
+        // reduction or immediately before its write. Match the dependency
+        // graph while retaining that source order in the charge schedule.
+        let mut before = if update_at > 0 {
             cx.copy(&body.statements[0], sources[0].0, counter)
         } else {
             None
         };
-        if let Some(copy) = &before {
+        let copy_after_reduction = before.is_none() && update_at == 2;
+        if copy_after_reduction {
+            before = Some(cx.copy(&body.statements[1], sources[1].0, counter)?);
+        }
+        if !copy_after_reduction && let Some(copy) = &before {
             cx.previous = Some(copy.at);
         }
-        let reduction_at = usize::from(before.is_some());
-        let reduction = if reduction_at < update_at {
-            if reduction_at + 1 != update_at || writes[reduction_at].1 {
+        let reduction_at = usize::from(before.is_some() && !copy_after_reduction);
+        let reduction_end = update_at - usize::from(copy_after_reduction);
+        let reduction = if reduction_at < reduction_end {
+            if reduction_at + 1 != reduction_end || writes[reduction_at].1 {
                 return None;
             }
             let (at, _, expr) = writes[reduction_at];
@@ -198,6 +206,9 @@ impl Repeat {
         // An update cannot read the reduced accumulator: that would make the
         // induction dependent on another graph position outside this template.
         cx.accumulator = None;
+        if let Some(copy) = &before {
+            cx.previous = Some(copy.at);
+        }
         let operation = cx.binary(writes[update_at].2, false)?;
         if !operation
             .inputs
@@ -227,6 +238,7 @@ impl Repeat {
             test,
             test_charge: Charge::of(test_source, 1)?,
             before,
+            copy_after_reduction,
             reduction,
             update,
             after,

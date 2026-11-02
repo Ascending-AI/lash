@@ -1402,6 +1402,7 @@ fn typed_repeat_agrees() {
         "let i = 0.0 let before = -1.0 let after = -1.0 while flat.lt(i, 0.5) { set before = i set i = flat.add(i, 0.1) set after = i } return (i, before, after)",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { let previous = flat.identity(i) set s = flat.add(s, previous) set i = flat.add(previous, 1.0) } if true { do perform 0(s) as Any } return s",
         "let i = 0.0 let s = 0.0 while flat.lt(i, 4.0) { set s = flat.add(s, i) set i = flat.add(i, 1.0) } if true { do perform 0(s) as Any } return s",
+        "let i = 0 let s = 0 while flat.lt(i, 4) { set s = flat.add(s, flat.mul(i, i)) let previous = flat.identity(i) set i = flat.add(previous, 1) } return (s, i)",
     ] {
         let source = scalar_document(body);
         crate::machine::islands::REPEATED_TEMPLATE.with(|n| n.set(0));

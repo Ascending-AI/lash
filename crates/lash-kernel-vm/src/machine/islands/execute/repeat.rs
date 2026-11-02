@@ -178,6 +178,11 @@ impl Repeat {
             .as_ref()
             .and_then(|reduce| reduce.term.bind(frame));
         let mut counter_value = frame.value(self.update.at);
+        let mut accumulator_value = self
+            .reduction
+            .as_ref()
+            .and_then(|reduce| frame.value(reduce.at));
+        let (mut saved_before, mut saved_after) = (None, None);
         let (mut iterations, mut units) = (0u64, 0u64);
         loop {
             if budget.admit(units).is_none() {
@@ -222,7 +227,7 @@ impl Repeat {
             };
             let reduction = match &self.reduction {
                 Some(reduce) => {
-                    let Some(accumulator) = frame.value(reduce.at) else {
+                    let Some(accumulator) = accumulator_value else {
                         stop!(Guard);
                     };
                     inputs.accumulator = accumulator;
@@ -310,24 +315,17 @@ impl Repeat {
             let Some(total) = units.checked_add(iteration) else {
                 stop!(Guard);
             };
-            if let (Some(copy), Some((value, _))) = (&self.before, before)
-                && copy.keep
-            {
-                frame.assign(copy.at, value);
+            saved_before = before.map(|(value, _)| value);
+            if let Some((value, _, _)) = reduction {
+                accumulator_value = Some(value);
             }
-            if let (Some(reduce), Some((value, _, _))) = (&self.reduction, reduction) {
-                frame.assign(reduce.at, value);
-            }
-            frame.assign(self.update.at, next);
             counter_value = Some(next);
-            if let (Some(copy), Some((value, _))) = (&self.after, after)
-                && copy.keep
-            {
-                frame.assign(copy.at, value);
-            }
+            saved_after = after.map(|(value, _)| value);
             if let Some(tape) = tape {
                 self.test_charge.record(tape, &[test_fee]);
-                if let (Some(copy), Some((_, fee))) = (&self.before, before) {
+                if !self.copy_after_reduction
+                    && let (Some(copy), Some((_, fee))) = (&self.before, before)
+                {
                     copy.charge.record(
                         tape,
                         copy.unary
@@ -340,6 +338,16 @@ impl Repeat {
                     reduce
                         .charge
                         .record(tape, &fees[usize::from(reduce.scale.is_none())..]);
+                }
+                if self.copy_after_reduction
+                    && let (Some(copy), Some((_, fee))) = (&self.before, before)
+                {
+                    copy.charge.record(
+                        tape,
+                        copy.unary
+                            .as_ref()
+                            .map_or(&[][..], |_| std::slice::from_ref(&fee)),
+                    );
                 }
                 self.update.charge.record(tape, &[update_fee]);
                 if let (Some(copy), Some((_, fee))) = (&self.after, after) {
@@ -369,6 +377,24 @@ impl Repeat {
             witnessed!(Repeated, Commit);
             units = total;
             iterations += 1;
+        }
+        if iterations != 0 {
+            if let (Some(copy), Some(value)) = (&self.before, saved_before)
+                && copy.keep
+            {
+                frame.assign(copy.at, value);
+            }
+            if let (Some(reduce), Some(value)) = (&self.reduction, accumulator_value) {
+                frame.assign(reduce.at, value);
+            }
+            if let Some(value) = counter_value {
+                frame.assign(self.update.at, value);
+            }
+            if let (Some(copy), Some(value)) = (&self.after, saved_after)
+                && copy.keep
+            {
+                frame.assign(copy.at, value);
+            }
         }
         (iterations, units)
     }

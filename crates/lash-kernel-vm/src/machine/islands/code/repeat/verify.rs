@@ -140,7 +140,9 @@ impl Repeat {
             return false;
         }
         let mut statements = plan.body.steps.iter();
-        if let Some(copy) = &self.before {
+        if !self.copy_after_reduction
+            && let Some(copy) = &self.before
+        {
             let Some(source) = next(&mut statements, copy.at, !copy.keep, &copy.charge) else {
                 return false;
             };
@@ -175,6 +177,18 @@ impl Repeat {
                 return false;
             }
             roles.accumulator = None;
+        }
+        if self.copy_after_reduction {
+            let Some(copy) = &self.before else {
+                return false;
+            };
+            let Some(source) = next(&mut statements, copy.at, !copy.keep, &copy.charge) else {
+                return false;
+            };
+            if self.reduction.is_none() || !roles.copy(copy, source, exe) {
+                return false;
+            }
+            roles.previous = Some(copy.at);
         }
         let Some(source) = next(&mut statements, self.update.at, false, &self.update.charge) else {
             return false;

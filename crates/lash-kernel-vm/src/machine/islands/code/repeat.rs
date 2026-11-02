@@ -101,6 +101,7 @@ pub(in crate::machine::islands) struct Repeat {
     pub(in crate::machine::islands) test: Binary,
     pub(in crate::machine::islands) test_charge: Charge,
     pub(in crate::machine::islands) before: Option<Copy>,
+    pub(in crate::machine::islands) copy_after_reduction: bool,
     pub(in crate::machine::islands) reduction: Option<Reduction>,
     pub(in crate::machine::islands) update: Update,
     pub(in crate::machine::islands) after: Option<Copy>,
