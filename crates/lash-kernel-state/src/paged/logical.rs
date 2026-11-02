@@ -696,6 +696,7 @@ impl Ledger {
         }
         self.state.roots_mut(owner).write(key, row, access)?;
         self.revision = revision;
+        self.published.expire(Written::Owners(vec![owner]));
         Ok(true)
     }
     pub fn holding(&self, owner: Owner, access: &Access<'_>) -> Result<Option<Holding>, HeapFault> {
