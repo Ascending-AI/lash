@@ -578,6 +578,18 @@ impl Named {
     }
 }
 
+fn insert_shared<T: Clone>(values: &mut Arc<Vec<T>>, at: usize, value: T) {
+    if let Some(values) = Arc::get_mut(values) {
+        values.insert(at, value);
+        return;
+    }
+    let mut extended = Vec::with_capacity(values.len() + 1);
+    extended.extend_from_slice(&values[..at]);
+    extended.push(value);
+    extended.extend_from_slice(&values[at..]);
+    *values = Arc::new(extended);
+}
+
 impl FunctionRegistry {
     pub fn new() -> Self {
         Self::default()
@@ -694,7 +706,7 @@ impl FunctionRegistry {
                 }
             }
         }
-        Arc::make_mut(&mut self.functions).insert(at, registered);
+        insert_shared(&mut self.functions, at, registered);
         if let Some(buckets) = &mut self.buckets {
             for boundary in &mut buckets[bucket(&function) + 1..] {
                 *boundary += 1;
@@ -709,7 +721,7 @@ impl FunctionRegistry {
         let place = self
             .names
             .partition_point(|other| other.key() < named.key());
-        Arc::make_mut(&mut self.names).insert(place, named);
+        insert_shared(&mut self.names, place, named);
         Ok(function)
     }
 
