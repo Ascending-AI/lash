@@ -2,6 +2,8 @@
 """Land committed work after sourcing ./env.sh; --dry-run stops before pushing."""
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -140,6 +142,37 @@ def push(main):
         raise RuntimeError("push refused:\n" + tail(output))
 
 
+def ancestor_holds_lock(fd):
+    info = os.fstat(fd)
+    identity = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+    holders = set()
+    for line in Path("/proc/locks").read_text().splitlines():
+        fields = line.split()
+        if len(fields) != 8 or fields[1:4] != ["FLOCK", "ADVISORY", "WRITE"]:
+            continue
+        major, minor, inode = fields[5].split(":")
+        if (int(major, 16), int(minor, 16), int(inode)) == identity:
+            holders.add(int(fields[4]))
+    pid = os.getppid()
+    while pid:
+        if pid in holders:
+            return True
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        pid = int(stat.rsplit(")", 1)[1].split()[1])
+    return False
+
+
+@contextmanager
+def land_lock():
+    with open("/workspace/kiln/lash/land.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if not ancestor_holds_lock(lock.fileno()):
+                fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="rebase, regenerate and check, without pushing")
@@ -175,7 +208,10 @@ def main():
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))
             return
-        if push(main_sha):
+        with land_lock():
+            run("git", "fetch", "origin", "main")
+            landed = git("rev-parse", "origin/main") == main_sha and push(main_sha)
+        if landed:
             print("landed " + git("rev-parse", "HEAD"))
             return
         if witness_paths:

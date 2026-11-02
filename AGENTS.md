@@ -35,8 +35,10 @@ the rest and reds are fixed forward:
 
 To land a change, commit it, source `./env.sh`, then run `scripts/land` from
 your fork. It rebases onto main, runs the required workspace `kiln clippy`,
-and pushes; `scripts/land --dry-run` does everything except push. After it
-prints `landed <sha>`, close your ticket and remove your fork with
+and pushes. It takes `/workspace/kiln/lash/land.lock` only for the final
+fetch/base check and push; do not wrap it in an outer `flock`.
+`scripts/land --dry-run` does everything except push and never takes the lock.
+After it prints `landed <sha>`, close your ticket and remove your fork with
 `kiln rm lash <name>`.
 
 `python3 scripts/dev-test.py --dependents` is an optional local tool for a
