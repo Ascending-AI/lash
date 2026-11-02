@@ -28,7 +28,7 @@ use super::Facts;
 #[derive(Debug, Default)]
 pub(super) struct KeyCache {
     slots: RefCell<Vec<Option<(ShortText, NormalKey)>>>,
-    hash: foldhash::fast::RandomState,
+    hash: foldhash::fast::FixedState,
 }
 
 impl KeyCache {
