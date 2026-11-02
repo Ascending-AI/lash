@@ -14,7 +14,9 @@ use lash_kernel_state::{
     },
 };
 use std::collections::BTreeSet;
+mod exact;
 mod region;
+pub(crate) use exact::{ExactEvent, ExactRoots, Successor};
 pub(crate) use region::CompiledExit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,7 +298,7 @@ impl Frontier {
                 heap,
                 arena,
             }
-            .check(event, site, actual, facts)
+            .check(event, site, &EventView::from(actual), facts)
         })?;
         let program = program
             .evaluate(ledger, arena)
@@ -497,6 +499,41 @@ impl<'a> SourceAccepted<'_, PreparedPrefix<'a>> {
 fn fault(text: &str) -> HeapFault {
     HeapFault::Malformed(text.into())
 }
+struct EventView<'a> {
+    inputs: &'a [logical::Owner],
+    outputs: &'a [(logical::Owner, logical::PublicationValue)],
+    borrowed: &'a [logical::Owner],
+    member: Option<&'a MemberEdit>,
+    entities: &'a [logical::VirtualEntity],
+    frame: Option<logical::FrameEvent>,
+    scratch: &'a [logical::ScratchEvent],
+    native: Option<&'a JournalEvent>,
+    journal: Option<&'a JournalEvent>,
+}
+impl<'a> From<&'a JournalEvent> for EventView<'a> {
+    fn from(event: &'a JournalEvent) -> Self {
+        Self {
+            inputs: &event.inputs,
+            outputs: &event.outputs,
+            borrowed: &event.borrowed,
+            member: event.member.as_ref(),
+            entities: &event.entities,
+            frame: event.frame,
+            scratch: &event.scratch,
+            native: event.native.as_ref().map(|_| event),
+            journal: Some(event),
+        }
+    }
+}
+impl EventView<'_> {
+    fn scratch_peak(&self) -> Option<u64> {
+        if self.scratch.is_empty() {
+            Some(0)
+        } else {
+            self.journal?.scratch_peak()
+        }
+    }
+}
 struct EventContext<'a> {
     earlier: &'a [JournalEvent],
     source: &'a Source,
@@ -613,7 +650,7 @@ impl EventContext<'_> {
         &self,
         event: &Event,
         roles: &[Site],
-        actual: &JournalEvent,
+        actual: &EventView<'_>,
     ) -> Result<(), Refused> {
         if actual.native.is_some()
             || !actual.borrowed.is_empty()
@@ -668,7 +705,7 @@ impl EventContext<'_> {
         &self,
         event: &Event,
         site: &super::interval::PublicationSite,
-        actual: &JournalEvent,
+        actual: &EventView<'_>,
         facts: &dyn Facts,
     ) -> Result<(), Refused> {
         let Self {
@@ -800,7 +837,7 @@ impl EventContext<'_> {
             })
             .and_then(|room| room.native_contract.as_ref());
         if let Some(contract) = native {
-            check_native(actual, contract, heap, arena)?;
+            check_native(actual.journal.ok_or(Refused::Facts)?, contract, heap, arena)?;
         }
         if actual.inputs.iter().any(|owner| !reads.contains(owner))
             || actual
@@ -840,7 +877,7 @@ impl EventContext<'_> {
                 )
                 .ok_or(Refused::Scratch)?;
         }
-        for lease in &actual.scratch {
+        for lease in actual.scratch {
             let owner = match lease {
                 logical::ScratchEvent::Begin { owner, .. }
                 | logical::ScratchEvent::End { owner } => owner,

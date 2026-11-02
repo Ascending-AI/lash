@@ -1,11 +1,12 @@
 //! Conditional tests consume their actual condition before selecting control.
 use super::*;
 use crate::compile::room::publication::Occurrence;
+use crate::compile::room::publication::{ExactRoots, Successor};
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::stream::Running;
 use crate::machine::{Control, Halt, KernelMachine, fault};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::JournalEvent;
+
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -174,7 +175,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -205,13 +206,13 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: vec![input],
-                    ..Default::default()
-                }])
+            ExactRoots {
+                inputs: vec![input],
+                outputs: vec![],
+                ..Default::default()
             },
-            Reserve(move |_: &mut Arena| Ok(Some((bank, block)))),
+            Successor::Condition(taken),
+            (bank, block),
             |_, _, edits, (bank, block)| {
                 debug_assert!(edits.is_empty());
                 bank.publish();

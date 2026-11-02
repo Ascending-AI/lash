@@ -1,5 +1,6 @@
-//! A caller adopts its existing result and continuation in one source event.
+//! A caller adopts its existing result and semantic continuation in one boundary.
 use super::*;
+use crate::compile::room::publication::{ExactRoots, Successor};
 use crate::compile::{
     Executable, NestedKind, StmtId,
     room::{ExitKind, Owner as Selector, Phase, Point},
@@ -11,7 +12,7 @@ use crate::machine::{
     stream::Running,
 };
 use lash_kernel_state::{
-    kernel_internals::logical::{JournalEvent, Owner, PublicationValue},
+    kernel_internals::logical::{Owner, PublicationValue},
     paged::PhaseRecord,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
@@ -251,11 +252,10 @@ impl KernelMachine {
         let kernel = doc::KernelVersion::of(document.kernel())
             .ok_or_else(|| malformed("resuming source kernel is unsupported"))?;
         let mut encoding = TokenWriter::new();
-        encoding.seq(4);
+        encoding.seq(3);
         encoding.text("lash.source.call-resume");
         at.site.encode(&mut encoding);
         invocation.frame().encode(&mut encoding);
-        pc.encode(&mut encoding);
         let start = Position {
             at: at.clone(),
             unpaid: Some(at.clone()),
@@ -266,11 +266,11 @@ impl KernelMachine {
             unpaid: Some(unpaid),
             ..start.clone()
         };
-        let program = Program::new(vec![JournalEvent {
+        let roots = ExactRoots {
             inputs,
             outputs,
             ..Default::default()
-        }]);
+        };
         let mut arena = self.arena.borrow_mut();
         let task = self
             .tasks
@@ -315,7 +315,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             &invocation,
             &mut frame.source_frontier,
             Prefix {
@@ -342,8 +342,9 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || program.clone(),
-            Reserve(move |_: &mut Arena| Ok(Some(bank))),
+            roots,
+            Successor::Normal,
+            bank,
             |_, _, edits, bank| {
                 debug_assert!(edits.is_empty());
                 bank.publish();

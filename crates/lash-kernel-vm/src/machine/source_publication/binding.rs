@@ -1,6 +1,6 @@
-//! Precise local bindings consume their actual operand in the accepted journal.
+//! Precise local bindings move their actual operand through one boundary.
 use super::*;
-use crate::compile::room::publication::Occurrence;
+use crate::compile::room::publication::{ExactRoots, Occurrence, Successor};
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::stream::Running;
 use crate::machine::{
@@ -297,7 +297,7 @@ impl KernelMachine {
             ordinal: arena.next_provisional().ordinal,
         });
         let safe_point = self.charged;
-        let published = Context {
+        let context = Context {
             admission: Admission::Exact(MemoryLimit::of(
                 self.bounds.memory_meter,
                 &mut self.bounds.memory,
@@ -324,88 +324,111 @@ impl KernelMachine {
                 safe_point,
             },
             logical_memory: &self.logical_memory,
-        }
-        .publish(
-            roots.invocation(),
-            &mut frame.source_frontier,
-            Prefix {
-                interval,
-                facts: LeafExecution(
-                    [(
-                        at.clone(),
-                        LeafFacts {
-                            dependencies: value.handle().into_iter().chain(cell).collect(),
-                            values: measures,
-                            ..Default::default()
-                        },
-                    )]
-                    .into(),
-                ),
-                start,
-                next,
-                allowance: Allowance {
-                    occurrences: vec![],
-                    before: 0,
-                    units: 0,
-                    close: None,
-                    strict: false,
-                    depth: 0,
-                    safe_point,
-                },
-            },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    member: member.as_ref().map(|(_, edit)| edit.clone()),
-                    outputs: if member.is_some() {
-                        vec![]
-                    } else {
-                        vec![(
-                            output,
-                            entity.map_or(PublicationValue::Existing(input), |entity| {
-                                PublicationValue::Page(doc::heap::PageValue::Ref(
-                                    doc::heap::Identity::Object(entity),
-                                ))
-                            }),
-                        )]
+        };
+        let prefix = Prefix {
+            interval,
+            facts: LeafExecution(
+                [(
+                    at.clone(),
+                    LeafFacts {
+                        dependencies: value.handle().into_iter().chain(cell).collect(),
+                        values: measures,
+                        ..Default::default()
                     },
-                    entities: entity
-                        .into_iter()
-                        .map(|entity| VirtualEntity {
-                            entity,
-                            body: VirtualBody::NativeVariable(value),
-                        })
-                        .collect(),
-                    ..Default::default()
-                }])
+                )]
+                .into(),
+            ),
+            start,
+            next,
+            allowance: Allowance {
+                occurrences: vec![],
+                before: 0,
+                units: 0,
+                close: None,
+                strict: false,
+                depth: 0,
+                safe_point,
             },
-            BindingPreparation {
-                bank,
-                slot,
-                cell: entity.map(|entity| CellConstruction { entity, value }),
-                member: member.as_ref().map(|(_, edit)| edit.clone()),
-            },
-            |arena, _, edits, (bank, slot, cell, write)| {
-                if let Some(write) = write {
-                    let [edit] = edits.as_slice() else {
-                        unreachable!("cell publication changed member arity");
+        };
+        let published = if shared || cell.is_some() {
+            context.publish(
+                roots.invocation(),
+                &mut frame.source_frontier,
+                prefix,
+                || {
+                    Program::new(vec![JournalEvent {
+                        inputs: inputs.clone(),
+                        member: member.as_ref().map(|(_, edit)| edit.clone()),
+                        outputs: if member.is_some() {
+                            vec![]
+                        } else {
+                            vec![(
+                                output,
+                                entity.map_or(PublicationValue::Existing(input), |entity| {
+                                    PublicationValue::Page(doc::heap::PageValue::Ref(
+                                        doc::heap::Identity::Object(entity),
+                                    ))
+                                }),
+                            )]
+                        },
+                        entities: entity
+                            .into_iter()
+                            .map(|entity| VirtualEntity {
+                                entity,
+                                body: VirtualBody::NativeVariable(value),
+                            })
+                            .collect(),
+                        ..Default::default()
+                    }])
+                },
+                BindingPreparation {
+                    bank,
+                    slot,
+                    cell: entity.map(|entity| CellConstruction { entity, value }),
+                    member: member.as_ref().map(|(_, edit)| edit.clone()),
+                },
+                |arena, _, edits, (bank, slot, cell, write)| {
+                    if let Some(write) = write {
+                        let [edit] = edits.as_slice() else {
+                            unreachable!("cell publication changed member arity");
+                        };
+                        write.publish(arena, edit.clone());
+                    } else {
+                        debug_assert!(edits.is_empty());
+                    }
+                    let state = if let Some(cell) = cell {
+                        cell.batch.publish(arena);
+                        SlotState::Cell(cell.handle)
+                    } else {
+                        SlotState::Value(value)
                     };
-                    write.publish(arena, edit.clone());
-                } else {
+                    bank.publish();
+                    if let Some(slot) = slot {
+                        slot.publish(state);
+                    }
+                },
+            )
+        } else {
+            context.publish_event(
+                roots.invocation(),
+                &mut frame.source_frontier,
+                prefix,
+                ExactRoots {
+                    inputs,
+                    outputs: vec![(output, PublicationValue::Existing(input))],
+                    ..Default::default()
+                },
+                Successor::Normal,
+                (bank, slot),
+                |_, _, edits, (bank, slot)| {
                     debug_assert!(edits.is_empty());
-                }
-                let state = if let Some(cell) = cell {
-                    cell.batch.publish(arena);
-                    SlotState::Cell(cell.handle)
-                } else {
-                    SlotState::Value(value)
-                };
-                bank.publish();
-                if let Some(slot) = slot {
-                    slot.publish(state);
-                }
-            },
-        )
+                    bank.publish();
+                    if let Some(slot) = slot {
+                        slot.publish(SlotState::Value(value));
+                    }
+                },
+            )
+        }
         .map_err(|halt| native_commit_refusal(running, pc, src, halt))?;
         drop(arena);
         #[cfg(any(test, feature = "testing"))]

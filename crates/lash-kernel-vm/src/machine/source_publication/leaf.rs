@@ -1,11 +1,12 @@
-//! Pure source reads install their bank occurrence in the accepted journal.
+//! Pure source reads publish their actual bank occurrence in one boundary.
 use super::*;
 use crate::compile::room::publication::Occurrence;
+use crate::compile::room::publication::{ExactRoots, Successor};
 use crate::compile::room::{Measure, Owner as Selector};
 use crate::machine::{Halt, KernelMachine, SlotState, fault};
 use crate::machine::{logical_held::Projection, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::PublicationValue;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -58,6 +59,28 @@ impl KernelMachine {
             return Ok(false);
         };
         self.logical_flush()?;
+        let activation = {
+            let store = self.logical.ledger();
+            let task = self
+                .tasks
+                .get_mut(running.task.0 as usize)?
+                .ok_or_else(|| fault("no task"))?;
+            let frame = task.frames.last_mut()?.ok_or_else(|| fault("no frame"))?;
+            let Some(roots) = &frame.logical else {
+                return Ok(false);
+            };
+            let Ok(placement) = room::placement::BindingPlacement::compile(running.exe, frame.code)
+            else {
+                return Ok(false);
+            };
+            placement.capture(
+                frame.code,
+                roots.invocation(),
+                &store.borrow(),
+                &self.heap,
+                frame.slot_states(),
+            )?
+        };
         let Some(bank) = self.regs.prepare_source_leaf(
             running.stream,
             pc,
@@ -142,7 +165,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -174,13 +197,13 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    outputs: vec![(output, PublicationValue::Native(value))],
-                    ..Default::default()
-                }])
+            ExactRoots {
+                activation,
+                inputs: vec![],
+                outputs: vec![(output, PublicationValue::Native(value))],
             },
-            Reserve(move |_: &mut Arena| Ok(Some(bank))),
+            Successor::Normal,
+            bank,
             |_, _, edits, bank| {
                 debug_assert!(edits.is_empty());
                 bank.publish();

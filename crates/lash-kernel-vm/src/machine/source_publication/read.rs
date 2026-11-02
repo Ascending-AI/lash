@@ -1,88 +1,12 @@
 //! Member reads publish their checked operands and canonical result together.
 use super::*;
-use crate::compile::room::publication::Occurrence;
+use crate::compile::room::publication::{ExactRoots, Occurrence, Successor};
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::stream::Running;
-use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput};
+use crate::machine::{Halt, KernelMachine, fault};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, Ledger, PublicationValue, RootValue,
-};
+use lash_kernel_state::kernel_internals::logical::{Holding, PublicationValue, RootValue};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-
-struct ReadResult<'bank, 'heap> {
-    bank: PreparedOutput<'bank>,
-    value: doc::Value,
-    at: Point,
-    release: Box<[Selector]>,
-    ledger: std::rc::Rc<std::cell::RefCell<Ledger>>,
-    heap: &'heap PagedHeap,
-}
-struct PreparedRead<'bank> {
-    bank: PreparedOutput<'bank>,
-    holding: Holding,
-    at: Point,
-    release: Box<[Selector]>,
-    released: u64,
-}
-impl<'bank> StoragePreparation for ReadResult<'bank, '_> {
-    type Prepared = PreparedRead<'bank>;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        if !event.outputs.is_empty()
-            || !event.entities.is_empty()
-            || event.frame.is_some()
-            || event.member.is_some()
-            || !event.scratch.is_empty()
-        {
-            return Ok(None);
-        }
-        let mut registration = arena.registration().map_err(native_fault)?;
-        let holding = Holding::from_native(registration.arena(), self.heap.pages(), &self.value)?;
-        let released = self.ledger.borrow().release_cost_preserving(
-            registration.arena(),
-            self.heap,
-            &event.inputs,
-            &[(self.bank.owner(), RootValue::Value(&self.value))],
-        )?;
-        let mut event = event.clone();
-        event
-            .outputs
-            .push((self.bank.owner(), PublicationValue::Native(self.value)));
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedRead {
-                bank: self.bank,
-                holding,
-                at: self.at,
-                release: self.release,
-                released,
-            },
-            actual: Program::new(vec![event]),
-        }))
-    }
-    fn facts(prepared: &Self::Prepared, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        let facts = facts
-            .0
-            .get_mut(&prepared.at)
-            .ok_or_else(|| malformed("read facts disappeared"))?;
-        facts.values.insert(
-            Measure::Local(Selector::Operand(prepared.at.site.clone())),
-            i128::from(prepared.holding.bytes()),
-        );
-        facts.values.insert(
-            Measure::Release(prepared.release.clone()),
-            i128::from(prepared.released),
-        );
-        Ok(())
-    }
-}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_read(
@@ -145,6 +69,13 @@ impl KernelMachine {
         at.site.encode(&mut encoding);
         output.encode(&mut encoding);
         let mut arena = self.arena.borrow_mut();
+        let holding = Holding::from_native(&mut arena, self.heap.pages(), &value)?;
+        let released = self.logical.ledger().borrow().release_cost_preserving(
+            &mut arena,
+            &self.heap,
+            &inputs,
+            &[(output, RootValue::Value(&value))],
+        )?;
         let task = self
             .tasks
             .get_mut(running.task.0 as usize)?
@@ -202,7 +133,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -216,6 +147,14 @@ impl KernelMachine {
                                 .chain(std::iter::once(&value))
                                 .filter_map(doc::Value::handle)
                                 .collect(),
+                            values: [
+                                (
+                                    Measure::Local(Selector::Operand(at.site.clone())),
+                                    i128::from(holding.bytes()),
+                                ),
+                                (Measure::Release(release), i128::from(released)),
+                            ]
+                            .into(),
                             ..Default::default()
                         },
                     )]
@@ -233,23 +172,16 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    ..Default::default()
-                }])
+            ExactRoots {
+                inputs,
+                outputs: vec![(output, PublicationValue::Native(value))],
+                ..Default::default()
             },
-            ReadResult {
-                bank,
-                value,
-                at,
-                release,
-                ledger: self.logical.ledger(),
-                heap: &self.heap,
-            },
-            |_, _, edits, prepared| {
+            Successor::Normal,
+            (bank, holding),
+            |_, _, edits, (bank, holding)| {
                 debug_assert!(edits.is_empty());
-                prepared.bank.publish(value, prepared.holding);
+                bank.publish(value, holding);
             },
         )?;
         #[cfg(any(test, feature = "testing"))]

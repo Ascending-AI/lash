@@ -1,0 +1,435 @@
+//! One exact source event uses the same affine ledger boundary as a region.
+//! Actual values are retained until preparation, so a holding price never
+//! authorizes a substituted result or a different source transfer.
+use super::*;
+pub(crate) use logical::PublicationValue as ExactValue;
+use logical::{BoundaryTransaction, Dependencies, Owner as RootOwner, RootValue};
+
+/// These are actual live roots, not executor-authored fees or byte deltas.
+/// Preparation consumes them directly under the canonical ledger owner.
+#[derive(Default)]
+pub(crate) struct ExactRoots {
+    pub(crate) activation: Option<crate::compile::room::placement::DenseActivation>,
+    pub(crate) inputs: Vec<RootOwner>,
+    pub(crate) outputs: Vec<(RootOwner, ExactValue)>,
+}
+
+/// A dynamic choice is an evaluated source fact. Its successor is derived
+/// again from source syntax, rather than accepted from a physical code cursor.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum Successor {
+    #[default]
+    Normal,
+    Condition(bool),
+    Cursor(bool),
+}
+
+pub(crate) struct ExactEvent {
+    source: Arc<Source>,
+    interval: Arc<CompiledInterval>,
+    at: Point,
+    unpaid: Point,
+}
+
+/// Entry dependencies, the actual roots and source exit remain inseparable.
+/// No acceptance or physical coordinate survives a durable source handoff.
+pub(crate) struct BoundEvent {
+    frontier: std::rc::Rc<()>,
+    revision: u64,
+    before: Position,
+    next: Position,
+    dependencies: Dependencies,
+    roots: ExactRoots,
+    room: CheckedRoom,
+    allowance: Allowance,
+    resources: ResourceFacts,
+}
+
+pub(crate) struct PreparedEvent<'a> {
+    frontier: std::rc::Rc<()>,
+    revision: u64,
+    before: Position,
+    next: Position,
+    transaction: BoundaryTransaction<'a>,
+    allowance: Allowance,
+    resources: ResourceFacts,
+}
+
+impl ExactEvent {
+    pub(crate) fn compile(
+        source: &Arc<Source>,
+        interval: Arc<CompiledInterval>,
+        successor: Successor,
+    ) -> Result<Self, Refused> {
+        let mut events = interval.events();
+        let at = events.next().ok_or(Refused::Path)?.point.clone();
+        if events.next().is_some()
+            || interval.owner() != source.owner
+            || interval.defining_source() != &source.site
+            || interval.exit() != ExitKind::Normal
+        {
+            return Err(Refused::Source);
+        }
+        drop(events);
+        if !Arc::ptr_eq(&interval, &source.compile_event(&at, interval.exit())?) {
+            return Err(Refused::Source);
+        }
+        let unpaid = source.exact_successor(&at, successor)?;
+        Ok(Self {
+            source: Arc::clone(source),
+            interval,
+            at,
+            unpaid,
+        })
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "one actual source event entry")]
+    pub(crate) fn bind(
+        &self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        arena: &Arena,
+        heap: &PagedHeap,
+        execution: &mut impl Execution,
+        roots: ExactRoots,
+        next: Position,
+        allowance: Allowance,
+        resources: ResourceFacts,
+    ) -> Result<BoundEvent, Refused> {
+        // These exact adapters run after their canonical stream charge close.
+        // A nonzero or still-open charge requires a ChargeDebt region instead.
+        if frontier.proven
+            || !Arc::ptr_eq(&self.source, &frontier.source)
+            || frontier.position.at != self.at
+            || frontier.position.unpaid.as_ref() != Some(&self.at)
+            || next.at != self.at
+            || next.unpaid.as_ref() != Some(&self.unpaid)
+            || next.occurrence != frontier.position.occurrence
+            || allowance.before != 0
+            || allowance.units != 0
+            || allowance.close.is_some()
+            || allowance.strict
+            || allowance.depth != 0
+            || !allowance.occurrences.is_empty()
+        {
+            return Err(Refused::Source);
+        }
+        let slots = self.source.owner_slots()?;
+        let view = EventView {
+            inputs: &roots.inputs,
+            outputs: &roots.outputs,
+            borrowed: &[],
+            member: None,
+            entities: &[],
+            frame: None,
+            scratch: &[],
+            native: None,
+            journal: None,
+        };
+        let mut handles = Vec::new();
+        let room = self
+            .interval
+            .evaluate_checked(execution, |event, site, facts| {
+                handles.extend_from_slice(facts.dependencies().ok_or(Refused::Facts)?);
+                EventContext {
+                    earlier: &[],
+                    source: &self.source,
+                    slots: &slots,
+                    occurrence: &frontier.position.occurrence,
+                    ledger,
+                    heap,
+                    arena,
+                }
+                .check(event, site, &view, facts)?;
+                // A local move preserves its actual provenance, including page and
+                // frozen roots. Equal-sized Native values cannot replace that move.
+                if site.assignment.is_some()
+                    || matches!(
+                        event.output,
+                        Some(Owner::Binding { .. } | Owner::SessionCell { .. })
+                    )
+                {
+                    if event.inputs.len() != 1 || roots.outputs.len() != 1 {
+                        return Err(Refused::Retained);
+                    }
+                    let input = slots
+                        .root(
+                            &event.inputs[0],
+                            next.occurrence.task,
+                            next.occurrence.invocation,
+                        )
+                        .ok_or(Refused::Source)?;
+                    if !matches!(roots.outputs[0].1, ExactValue::Existing(owner) if owner == input)
+                    {
+                        return Err(Refused::Retained);
+                    }
+                }
+                if matches!(event.output, Some(Owner::Operand(_)))
+                    && let Ok(input) = self.source.scalar_input(&slots, &event.point)
+                {
+                    let expected = match input {
+                        super::super::region::ScalarInput::Literal(value) => value,
+                        super::super::region::ScalarInput::Binding(slot) => {
+                            let activation = roots.activation.as_ref().ok_or(Refused::Facts)?;
+                            let invocation = ledger
+                                .invocation(
+                                    next.occurrence.task,
+                                    next.occurrence.invocation,
+                                    heap.pages(),
+                                )
+                                .map_err(|_| Refused::Facts)?;
+                            if !activation.current(&self.source, ledger, &invocation) {
+                                return Err(Refused::Facts);
+                            }
+                            activation.value(slot).ok_or(Refused::Facts)?
+                        }
+                    };
+                    if roots.outputs.len() != 1
+                        || !matches!(roots.outputs[0].1,
+                        ExactValue::Native(value) if value.same(&expected))
+                    {
+                        return Err(Refused::Facts);
+                    }
+                }
+                Ok(())
+            })?;
+        for (_, value) in &roots.outputs {
+            match value {
+                ExactValue::Native(value) => handles.extend(value.handle()),
+                ExactValue::Capture(handle) => handles.push(*handle),
+                _ => {}
+            }
+        }
+        let dependencies = Dependencies::capture(ledger, arena, &handles).ok_or(Refused::Facts)?;
+        Ok(BoundEvent {
+            frontier: std::rc::Rc::clone(&frontier.identity),
+            revision: frontier.revision,
+            before: frontier.position.clone(),
+            next,
+            dependencies,
+            roots,
+            room,
+            allowance,
+            resources,
+        })
+    }
+}
+
+impl BoundEvent {
+    pub(crate) fn prepare<'a>(
+        self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        mut registration: Registration<'a>,
+        heap: &PagedHeap,
+    ) -> Result<PreparedEvent<'a>, PublicationError> {
+        if !current(&self.frontier, self.revision, &self.before, frontier)
+            || !self.dependencies.is_current(ledger, registration.arena())
+        {
+            return Err(PublicationError::Miss("exact entry dependencies changed"));
+        }
+        let outputs: Vec<_> = self
+            .roots
+            .outputs
+            .iter()
+            .map(|(owner, value)| {
+                let root = match value {
+                    ExactValue::Native(value) => RootValue::Value(value),
+                    ExactValue::Existing(owner) => RootValue::Existing(*owner),
+                    ExactValue::Capture(handle) => RootValue::Capture(*handle),
+                    ExactValue::Page(value) => RootValue::Page(value),
+                    ExactValue::Frozen(value) => RootValue::Frozen(value),
+                    ExactValue::Frame => RootValue::Frame,
+                    ExactValue::Departure => RootValue::Departure,
+                };
+                (*owner, root)
+            })
+            .collect();
+        let before = ledger.balance()?.total()?;
+        let transaction = ledger
+            .prepare_source_boundary(registration, heap, &self.roots.inputs, &outputs)?
+            .bind_dependencies(self.dependencies)?;
+        let balance = self.room.balance();
+        if i128::from(transaction.balance()?.total()?) - i128::from(before)
+            != balance.retained_delta
+            || transaction.peak()
+                > before
+                    .checked_add(balance.peak_extra)
+                    .ok_or_else(|| fault("exact source peak overflow"))?
+        {
+            return Err(PublicationError::Miss(
+                "exact source room disagrees with actual roots",
+            ));
+        }
+        let transaction = transaction
+            .require_source_room(balance.peak_extra)
+            .ok_or_else(|| fault("exact source room overflow"))?;
+        Ok(PreparedEvent {
+            frontier: self.frontier,
+            revision: self.revision,
+            before: self.before,
+            next: self.next,
+            transaction,
+            allowance: self.allowance,
+            resources: self.resources,
+        })
+    }
+}
+
+impl<'a> PreparedEvent<'a> {
+    pub(crate) fn peak(&self) -> u64 {
+        self.transaction.peak()
+    }
+    pub(crate) fn collect(mut self, ledger: &Ledger, heap: &PagedHeap) -> Result<Self, HeapFault> {
+        self.transaction = self.transaction.collect(ledger, heap.pages())?;
+        Ok(self)
+    }
+    pub(crate) fn admit<'r>(
+        mut self,
+        frontier: &Frontier,
+        ledger: &Ledger,
+        resources: SourceResources<'r>,
+        memory_bound: u64,
+    ) -> Result<Option<SourceAccepted<'r, (Self, u64)>>, HeapFault> {
+        if !current(&self.frontier, self.revision, &self.before, frontier)
+            || !self.transaction.is_current(ledger)
+            || self.peak() > memory_bound
+        {
+            return Ok(None);
+        }
+        let facts = self.resources.clone();
+        let need = self.allowance.clone();
+        resources.admit_interval(&facts, &need, (self, memory_bound))
+    }
+}
+
+impl SourceAccepted<'_, (PreparedEvent<'_>, u64)> {
+    pub(crate) fn publish_event(
+        self,
+        frontier: &mut Frontier,
+        ledger: &mut Ledger,
+        semantic: impl FnOnce(&mut Arena, Vec<MemberEdit>),
+    ) -> Result<logical::Balance, PublicationError> {
+        self.commit(|(mut prepared, memory_bound)| {
+            if !current(
+                &prepared.frontier,
+                prepared.revision,
+                &prepared.before,
+                frontier,
+            ) || !prepared.transaction.is_current(ledger)
+            {
+                return Err(PublicationError::Miss("exact source frontier changed"));
+            }
+            let revision = frontier
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| fault("source frontier overflow"))?;
+            let balance = prepared.transaction.balance()?;
+            let accepted = prepared
+                .transaction
+                .admit(memory_bound)
+                .map_err(|_| fault("exact source admission changed"))?;
+            accepted.publish(ledger, semantic)?;
+            frontier.position = prepared.next;
+            frontier.revision = revision;
+            Ok(balance)
+        })
+    }
+}
+
+fn current(
+    identity: &std::rc::Rc<()>,
+    revision: u64,
+    before: &Position,
+    frontier: &Frontier,
+) -> bool {
+    std::rc::Rc::ptr_eq(identity, &frontier.identity)
+        && revision == frontier.revision
+        && !frontier.proven
+        && before == &frontier.position
+}
+
+impl Source {
+    fn exact_successor(&self, at: &Point, successor: Successor) -> Result<Point, Refused> {
+        match at.phase {
+            Phase::Commit | Phase::Restore => self.next_after_commit(&at.site),
+            Phase::Open => self.compile_leaf(&at.site).map(|(_, next, _)| next),
+            Phase::Test => match successor {
+                Successor::Condition(taken) => self
+                    .next_after_while_test(&at.site, taken)
+                    .or_else(|_| self.next_after_if_test(&at.site, taken)),
+                Successor::Normal => {
+                    let mut node = doc::Node::Block(&self.body);
+                    for index in &at.site.path[self.site.path.len()..] {
+                        node = *node.children().get(*index as usize).ok_or(Refused::Path)?;
+                    }
+                    if !matches!(node, doc::Node::Expr(doc::Expr::Let { .. })) {
+                        return Err(Refused::Facts);
+                    }
+                    self.first_event(&at.site.child(1))
+                }
+                Successor::Cursor(_) => Err(Refused::Path),
+            },
+            Phase::Leave if at.site != self.site => self.exact_scope_successor(&at.site, successor),
+            _ => Err(Refused::Path),
+        }
+    }
+    fn exact_scope_successor(&self, at: &Site, successor: Successor) -> Result<Point, Refused> {
+        if at.unit != self.site.unit || !at.path.starts_with(&self.site.path) {
+            return Err(Refused::Path);
+        }
+        let mut node = doc::Node::Block(&self.body);
+        let mut path = self.site.clone();
+        let mut parents = Vec::new();
+        for &index in &at.path[self.site.path.len()..] {
+            parents.push((node, path.clone(), index));
+            node = *node.children().get(index as usize).ok_or(Refused::Path)?;
+            path = path.child(index);
+        }
+        if !matches!(node, doc::Node::Block(_)) {
+            return Err(Refused::Path);
+        }
+        let (parent, site, index) = parents.last().ok_or(Refused::Path)?;
+        match parent {
+            doc::Node::Stmt(doc::Stmt::While { .. }) if *index == 1 => {
+                return self.first_event(&site.child(0));
+            }
+            doc::Node::Stmt(doc::Stmt::For { .. }) if *index == 1 => {
+                let Successor::Cursor(continued) = successor else {
+                    return Err(Refused::Facts);
+                };
+                return self.next_after_for_cursor(site, continued);
+            }
+            doc::Node::Stmt(doc::Stmt::Try(statement)) => {
+                let scope = if *index == 0 {
+                    TryScope::Body
+                } else if *index == 1 && statement.catch.is_some() {
+                    TryScope::Catch
+                } else {
+                    TryScope::Finally
+                };
+                return self.next_after_try_scope(site, scope);
+            }
+            _ => {}
+        }
+        // Ordinary selected blocks finish their enclosing statement. Resume at
+        // the next statement in its source block, or that block's own exit.
+        for (node, site, index) in parents.into_iter().rev() {
+            if let doc::Node::Block(body) = node {
+                return if (index as usize) + 1 < body.len() {
+                    self.first_event(&site.child(index + 1))
+                } else {
+                    Ok(Point {
+                        phase: if site == self.site {
+                            Phase::Fallthrough
+                        } else {
+                            Phase::Leave
+                        },
+                        site,
+                    })
+                };
+            }
+        }
+        Err(Refused::Path)
+    }
+}

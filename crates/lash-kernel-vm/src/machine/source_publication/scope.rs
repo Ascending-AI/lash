@@ -1,11 +1,12 @@
 //! Normal nested block exits publish their owner release and reserved clears.
 use super::*;
+use crate::compile::room::publication::{ExactRoots, Successor};
 use crate::compile::{
     Executable,
     room::{ExitKind, Measure, Owner as Selector, Phase, Point, TryScope, publication::Occurrence},
 };
 use crate::machine::{Completion, Control, Halt, KernelMachine, TryPhase, fault};
-use lash_kernel_state::kernel_internals::logical::JournalEvent;
+
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use std::collections::BTreeSet;
 
@@ -285,7 +286,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -314,13 +315,16 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    ..Default::default()
-                }])
+            ExactRoots {
+                inputs,
+                outputs: vec![],
+                ..Default::default()
             },
-            Reserve(move |_: &mut Arena| Ok(Some((bank, slots, controls)))),
+            match loop_body {
+                Some(ScopeLoop::For { continued }) => Successor::Cursor(continued),
+                _ => Successor::Normal,
+            },
+            (bank, slots, controls),
             |_, _, edits, (bank, slots, controls)| {
                 debug_assert!(edits.is_empty());
                 let Some(Control::Block { block: actual, .. }) = controls.pop() else {

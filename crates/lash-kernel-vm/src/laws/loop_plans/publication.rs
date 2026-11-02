@@ -1,12 +1,14 @@
 use super::*;
 mod borrowed;
 mod construction;
+mod exact;
 mod fields;
 mod resume;
 
 /// The source publication protocol binds recovery, ownership, charge closes
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
+    exact::events();
     resume::calls();
     borrowed::entry();
     fields::names();
