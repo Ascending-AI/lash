@@ -75,9 +75,7 @@ use lash_kernel_value::identity::SessionId;
 use lash_kernel_value::{OperationUse, QualifiedName};
 use lash_kernel_vm::{Bounds, EffectRequest, End, Host, Outcome, Program, Request, Target};
 use lash_protocol_types::ToolCallId;
-use lash_vm_broker::kernel::graph::{
-    ArgumentProjection, Disposition, EffectMembership, FrozenRequest, Projections,
-};
+use lash_vm_broker::kernel::graph::{ArgumentProjection, FrozenRequest, Projections};
 use lash_vm_broker::kernel::pages::{PageLimits, ParentSeal, SharedPages, SpoolRoot};
 use lash_vm_broker::kernel::{
     AdmitAs, DrivenMachine as _, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, EndSave,

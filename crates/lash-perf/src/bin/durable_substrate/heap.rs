@@ -358,7 +358,7 @@ fn steps(scenario: &str) -> usize {
 /// continuation: the re-run from the previous cell's checkpoint through
 /// the operation to the cell's journaled park, which seals nothing.
 fn checkpointed(park: usize) -> bool {
-    park % 2 == 0
+    park.is_multiple_of(2)
 }
 fn provider(scenario: &str, h: usize) -> lash_core::provider::ProviderHandle {
     let scenario = scenario.to_owned();

@@ -573,7 +573,6 @@ impl KernelBroker<'_> {
     /// # Errors
     ///
     /// [`KernelFailure`]. The run's last checkpoint stands.
-    #[expect(clippy::too_many_lines, reason = "one run's drive, in its order")]
     pub async fn run<S: Machines>(
         &self,
         machines: &S,

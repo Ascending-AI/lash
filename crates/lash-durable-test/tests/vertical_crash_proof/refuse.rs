@@ -103,7 +103,6 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
                         .unwrap()
                         .insert("left_by_another_build".to_owned(), true.into());
                 }
-                _ => unreachable!(),
             }
             body.checkpoint = value.to_string();
             let root = staging.encode_value(NodeKind::PHASE_ROOT, &body).unwrap();

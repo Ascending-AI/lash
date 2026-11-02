@@ -547,7 +547,6 @@ impl DurableSnapshotStore {
     /// ledger's next park, and an admission of every wait, each standing in
     /// `ledger` as admitted. Answers the calls the host records and the
     /// round's members.
-    #[expect(clippy::too_many_arguments, reason = "one admission, in its parts")]
     fn admit_requests(
         &self,
         tx: &mut lash_durable::ActorTx,
@@ -905,7 +904,7 @@ impl DurableSnapshotStore {
         // commit that consumes its answer ends the execution, and the debt.
         let (owed, links) = host.debts();
         let mut requirements = lash_vocabulary::claims::ClaimRequirements {
-            machine: super::loader::requirements(&closure, KERNEL_VERSION, std::iter::empty())
+            machine: super::loader::requirements(closure, KERNEL_VERSION, std::iter::empty())
                 .machine,
             ..lash_vocabulary::claims::ClaimRequirements::default()
         };
