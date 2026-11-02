@@ -605,6 +605,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     use crate::compile::room::{Balance, Phase, Refused};
     room_shared_binding_growth();
     room_unpooled_immutable_growth();
+    scalar_region_lifetimes();
     interval::member_read_suffix();
     let source = room_numeric_source();
     let mut execution = RoomExecution::default();
@@ -729,6 +730,156 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
             assert_eq!(source.verify_room(&understated), Err(Refused::Peak));
         }
     });
+}
+
+/// A canceled scalar temporary still requires its interior source peak. The
+/// surviving assignment transfers once at the region exit.
+fn scalar_region_lifetimes() {
+    use crate::compile::room::{self, Phase, Point, region::ScalarRegionValues};
+    use lash_kernel_doc::{TaskId, Value};
+    use lash_kernel_state::kernel_internals::logical::{Ledger, Owner as Root, RootValue};
+    use std::sync::Arc;
+    let run = Embedder::new("main { let keep = true while keep { set keep = false } return null }");
+    let (program, _) = run.program(false);
+    let source = Arc::new(room::Source::compile(
+        lash_kernel_doc::constant_pool::PoolOwner::Document(program.document.identity()),
+        lash_kernel_value::sites::Site::new(lash_kernel_value::sites::Unit::Main, vec![]),
+        program.document.main.as_ref().unwrap(),
+        &[],
+        Default::default(),
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeSet::from([lash_kernel_value::Name::new("keep")]),
+    ));
+    let mut execution = RoomExecution::default();
+    source.evaluate(&mut execution, 100).unwrap();
+    let from = Point {
+        site: source.site.child(1).child(0),
+        phase: Phase::Commit,
+    };
+    let through = Point {
+        site: source.site.child(1).child(1),
+        phase: Phase::Leave,
+    };
+    let first = execution
+        .route
+        .iter()
+        .position(|selection| matches!(selection, room::Selection::Event { at, .. } if at == &from))
+        .unwrap();
+    let last = execution
+        .route
+        .iter()
+        .position(
+            |selection| matches!(selection, room::Selection::Event { at, .. } if at == &through),
+        )
+        .unwrap();
+    let interval = source
+        .compile_between(&from, &through, &execution.route[first..=last], 100)
+        .unwrap();
+    assert_eq!(
+        interval
+            .evaluate_interval(&mut RoomExecution::default())
+            .unwrap()
+            .balance(),
+        room::Balance {
+            peak_extra: 16,
+            retained_delta: 0
+        }
+    );
+    let mut region = source.compile_scalar_region(interval).unwrap();
+    assert_eq!(region.verify(), Ok(()));
+    let heap = run.machine.source_law_heap();
+    let mut ledger = Ledger::fresh();
+    let mut arena = lash_kernel_state::arena::Arena::new();
+    let binding = source
+        .owner_slots()
+        .unwrap()
+        .root(
+            &room::Owner::Binding {
+                declared: source.site.child(0),
+                name: lash_kernel_value::Name::new("keep"),
+            },
+            TaskId::MAIN,
+            0,
+        )
+        .unwrap();
+    let Root::Value { slot, .. } = binding else {
+        panic!("private local binding");
+    };
+    let (invocation, entered) = ledger
+        .prepare_enter(
+            TaskId::MAIN,
+            &mut arena,
+            heap.pages(),
+            &[],
+            &[(slot, RootValue::Value(&Value::Bool(true)))],
+        )
+        .unwrap();
+    ledger
+        .commit(entered.admit(u64::MAX).ok().unwrap())
+        .unwrap();
+    let mut values = vec![Value::Null; region.fact_count()];
+    for (_, fact) in region.entries() {
+        values[fact.index()] = Value::Bool(true);
+    }
+    for (at, fact) in region.results() {
+        values[fact.index()] = Value::Bool(at == &from);
+    }
+    let bound = region
+        .bind(
+            &ledger,
+            &mut arena,
+            heap,
+            &invocation,
+            ScalarRegionValues {
+                values: &values,
+                calls: &[],
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        bound.peak(),
+        16,
+        "the temporary is live before its consuming assignment"
+    );
+    let before = ledger.balance().unwrap().total().unwrap();
+    assert!(
+        bound
+            .prepare(&ledger, &mut arena, heap)
+            .unwrap()
+            .unwrap()
+            .admit(before + 15)
+            .is_err()
+    );
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
+    let bound = region
+        .bind(
+            &ledger,
+            &mut arena,
+            heap,
+            &invocation,
+            ScalarRegionValues {
+                values: &values,
+                calls: &[],
+            },
+        )
+        .unwrap()
+        .unwrap();
+    let prepared = bound.prepare(&ledger, &mut arena, heap).unwrap().unwrap();
+    ledger
+        .commit(prepared.admit(before + 16).ok().unwrap())
+        .unwrap();
+    assert_eq!(ledger.balance().unwrap().total().unwrap(), before);
+    assert_eq!(
+        ledger
+            .holding(invocation.owner(slot), heap.pages())
+            .unwrap()
+            .unwrap()
+            .bytes(),
+        16
+    );
+    region.understate_peak_for_law();
+    assert_eq!(region.verify(), Err(room::Refused::Peak));
 }
 
 fn room_shared_binding_growth() {

@@ -16,6 +16,7 @@ mod derive;
 mod evaluate;
 mod interval;
 pub(crate) mod publication;
+pub(crate) mod region;
 mod root_owners;
 pub(crate) use interval::CompiledInterval;
 pub(crate) type Selection = interval::Selection;
