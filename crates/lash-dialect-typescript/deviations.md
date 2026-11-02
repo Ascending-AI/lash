@@ -111,13 +111,9 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 | Test | Code |
 | --- | --- |
 | `test/built-ins/String/prototype/repeat/repeat-string-n-times.js` | `TS_RUN_BOUNDS` |
-| `test/built-ins/decodeURI/S15.1.3.1_A2.4_T1.js` | `TS_RUN_BOUNDS` |
-| `test/built-ins/decodeURIComponent/S15.1.3.2_A2.4_T1.js` | `TS_RUN_BOUNDS` |
-| `test/built-ins/encodeURI/S15.1.3.3_A2.3_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURI/S15.1.3.3_A2.4_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURI/S15.1.3.3_A2.4_T2.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURI/S15.1.3.3_A2.5_T1.js` | `TS_RUN_BOUNDS` |
-| `test/built-ins/encodeURIComponent/S15.1.3.4_A2.3_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T1.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.4_T2.js` | `TS_RUN_BOUNDS` |
 | `test/built-ins/encodeURIComponent/S15.1.3.4_A2.5_T1.js` | `TS_RUN_BOUNDS` |

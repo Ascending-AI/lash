@@ -89,6 +89,7 @@ function ts.string.integer(value: Any) -> Number
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(value), deep(result))
+native
 body {
   let number = invoke ts.to_number(value)
   if num.is_nan(number) { return 0 }
@@ -133,6 +134,7 @@ function ts.string.uint32(value: Any) -> Int
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(value), deep(result))
+native
 body {
   let n = invoke ts.string.integer(value)
   if num.is_finite(n) {} else { return 0 }
@@ -143,6 +145,7 @@ function ts.string.receiver(this: Any) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(this), deep(result))
+native
 body {
   do invoke ts.require_object_coercible(this)
   let text = invoke ts.to_string(this)
@@ -731,6 +734,7 @@ function ts.string.toUpperCase(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(this), deep(result))
+native
 body {
   let text = invoke ts.string.receiver(this)
   return text.upper_u17_0_0(text)
@@ -844,6 +848,7 @@ function ts.string.fromCharCode(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(args), deep(result))
+native
 body {
   let units = []
   for value in args metered 2 {

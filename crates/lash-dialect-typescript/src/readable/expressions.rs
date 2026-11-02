@@ -696,7 +696,7 @@ impl Lifter<'_> {
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), property.to_owned()))
             }
-            ("ts.get_numeric" | "ts.get_computed", [target, key]) => {
+            ("ts.get_numeric" | "ts.get_computed" | "ts.text_index", [target, key]) => {
                 let target = self.expr(target)?;
                 let key = self.expr(key)?;
                 Ok(Expr::Index(Box::new(target), Box::new(key)))

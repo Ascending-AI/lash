@@ -39,6 +39,7 @@ function ts.uri.escape(octet: Int) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, size(octet), deep(result))
+native
 body {
   let high = int.div_floor(octet, 16)
   let low = int.rem_floor(octet, 16)
@@ -51,6 +52,7 @@ function ts.uri.encode(input: Text, preserve: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, size(input), size(preserve), deep(result))
+native
 body {
   let pieces = []
   let index = 0
@@ -101,6 +103,7 @@ function ts.uri.flush(octets: List(Int)) -> Text
 kernel 1
 errors "URIError"
 charge sum(8, size(octets), deep(result))
+native
 body {
   try { return bytes.utf8_decode(bytes.from_octets(octets)) } catch malformed {
     throw error.new("URIError", "URI malformed", null)
@@ -113,7 +116,8 @@ body {
 function ts.uri.decode(input: Text, preserve: Bool) -> Text
 kernel 1
 errors "URIError"
-charge sum(32, product(64, size(input)), size(preserve), deep(result))
+charge sum(8, product(8, size(input)), size(preserve), deep(result))
+native
 body {
   let pieces = []
   let octets = []
@@ -167,6 +171,7 @@ function ts.uri.encodeURI(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
 charge sum(8, deep(args), deep(result))
+native
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_1 = padded[0]
@@ -178,7 +183,8 @@ body {
 function ts.uri.decodeURI(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(32, product(64, deep(args)), deep(result))
+charge sum(8, product(8, deep(args)), deep(result))
+native
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_2 = padded[0]
@@ -191,6 +197,7 @@ function ts.uri.encodeURIComponent(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
 charge sum(8, deep(args), deep(result))
+native
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_3 = padded[0]
@@ -202,7 +209,8 @@ body {
 function ts.uri.decodeURIComponent(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "URIError"
-charge sum(32, product(64, deep(args)), deep(result))
+charge sum(8, product(8, deep(args)), deep(result))
+native
 body {
   let padded = invoke ts.pad(args, 1)
   let arg_4 = padded[0]

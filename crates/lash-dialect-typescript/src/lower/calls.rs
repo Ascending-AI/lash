@@ -180,6 +180,15 @@ impl Lowerer<'_> {
     /// Every other value, and a field a plain record lacks but a built-in
     /// might answer for, takes the helper (`direct_read`).
     pub(super) fn get_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
+        if matches!(object.ty, Ty::Text)
+            && let Key::Computed(index) = key
+        {
+            return self.invoke(
+                "ts.text_index",
+                &[object.clone(), index.clone()],
+                Ty::Unknown,
+            );
+        }
         if matches!(object.ty, Ty::List(_)) {
             let object = self.reuse(object.clone());
             return self.get_list_member(&object, key);

@@ -1,0 +1,35 @@
+use text.utf16_len
+use text.utf16_slice
+use ts.number_index
+use ts.get_computed
+use same
+use kind
+use num.lt
+use num.add
+use float.to_int
+use error.new
+
+function ts.text_index(target: Any, key: Any) -> Any
+kernel 1
+errors "type_error", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, size(target), size(result))
+native
+body {
+  if same(kind(target), "text") {
+    let length = text.utf16_len(target)
+    let position = invoke ts.number_index(key, length)
+    if same(position, -2.0) {} else {
+      if num.lt(position, 0) { return absent }
+      let index = float.to_int(position)
+      try { return text.utf16_slice(target, index, num.add(index, 1)) } catch boundary {
+        throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String index contains a lone surrogate", null)
+      }
+    }
+  }
+  let dynamic = fn(target, key) {
+    let outcome = invoke ts.get_computed(target, key)
+    return outcome
+  }
+  let outcome = apply dynamic(target, key)
+  return outcome
+}

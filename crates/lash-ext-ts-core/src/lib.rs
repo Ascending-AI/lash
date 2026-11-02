@@ -27,6 +27,7 @@ mod arrays;
 mod bitwise;
 mod conversions;
 mod number_index;
+mod strings;
 
 use std::sync::Arc;
 
@@ -128,6 +129,14 @@ macro_rules! natives {
 }
 
 natives!(name, kernel;
+        "ts.text_index" => Arc::new(strings::TextIndex),
+        "ts.uri.encodeURI" | "ts.uri.encodeURIComponent" | "ts.uri.decodeURI" | "ts.uri.decodeURIComponent" => Arc::new(strings::Uri {
+            encode: name.starts_with("ts.uri.encode"),
+            preserve: name.ends_with("URI"),
+        }),
+        "ts.string.toUpperCase" => Arc::new(strings::Uppercase),
+        "ts.string.fromCharCode" => Arc::new(strings::FromCharCode),
+        "ts.strict_equals" => Arc::new(strings::StrictEquals),
         "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
         "ts.sub" => Arc::new(Subtract {

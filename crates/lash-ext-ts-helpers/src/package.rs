@@ -102,6 +102,11 @@ pub fn define_helpers_from(
         library,
         helper_operations(),
     )?);
+    definitions.extend(define_functions(
+        include_str!("helpers/text_index.kernel"),
+        library,
+        helper_operations(),
+    )?);
     Ok(definitions)
 }
 

@@ -179,6 +179,7 @@ body {
 function ts.identity(value: Any) -> Any
 kernel 1
 charge 4
+native
 body {
   if same(kind(value), "tuple") {} else { return value }
   if same(value, ()) { return value }
@@ -258,6 +259,7 @@ function ts.require_object_coercible(value: Any) -> Any
 kernel 1
 errors "type_error"
 charge 3
+native
 body {
   let nullish = invoke ts.is_nullish(value)
   if nullish {
@@ -829,7 +831,7 @@ body {
 function ts.bit_and(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(28, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -845,7 +847,7 @@ body {
 function ts.bit_or(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(28, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -861,7 +863,7 @@ body {
 function ts.bit_xor(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(28, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -889,7 +891,7 @@ body {
 function ts.shl(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(32, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -914,7 +916,7 @@ body {
 function ts.shr(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(30, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -937,7 +939,7 @@ body {
 function ts.ushr(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
-charge sum(30, deep(left), deep(right))
+charge sum(8, deep(left), deep(right))
 native
 body {
   let pair = invoke ts.numeric_pair(left, right)
@@ -954,6 +956,7 @@ body {
 function ts.strict_equals(left: Any, right: Any) -> Bool
 kernel 1
 charge 8
+native
 body {
   let a = invoke ts.receiver(left)
   let b = invoke ts.receiver(right)
@@ -1189,6 +1192,7 @@ body {
 function ts.pad(items: List(Any), count: Number) -> List(Any)
 kernel 1
 charge sum(2, size(items), magnitude(count))
+native
 body {
   if num.le(count, list.len(items)) {
     return items
