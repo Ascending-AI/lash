@@ -85,6 +85,23 @@ pub(super) fn compiled_charges() {
             })
             .unwrap()
             + 1;
+        let native =
+            ChargeProgram::native_completion(&exe, body.code, statement, close - 1).unwrap();
+        assert_eq!(native.verify(&exe, body.code), Ok(()));
+        let native_debt = native.bind(&values[..1]).unwrap();
+        assert_eq!(
+            native_debt.units(),
+            9,
+            "a native completion never repays the statement or read closes"
+        );
+        assert!(native_debt.matches(
+            &exe.code(body.code).source_room,
+            native.first(),
+            native.first()
+        ));
+        let native_tape = crate::observe::ChargeTape::new();
+        native_debt.record(&native_tape);
+        assert_eq!(native_tape.steps(), [Weight::Atomic(9)]);
         let prefix = ChargeProgram::compile(
             &exe,
             body.code,

@@ -7,6 +7,12 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 use lash_kernel_value::{FunctionId, sites::Site};
 use std::sync::Arc;
 pub(crate) mod composition;
+mod native_completion;
+#[derive(Clone, Copy)]
+enum Coverage {
+    Span,
+    NativeCompletion,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TapeEvent {
@@ -34,6 +40,7 @@ struct Formula {
 /// remain cold for verification, exact suffix selection and detailed tape.
 pub(crate) struct ChargeProgram {
     source: Arc<Source>,
+    coverage: Coverage,
     statement: compile::StmtId,
     range: OpRange,
     closes: Box<[Close]>,
@@ -114,6 +121,7 @@ impl ChargeProgram {
             .ok_or(Refused::Facts)?;
         let program = Self {
             source,
+            coverage: Coverage::Span,
             statement,
             range,
             closes: closes.into(),
@@ -135,8 +143,20 @@ impl ChargeProgram {
         {
             return Err(Refused::Source);
         }
-        let (closes, formulas) = derive(exe, code, self.statement, self.range)?;
-        if first(exe, code, self.statement, self.range)? != self.first
+        let (closes, formulas, first) = match self.coverage {
+            Coverage::Span => {
+                let (closes, formulas) = derive(exe, code, self.statement, self.range)?;
+                (
+                    closes,
+                    formulas,
+                    first(exe, code, self.statement, self.range)?,
+                )
+            }
+            Coverage::NativeCompletion => {
+                native_completion::derive(exe, code, self.statement, self.range)?
+            }
+        };
+        if first != self.first
             || closes.last().map(|close| &close.at) != Some(&self.through)
             || closes != *self.closes
             || formulas.len() != self.formulas.len()
