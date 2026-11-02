@@ -148,7 +148,7 @@ pub(super) struct Build<'e> {
     pub(super) charged: bool,
     pub(super) registers: usize,
     restarts: usize,
-    captures: Vec<(u32, super::Restart, bool)>,
+    captures: Vec<(u32, u32, Vec<u32>)>,
     source_registers: u32,
     live: Vec<u32>,
     statement: Option<StmtId>,
@@ -332,6 +332,7 @@ impl<'e> Build<'e> {
 
     fn statement(&mut self, statement: &Statement, index: usize) -> Option<()> {
         self.statement = Some(statement.id);
+        self.restarts = 0;
         self.captures.clear();
         self.live.clear();
         let ahead = self.start();
@@ -402,6 +403,30 @@ impl<'e> Build<'e> {
             index,
             ahead,
         });
+        let source = self.exe.stmt(statement.id).ops;
+        for head in source.start..source.end() {
+            if !matches!(
+                self.stream.ops[head as usize],
+                lash_kernel_exec::Op::Region { .. }
+            ) {
+                continue;
+            }
+            let commit = (head + 1..source.end())
+                .find(|at| {
+                    !matches!(
+                        self.stream.ops[*at as usize],
+                        lash_kernel_exec::Op::Region { .. }
+                            | lash_kernel_exec::Op::Const { .. }
+                            | lash_kernel_exec::Op::Local { .. }
+                    )
+                })
+                .map_or(source.end(), |at| at + 1);
+            if let Some((made, inputs)) =
+                crate::compile::islands::construction_restart(self.stream, head, commit)
+            {
+                self.captures.push((made, head, inputs));
+            }
+        }
         if let Some(root) = &statement.root {
             self.root = Some(statement.id);
             self.expr(root)?;
@@ -774,7 +799,7 @@ impl<'e> Build<'e> {
         }
         self.open = None;
         self.live.clear();
-        self.captures.iter().all(|capture| capture.2).then_some(())
+        Some(())
     }
 
     /// The branch instruction enters a nonempty arm's source block itself.
@@ -829,37 +854,6 @@ impl<'e> Build<'e> {
 
     fn expr(&mut self, expr: &Expr) -> Option<()> {
         let (pc, reg) = (expr.pc, expr.reg);
-        let collection = match &expr.kind {
-            Kind::Operator { lib, .. } => self.exe.lib(*lib).collection_method(),
-            Kind::Call { invoke, .. } => invoke
-                .act
-                .and_then(|act| self.stream.nested[act.ix()].kind.operator_lib())
-                .is_some_and(|lib| self.exe.lib(lib).collection_method()),
-            _ => false,
-        };
-        if collection {
-            for close in expr.closes() {
-                if let Some((made, input)) =
-                    crate::compile::islands::collection_restart(self.stream, close.head, pc)
-                {
-                    let saved = self.source_registers + 2 * self.restarts as u32;
-                    self.registers = self.registers.max(saved as usize + 2);
-                    let restart = super::Restart {
-                        statement: self.statement?,
-                        head: close.head,
-                        reg: input,
-                        saved,
-                    };
-                    self.restarts += 1;
-                    self.captures.push((made, restart, false));
-                    self.emit(Op::Constant {
-                        dst: saved + 1,
-                        value: Value::Bool(false),
-                        source: None,
-                    });
-                }
-            }
-        }
         match &expr.kind {
             Kind::Local { local, miss, .. } => {
                 self.emit(Op::Local {
@@ -1290,6 +1284,7 @@ impl<'e> Build<'e> {
                 ahead,
                 miss,
             } => {
+                let restarts = self.construction_restarts(pc)?;
                 let kind = make.kind();
                 let members = if *make == Make::Map {
                     items.len() / 2
@@ -1308,16 +1303,7 @@ impl<'e> Build<'e> {
                     && *miss < pc
                     && items.first().is_some_and(|item| item.pc < *miss);
                 let items: Box<[_]> = items.iter().map(|item| item.reg).collect();
-                let keeps: Vec<_> = self
-                    .captures
-                    .iter_mut()
-                    .filter(|capture| capture.0 == pc)
-                    .map(|capture| {
-                        capture.2 = true;
-                        capture.1
-                    })
-                    .collect();
-                for restart in keeps {
+                for restart in restarts {
                     self.emit(Op::Keep(restart));
                 }
                 self.emit(Op::Make {
@@ -1338,6 +1324,7 @@ impl<'e> Build<'e> {
                 values,
                 miss,
             } => {
+                let restarts = self.construction_restarts(pc)?;
                 let names: Box<[_]> = self
                     .stream
                     .field_lists
@@ -1354,6 +1341,9 @@ impl<'e> Build<'e> {
                     self.expr(value)?;
                 }
                 let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
+                for restart in restarts {
+                    self.emit(Op::Keep(restart));
+                }
                 self.emit(Op::Record {
                     pc,
                     ahead: *ahead,
@@ -1407,6 +1397,34 @@ impl<'e> Build<'e> {
             }
         }
         Some(())
+    }
+
+    fn construction_restarts(&mut self, pc: u32) -> Option<Vec<super::Restart>> {
+        let inputs: Vec<_> = self
+            .captures
+            .iter()
+            .filter(|capture| capture.0 == pc)
+            .flat_map(|(_, head, inputs)| inputs.iter().map(|input| (*head, *input)))
+            .collect();
+        let mut restarts = Vec::new();
+        for (head, input) in inputs {
+            let saved = self.source_registers + 2 * self.restarts as u32;
+            self.registers = self.registers.max(saved as usize + 2);
+            let restart = super::Restart {
+                statement: self.statement?,
+                head,
+                reg: input,
+                saved,
+            };
+            self.restarts += 1;
+            self.emit(Op::Constant {
+                dst: saved + 1,
+                value: Value::Bool(false),
+                source: None,
+            });
+            restarts.push(restart);
+        }
+        Some(restarts)
     }
 
     /// The scheduler instruction of a statement-root action; `None` within

@@ -796,6 +796,7 @@ fn scalar_layouts_agree() {
         "let i = 0 let s = 0 while flat.lt(i, 3) { set s = flat.add(s, 1.0) set i = flat.add(i, 1) } return s",
         "let i = 0 let s = 9223372036854775806 try { while flat.lt(i, 3) { set s = flat.add(s, 1) set i = flat.add(i, 1) } } catch err { print (s, i) } return (s, i)",
         "let i = 0.0 let s = 1.5 try { while flat.lt(i, 3.0) { set i = flat.add(i, 1.0) set s = flat.rem(s, 2.0) } } catch err { print (s, i) } return (s, i)",
+        "let logger = (fn(args) { print args[0] return args[0] },) let f = fn(value) { return let(saved = logger, let(args = [flat.identity(value)], let(callee = saved[0], apply callee(args)))) } return apply f(2)",
     ].into_iter().enumerate() {
         let source = scalar_document(body);
         for record in [false, true] {
