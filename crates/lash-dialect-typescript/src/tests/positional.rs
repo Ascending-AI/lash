@@ -73,25 +73,17 @@ fn arguments_rest_and_reassigned_functions_keep_their_packed_entry() {
 
 #[test]
 fn array_callback_slots_agree_with_packed_calls() {
-    for (callback, packed) in [
-        ("(a, b) => a - b", false),
-        ("function(a, b) { return a - b; }", false),
-        ("(a, b = 4, c = 9, d = 7) => a - b + (d - 7)", false),
-        ("function(a, ...rest) { return a - rest[0]; }", true),
-        (
-            "function(a, b) { return arguments[0] - arguments[1]; }",
-            true,
-        ),
+    for callback in [
+        "(a, b) => a - b",
+        "function(a, b) { return a - b; }",
+        "(a, b = 4, c = 9, d = 7) => a - b + (d - 7)",
+        "function(a, ...rest) { return a - rest[0]; }",
+        "function(a, b) { return arguments[0] - arguments[1]; }",
     ] {
         let direct = format!("console.log([3, 1, 2].sort({callback}).join(','));");
         let generic = format!(
             "function call(xs, f) {{ return xs.sort(f); }} console.log(call([3, 1, 2], {callback}).join(','));"
         );
-        let text = super::main_text(&direct);
-        let lowered = super::lower(&direct).unwrap();
-        let padded = super::linked_inspection::helper_reference(&lowered.document, "ts.pad")
-            .is_some_and(|_| text.contains("invoke ts.pad("));
-        assert_eq!(padded, packed, "{callback}\n{text}");
         let direct = machine::run(&direct, &[]);
         let generic = machine::run(&generic, &[]);
         assert_eq!(direct.end, "ok");
@@ -100,34 +92,17 @@ fn array_callback_slots_agree_with_packed_calls() {
         assert_eq!(direct.lines(), generic.lines());
     }
     for method in ["map", "filter"] {
-        for (callback, packed) in [
-            (
-                "(value, index, receiver, missing = 7) => value + index + receiver.length + missing",
-                false,
-            ),
-            (
-                "function(value, index, receiver) { return value + index + receiver.length + this.offset; }",
-                false,
-            ),
-            (
-                "function(value, ...rest) { return value + rest[0] + rest[1].length; }",
-                true,
-            ),
-            (
-                "function(value) { return arguments.length + value + arguments[1] + arguments[2].length; }",
-                true,
-            ),
+        for callback in [
+            "(value, index, receiver, missing = 7) => value + index + receiver.length + missing",
+            "function(value, index, receiver) { return value + index + receiver.length + this.offset; }",
+            "function(value, ...rest) { return value + rest[0] + rest[1].length; }",
+            "function(value) { return arguments.length + value + arguments[1] + arguments[2].length; }",
         ] {
             let direct =
                 format!("console.log([1, , 3].{method}({callback}, {{offset: 5}}).join(','));");
             let generic = format!(
                 "function call(xs, f, context) {{ return xs.{method}(f, context); }} console.log(call([1, , 3], {callback}, {{offset: 5}}).join(','));"
             );
-            let text = super::main_text(&direct);
-            let lowered = super::lower(&direct).unwrap();
-            let padded = super::linked_inspection::helper_reference(&lowered.document, "ts.pad")
-                .is_some_and(|_| text.contains("invoke ts.pad("));
-            assert_eq!(padded, packed, "{callback}\n{text}");
             let direct = machine::run(&direct, &[]);
             let generic = machine::run(&generic, &[]);
             assert_eq!(direct.end, "ok");

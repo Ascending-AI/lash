@@ -266,9 +266,17 @@ fn padded(lifter: &Lifter<'_>, args: &Name, arity: usize, value: &k::Expr) -> bo
         if lifter.is(function, "num.lt")
             && matches!(operands.as_slice(), [k::Expr::Call { function: len, args: of }, bound]
                 if lifter.is(len, "list.len") && of.as_slice() == [list.clone()] && *bound == n));
-    let pads = matches!(&**then, k::Expr::Act(act)
-        if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.pad"))
-            && act.args.as_slice() == [list.clone(), n.clone()]);
+    let pads = match &**then {
+        k::Expr::Call {
+            function,
+            args: operands,
+        } => lifter.is(function, "ts.pad") && operands.as_slice() == [list.clone(), n.clone()],
+        k::Expr::Act(act) => {
+            matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if lifter.is(id, "ts.pad"))
+                && act.args.as_slice() == [list.clone(), n.clone()]
+        }
+        _ => false,
+    };
     tests && pads && **r#else == list
 }
 
