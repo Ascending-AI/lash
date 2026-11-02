@@ -444,6 +444,7 @@ impl EvaluatedProgram {
             state: ledger.state.clone(),
             identity: Rc::clone(&ledger.identity),
             revision: ledger.revision,
+            published: super::Publications::default(),
         };
         let before = ledger.balance()?.total()?;
         let mut peak = before;

@@ -27,6 +27,89 @@ impl SourceValue {
     }
 }
 
+/// Root writes a state has made since its ledger last committed one.
+#[derive(Clone, Default)]
+pub(super) enum Written {
+    #[default]
+    None,
+    Owners(Vec<Owner>),
+    /// Holdings were replaced wholesale, as by normalization.
+    All,
+}
+impl Written {
+    pub(super) fn owners(&mut self, owners: impl Iterator<Item = Owner>) {
+        match self {
+            Self::None => *self = Self::Owners(owners.collect()),
+            Self::Owners(written) => written.extend(owners),
+            Self::All => {}
+        }
+    }
+}
+
+/// The value a runtime event last published to an owner, when republishing
+/// it would project the same holding: a value or a borrowed cell is projected
+/// from its identity and immutable facts alone, under unchanged ledger keys.
+#[derive(Clone, Copy)]
+enum Published {
+    Absent,
+    Value(Value),
+    Capture(ArenaHandle),
+    Departure,
+}
+impl Published {
+    fn of(next: &Option<SourceValue>) -> Option<Self> {
+        Some(match next {
+            None => Self::Absent,
+            Some(SourceValue::Value(value)) => Self::Value(*value),
+            Some(SourceValue::Capture(handle)) => Self::Capture(*handle),
+            Some(SourceValue::Departure) => Self::Departure,
+            Some(SourceValue::Page(_) | SourceValue::Frozen(_)) => return None,
+        })
+    }
+    fn same(&self, next: &Option<SourceValue>) -> bool {
+        match (self, next) {
+            (Self::Absent, None) | (Self::Departure, Some(SourceValue::Departure)) => true,
+            (Self::Value(value), Some(SourceValue::Value(next))) => value.same(next),
+            (Self::Capture(handle), Some(SourceValue::Capture(next))) => handle == next,
+            _ => false,
+        }
+    }
+}
+
+/// Each owner's last runtime publication, valid until a root write to that
+/// owner or a wholesale replacement expires it. The ledger owns it, so no
+/// edit path can change a holding without expiring the fact.
+#[derive(Default)]
+pub(super) struct Publications(
+    std::collections::HashMap<Owner, Published, foldhash::fast::RandomState>,
+);
+impl Publications {
+    pub(super) fn expire(&mut self, written: Written) {
+        match written {
+            Written::None => {}
+            Written::Owners(owners) => {
+                for owner in owners {
+                    self.0.remove(&owner);
+                }
+            }
+            Written::All => self.0.clear(),
+        }
+    }
+    /// Whether publishing `next` to `owner` would leave its holding as is.
+    fn holds(&self, owner: &Owner, next: &Option<SourceValue>) -> bool {
+        self.0
+            .get(owner)
+            .is_some_and(|published| published.same(next))
+    }
+    fn record(&mut self, published: &[Replacement]) {
+        for (owner, next) in published {
+            if let Some(next) = Published::of(next) {
+                self.0.insert(*owner, next);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Lifecycle {
     ledger: Rc<RefCell<Ledger>>,
@@ -98,6 +181,11 @@ impl Lifecycle {
         settle(&mut pending);
         let result = (|| {
             let mut ledger = self.ledger.borrow_mut();
+            // An owner still holding what it last published needs no event.
+            pending.retain(|(owner, next)| !ledger.published.holds(owner, next));
+            if pending.is_empty() && events.is_empty() {
+                return Ok(());
+            }
             let mut registration = arena
                 .registration()
                 .map_err(|error| invalid(&error.to_string()))?;
@@ -107,6 +195,7 @@ impl Lifecycle {
                 .admit(u64::MAX)
                 .map_err(|_| invalid("source holding overflow"))?;
             ledger.publish(accepted, || registration.commit())?;
+            ledger.published.record(&pending);
             pending.clear();
             Ok(())
         })();

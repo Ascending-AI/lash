@@ -219,7 +219,10 @@ impl Ledger {
             return Err(invalid("normalized membership and trace costs disagree"));
         }
         graph.edit.state.refinements = refinements;
+        // A draft carries the mark to the ledger that commits it.
+        graph.edit.state.written = super::Written::All;
         self.state = graph.edit.state;
+        self.published.expire(super::Written::All);
         self.revision = revision;
         Ok(())
     }

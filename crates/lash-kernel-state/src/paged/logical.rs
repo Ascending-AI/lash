@@ -23,6 +23,7 @@ mod invocations;
 pub use invocations::Invocation;
 mod lifecycle;
 pub use lifecycle::{Lifecycle, SourceValue};
+use lifecycle::{Publications, Written};
 mod members;
 mod ownership;
 mod program;
@@ -41,7 +42,7 @@ mod values;
 pub(crate) use values::stream_value_edges;
 
 /// An index in the exact source unit, assigned before register placement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Slot {
     Binding(u32),
     Operand(u32),
@@ -55,7 +56,7 @@ pub enum Slot {
     Capture(u32),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Owner {
     Frame {
         task: TaskId,
@@ -368,6 +369,9 @@ struct State {
     entities: Tree<EntityHolding>,
     refinements: u64,
     next_invocation: u64,
+    /// The root writes since the ledger last committed a state: they expire
+    /// the publications of exactly those owners, or of all of them.
+    written: Written,
 }
 impl State {
     fn balance(&self) -> Result<Balance, HeapFault> {
@@ -440,6 +444,10 @@ pub struct Ledger {
     state: State,
     identity: Rc<()>,
     revision: u64,
+    /// What a runtime event last published to each owner no edit has
+    /// written since. Every commit expires the owners its state wrote;
+    /// rekey and normalization, which replace holdings wholesale, expire all.
+    published: Publications,
 }
 /// A process-local dependency stamp. Every committed owner, member, departure
 /// or normalization change invalidates it. It cannot authenticate another run
@@ -472,6 +480,7 @@ impl Prepared {
             state: self.next,
             identity: Rc::clone(&self.identity),
             revision: self.revision,
+            published: Publications::default(),
         };
         draft.normalize(access, limits)?;
         self.next = draft.state;
@@ -494,6 +503,7 @@ impl Prepared {
             state: before.state.clone(),
             identity: Rc::new(()),
             revision: before.revision,
+            published: Publications::default(),
         };
         swept.normalize(access, limits)?;
         let garbage = before
@@ -545,9 +555,11 @@ impl Ledger {
                 entities: Tree::new(false),
                 refinements: 0,
                 next_invocation: 1,
+                written: Written::default(),
             },
             identity: Rc::new(()),
             revision: 0,
+            published: Publications::default(),
         }
     }
     pub fn open(root: LedgerRoot) -> Result<Self, HeapFault> {
@@ -559,9 +571,11 @@ impl Ledger {
                 entities: Tree::of_keyed(&root.entities),
                 refinements: root.refinements,
                 next_invocation: root.next_invocation,
+                written: Written::default(),
             },
             identity: Rc::new(()),
             revision: 0,
+            published: Publications::default(),
         };
         ledger.balance()?;
         Ok(ledger)
@@ -835,6 +849,8 @@ impl Ledger {
         semantic();
         self.state = next;
         self.revision = revision;
+        self.published
+            .expire(std::mem::take(&mut self.state.written));
         Ok(())
     }
     /// Rekeys what the ledger priced under provisional keys to the durable
@@ -851,6 +867,7 @@ impl Ledger {
             return Ok(());
         }
         self.handoff()?;
+        self.published.expire(Written::All);
         let durable: std::collections::HashMap<EntityId, EntityId> =
             rekeyed.iter().copied().collect();
         let state = &mut self.state;
@@ -1086,6 +1103,9 @@ impl Edit<'_, '_> {
         if changes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
             return Err(invalid("owner replaced twice in one transfer"));
         }
+        self.state
+            .written
+            .owners(changes.iter().map(|(owner, _)| *owner));
         let access = self.access;
         let mut edges = BTreeMap::<EntityId, (u64, u64)>::new();
         let mut collect = |value: &Holding, adding: bool| {
