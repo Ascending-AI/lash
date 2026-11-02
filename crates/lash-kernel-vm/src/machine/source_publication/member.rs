@@ -218,12 +218,10 @@ impl KernelMachine {
             .invocation;
         let mut arena = self.arena.borrow_mut();
         let ledger = store.borrow();
-        let measured = match ledger.prepare_member_publication(
+        let measured = match ledger.prepare_source_members_boundary(
             arena.registration().map_err(native_fault)?,
-            self.heap.pages(),
-            handle,
-            edit.member.clone(),
-            edit.next,
+            &self.heap,
+            std::slice::from_ref(&edit),
             &[],
             &[],
         ) {

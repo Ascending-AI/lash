@@ -1,4 +1,4 @@
-//! Storage preparation for an already journaled list member publication.
+//! Detached storage preparation for an authenticated member boundary.
 use super::*;
 use lash_kernel_doc::heap::{HeapFault, HostResource};
 
@@ -109,6 +109,26 @@ impl Arena {
     }
 }
 impl PreparedListWrite {
+    /// The private value of this one list position, including an unpublished
+    /// append. Reads through certified aliases use the same shadow.
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    /// Fold another private write to this position without touching the list.
+    /// Source authorization and observer exclusion belong to the certificate.
+    pub fn stage(&mut self, value: Value) {
+        self.value = value;
+    }
+
+    pub fn edit(&self) -> crate::paged::logical::MemberEdit {
+        crate::paged::logical::MemberEdit {
+            handle: self.handle,
+            member: crate::paged::logical::Member::List(self.index),
+            next: Some(self.value),
+        }
+    }
+
     /// The accepted journal checks this same content dependency before invoking
     /// the closure. Registration suppresses the legacy member-event mirror.
     pub fn publish(self, arena: &mut Arena, edit: crate::paged::logical::MemberEdit) {
@@ -201,6 +221,30 @@ impl Arena {
     }
 }
 impl PreparedCellWrite {
+    /// Read the private shadow through every certified alias of this cell.
+    /// The arena continues to expose its original member until publication.
+    pub fn value(&self) -> Value {
+        self.value
+    }
+
+    /// Replace only the detached shadow. The certified kernel owns observer
+    /// exclusion and source-order peak/charge facts; this reserves no logical
+    /// authority and changes neither the cell nor its alias/capture owners.
+    pub fn stage(&mut self, value: Value) {
+        self.value = value;
+    }
+
+    /// The exact final member installed by this storage reservation. Its old
+    /// provenance remains the original cell and content version captured at
+    /// preparation, regardless of how many private writes were folded.
+    pub fn edit(&self) -> crate::paged::logical::MemberEdit {
+        crate::paged::logical::MemberEdit {
+            handle: self.handle,
+            member: crate::paged::logical::Member::Variable,
+            next: Some(self.value),
+        }
+    }
+
     /// Install exactly the checked member edit under its accepted registration.
     pub fn publish(self, arena: &mut Arena, edit: crate::paged::logical::MemberEdit) {
         assert!(arena.registration_active() && arena.content_is(&self.version));

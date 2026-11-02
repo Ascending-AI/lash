@@ -170,14 +170,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         // Ask the canonical member owner for both the graph change and the
         // post-member release. Aliases and self-edges are never summed here.
         let member = ledger
-            .prepare_member_publication(
+            .prepare_source_members_boundary(
                 self.arena
                     .registration()
                     .map_err(|error| malformed(&error.to_string()))?,
-                self.heap.pages(),
-                handle,
-                edit.member.clone(),
-                edit.next,
+                self.heap,
+                std::slice::from_ref(&edit),
                 &[],
                 &[],
             )

@@ -1,4 +1,4 @@
-//! Member journals read the canonical original entry. Callers never provide
+//! Member boundaries read the canonical original entry. Callers never provide
 //! its old price, spelling, edges or a final numeric body delta.
 use super::*;
 use crate::arena::{Arena, Registration};
@@ -52,9 +52,80 @@ impl Ledger {
         inputs: &[Owner],
         outputs: &[(Owner, RootValue<'_>)],
     ) -> Result<PreparedMember, MemberFault> {
+        self.prepare_members_ownership(
+            registration,
+            access,
+            &[MemberEdit {
+                handle,
+                member,
+                next,
+            }],
+            inputs,
+            outputs,
+            None,
+        )
+    }
+
+    /// Stage final member contents and surviving roots directly, without an
+    /// interior event tape. Each target occurs once: private kernels fold their
+    /// repeated writes in detached storage before submitting the final edit.
+    /// This is storage/graph preparation, not source or observer authorization.
+    /// Core must authenticate the entry dependencies, private observers, source
+    /// exit and interior peak before admitting and publishing this boundary.
+    pub fn prepare_source_members_boundary<'a>(
+        &self,
+        mut registration: Registration<'a>,
+        heap: &super::super::heap_impl::PagedHeap,
+        edits: &[MemberEdit],
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+    ) -> Result<BoundaryTransaction<'a>, MemberFault> {
+        let PreparedMember {
+            prepared,
+            dependencies,
+        } = self.prepare_members_ownership(
+            &mut registration,
+            heap.pages(),
+            edits,
+            inputs,
+            outputs,
+            Some(heap),
+        )?;
+        Ok(BoundaryTransaction::from_program(
+            registration,
+            dependencies,
+            prepared,
+            edits.to_vec(),
+        ))
+    }
+
+    fn prepare_members_ownership(
+        &self,
+        registration: &mut Registration<'_>,
+        access: &Access<'_>,
+        edits: &[MemberEdit],
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+        heap: Option<&super::super::heap_impl::PagedHeap>,
+    ) -> Result<PreparedMember, MemberFault> {
         let arena = registration.arena();
-        let (change, mut pending, mut handles) =
-            self.member_change(arena, access, handle, member, next)?;
+        let mut targets = std::collections::BTreeSet::new();
+        let mut members = Vec::with_capacity(edits.len());
+        let mut pending = Vec::new();
+        let mut handles = Vec::new();
+        for edit in edits {
+            // Independent storage reservations may be installed together.
+            // Two snapshots of one body would overwrite each other. A private
+            // body kernel must submit its single final storage reservation.
+            if !targets.insert(arena.ledger_key(edit.handle)?) {
+                return Err(invalid("member boundary needs one final edit per body").into());
+            }
+            let (change, edges, versions) =
+                self.member_change(arena, access, edit.handle, edit.member.clone(), edit.next)?;
+            members.push(change);
+            pending.extend(edges);
+            handles.extend(versions);
+        }
         for (_, value) in outputs {
             match value {
                 RootValue::Value(value) => handles.extend(value.handle()),
@@ -63,25 +134,21 @@ impl Ledger {
             }
         }
         let roots = self.ownership_changes(arena, access, inputs, outputs, &mut pending)?;
-        let mut changes = self.allocate_membership(arena, access, pending)?;
-        changes.push(change);
+        let mut changes = self.allocate_membership_from(arena, access, pending, heap)?;
+        changes.extend(members);
         changes.push(Change::Roots(roots));
-        // Bind every body actually projected by this journal, including fresh
-        // descendants of an immutable result. The registration borrow prevents
-        // foreign mutation, but its owner can still edit staging before publish.
-        for change in &changes {
-            if let Change::Mutate { entity, .. } = change {
-                handles.push(
-                    arena
-                        .logical_handle(*entity)
-                        .ok_or_else(|| invalid("projected body disappeared"))?,
-                );
+        let prepared = self.prepare_event(changes, access)?;
+        // Bind every resident body actually projected, including fresh
+        // descendants. Cold bodies come from immutable canonical heap pages.
+        for entity in &prepared.projected {
+            if let Some(handle) = arena.logical_handle(*entity) {
+                handles.push(handle);
             }
         }
         let dependencies = Dependencies::capture(self, arena, &handles)
             .ok_or_else(|| invalid("member facts are unavailable"))?;
         Ok(PreparedMember {
-            prepared: self.prepare_event(changes, access)?,
+            prepared,
             dependencies,
         })
     }

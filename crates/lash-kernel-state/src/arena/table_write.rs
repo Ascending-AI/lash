@@ -26,6 +26,7 @@ struct TableEdit {
     structural: bool,
     sequence: u64,
     resident_before: u64,
+    position: usize,
 }
 pub(super) struct TableSnapshot {
     version: ContentVersion,
@@ -162,6 +163,7 @@ impl TableSnapshot {
             });
         }
         let before = self.values.len() as u64;
+        let position = self.place.unwrap_or(self.values.len() / 2);
         let sequence = if let Some(at) = self.place {
             let sequence = *self.sequences.get(at).ok_or_else(|| {
                 HeapFault::Malformed("a table position has no insertion sequence".into())
@@ -222,11 +224,55 @@ impl TableSnapshot {
                 structural: self.old.is_none() || next.is_none(),
                 sequence,
                 resident_before: before,
+                position,
             }),
         })
     }
 }
 impl PreparedTableMember {
+    /// The final value of the private member, before any arena installation.
+    pub fn value(&self) -> Option<Value> {
+        self.next
+    }
+
+    /// Fold an overwrite of the same private member into its detached body.
+    /// Insertion/removal order and key spelling remain those of the original
+    /// reservation. A structural successor needs its own canonical boundary.
+    /// The certificate, not this storage object, proves observer exclusion.
+    pub fn stage(&mut self, value: Value) -> bool {
+        if self.next.is_none() {
+            return false;
+        }
+        let Some(prepared) = &mut self.edit else {
+            return false;
+        };
+        if matches!(prepared.body, Body::Set(_)) && !matches!(value, Value::Absent) {
+            return false;
+        }
+        let table = match &mut prepared.body {
+            Body::Map(table) | Body::Set(table) | Body::Record(table) => table,
+            _ => unreachable!("a prepared table has a table body"),
+        };
+        let Some(Chunk::Resident(values)) = table.chunks.get_mut(0) else {
+            unreachable!("a prepared table has one resident chunk");
+        };
+        values[prepared.position * 2 + 1] = value;
+        // Rebuild the derived summary once at publication, not per private
+        // overwrite. No guest state or logical authority changes here.
+        prepared.flat = None;
+        self.next = Some(value);
+        true
+    }
+
+    /// Exact source address and final value checked by the boundary ledger.
+    pub fn edit(&self) -> MemberEdit {
+        MemberEdit {
+            handle: self.handle,
+            member: self.address.clone(),
+            next: self.next,
+        }
+    }
+
     pub(super) fn reserve(&self, arena: &mut Arena, batch: usize) -> Result<(), HeapFault> {
         reserve(&mut arena.zero, batch + 2)?;
         reserve(&mut arena.dirty, batch + 1)?;
@@ -244,9 +290,12 @@ impl PreparedTableMember {
                     _ => false,
                 }
         );
-        let Some(prepared) = self.edit else {
+        let Some(mut prepared) = self.edit else {
             return;
         };
+        prepared.flat = prepared
+            .flat
+            .or_else(|| sizes::summarize_flat(&arena.objects, &prepared.body));
         arena.resident = arena
             .resident
             .saturating_sub(prepared.resident_before)
