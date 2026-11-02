@@ -77,3 +77,179 @@ fn append(
         bytes,
     }))
 }
+
+/// Actual operands, result and native scratch phase, retained independently of
+/// a source journal. The common charge compiler binds its canonical formula to
+/// these facts; this consumer never supplies a second charge price.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "staged text kernel awaits core source activation")
+)]
+pub(crate) struct TextEvaluation {
+    pub(crate) arguments: [Value; 2],
+    pub(crate) result: Value,
+    pub(crate) summaries: [lash_kernel_doc::heap::TextSummary; 3],
+    pub(crate) work: u64,
+    pub(crate) install: u64,
+}
+
+impl Cx<'_> {
+    /// Execute a certified straight-line append kernel, then prepare only its
+    /// actual surviving roots. `steps` index entry values followed by results
+    /// in source order. The compiler supplies observer exclusion for each move.
+    /// The finish callback authenticates the source exit and settles one charge
+    /// debt and BoundaryTransaction. No old source/journal wrapper runs here.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one source prefix with its storage and exit"
+    )]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "staged text kernel awaits core source activation")
+    )]
+    pub(crate) fn prepare_text_prefix<R>(
+        arena: &mut Arena,
+        ledger: &mut lash_kernel_state::kernel_internals::logical::Ledger,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+        entries: &[Value],
+        private: &[ArenaHandle],
+        join: Option<(usize, usize)>,
+        steps: &[(usize, usize, bool)],
+        outputs: &[(lash_kernel_state::kernel_internals::logical::Owner, usize)],
+        inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
+        finish: impl FnOnce(
+            lash_kernel_state::kernel_internals::logical::BoundaryTransaction<'_>,
+            &mut lash_kernel_state::kernel_internals::logical::Ledger,
+            &mut dyn FnMut(
+                &mut Arena,
+                Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
+            ),
+            &[TextEvaluation],
+        ) -> Result<R, HeapFault>,
+    ) -> Result<Option<(R, Vec<Value>)>, HeapFault> {
+        let joined = match join {
+            Some((list, separator)) => {
+                let (Some(&Value::List(list)), Some(&separator)) =
+                    (entries.get(list), entries.get(separator))
+                else {
+                    return Ok(None);
+                };
+                let Ok(pieces) = arena.sequence(list) else {
+                    return Ok(None);
+                };
+                Some((pieces.to_vec(), separator, Value::List(list)))
+            }
+            None => None,
+        };
+        let mut bound_entries = entries.to_vec();
+        if let Some((pieces, _, _)) = &joined {
+            bound_entries.extend_from_slice(pieces);
+        }
+        let Some(mut storage) = arena.prepare_text_region(ledger, &bound_entries, private) else {
+            return Ok(None);
+        };
+        let mut values = entries.to_vec();
+        let mut evaluations = Vec::with_capacity(steps.len());
+        if let Some((pieces, separator, list)) = joined {
+            let Some((result, facts)) = storage.join(&pieces, separator) else {
+                return Ok(None);
+            };
+            values.push(result);
+            evaluations.push(TextEvaluation {
+                arguments: [list, separator],
+                result,
+                summaries: [facts.left, facts.right, facts.result],
+                work: facts.work,
+                install: facts.install,
+            });
+        }
+        for &(left, right, moving) in steps {
+            let (Some(&left), Some(&right)) = (values.get(left), values.get(right)) else {
+                return Ok(None);
+            };
+            let Some((result, facts)) = storage.concat(left, right, moving) else {
+                return Ok(None);
+            };
+            values.push(result);
+            evaluations.push(TextEvaluation {
+                arguments: [left, right],
+                result,
+                summaries: [facts.left, facts.right, facts.result],
+                work: facts.work,
+                install: facts.install,
+            });
+        }
+        let Some(roots): Option<Vec<_>> = outputs
+            .iter()
+            .map(|(owner, index)| Some((*owner, *values.get(*index)?)))
+            .collect()
+        else {
+            return Ok(None);
+        };
+        let live = roots.iter().map(|(_, value)| *value).collect();
+        storage
+            .boundary(
+                ledger,
+                heap,
+                inputs,
+                &roots,
+                |transaction, ledger, apply| finish(transaction, ledger, apply, &evaluations),
+            )
+            .map(|result| result.map(|result| (result, live)))
+    }
+}
+
+impl crate::machine::islands::compiled::Format {
+    /// Storage half of the already recognized parts/join/append graph. The
+    /// real parts list and all canonical formatting calls precede this kernel;
+    /// the common certificate retains their allocation ordinals and peaks.
+    /// On a partial source exit, core selects prepare_text_prefix's join-only
+    /// prefix and its own recovery map instead of claiming this final write.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one format graph and its authenticated exit"
+    )]
+    #[expect(
+        dead_code,
+        reason = "staged format kernel awaits core source activation"
+    )]
+    pub(crate) fn prepare_text_storage<R>(
+        &self,
+        arena: &mut Arena,
+        ledger: &mut lash_kernel_state::kernel_internals::logical::Ledger,
+        heap: &lash_kernel_state::kernel_internals::PagedHeap,
+        registers: &[Value],
+        private: &[ArenaHandle],
+        inputs: &[lash_kernel_state::kernel_internals::logical::Owner],
+        output: lash_kernel_state::kernel_internals::logical::Owner,
+        move_left: bool,
+        finish: impl FnOnce(
+            lash_kernel_state::kernel_internals::logical::BoundaryTransaction<'_>,
+            &mut lash_kernel_state::kernel_internals::logical::Ledger,
+            &mut dyn FnMut(
+                &mut Arena,
+                Vec<lash_kernel_state::kernel_internals::logical::MemberEdit>,
+            ),
+            &[TextEvaluation],
+        ) -> Result<R, HeapFault>,
+    ) -> Result<Option<(R, Vec<Value>)>, HeapFault> {
+        let (Some(&parts), Some(&left)) = (
+            registers.get(self.parts.reg as usize),
+            registers.get(self.append_args[0] as usize),
+        ) else {
+            return Ok(None);
+        };
+        Cx::prepare_text_prefix(
+            arena,
+            ledger,
+            heap,
+            &[parts, self.separator.1, left],
+            private,
+            Some((0, 1)),
+            &[(2, 3, move_left)],
+            &[(output, 4)],
+            inputs,
+            finish,
+        )
+    }
+}

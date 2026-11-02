@@ -59,16 +59,7 @@ impl Arena {
         if !admit(self.text_install_bound(bytes).checked_add(bytes)?) {
             return None;
         }
-        let mut joined = String::new();
-        joined
-            .try_reserve_exact(usize::try_from(bytes).ok()?)
-            .ok()?;
-        for (index, value) in values.iter().enumerate() {
-            if !separator.is_empty() && index != 0 {
-                joined.push_str(separator);
-            }
-            joined.push_str(resident(self, value)?);
-        }
+        let joined = joined(self, values, separator, bytes)?;
         let value = match ShortText::new(&joined) {
             Some(short) => Value::Text(short),
             None => Value::LongText(self.insert_resident_text(LongText {
@@ -240,4 +231,321 @@ fn extended(
         },
         len,
     ))
+}
+
+/// Dynamic facts of the canonical text body, before storage can move. The
+/// resource compiler uses these sizes for its native formula and scratch phase;
+/// neither the buffer capacity nor a guessed retained delta is a logical price.
+#[derive(Clone, Copy, Debug)]
+pub struct TextFacts {
+    pub left: TextSummary,
+    pub right: TextSummary,
+    pub result: TextSummary,
+    pub work: u64,
+    pub install: u64,
+}
+
+const EMPTY_TEXT: TextSummary = TextSummary {
+    utf8_bytes: 0,
+    chars: 0,
+    utf16_units: 0,
+};
+
+struct TextEdit {
+    made: ArenaHandle,
+    moved: Option<(ArenaHandle, usize)>,
+}
+
+/// Unpublished resident text storage for one certified source prefix. All
+/// appends share this guard and one exit transaction. The caller proves that
+/// `private` inputs have no observer in the prefix, including saved operands.
+/// Drop restores moved buffers in reverse order and removes speculative texts.
+/// No callback, seal, collection or other arena writer can overlap this borrow.
+pub struct PreparedTexts<'a> {
+    arena: &'a mut Arena,
+    dependencies: Option<crate::paged::logical::Dependencies>,
+    entries: std::collections::HashSet<(u32, u32)>,
+    private: std::collections::HashSet<(u32, u32)>,
+    made: std::collections::HashSet<(u32, u32)>,
+    edits: Vec<TextEdit>,
+    zero: usize,
+    facts: usize,
+    resident: u64,
+    tokens: u64,
+    published: bool,
+}
+
+impl Arena {
+    /// Bind entry content once. Source activation, owner placement, legal exits,
+    /// charge debt and the complete logical peak remain the common certificate's
+    /// obligations. This method grants no admission or source advancement.
+    pub fn prepare_text_region(
+        &mut self,
+        ledger: &crate::paged::logical::Ledger,
+        entries: &[Value],
+        private: &[ArenaHandle],
+    ) -> Option<PreparedTexts<'_>> {
+        if self.registration_active() {
+            return None;
+        }
+        let handles: Vec<_> = entries.iter().filter_map(Value::handle).collect();
+        let entries: std::collections::HashSet<_> =
+            handles.iter().map(|handle| text_slot(*handle)).collect();
+        if private
+            .iter()
+            .any(|handle| !entries.contains(&text_slot(*handle)) || !self.extensible(*handle))
+        {
+            return None;
+        }
+        let dependencies = crate::paged::logical::Dependencies::capture(ledger, self, &handles)?;
+        Some(PreparedTexts {
+            zero: self.zero.len(),
+            facts: self.facts.len(),
+            resident: self.resident,
+            tokens: self.tokens,
+            arena: self,
+            dependencies: Some(dependencies),
+            entries,
+            private: private.iter().map(|handle| text_slot(*handle)).collect(),
+            made: Default::default(),
+            edits: Vec::new(),
+            published: false,
+        })
+    }
+}
+
+impl PreparedTexts<'_> {
+    /// Only entry values and this prefix's own outputs may be read. A moved
+    /// predecessor has a summary but no readable contents, so it cannot become
+    /// a live-out or be read as another operand after its storage was donated.
+    fn readable(&self, value: &Value) -> bool {
+        value.handle().is_none_or(|handle| {
+            self.entries.contains(&text_slot(handle)) || self.made.contains(&text_slot(handle))
+        }) && part(self.arena, value).is_some()
+    }
+
+    pub fn summary(&self, value: &Value) -> Option<TextSummary> {
+        self.readable(value)
+            .then(|| part(self.arena, value).map(|(_, summary)| summary))?
+    }
+
+    pub fn text<'a>(&'a self, value: &'a Value) -> Option<&'a str> {
+        self.readable(value).then(|| resident(self.arena, value))?
+    }
+
+    /// Execute the canonical resident concatenation. Admission of the selected
+    /// source prefix happens outside this body. `move_left` is the compiler's
+    /// observer-exclusion fact, not an arena reference-count heuristic.
+    pub fn concat(
+        &mut self,
+        left: Value,
+        right: Value,
+        move_left: bool,
+    ) -> Option<(Value, TextFacts)> {
+        let a = self.summary(&left)?;
+        let b = self.summary(&right)?;
+        let result = add_summary(a, b)?;
+        let mut facts = TextFacts {
+            left: a,
+            right: b,
+            result,
+            work: result.utf8_bytes,
+            install: if result.utf8_bytes <= ShortText::MAX as u64 {
+                0
+            } else {
+                self.arena.text_install_bound(result.utf8_bytes)
+            },
+        };
+        if let (Value::Text(a), Value::Text(b)) = (left, right)
+            && let Some(text) = a.concat(&b)
+        {
+            facts.work = 0;
+            return Some((Value::Text(text), facts));
+        }
+        self.edits.try_reserve(1).ok()?;
+        self.made.try_reserve(1).ok()?;
+        let moving = match left {
+            Value::LongText(handle)
+                if move_left
+                    && left.handle() != right.handle()
+                    && (self.private.contains(&text_slot(handle))
+                        || self.made.contains(&text_slot(handle)))
+                    && self.arena.extensible(handle) =>
+            {
+                Some(handle)
+            }
+            _ => None,
+        };
+        let (value, moved) = if let Some(from) = moving {
+            let (made, length) = match right {
+                Value::Text(text) => self.arena.extend_text(from, text.as_str(), |_| true)?,
+                Value::LongText(other) => self.arena.extend_text_from(from, other, |_| true)?,
+                _ => return None,
+            };
+            (Value::LongText(made), Some((from, length)))
+        } else {
+            (self.arena.concat_text(left, right)?, None)
+        };
+        if let Value::LongText(made) = value {
+            self.edits.push(TextEdit { made, moved });
+            self.made.insert(text_slot(made));
+        }
+        Some((value, facts))
+    }
+
+    /// Join already formatted text pieces. Numeric/string conversion remains
+    /// the canonical library's job; this kernel never substitutes a formatter.
+    /// The temporary source parts list remains a real allocation owned by the
+    /// constructor consumer. Only its resident text pieces are consumed here.
+    pub fn join(&mut self, pieces: &[Value], separator: Value) -> Option<(Value, TextFacts)> {
+        let separator_summary = self.summary(&separator)?;
+        let mut result = EMPTY_TEXT;
+        for (index, piece) in pieces.iter().enumerate() {
+            if index != 0 {
+                result = add_summary(result, separator_summary)?;
+            }
+            result = add_summary(result, self.summary(piece)?)?;
+        }
+        self.edits.try_reserve(1).ok()?;
+        self.made.try_reserve(1).ok()?;
+        let joined = joined(
+            self.arena,
+            pieces,
+            resident(self.arena, &separator)?,
+            result.utf8_bytes,
+        )?;
+        let value = match ShortText::new(&joined) {
+            Some(short) => Value::Text(short),
+            None => {
+                let made = self.arena.insert_resident_text(LongText {
+                    summary: result,
+                    chunks: Box::new([Chunk::Resident(joined)]),
+                });
+                self.edits.push(TextEdit { made, moved: None });
+                self.made.insert(text_slot(made));
+                Value::LongText(made)
+            }
+        };
+        Some((
+            value,
+            TextFacts {
+                left: EMPTY_TEXT,
+                right: separator_summary,
+                result,
+                work: result.utf8_bytes,
+                install: if result.utf8_bytes <= ShortText::MAX as u64 {
+                    0
+                } else {
+                    self.arena.text_install_bound(result.utf8_bytes)
+                },
+            },
+        ))
+    }
+
+    /// Stage actual live-outs once. The common source owner authenticates the
+    /// selected exit and resource/charge facts in `finish`, then passes `apply`
+    /// to AcceptedBoundary::publish inside SourceAccepted::commit. If it
+    /// declines, rejects a dependency or returns an error, Drop restores storage.
+    /// A callback returning success without publishing grants no storage commit.
+    pub fn boundary<R>(
+        mut self,
+        ledger: &mut crate::paged::logical::Ledger,
+        heap: &crate::paged::heap_impl::PagedHeap,
+        inputs: &[crate::paged::logical::Owner],
+        outputs: &[(crate::paged::logical::Owner, Value)],
+        finish: impl FnOnce(
+            crate::paged::logical::BoundaryTransaction<'_>,
+            &mut crate::paged::logical::Ledger,
+            &mut dyn FnMut(&mut Arena, Vec<crate::paged::logical::MemberEdit>),
+        ) -> Result<R, lash_kernel_doc::heap::HeapFault>,
+    ) -> Result<Option<R>, lash_kernel_doc::heap::HeapFault> {
+        use crate::paged::logical::RootValue;
+        // An interior predecessor's summary is sufficient for fees, but its
+        // missing bytes must never be authenticated as a surviving root.
+        for (_, value) in outputs {
+            if matches!(value, Value::Text(_) | Value::LongText(_)) && !self.readable(value) {
+                return Ok(None);
+            }
+        }
+        let roots: Vec<_> = outputs
+            .iter()
+            .map(|(owner, value)| (*owner, RootValue::Value(value)))
+            .collect();
+        let dependencies = self.dependencies.take().ok_or_else(|| {
+            lash_kernel_doc::heap::HeapFault::Malformed("text entry facts already consumed".into())
+        })?;
+        let arena_identity = std::ptr::from_ref(&*self.arena);
+        let transaction = ledger
+            .prepare_source_boundary(
+                self.arena.registration().map_err(text_fault)?,
+                heap,
+                inputs,
+                &roots,
+            )?
+            .bind_dependencies(dependencies)?;
+        let published = &mut self.published;
+        let result = finish(transaction, ledger, &mut |arena, edits| {
+            assert!(
+                std::ptr::eq(arena_identity, arena),
+                "text storage belongs to this arena"
+            );
+            assert!(edits.is_empty(), "a text boundary has no member edits");
+            *published = true;
+        })?;
+        Ok(self.published.then_some(result))
+    }
+}
+
+impl Drop for PreparedTexts<'_> {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        for edit in self.edits.iter().rev() {
+            if let Some((from, length)) = edit.moved {
+                self.arena.unextend_text(from, edit.made, length);
+            }
+            // These bodies have no member edges, identities or projected page
+            // caches. No counter or zero-list entry may escape abandonment.
+            self.arena.objects.release(edit.made);
+            self.arena.facts[edit.made.index() as usize] = Facts::default();
+        }
+        self.arena.zero.truncate(self.zero);
+        self.arena.facts.truncate(self.facts);
+        self.arena.resident = self.resident;
+        self.arena.tokens = self.tokens;
+    }
+}
+
+fn add_summary(a: TextSummary, b: TextSummary) -> Option<TextSummary> {
+    Some(TextSummary {
+        utf8_bytes: a.utf8_bytes.checked_add(b.utf8_bytes)?,
+        chars: a.chars.checked_add(b.chars)?,
+        utf16_units: a.utf16_units.checked_add(b.utf16_units)?,
+    })
+}
+
+fn text_fault(error: lash_kernel_doc::NativeError) -> lash_kernel_doc::heap::HeapFault {
+    match error {
+        lash_kernel_doc::NativeError::Host(error) => error,
+        other => lash_kernel_doc::heap::HeapFault::Malformed(other.to_string()),
+    }
+}
+
+fn text_slot(handle: ArenaHandle) -> (u32, u32) {
+    (handle.index(), handle.generation())
+}
+
+fn joined(arena: &Arena, values: &[Value], separator: &str, bytes: u64) -> Option<String> {
+    let mut joined = String::new();
+    joined
+        .try_reserve_exact(usize::try_from(bytes).ok()?)
+        .ok()?;
+    for (index, value) in values.iter().enumerate() {
+        if !separator.is_empty() && index != 0 {
+            joined.push_str(separator);
+        }
+        joined.push_str(resident(arena, value)?);
+    }
+    Some(joined)
 }
