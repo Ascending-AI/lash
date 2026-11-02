@@ -1,25 +1,14 @@
 //! A turn phase's checkpoint as checkpoint graph nodes (FIG-5887 §3): a
-//! PhaseRoot (kind 33) over the TurnContent (kind 39) and
-//! ModelRequestFrame (kind 46) its machine checkpoint names.
+//! PhaseRoot (kind 33) over its run's configuration.
 //!
-//! The machine's checkpoint is bounded state; the transcript it would
-//! otherwise copy is content the checkpoint names by digest, in chains whose
-//! closed chunks keep their digests as the turn appends. A chain's first
-//! chunk and every other content blob is one TurnContent node; each later
-//! chunk is a ContentChunk (kind 50) that names the node of the chunk before
-//! it. The PhaseRoot names only the blobs no chunk names: each chain's last
-//! chunk and the checkpoint's values. So a phase's root and the references
-//! its commit checks are bounded by the chains it names, not by their
-//! length (FIG-7366). A phase stages only the blobs its machine's checkpoint
-//! added (FIG-5955): the others an earlier phase of the turn stored, and the
-//! phase requires those it names directly by the node the machine was told
-//! each is stored as.
-//! The root holds checkpoint text with its window pin as a separate structured field. The
-//! run's resolved shape rides beside it as configuration graph nodes shared
-//! with retained revisions; its tool surface is a TurnContent node. The
-//! first phase stages a nondefault run's resolution. Default runs instead
-//! reference the configuration retained by their acknowledged head, with
-//! their own resolved renderer (FIG-3843).
+//! The turn's machine is not stored: its journal rebuilds it (FIG-7585).
+//! The root holds what a resume serves instead of deciding again, as
+//! checkpoint text, with the window the turn started from as a separate
+//! structured pin. The run's resolved shape rides beside it as
+//! configuration graph nodes shared with retained revisions; its tool
+//! surface is a TurnContent node. The first phase stages a nondefault run's
+//! resolution. Default runs instead reference the configuration retained by
+//! their acknowledged head, with their own resolved renderer (FIG-3843).
 
 use lash_core_store::checkpoint_graph::EncodeBudget;
 use lash_core_store::checkpoint_graph::ExplicitLimit;
@@ -29,28 +18,15 @@ use lash_core_store::checkpoint_graph::GraphStaging;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::checkpoint_graph::NodeSource;
-use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
-use lash_core_store::phase_preparation::{PhaseContentPreparations, PreparationRole};
-use lash_core_store::store::BlobRef;
-use std::collections::{BTreeMap, BTreeSet};
-
-use lash_kernel_value::tokens::TokenCodec;
-use lash_kernel_value::tokens::TokenError;
-use lash_kernel_value::tokens::TokenReader;
-use lash_kernel_value::tokens::TokenWriter;
-use lash_sansio::{
-    CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
-};
+use lash_sansio::TurnWindowPin;
 
 use super::run_config::{RecordedRunConfig, RunConfigStored};
 use super::session::PhaseCheckpoint;
-use crate::HostTurnProtocol;
 
-/// The phase's checkpoint without its content.
+/// The phase's checkpoint text.
 #[derive(serde::Serialize)]
 struct PhaseText<'a> {
-    checkpoint: &'a TurnCheckpoint<HostTurnProtocol>,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     delivered: &'a [crate::AdmittedTurnInputs],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
@@ -61,11 +37,10 @@ struct PhaseText<'a> {
     cell: &'a Option<super::session::CellStart>,
 }
 
-/// The root's checkpoint data read back.
+/// The root's checkpoint text read back.
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PhaseRead {
-    checkpoint: TurnCheckpoint<HostTurnProtocol>,
     #[serde(default)]
     delivered: Vec<crate::AdmittedTurnInputs>,
     #[serde(default)]
@@ -76,265 +51,21 @@ struct PhaseRead {
     cell: Option<super::session::CellStart>,
 }
 
-/// Kind 39's body: one content blob's canonical JSON text.
-pub(super) struct ContentText(pub(super) String);
-
-impl TokenCodec for ContentText {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(&self.0);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(Self(input.text()?.to_owned()))
-    }
-}
-
-/// Encode a canonical text slice without making an owned decode value.
-fn stage_content(staging: &mut GraphStaging, text: &str) -> Result<NodeId, GraphRefusal> {
-    let mut out = TokenWriter::new();
-    out.text(text);
-    let body = out.into_bytes();
-    #[cfg(feature = "perf-witness")]
-    crate::perf_witness::record_graph_serialized_body(body.len());
-    staging
-        .encode(NodeKind::TURN_CONTENT, TypedBody::logical(&body))
-        .map_err(Into::into)
-}
-
-/// Kind 50: a chain chunk after its chain's first, its canonical text
-/// before the node of the chunk it follows, which its text names as `prev`.
-fn stage_chunk(
-    staging: &mut GraphStaging,
-    text: &str,
-    prev: NodeId,
-) -> Result<NodeId, GraphRefusal> {
-    let mut out = TokenWriter::new();
-    out.seq(2);
-    out.text(text);
-    prev.encode(&mut out);
-    let body = out.into_bytes();
-    #[cfg(feature = "perf-witness")]
-    crate::perf_witness::record_graph_serialized_body(body.len());
-    staging
-        .encode(NodeKind::CONTENT_CHUNK, TypedBody::logical(&body))
-        .map_err(Into::into)
-}
-
-/// Kind 50 read back.
-struct ContentChunk {
-    text: String,
-    prev: NodeId,
-}
-
-impl TokenCodec for ContentChunk {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.text(&self.text);
-        self.prev.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            text: input.text()?.to_owned(),
-            prev: NodeId::decode(input)?,
-        })
-    }
-}
-
-/// Kind 46: a request's changing scope over its immutable configuration.
-/// The config is a TurnContent whose text is shared across sends; neither
-/// the scope nor the checkpoint's content digest is part of that child.
-/// The wrapper keeps its explicit reference intact when the graph decoder
-/// expands references to placed text leaves.
-struct ModelRequestFrame {
-    config: NodeId,
-    scope: serde_json::Value,
-}
-
-impl TokenCodec for ModelRequestFrame {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.config.encode(out);
-        self.scope.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            config: NodeId::decode(input)?,
-            scope: serde_json::Value::decode(input)?,
-        })
-    }
-}
-
-fn stage_prepared_content(
-    staging: &mut GraphStaging,
-    text: &str,
-    role: PreparationRole,
-    prepared: &mut PhaseContentPreparations,
-    held: &mut Vec<NodeId>,
-) -> Result<NodeId, String> {
-    let key = BlobRef::for_content(text.as_bytes());
-    if let Some(root) = prepared.get(role, &key) {
-        held.push(root);
-        return Ok(root);
-    }
-    let root = stage_content(staging, text).map_err(|error| error.to_string())?;
-    prepared.record(role, key, root);
-    Ok(root)
-}
-
-fn stage_request(
-    staging: &mut GraphStaging,
-    text: &str,
-    prepared: &mut PhaseContentPreparations,
-    held: &mut Vec<NodeId>,
-) -> Result<NodeId, String> {
-    let mut config: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let scope = config
-        .as_object_mut()
-        .and_then(|config| config.remove("scope"))
-        .ok_or_else(|| "the checkpoint's model request has no scope".to_owned())?;
-    let config = stage_prepared_content(
-        staging,
-        &config.to_string(),
-        PreparationRole::ModelRequest,
-        prepared,
-        held,
-    )?;
-    staging
-        .encode_value(
-            NodeKind::MODEL_REQUEST_FRAME,
-            &ModelRequestFrame { config, scope },
-        )
-        .map_err(|e| e.to_string())
-}
-
-/// Content blob `node`, a child of `parent` of one of `allowed`, with the
-/// node of the chunk before it when it is a later chain chunk.
-fn load_content(
-    decoder: &mut GraphDecoder<'_>,
-    parent: NodeId,
-    node: NodeId,
-    allowed: &[NodeKind],
-    prepared: Option<&mut PhaseContentPreparations>,
-) -> Result<(String, Option<NodeId>), String> {
-    let kind = decoder
-        .child_kind(parent, node, allowed)
-        .map_err(|e| e.to_string())?;
-    if kind == NodeKind::TURN_CONTENT {
-        return decoder
-            .decode::<ContentText>(node, kind)
-            .map(|text| (text.0, None))
-            .map_err(|e| e.to_string());
-    }
-    if kind == NodeKind::CONTENT_CHUNK {
-        return decoder
-            .decode::<ContentChunk>(node, kind)
-            .map(|chunk| (chunk.text, Some(chunk.prev)))
-            .map_err(|e| e.to_string());
-    }
-    let frame: ModelRequestFrame = decoder.decode(node, kind).map_err(|e| e.to_string())?;
-    decoder
-        .child_kind(node, frame.config, &[NodeKind::TURN_CONTENT])
-        .map_err(|e| e.to_string())?;
-    let ContentText(text) = decoder
-        .decode(frame.config, NodeKind::TURN_CONTENT)
-        .map_err(|e| e.to_string())?;
-    let mut config: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    if serde_json::to_string(&config).map_err(|e| e.to_string())? != text {
-        return Err("the request config is not canonical JSON".to_owned());
-    }
-    if let Some(prepared) = prepared {
-        prepared.record(
-            PreparationRole::ModelRequest,
-            BlobRef::for_content(text.as_bytes()),
-            frame.config,
-        );
-    }
-    let fields = config
-        .as_object_mut()
-        .ok_or_else(|| "the request config is not an object".to_owned())?;
-    if fields.insert("scope".to_owned(), frame.scope).is_some() {
-        return Err("the request config holds its changing scope".to_owned());
-    }
-    // Re-serialize through the owning type, preserving the machine's exact
-    // canonical field order and bytes, which insert_stored checks by digest.
-    let request: crate::llm::types::LlmRequest =
-        serde_json::from_value(config.clone()).map_err(|e| e.to_string())?;
-    if serde_json::to_value(&request).map_err(|e| e.to_string())? != config {
-        return Err("the model request is not canonical".to_owned());
-    }
-    serde_json::to_string(&request)
-        .map(|text| (text, None))
-        .map_err(|e| e.to_string())
-}
-
-/// What a PhaseRoot may name as a content blob.
-const NAMED_CONTENT: &[NodeKind] = &[
-    NodeKind::TURN_CONTENT,
-    NodeKind::MODEL_REQUEST_FRAME,
-    NodeKind::CONTENT_CHUNK,
-];
-
-/// What a chain chunk may follow.
-const EARLIER_CHUNK: &[NodeKind] = &[NodeKind::TURN_CONTENT, NodeKind::CONTENT_CHUNK];
-
 /// The host owns the opaque sans-io pin's spelling. At the graph boundary
-/// it is a SessionHeadRef, never JSON escaped inside a JSON string.
-fn structure_window_pin(
-    value: &mut serde_json::Value,
-) -> Result<Option<serde_json::Value>, String> {
-    let Some(window) = value
-        .pointer_mut("/checkpoint/window")
-        .and_then(serde_json::Value::as_object_mut)
-    else {
-        return Ok(None);
-    };
-    let pin = window
-        .remove("pin")
-        .ok_or_else(|| "the checkpoint window has no pin".to_owned())?;
-    let head: crate::store::SessionHeadRef = serde_json::from_str(
-        pin.as_str()
-            .ok_or_else(|| "the window pin is not text".to_owned())?,
-    )
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(head)
-        .map(Some)
+/// it is a SessionHeadRef's fields, never JSON escaped inside a string.
+fn structure_window_pin(pin: &TurnWindowPin) -> Result<serde_json::Value, String> {
+    let head: crate::store::SessionHeadRef = serde_json::from_str(pin.as_str())
+        .map_err(|e| format!("the window pin is not a head: {e}"))?;
+    serde_json::to_value(head).map_err(|e| e.to_string())
+}
+
+/// The structured pin `value` as the machine spells it.
+fn window_pin(value: serde_json::Value) -> Result<TurnWindowPin, String> {
+    let head: crate::store::SessionHeadRef =
+        serde_json::from_value(value).map_err(|e| format!("the window pin is not a head: {e}"))?;
+    serde_json::to_string(&head)
+        .map(TurnWindowPin::new)
         .map_err(|e| e.to_string())
-}
-
-fn checkpoint_value(
-    mut value: serde_json::Value,
-    pin: Option<serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    let window = value
-        .pointer_mut("/checkpoint/window")
-        .and_then(serde_json::Value::as_object_mut);
-    match (window, pin) {
-        (Some(window), Some(pin)) => {
-            if window.contains_key("pin") {
-                return Err("the checkpoint text embeds its window pin".to_owned());
-            }
-            let head: crate::store::SessionHeadRef =
-                serde_json::from_value(pin).map_err(|e| e.to_string())?;
-            window.insert(
-                "pin".to_owned(),
-                serde_json::Value::String(serde_json::to_string(&head).map_err(|e| e.to_string())?),
-            );
-        }
-        (None, None) => {}
-        _ => return Err("the checkpoint window and its structured pin disagree".to_owned()),
-    }
-    Ok(value)
-}
-
-fn read_checkpoint(text: &str, pin: Option<serde_json::Value>) -> Result<PhaseRead, String> {
-    let value = serde_json::from_str(text)
-        .map_err(|e| format!("the turn checkpoint does not decode: {e}"))?;
-    serde_json::from_value(checkpoint_value(value, pin)?)
-        .map_err(|e| format!("the turn checkpoint does not decode: {e}"))
 }
 
 /// A phase checkpoint staged as nodes, for the transaction that advances
@@ -349,21 +80,22 @@ pub(in crate::runtime) struct StagedPhase {
     supplied: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
     stored: PhaseStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
-    /// The journal row of the machine inputs the phase observed, if any.
-    journal: Option<lash_durable::DomainWrite>,
+    /// The journal rows the phase appends: the turn's build inputs with its
+    /// first phase, then the machine inputs the phase observed, if any.
+    journal: Vec<lash_durable::DomainWrite>,
 }
 
-/// The blobs a staged phase added, each by the node it is stored as: what
-/// its machine is told once the phase's commit is acknowledged
-/// ([`lash_sansio::TurnMachine::checkpoint_stored`]), and the nodes of its
-/// run's configuration it added, which its drive is told.
-#[must_use = "the machine is told what its committed phase stored"]
+/// What a staged phase stored: the nodes of its run's configuration it
+/// added, which its drive is told once the phase's commit is acknowledged,
+/// and the journal it made durable.
+#[must_use = "the drive is told what its committed phase stored"]
 pub(in crate::runtime) struct PhaseStored {
-    content: Vec<(CheckpointContentRef, CheckpointContentPin)>,
     config: RunConfigStored,
     publication: Option<std::sync::Arc<crate::runtime::session_environment::Publication>>,
     /// The machine's journal mark the phase's commit makes durable.
     inputs: Option<usize>,
+    /// Whether the phase's commit journals the turn's build inputs.
+    build: bool,
 }
 
 impl PhaseStored {
@@ -372,130 +104,44 @@ impl PhaseStored {
         if let Some(publication) = self.publication {
             publication.committed();
         }
-        drive.machine().checkpoint_stored(self.content);
         if let Some(mark) = self.inputs {
             drive.machine().inputs_committed(mark);
         }
+        if self.build {
+            drive.build_journaled();
+        }
         drive.run_config_stored(&self.config);
-    }
-
-    /// Tell `machine`, restored from this phase, what the phase stored: its
-    /// configuration's nodes came back with the checkpoint.
-    pub(super) fn restored(self, machine: &mut crate::TurnMachine) {
-        machine.checkpoint_stored(self.content);
     }
 }
 
 impl StagedPhase {
-    /// Stages `checkpoint`: a ModelRequestFrame for its request, a
-    /// ContentChunk per chain chunk `links` names the chunk before, and a
-    /// TurnContent per other content blob, with the PhaseRoot over those no
-    /// chunk names, among them and `held`, the blobs an earlier phase
-    /// stored, by their nodes.
+    /// Stages `checkpoint`: its PhaseRoot over its run's configuration.
     ///
     /// # Errors
     ///
-    /// The account of a checkpoint that does not encode, or of a chunk
-    /// whose predecessor it neither supplies nor holds.
-    pub(in crate::runtime) fn of(
-        checkpoint: &PhaseCheckpoint,
-        held: &[(CheckpointContentRef, CheckpointContentPin)],
-        links: &BTreeMap<CheckpointContentRef, CheckpointContentRef>,
-    ) -> Result<Self, String> {
+    /// The account of a checkpoint that does not encode.
+    pub(in crate::runtime) fn of(checkpoint: &PhaseCheckpoint) -> Result<Self, String> {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
-        let mut content_prepared = checkpoint
-            .config
-            .as_ref()
-            .map(|config| config.content_preparations().clone())
-            .unwrap_or_default();
-        let mut content_held = Vec::new();
         let config = checkpoint
             .config
             .as_ref()
             .map(|config| config.stage(&mut staging))
             .transpose()?;
-        let mut value = serde_json::to_value(&PhaseText {
-            checkpoint: &checkpoint.saved.checkpoint,
+        let text = serde_json::to_string(&PhaseText {
             delivered: &checkpoint.delivered,
             before_turn: &checkpoint.before_turn,
             trace: &checkpoint.trace,
             cell: &checkpoint.cell,
         })
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
-        let window_pin = structure_window_pin(&mut value)?;
-        let request = checkpoint
-            .saved
-            .checkpoint
-            .pending_request()
-            .map(|(request, _, _)| request);
-        let environment = checkpoint.saved.checkpoint.environment_content();
-        let held: BTreeMap<&CheckpointContentRef, NodeId> = held
-            .iter()
-            .map(|(digest, pin)| (digest, NodeId(*pin.as_bytes())))
-            .collect();
-        let fresh: BTreeMap<&CheckpointContentRef, &[u8]> =
-            checkpoint.saved.content.iter().collect();
-        // Each fresh blob is staged after the chunk before it, so a chunk
-        // names that chunk's node.
-        let mut staged: BTreeMap<&CheckpointContentRef, NodeId> = BTreeMap::new();
-        let mut stored = Vec::new();
-        for &digest in fresh.keys() {
-            let mut pending = vec![digest];
-            while let Some(&top) = pending.last() {
-                if staged.contains_key(top) {
-                    pending.pop();
-                    continue;
-                }
-                let prev = match links.get(top) {
-                    None => None,
-                    Some(prev) => match staged.get(prev).or_else(|| held.get(prev)) {
-                        Some(node) => Some(*node),
-                        None if fresh.contains_key(prev) => {
-                            pending.push(prev);
-                            continue;
-                        }
-                        None => {
-                            return Err(format!(
-                                "turn content {top} follows {prev}, which the checkpoint neither supplies nor holds"
-                            ));
-                        }
-                    },
-                };
-                let text = std::str::from_utf8(fresh[top])
-                    .map_err(|error| format!("turn content {top} is not text: {error}"))?;
-                let node = match prev {
-                    _ if Some(top) == request => {
-                        stage_request(&mut staging, text, &mut content_prepared, &mut content_held)?
-                    }
-                    _ if Some(top) == environment => stage_prepared_content(
-                        &mut staging,
-                        text,
-                        PreparationRole::Environment,
-                        &mut content_prepared,
-                        &mut content_held,
-                    )?,
-                    Some(prev) => stage_chunk(&mut staging, text, prev).map_err(refused)?,
-                    None => stage_content(&mut staging, text).map_err(refused)?,
-                };
-                staged.insert(top, node);
-                stored.push((top.clone(), CheckpointContentPin::new(node.0)));
-                pending.pop();
-            }
-        }
-        // A chunk another chunk names is reached through it.
-        let followed: BTreeSet<&CheckpointContentRef> = links.values().collect();
-        let mut content: Vec<(String, NodeId)> = staged
-            .iter()
-            .chain(held.iter())
-            .filter(|(digest, _)| !followed.contains(*digest))
-            .map(|(digest, node)| (digest.as_str().to_owned(), *node))
-            .collect();
-        content.sort_by(|left, right| left.0.cmp(&right.0));
         let body = PhaseRootBody {
-            checkpoint: value.to_string(),
-            window_pin,
-            content,
+            checkpoint: text,
+            window_pin: checkpoint
+                .window_pin
+                .as_ref()
+                .map(structure_window_pin)
+                .transpose()?,
             run: config.as_ref().map(|config| config.run.clone()),
             environments: config
                 .as_ref()
@@ -505,30 +151,19 @@ impl StagedPhase {
         let root = staging
             .encode_value(NodeKind::PHASE_ROOT, &body)
             .map_err(|error| refused(error.into()))?;
-        // The phase requires each held blob it names directly: the root's,
-        // and each a fresh chunk follows. One a held chunk follows is
-        // reached through that stored chunk.
-        let preceding: BTreeSet<&CheckpointContentRef> =
-            fresh.keys().filter_map(|chunk| links.get(*chunk)).collect();
-        let mut held_nodes = held
-            .iter()
-            .filter(|(digest, _)| !followed.contains(*digest) || preceding.contains(*digest))
-            .map(|(_, node)| *node)
-            .collect::<Vec<_>>();
         let publication = config
             .as_ref()
             .and_then(|config| config.publication.clone());
         let mut config_stored = RunConfigStored::default();
+        let mut held = Vec::new();
         let mut prepared = Vec::new();
         let mut supplied = Vec::new();
         if let Some(config) = config {
-            held_nodes.extend(config.held);
+            held = config.held;
             prepared = config.prepared;
             supplied = config.supplied;
             config_stored = config.stored;
         }
-        held_nodes.extend(content_held);
-        config_stored.content_prepared = Some(content_prepared);
         Ok(Self {
             publication: publication.clone(),
             root,
@@ -542,20 +177,21 @@ impl StagedPhase {
                 .as_ref()
                 .and_then(|config| config.surface().cloned()),
             staging,
-            held: held_nodes,
+            held,
             prepared,
             supplied,
             stored: PhaseStored {
-                content: stored,
                 config: config_stored,
                 publication,
                 inputs: None,
+                build: false,
             },
-            journal: None,
+            journal: Vec::new(),
         })
     }
 
-    /// Journal `machine`'s inputs since its last committed journal row
+    /// Journal the turn's `build` inputs, unless an earlier phase journaled
+    /// them, and `machine`'s inputs since its last committed journal row
     /// with the phase: the phase's commit appends them, and its
     /// acknowledgement makes them durable.
     ///
@@ -564,21 +200,27 @@ impl StagedPhase {
     /// The account of inputs that do not encode.
     pub(in crate::runtime) fn journaling(
         mut self,
+        build: Option<String>,
         machine: &mut crate::TurnMachine,
         session: &lash_kernel_value::identity::SessionId,
         run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Self, String> {
+        let journal = |inputs| {
+            lash_durable::DomainWrite::Turn(lash_durable::domain::TurnWrite::Journal {
+                session: session.clone(),
+                run: run.clone(),
+                inputs,
+            })
+        };
+        if let Some(build) = build {
+            self.journal.push(journal(build));
+            self.stored.build = true;
+        }
         let (row, mark) = machine.stage_inputs();
         if !row.is_empty() {
             let inputs = serde_json::to_string(&row)
                 .map_err(|error| format!("the turn's machine inputs do not encode: {error}"))?;
-            self.journal = Some(lash_durable::DomainWrite::Turn(
-                lash_durable::domain::TurnWrite::Journal {
-                    session: session.clone(),
-                    run: run.clone(),
-                    inputs,
-                },
-            ));
+            self.journal.push(journal(inputs));
         }
         self.stored.inputs = Some(mark);
         Ok(self)
@@ -593,7 +235,7 @@ impl StagedPhase {
         if let Some(publication) = self.publication {
             publication.stage(tx);
         }
-        if let Some(journal) = self.journal {
+        for journal in self.journal {
             tx.write(journal);
         }
         for node in self.held {
@@ -610,8 +252,7 @@ impl StagedPhase {
 }
 
 /// Restages PhaseRoot `root` from `source` with its checkpoint text made
-/// `edit` of it, as another build would have written the phase: its content
-/// stays the installed nodes it names.
+/// `edit` of it, as another build would have written the phase.
 ///
 /// # Errors
 ///
@@ -627,24 +268,12 @@ pub(super) fn restaged_text(
     let mut body: PhaseRootBody = decoder
         .decode(root, NodeKind::PHASE_ROOT)
         .map_err(|error| error.to_string())?;
-    let logical = checkpoint_value(
-        serde_json::from_str(&body.checkpoint).map_err(|error| error.to_string())?,
-        body.window_pin,
-    )?;
-    let mut value =
-        serde_json::from_str(&edit(&logical.to_string())).map_err(|error| error.to_string())?;
-    body.window_pin = structure_window_pin(&mut value)?;
-    body.checkpoint = value.to_string();
+    body.checkpoint = edit(&body.checkpoint);
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     let root = staging
         .encode_value(NodeKind::PHASE_ROOT, &body)
         .map_err(|error| error.to_string())?;
-    for node in body
-        .content
-        .iter()
-        .map(|(_, node)| node)
-        .chain(body.environments.iter().map(|(_, node)| node))
-    {
+    for (_, node) in &body.environments {
         tx.require(*node);
     }
     if let Some(run) = &body.run {
@@ -655,60 +284,22 @@ pub(super) fn restaged_text(
 }
 
 /// Reads PhaseRoot `root` from `source` back into the phase checkpoint it
-/// was staged from, with the node each content blob is stored as.
+/// was staged from.
 ///
 /// # Errors
 ///
-/// The account of a node that does not read, a checkpoint text that does
-/// not decode, or content that is not the bytes its digest names.
+/// The account of a node that does not read or a checkpoint text that does
+/// not decode.
 pub(in crate::runtime) fn load(
     source: &dyn NodeSource,
     root: NodeId,
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
-) -> Result<(PhaseCheckpoint, PhaseStored), String> {
+) -> Result<PhaseCheckpoint, String> {
     let mut decoder = GraphDecoder::new(source, limits);
     let text = |error: GraphRefusal| error.to_string();
     let body: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).map_err(text)?;
-    let read = read_checkpoint(&body.checkpoint, body.window_pin)?;
-    let environment = read.checkpoint.environment_content().cloned();
-    let request = read
-        .checkpoint
-        .pending_request()
-        .map(|(request, _, _)| request.clone());
-    let mut prepared = PhaseContentPreparations::default();
-    let mut content = TurnCheckpointContent::default();
-    let mut stored = Vec::new();
-    for (digest, node) in body.content {
-        // A named blob, then each chunk before it its chunks name, until a
-        // chain's first chunk or one another chain already read.
-        let mut next = Some((Some(CheckpointContentRef::stored(digest)), root, node));
-        while let Some((named, parent, node)) = next.take() {
-            let allowed = if named.is_some() {
-                NAMED_CONTENT
-            } else {
-                EARLIER_CHUNK
-            };
-            let request_prepared = request
-                .as_ref()
-                .is_some_and(|request| named.as_ref() == Some(request))
-                .then_some(&mut prepared);
-            let (blob, prev) = load_content(&mut decoder, parent, node, allowed, request_prepared)?;
-            let digest = named.unwrap_or_else(|| CheckpointContentRef::of_content(blob.as_bytes()));
-            if content.contains(&digest) {
-                break;
-            }
-            let environment_key = (environment.as_ref() == Some(&digest))
-                .then(|| BlobRef::for_content(blob.as_bytes()));
-            content
-                .insert_stored(digest.clone(), blob.into_bytes())
-                .map_err(|error| error.to_string())?;
-            if let Some(key) = environment_key {
-                prepared.record(PreparationRole::Environment, key, node);
-            }
-            stored.push((digest, CheckpointContentPin::new(node.0)));
-            next = prev.map(|prev| (None, node, prev));
-        }
-    }
+    let read: PhaseRead = serde_json::from_str(&body.checkpoint)
+        .map_err(|e| format!("the turn checkpoint does not decode: {e}"))?;
     let config = match body.run {
         None => None,
         Some(run) => {
@@ -742,31 +333,21 @@ pub(in crate::runtime) fn load(
                         .map_err(|error| error.to_string())
                 })
                 .collect::<Result<_, _>>()?;
-            Some(
-                RecordedRunConfig::load((run, resolved), environments, source)?
-                    .with_content_preparations(Some(&prepared)),
-            )
+            Some(RecordedRunConfig::load(
+                (run, resolved),
+                environments,
+                source,
+            )?)
         }
     };
-    Ok((
-        PhaseCheckpoint {
-            saved: SavedTurn {
-                checkpoint: read.checkpoint,
-                content,
-            },
-            delivered: read.delivered,
-            before_turn: read.before_turn,
-            trace: read.trace,
-            config,
-            cell: read.cell,
-        },
-        PhaseStored {
-            content: stored,
-            config: RunConfigStored::default(),
-            publication: None,
-            inputs: None,
-        },
-    ))
+    Ok(PhaseCheckpoint {
+        window_pin: body.window_pin.map(window_pin).transpose()?,
+        delivered: read.delivered,
+        before_turn: read.before_turn,
+        trace: read.trace,
+        config,
+        cell: read.cell,
+    })
 }
 
 /// The retained plugin decisions and surface in a phase, projected without
@@ -807,31 +388,6 @@ pub async fn read_plugin_phase(
     }))
 }
 
-/// Protocol events retained by a turn's phase, decoded without restoring a runtime.
-/// A retired phase has no retained events.
-pub async fn read_protocol_events(
-    reads: &dyn lash_durable::DurableReads,
-    session: &lash_kernel_value::identity::SessionId,
-    run: &lash_vocabulary::identity::TurnId,
-) -> Result<Vec<crate::ProtocolEvent>, lash_durable::DurableError> {
-    let Some(phase) = read_phase(reads, session, run).await? else {
-        return Ok(Vec::new());
-    };
-    let events = phase.saved.recorded_events().map_err(|error| {
-        lash_durable::DurableError::Graph(GraphRefusal::InvalidBody {
-            kind: NodeKind::PHASE_ROOT.0,
-            reason: error.to_string(),
-        })
-    })?;
-    Ok(events
-        .into_iter()
-        .filter_map(|event| match event {
-            crate::SessionHistoryRecord::Protocol(event) => Some(event),
-            crate::SessionHistoryRecord::Conversation(_) => None,
-        })
-        .collect())
-}
-
 async fn read_phase(
     reads: &dyn lash_durable::DurableReads,
     session: &lash_kernel_value::identity::SessionId,
@@ -856,7 +412,7 @@ async fn read_phase(
         Err(lash_durable::DurableError::Graph(GraphRefusal::RootRetired)) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let (phase, _) = load(&graph, graph.root, limits).map_err(|reason| {
+    let phase = load(&graph, graph.root, limits).map_err(|reason| {
         lash_durable::DurableError::Graph(GraphRefusal::InvalidBody {
             kind: NodeKind::PHASE_ROOT.0,
             reason,
@@ -893,7 +449,6 @@ mod tests {
                 &PhaseRootBody {
                     checkpoint: "{}".into(),
                     window_pin: None,
-                    content: Vec::new(),
                     run: Some(reference.clone()),
                     environments: Vec::new(),
                 },
@@ -913,32 +468,6 @@ mod tests {
         );
     }
 
-    /// BorrowedEncodingIsIdentical: borrowing canonical phase text keeps every
-    /// staged envelope and its digest, including placed and chunked UTF-8 text.
-    #[test]
-    fn borrowed_content_encoding_keeps_nodes_and_digests() {
-        let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 22);
-        for text in [
-            String::new(),
-            r#"{"escaped":"\n\"\\","number":123456789012345678901234567890}"#.into(),
-            "é日🦀".repeat(8192),
-        ] {
-            let budget = || EncodeBudget::new(ExplicitLimit::new(u64::MAX));
-            let mut owned = GraphStaging::new(budget());
-            let expected = owned
-                .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.clone()))
-                .unwrap();
-            let mut borrowed = GraphStaging::new(budget());
-            let actual = stage_content(&mut borrowed, &text).unwrap();
-            assert_eq!(actual, expected);
-            assert_eq!(borrowed.nodes(), owned.nodes());
-            let ContentText(decoded) = GraphDecoder::new(&borrowed, limits)
-                .decode(actual, NodeKind::TURN_CONTENT)
-                .unwrap();
-            assert_eq!(decoded, text);
-        }
-    }
-
     /// PHASE-PIN-STRUCTURE: the stored pin is fields, and a graph read
     /// returns exactly the host's original opaque spelling to the machine.
     #[test]
@@ -949,41 +478,27 @@ mod tests {
             leaf: None,
             checkpoint: None,
         };
-        let original = serde_json::json!({"checkpoint": {"window": {
-            "pin": serde_json::to_string(&head).unwrap(), "messages": 3, "events": 2
-        }}});
-        let mut structured = original.clone();
-        let window_pin = structure_window_pin(&mut structured).unwrap();
+        let pin = TurnWindowPin::new(serde_json::to_string(&head).unwrap());
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let root = staging
             .encode_value(
                 NodeKind::PHASE_ROOT,
                 &PhaseRootBody {
-                    checkpoint: structured.to_string(),
-                    window_pin,
-                    content: Vec::new(),
+                    checkpoint: "{}".into(),
+                    window_pin: Some(structure_window_pin(&pin).unwrap()),
                     run: None,
                     environments: Vec::new(),
                 },
             )
             .unwrap();
-        let mut decoder = GraphDecoder::new(
-            &staging,
-            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20),
-        );
-        let stored: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).unwrap();
+        let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20);
+        let stored: PhaseRootBody = GraphDecoder::new(&staging, limits)
+            .decode(root, NodeKind::PHASE_ROOT)
+            .unwrap();
         assert_eq!(
             stored.window_pin,
             Some(serde_json::to_value(&head).unwrap())
         );
-        let value: serde_json::Value = serde_json::from_str(&stored.checkpoint).unwrap();
-        assert!(
-            value.pointer("/checkpoint/window/pin").is_none(),
-            "the text contains no escaped pin"
-        );
-        assert_eq!(
-            checkpoint_value(value, stored.window_pin).unwrap(),
-            original
-        );
+        assert_eq!(load(&staging, root, limits).unwrap().window_pin, Some(pin));
     }
 }

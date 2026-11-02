@@ -15,6 +15,9 @@ pub(in crate::runtime) struct DurableTurn {
     /// stands at once its context pressure ran, pinned by that head, which
     /// the turn's checkpoints name instead of holding (FIG-5206, FIG-5955).
     pub(in crate::runtime) window: crate::runtime::durable::head::TurnWindow,
+    /// The window a resumed turn started from, at its recorded pin, which
+    /// its machine is built over; `None` for a fresh turn.
+    pub(in crate::runtime) pinned: Option<crate::runtime::durable::head::TurnWindow>,
     /// The turn's messages, led by the window's.
     pub(in crate::runtime) messages: crate::MessageSequence,
     /// What the before-turn callbacks decided: run for a fresh turn, served
@@ -35,6 +38,7 @@ pub(in crate::runtime) enum TurnStart {
     Fresh(Option<lash_trace::DurableTraceScope>),
     /// A resumed turn, with what its checkpoint recorded.
     Resumed {
+        build: Box<crate::runtime::durable::turn_build::TurnBuild>,
         before_turn: Vec<crate::plugin::RecordedTurnContribution>,
         trace: Option<lash_trace::DurableTraceScope>,
         config: Box<crate::runtime::durable::run_config::RecordedRunConfig>,
@@ -78,13 +82,14 @@ impl LashRuntime {
         let attachments = self.bind_turn_attachments(controller)?;
         self.transition_turn_plugins(controller).await?;
         let fresh = matches!(&start, TurnStart::Fresh(_));
-        let (recorded_before_turn, retained_trace, run_config, cell_start) = match start {
+        let (recorded, retained_trace, run_config, cell_start) = match start {
             TurnStart::Resumed {
+                build,
                 before_turn,
                 trace,
                 config,
                 cell,
-            } => (Some(before_turn), trace, *config, cell),
+            } => (Some((*build, before_turn)), trace, *config, cell),
             TurnStart::Fresh(admitted_trace) => (
                 None,
                 admitted_trace,
@@ -121,7 +126,13 @@ impl LashRuntime {
         .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         let controller = controller.with_trace_scope(turn_boundary.scope.clone());
         let previous_prompt_usage = self.state.last_prompt_usage.clone();
-        let turn_index = self.state.turn_index + 1;
+        let (recorded_build, recorded_before_turn) = match recorded {
+            Some((build, before_turn)) => (Some(build), Some(before_turn)),
+            None => (None, None),
+        };
+        let turn_index = recorded_build
+            .as_ref()
+            .map_or(self.state.turn_index + 1, |build| build.turn_index);
         let state_segment = u32::try_from(turn_index).map_err(|_| {
             RuntimeError::new(
                 RuntimeErrorCode::Plugin,
@@ -131,36 +142,10 @@ impl LashRuntime {
         self.services
             .plugins
             .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
-        let mut turn_delta = Vec::new();
-        let mut user_messages = Vec::new();
-        for pending in admissions
-            .turn_inputs
-            .iter()
-            .flat_map(|admitted| &admitted.inputs)
-        {
-            let input = pending
-                .input
-                .live("PendingTurnInput")
-                .map_err(|error| error.runtime_error())?;
-            let normalized = normalize_input_items(&input.items);
-            let user_id = crate::runtime::ingress_message_id(&pending.input_id);
-            user_messages.push(opening_user_message(
-                user_id,
-                run,
-                Some(pending.input_id.clone()),
-                normalized,
-            ));
-        }
-        // A run without host input still opens with an empty user message.
-        if user_messages.is_empty() {
-            user_messages.push(opening_user_message(
-                format!("m_turn_{run}_input"),
-                run,
-                None,
-                Vec::new(),
-            ));
-        }
-        turn_delta.extend(user_messages);
+        let turn_delta = match &recorded_build {
+            Some(build) => build.messages.clone(),
+            None => turn_messages(run, &admissions)?,
+        };
         let mut initial_turn_input_applications = Vec::new();
         for admitted in &mut admissions.turn_inputs {
             admitted.record_initial_turn_application(run, &turn_delta);
@@ -178,21 +163,28 @@ impl LashRuntime {
             );
         }
 
-        // Context pressure runs before the turn's graph-append draft exists:
-        // a frame it opens commits on its own, and the turn is drafted over
-        // the frame the turn then runs in (FIG-4110).
-        let pressure = self
-            .run_context_pressure(ContextPressureStep {
-                run: std::marker::PhantomData,
-                trace_turn_id: run,
-                previous_prompt_usage: previous_prompt_usage.clone(),
-                scoped_effect_controller: &controller,
-            })
-            .await?;
-        let previous_prompt_usage = if pressure.opened_frame {
-            None
-        } else {
-            previous_prompt_usage
+        // A fresh turn's context pressure runs before the turn's
+        // graph-append draft exists: a frame it opens commits on its own,
+        // and the turn is drafted over the frame the turn then runs in
+        // (FIG-4110). A resumed turn serves the records its start decided.
+        let (pressure_records, previous_prompt_usage) = match &recorded_build {
+            Some(build) => (build.pressure.clone(), previous_prompt_usage),
+            None => {
+                let pressure = self
+                    .run_context_pressure(ContextPressureStep {
+                        run: std::marker::PhantomData,
+                        trace_turn_id: run,
+                        previous_prompt_usage: previous_prompt_usage.clone(),
+                        scoped_effect_controller: &controller,
+                    })
+                    .await?;
+                let usage = if pressure.opened_frame {
+                    None
+                } else {
+                    previous_prompt_usage
+                };
+                (pressure.turn_records, usage)
+            }
         };
         // One graph-append draft per turn: prepare-turn hooks, the driver's
         // hooks and finalize-turn hooks all record into it, and `turn.commit`
@@ -201,7 +193,7 @@ impl LashRuntime {
             &self.state,
             Arc::clone(&self.host.core.clock),
         );
-        for records in &pressure.turn_records {
+        for records in &pressure_records {
             turn_graph_appends
                 .record(&self.state.session_id, records)
                 .map_err(|err| {
@@ -232,43 +224,57 @@ impl LashRuntime {
             base_read_model.active_events,
         )
         .with_render_cache(base_read_model.prompt_render_cache);
-        let messages = window.then(turn_delta);
-        // The attachment-omission history policies (ADR 0133) narrow the
-        // request's view only: `messages` stays the turn's history.
-        let context_transform = crate::runtime::RuntimeNamedPhase::begin(
-            self.turn_phase_probe.clone(),
-            "context_transform",
-        );
-        let mut request_messages = messages.clone();
-        let trace_context = {
-            let context =
-                lash_trace::TraceContext::default().for_session(self.state.session_id.clone());
-            match controller.turn_id() {
-                Some(turn_id) => context.for_turn(turn_id),
-                None => context,
+        let messages = window.then(turn_delta.clone());
+        let build = match recorded_build {
+            Some(build) => build,
+            None => {
+                // The attachment-omission history policies (ADR 0133)
+                // decide once, at the turn's start: the turn records what
+                // they omitted, and its machine narrows the request's view
+                // by that record.
+                let context_transform = crate::runtime::RuntimeNamedPhase::begin(
+                    self.turn_phase_probe.clone(),
+                    "context_transform",
+                );
+                let trace_context = {
+                    let context = lash_trace::TraceContext::default()
+                        .for_session(self.state.session_id.clone());
+                    match controller.turn_id() {
+                        Some(turn_id) => context.for_turn(turn_id),
+                        None => context,
+                    }
+                };
+                let omissions = plugins
+                    .attachment_omissions(
+                        &crate::plugin::AttachmentOmissionContext {
+                            session_id: self.state.session_id.clone(),
+                            plugin_config: self.state.admitted_plugin_config(),
+                            state: self.read_view(),
+                            prompt_usage: previous_prompt_usage.clone(),
+                            max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
+                            traces: manager.trace_emitter(),
+                            trace_context,
+                        },
+                        &messages,
+                    )
+                    .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
+                drop(context_transform);
+                crate::runtime::durable::turn_build::TurnBuild {
+                    turn_index,
+                    frame: self
+                        .state
+                        .current_frame_node_id
+                        .clone()
+                        .expect("an admitted turn has a committed active agent frame")
+                        .into_inner(),
+                    messages: turn_delta,
+                    omissions: crate::runtime::durable::turn_build::TurnBuild::record_omissions(
+                        &omissions,
+                    ),
+                    pressure: pressure_records,
+                }
             }
         };
-        let omissions = plugins
-            .attachment_omissions(
-                &crate::plugin::AttachmentOmissionContext {
-                    session_id: self.state.session_id.clone(),
-                    plugin_config: self.state.admitted_plugin_config(),
-                    state: self.read_view(),
-                    prompt_usage: previous_prompt_usage.clone(),
-                    max_context_tokens: LashRuntime::max_context_tokens(self).ok(),
-                    traces: manager.trace_emitter(),
-                    trace_context,
-                },
-                &request_messages,
-            )
-            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
-        if !omissions.is_empty() {
-            crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
-        }
-        let prepared_context = crate::session_model::context::PreparedContext {
-            messages: request_messages,
-        };
-        drop(context_transform);
         self.state.last_prompt_usage = None;
 
         // The before-turn hooks: their session changes and events.
@@ -387,15 +393,14 @@ impl LashRuntime {
         } else {
             run_config
         };
-        let run_config =
-            run_config.with_content_preparations(projection.head.phase_content_preparations());
         let driver = Box::new(RuntimeTurnDriver {
             prompt_state: projection.prompt.draft(),
+            build,
+            build_journaled: !fresh,
 
             run: std::marker::PhantomData,
             session,
             policy: resolved_turn_policy,
-            prepared_context,
             answered_cell_calls: Default::default(),
             answered_cell_execution: None,
             cell_end: Default::default(),
@@ -451,6 +456,7 @@ impl LashRuntime {
         Ok(DurableTurn {
             driver,
             window,
+            pinned: None,
             messages,
             before_turn,
             trace_scope: turn_boundary.scope,
@@ -487,6 +493,42 @@ impl LashRuntime {
                 )
             })
     }
+}
+
+/// The turn's new messages: one opening message per input its run took, or
+/// an empty user message for a run without host input.
+fn turn_messages(
+    run: &TurnId,
+    admissions: &LogicalTurnAdmissions,
+) -> Result<Vec<Message>, RuntimeError> {
+    let mut user_messages = Vec::new();
+    for pending in admissions
+        .turn_inputs
+        .iter()
+        .flat_map(|admitted| &admitted.inputs)
+    {
+        let input = pending
+            .input
+            .live("PendingTurnInput")
+            .map_err(|error| error.runtime_error())?;
+        let normalized = normalize_input_items(&input.items);
+        let user_id = crate::runtime::ingress_message_id(&pending.input_id);
+        user_messages.push(opening_user_message(
+            user_id,
+            run,
+            Some(pending.input_id.clone()),
+            normalized,
+        ));
+    }
+    if user_messages.is_empty() {
+        user_messages.push(opening_user_message(
+            format!("m_turn_{run}_input"),
+            run,
+            None,
+            Vec::new(),
+        ));
+    }
+    Ok(user_messages)
 }
 
 /// One opening message per accepted input: normalization may combine text

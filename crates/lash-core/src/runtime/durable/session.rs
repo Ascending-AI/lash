@@ -915,15 +915,17 @@ pub struct ComposedCall {
     pub template: RecordedRequestTemplate,
 }
 
-/// What a phase row's checkpoint holds: the machine's saved turn, the
-/// steering input its checkpoints delivered, which the phase bound to the
+/// What a phase row's checkpoint holds: the window the turn started from,
+/// the steering input its checkpoints delivered, which the phase bound to the
 /// run, and the turn's before-turn decisions, retained trace scope and
 /// recorded run configuration, which a resume serves. It carries no plugin
 /// state: the run's changed namespaces are rows of their own (FIG-5301).
 /// Encoded by the phase runner, its owner, as its PhaseRoot.
 pub struct PhaseCheckpoint {
-    /// The machine's checkpoint with the content it names.
-    pub saved: SavedTurn<HostTurnProtocol>,
+    /// The pin of the committed window the turn started from, which a
+    /// resume rebuilds its machine over; `None` for a turn started without
+    /// one.
+    pub window_pin: Option<lash_sansio::TurnWindowPin>,
     /// The steering input the turn's checkpoints delivered, with its
     /// application evidence ([`TurnDrive::delivered_inputs`]).
     pub delivered: Vec<crate::AdmittedTurnInputs>,
@@ -1011,11 +1013,7 @@ impl PhaseCheckpoint {
         &self,
         tx: &mut lash_durable::ActorTx,
     ) -> Result<lash_durable::domain::checkpoint_graph::NodeId, String> {
-        Ok(
-            super::phase_root::StagedPhase::of(self, &[], &Default::default())?
-                .staged_in(tx)
-                .0,
-        )
+        Ok(super::phase_root::StagedPhase::of(self)?.staged_in(tx).0)
     }
 
     /// Stages in `tx` the PhaseRoot `root` of `graph` with its checkpoint
@@ -1050,6 +1048,11 @@ pub struct RecordedPreparation {
     pub config: super::run_config::RecordedRunConfig,
     /// The first start of the cell the phase holds, if any.
     pub cell: Option<CellStart>,
+    /// The turn's build inputs, which its journal records; `None` for a
+    /// host that builds its machine itself.
+    pub(crate) build: Option<super::turn_build::TurnBuild>,
+    /// The window the turn started from, at its pin.
+    pub(crate) window: Option<super::head::TurnWindow>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -1286,16 +1289,17 @@ fn session_of(cx: &ActorContext) -> SessionId {
     SessionId::try_from(cx.actor().id().to_owned()).expect("a session actor names its session")
 }
 
-/// The restore of one turn from its checkpoint, handed to
-/// [`TurnServices::resume`]: it runs at most once, so a takeover performs
-/// exactly one `restore_from_checkpoint`, reported to the context's probe.
+/// The restore of one turn from its rows, handed to
+/// [`TurnServices::resume`]: it runs at most once, so a takeover replays
+/// the turn's journal exactly once, reported to the context's probe.
 pub struct TurnRestore<'a> {
     cx: &'a ActorContext,
     row: &'a TurnRow,
     heads: &'a mut SessionOwner,
-    /// The phase checkpoint, once read, with the nodes its content is
-    /// stored as.
-    phase: Option<(PhaseCheckpoint, super::phase_root::PhaseStored)>,
+    /// The phase checkpoint, once read.
+    phase: Option<PhaseCheckpoint>,
+    /// The turn's journal, once read.
+    journal: Option<super::turn_build::ReadJournal>,
 }
 
 impl<'a> TurnRestore<'a> {
@@ -1309,6 +1313,7 @@ impl<'a> TurnRestore<'a> {
             row,
             heads,
             phase: None,
+            journal: None,
         }
     }
 
@@ -1346,7 +1351,29 @@ impl<'a> TurnRestore<'a> {
                 })?
             }
         };
-        Ok(&self.phase.insert(phase).0)
+        Ok(self.phase.insert(phase))
+    }
+
+    /// The turn's journal, read the first time it is asked for.
+    async fn journal(&mut self) -> Result<&mut super::turn_build::ReadJournal, TurnRestoreError> {
+        let journal = match self.journal.take() {
+            Some(journal) => journal,
+            None => {
+                let row = self.row;
+                let rows = self
+                    .cx
+                    .durable_reads()?
+                    .turn_journal(&row.session, &row.run)
+                    .await?;
+                super::turn_build::read_journal(rows).map_err(|reason| {
+                    TurnRestoreError::Undecodable {
+                        run: row.run.clone(),
+                        reason,
+                    }
+                })?
+            }
+        };
+        Ok(self.journal.insert(journal))
     }
 
     /// The turn's row.
@@ -1401,14 +1428,33 @@ impl<'a> TurnRestore<'a> {
             .config
             .clone()
             .ok_or_else(|| TurnRestoreError::Undecodable {
-                run,
+                run: run.clone(),
                 reason: "the turn checkpoint records no run configuration".to_owned(),
             })?;
+        let before_turn = phase.before_turn.clone();
+        let trace = phase.trace.clone();
+        let cell = phase.cell.clone();
+        let pin = phase.window_pin.clone();
+        let window = match pin {
+            None => None,
+            Some(pin) => Some(
+                self.heads
+                    .window_at(self.cx, &self.row.session, &pin)
+                    .await
+                    .map_err(|source| TurnRestoreError::Window {
+                        run: run.clone(),
+                        source: Box::new(source),
+                    })?,
+            ),
+        };
+        let build = self.journal().await?.build.clone();
         Ok(RecordedPreparation {
-            before_turn: phase.before_turn.clone(),
-            trace: phase.trace.clone(),
+            before_turn,
+            trace,
             config,
-            cell: phase.cell.clone(),
+            cell,
+            build,
+            window,
         })
     }
 
@@ -1428,24 +1474,27 @@ impl<'a> TurnRestore<'a> {
         syncs: lash_sansio::RecordedSyncs<'_>,
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
-        self.phase().await?;
-        let Some((
-            PhaseCheckpoint {
-                saved, delivered, ..
-            },
-            stored,
-        )) = self.phase.take()
-        else {
-            return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
+        let PhaseCheckpoint {
+            window_pin,
+            delivered,
+            ..
+        } = match self.phase.take() {
+            Some(phase) => phase,
+            None => {
+                self.phase().await?;
+                self.phase
+                    .take()
+                    .ok_or_else(|| TurnRestoreError::NoCheckpoint(row.run.clone()))?
+            }
         };
         // The session's head can have moved past the window the turn
         // started from: the machine is rebuilt over that window first.
-        if let Some(pin) = saved.checkpoint.window_pin()
-            && machine.window_pin() != Some(pin)
+        if let Some(pin) = window_pin
+            && machine.window_pin() != Some(&pin)
         {
             let window = self
                 .heads
-                .window_at(self.cx, &row.session, pin)
+                .window_at(self.cx, &row.session, &pin)
                 .await
                 .map_err(|source| TurnRestoreError::Window {
                     run: row.run.clone(),
@@ -1472,25 +1521,12 @@ impl<'a> TurnRestore<'a> {
             }
             | UnfinishedPhase::Tools { .. } => None,
         };
-        let reads = self.cx.durable_reads()?;
-        let namespaces = reads.turn_namespaces(&row.session, &row.run).await?;
-        let mut rows = Vec::new();
-        for journaled in reads.turn_journal(&row.session, &row.run).await? {
-            rows.push(
-                serde_json::from_str::<lash_sansio::JournalRow<_>>(&journaled).map_err(
-                    |error| TurnRestoreError::Undecodable {
-                        run: row.run.clone(),
-                        reason: format!("a journal row does not decode: {error}"),
-                    },
-                )?,
-            );
-        }
-        let inputs = lash_sansio::JournalRow::assemble(rows).map_err(|divergence| {
-            TurnRestoreError::Diverged {
-                run: row.run.clone(),
-                divergence,
-            }
-        })?;
+        let namespaces = self
+            .cx
+            .durable_reads()?
+            .turn_namespaces(&row.session, &row.run)
+            .await?;
+        let inputs = std::mem::take(&mut self.journal().await?.inputs);
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         machine
             .replay_inputs(inputs, syncs)
@@ -1498,11 +1534,6 @@ impl<'a> TurnRestore<'a> {
                 run: row.run.clone(),
                 divergence,
             })?;
-        // The turn's next phase builds on the content its last phase stored:
-        // the replayed machine stages its own checkpoint, whose blobs that
-        // phase pinned.
-        let _ = machine.checkpoint_delta();
-        stored.restored(&mut machine);
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

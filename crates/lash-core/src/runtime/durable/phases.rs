@@ -69,41 +69,28 @@ use crate::{
 };
 use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::llm::types::AdmittedSend;
-use lash_sansio::CheckpointDelta;
 use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
-/// The phase checkpoint of `drive` as it stands: its machine's checkpoint
-/// and the input its checkpoints delivered, staged as its PhaseRoot.
+/// The phase checkpoint of `drive` as it stands, staged as its PhaseRoot,
+/// with the journal rows its commit appends.
 fn encode_checkpoint(
     drive: &mut dyn TurnDrive,
     session: &SessionId,
     run: &TurnId,
 ) -> Result<StagedPhase, TurnError> {
-    let delta = drive.machine().checkpoint_delta();
-    encode_phase(drive, delta, session, run)
-}
-
-/// `delta`, a checkpoint of `drive`'s machine, staged as its PhaseRoot: the
-/// content the machine's checkpoint added, over the content an earlier
-/// phase of the turn stored.
-fn encode_phase(
-    drive: &mut dyn TurnDrive,
-    delta: CheckpointDelta<HostTurnProtocol>,
-    session: &SessionId,
-    run: &TurnId,
-) -> Result<StagedPhase, TurnError> {
     lash_core_ids::operational_metrics::turn::sync_phase("checkpoint encode", || {
         let checkpoint = PhaseCheckpoint {
-            saved: delta.saved,
+            window_pin: drive.machine().window_pin().cloned(),
             delivered: drive.delivered_inputs(),
             before_turn: drive.before_turn(),
             trace: drive.trace_scope(),
             config: drive.run_config(),
             cell: drive.cell_start(),
         };
-        StagedPhase::of(&checkpoint, &delta.held, &delta.links)
-            .and_then(|staged| staged.journaling(drive.machine(), session, run))
+        let build = drive.unjournaled_build();
+        StagedPhase::of(&checkpoint)
+            .and_then(|staged| staged.journaling(build, drive.machine(), session, run))
             .map_err(TurnError::Exec)
     })
 }
@@ -702,14 +689,13 @@ async fn phase_loop(
                 {
                     pin.attempt = pin.attempt.max(reservation.attempt);
                 }
-                let delta = drive.machine().checkpoint_delta();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
                     tx.opened_at(),
                     row.turn_deadline,
                     pinned,
                     calls.saturating_add(1),
-                    model_call::request_ref(&delta.saved.checkpoint)?,
+                    model_call::request_ref(drive.machine())?,
                     drive.live_stream_cursor(),
                 )?;
                 if let model_call::ModelStart::Send { pin, resent, .. } = &start {
@@ -759,7 +745,7 @@ async fn phase_loop(
                     }
                     let written = write_run_changes(drive.as_mut(), &mut tx, &session, &run);
                     let (checkpoint, stored) =
-                        encode_phase(drive.as_mut(), delta, &session, &run)?.staged_in(&mut tx);
+                        encode_checkpoint(drive.as_mut(), &session, &run)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),

@@ -162,9 +162,10 @@ discriminator! {
     ExecStatus { Parked = 0, Ended = 1 }
 }
 
-/// Kind 33: a turn phase's checkpoint root. Its checkpoint text excludes
-/// its structured window pin and its content, which it names by digest, each a
-/// TurnContent or ModelRequestFrame node, ascending. Its recorded run is
+/// Kind 33: a turn phase's checkpoint root. Its checkpoint text holds what
+/// the turn's start and phases decided that a resume serves; the window the
+/// turn started from is its structured pin, and the turn's machine is the
+/// one its journal rebuilds, so the root names no content. Its recorded run is
 /// the shared ConfigValue graph of its resolved shape, with typed environment
 /// references for every model round.
 /// The integrator owns the checkpoint data. A phase root owes nothing:
@@ -174,7 +175,6 @@ discriminator! {
 pub struct PhaseRoot {
     pub checkpoint: String,
     pub window_pin: Option<serde_json::Value>,
-    pub content: Vec<(String, NodeId)>,
     pub run: Option<RunConfigReference>,
     pub environments: Vec<(u64, NodeId)>,
 }
@@ -238,36 +238,22 @@ impl TokenCodec for RunConfigReference {
 
 impl TokenCodec for PhaseRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(4);
         out.text(&self.checkpoint);
         self.window_pin.encode(out);
-        out.seq(self.content.len() as u64);
-        for (digest, node) in &self.content {
-            out.seq(2);
-            out.text(digest);
-            node.encode(out);
-        }
         self.run.encode(out);
         self.environments.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(4)?;
         let checkpoint = input.text()?.to_owned();
         let window_pin = Option::decode(input)?;
-        let count = input.seq()?;
-        let mut content = Vec::new();
-        for _ in 0..count {
-            input.expect_struct(2)?;
-            let digest = input.text()?.to_owned();
-            content.push((digest, NodeId::decode(input)?));
-        }
         let run = Option::decode(input)?;
         let environments = Vec::decode(input)?;
         Ok(Self {
             checkpoint,
             window_pin,
-            content,
             run,
             environments,
         })

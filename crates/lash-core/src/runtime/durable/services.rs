@@ -12,8 +12,8 @@ pub use super::commit_publication::{
 };
 use super::head::SessionHead;
 use super::session::{
-    AdmittedInputs, OpenTurn, RecordedPreparation, TurnDrive, TurnError, TurnRestore, TurnRow,
-    TurnServices,
+    AdmittedInputs, OpenTurn, RecordedPreparation, TurnDrive, TurnError, TurnRestore,
+    TurnRestoreError, TurnRow, TurnServices,
 };
 use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::ActorContext;
@@ -216,21 +216,32 @@ impl RuntimeTurnServices {
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
+        let mut pinned = None;
         let start = match recorded {
             Some(RecordedPreparation {
                 before_turn,
                 trace,
                 config,
                 cell,
-            }) => TurnStart::Resumed {
-                before_turn,
-                trace,
-                config: Box::new(config),
-                cell,
-            },
+                build,
+                window,
+            }) => {
+                let build = build.ok_or_else(|| TurnRestoreError::Undecodable {
+                    run: row.run.clone(),
+                    reason: "the turn's journal records no build inputs".to_owned(),
+                })?;
+                pinned = window;
+                TurnStart::Resumed {
+                    before_turn,
+                    trace,
+                    config: Box::new(config),
+                    cell,
+                    build: Box::new(build),
+                }
+            }
             None => TurnStart::Fresh(row.admission.trace().cloned()),
         };
-        let turn = Box::pin(runtime.prepare_durable_turn(
+        let mut turn = Box::pin(runtime.prepare_durable_turn(
             &controller,
             &row.run,
             admissions,
@@ -238,6 +249,7 @@ impl RuntimeTurnServices {
             &observer,
         ))
         .await?;
+        turn.pinned = pinned;
         cx.retain_session_environment(turn.driver.environment.shared.clone())
             .await?;
         // The turn's commit settles its inputs and queued work from the

@@ -2,69 +2,103 @@ use super::*;
 pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as SyncFailure;
 use lash_execution_contracts::plugin_error::PluginError;
 
-impl RuntimeTurnDriver<'_> {
-    /// The turn's machine over `messages`, which lead with `window`'s,
-    /// counting its protocol iterations on from `run_offset`.
-    #[expect(
-        clippy::expect_used,
-        reason = "an admitted turn has a committed active agent frame and an opener scope"
-    )]
-    pub(super) fn prepare_machine(
-        &mut self,
-        window: crate::runtime::durable::head::TurnWindow,
-        messages: crate::MessageSequence,
-        run_offset: usize,
-    ) -> TurnMachine {
-        #[cfg(feature = "perf-witness")]
-        let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
-            lash_core_ids::perf_witness::history::Component::RequestBuild,
-        );
-        let session_policy = self.policy.clone();
-        // The machine starts with no environment: its protocol-start sync
-        // builds the prompt and the tool surface as a recorded step, so the
-        // shift never reads a surface a replay could not reproduce (FIG-3672
-        // P7b). Only the protocol's driver configuration is taken here, and
-        // that is host configuration, independent of the tools.
-        self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
-        let turn_driver_preamble = self.session.protocol_driver_preamble();
-        // ADR 0117: the model's calls are named under the admitted scope's
-        // run, continued by this physical turn.
-        let model_tool_calls = lash_sansio::ModelToolCalls::new(
-            crate::EffectOpener::for_scope(self.scoped_effect_controller.admitted_scope())
-                .expect("a turn runs under an opener scope")
-                .tool_call_admission(),
-            self.turn_index as u64,
-        );
-        let prepared = crate::build_turn(crate::SansIoTurnInput {
-            session_id: self.session_id.clone(),
-            agent_frame_id: self
-                .turn_pipeline
-                .state()
-                .current_frame_node_id
-                .clone()
-                .expect("an admitted turn has a committed active agent frame")
-                .into_inner(),
-            turn_id: self.turn_id.clone(),
-            model: session_policy.llm_profile_config().clone(),
-            window,
-            messages,
-            events: self.turn_pipeline.active_events(),
-            protocol_run_offset: run_offset,
-            turn_driver_preamble,
-            turn_budget: session_policy.turn_budget,
-            no_progress_budget: session_policy.no_progress_budget,
-            attachment_acceptance: Arc::clone(&session_policy.attachment_acceptance),
-            generation: session_policy.generation.clone(),
-            emit_llm_trace: false,
-            termination: self.protocol_turn_options.clone(),
-            model_tool_calls,
-        });
-        self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
-        let mut machine = prepared.machine;
-        machine.adopt_prepared_messages(self.prepared_context.messages.clone());
-        machine
-    }
+/// What the one machine builder reads besides a turn's build rows: the
+/// session the turn runs in, its resolved policy and protocol options, and
+/// the events of the turn's draft over the window that draft started from.
+/// None of it needs a claim, a store write or a plugin callback.
+pub(in crate::runtime) struct MachineBasis<'a> {
+    pub(in crate::runtime) session: &'a Session,
+    pub(in crate::runtime) session_id: &'a SessionId,
+    pub(in crate::runtime) turn_id: &'a lash_vocabulary::identity::TurnId,
+    pub(in crate::runtime) policy: &'a RuntimeSessionPolicy,
+    pub(in crate::runtime) protocol_turn_options: crate::ProtocolTurnOptions,
+    /// The window the turn's draft started from, the session's head.
+    pub(in crate::runtime) head_window: crate::runtime::durable::head::TurnWindow,
+    /// The turn draft's events, led by `head_window`'s.
+    pub(in crate::runtime) events: lash_protocol_types::AppendVec<SessionHistoryRecord>,
+}
 
+/// The turn's machine as its start built it, from its journaled `build`
+/// inputs over `basis`, rebuilt over `pinned`, the window at the turn's
+/// pin, when the head has moved past it since: a fresh turn, a resume and
+/// the open-turn inspection all build the machine here.
+///
+/// # Errors
+///
+/// [`lash_sansio::ReplayDivergence`] when the machine cannot be rebuilt
+/// over the pinned window.
+pub(in crate::runtime) fn build_turn_machine(
+    basis: MachineBasis<'_>,
+    build: &crate::runtime::durable::turn_build::TurnBuild,
+    pinned: Option<crate::runtime::durable::head::TurnWindow>,
+) -> Result<TurnMachine, lash_sansio::ReplayDivergence> {
+    #[cfg(feature = "perf-witness")]
+    let _history_scope = lash_core_ids::perf_witness::history::Scope::enter(
+        lash_core_ids::perf_witness::history::Component::RequestBuild,
+    );
+    let MachineBasis {
+        session,
+        session_id,
+        turn_id,
+        policy,
+        protocol_turn_options,
+        head_window,
+        events,
+    } = basis;
+    // The machine starts with no environment: its protocol-start sync
+    // builds the prompt and the tool surface as a recorded step, so the
+    // shift never reads a surface a replay could not reproduce (FIG-3672
+    // P7b). Only the protocol's driver configuration is taken here, and
+    // that is host configuration, independent of the tools.
+    let turn_driver_preamble = session.protocol_driver_preamble();
+    // ADR 0117: the model's calls are named under the admitted scope's
+    // run, continued by this physical turn.
+    let model_tool_calls = lash_sansio::ModelToolCalls::new(
+        crate::EffectOpener::turn(session_id.clone(), turn_id.clone()).tool_call_admission(),
+        build.turn_index as u64,
+    );
+    let messages = head_window.then(build.messages.clone());
+    let prepared = crate::build_turn(crate::SansIoTurnInput {
+        session_id: session_id.clone(),
+        agent_frame_id: build.frame.clone(),
+        turn_id: turn_id.clone(),
+        model: policy.llm_profile_config().clone(),
+        window: head_window.clone(),
+        messages,
+        events,
+        protocol_run_offset: 0,
+        turn_driver_preamble,
+        turn_budget: policy.turn_budget,
+        no_progress_budget: policy.no_progress_budget,
+        attachment_acceptance: Arc::clone(&policy.attachment_acceptance),
+        generation: policy.generation.clone(),
+        emit_llm_trace: false,
+        termination: protocol_turn_options,
+        model_tool_calls,
+    });
+    let mut machine = prepared.machine;
+    let window = match pinned {
+        Some(pinned) if pinned.pin() != head_window.pin() => {
+            machine.rewindow(pinned.clone())?;
+            pinned
+        }
+        _ => head_window,
+    };
+    // The attachment-omission decisions narrow the request's view only:
+    // the machine's messages stay the turn's history (ADR 0133).
+    let mut request_messages = window.then(build.messages.clone());
+    let omissions = build.omissions();
+    if !omissions.is_empty() {
+        crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
+    }
+    machine.adopt_prepared_messages(request_messages);
+    if let Err(event) = validate_recorded_selection(policy) {
+        machine.fail_turn(*event);
+    }
+    Ok(machine)
+}
+
+impl RuntimeTurnDriver<'_> {
     /// Capture the facts this sync will adopt before deciding whether a held
     /// round outcome must commit ahead of an environment preparation.
     pub(super) fn prepare_environment_sync(&mut self) -> bool {
@@ -179,33 +213,6 @@ impl RuntimeTurnDriver<'_> {
             messages,
         )
     }
-
-    /// The recorded wire model, once the recorded reasoning is judged
-    /// against the recorded capability. It reads recorded facts alone and
-    /// names the model by its recorded key, so a replay judges the same way
-    /// on a deployment that no longer serves the key (FIG-4404).
-    pub(super) fn validate_recorded_selection(&self) -> Result<(), Box<SessionStreamEvent>> {
-        let recorded = self.policy.llm_profile_config();
-        let model = recorded.model.wire_model().to_string();
-        // Effort names match exactly, so the selection travels unchanged.
-        match recorded.metadata().capability.validate_selection(
-            &model,
-            recorded.key().as_str(),
-            &recorded.reasoning,
-        ) {
-            Ok(()) => {}
-            Err(error) => {
-                return Err(Box::new(make_error_event(
-                    crate::TurnFailureKind::LlmProvider,
-                    Some(error.category.failure_code().into()),
-                    error.message.clone(),
-                    Some(error.message),
-                    lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
-                )));
-            }
-        }
-        Ok(())
-    }
 }
 
 impl TurnEffectContext {
@@ -257,4 +264,33 @@ fn environment_sync(
             .filter(|(name, operation)| name.replace("__", ".") != *operation)
             .collect(),
     }
+}
+
+/// The recorded wire model, once the recorded reasoning is judged against
+/// the recorded capability. It reads recorded facts alone and names the
+/// model by its recorded key, so a replay judges the same way on a
+/// deployment that no longer serves the key (FIG-4404).
+fn validate_recorded_selection(
+    policy: &RuntimeSessionPolicy,
+) -> Result<(), Box<SessionStreamEvent>> {
+    let recorded = policy.llm_profile_config();
+    let model = recorded.model.wire_model().to_string();
+    // Effort names match exactly, so the selection travels unchanged.
+    match recorded.metadata().capability.validate_selection(
+        &model,
+        recorded.key().as_str(),
+        &recorded.reasoning,
+    ) {
+        Ok(()) => {}
+        Err(error) => {
+            return Err(Box::new(make_error_event(
+                crate::TurnFailureKind::LlmProvider,
+                Some(error.category.failure_code().into()),
+                error.message.clone(),
+                Some(error.message),
+                lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
+            )));
+        }
+    }
+    Ok(())
 }

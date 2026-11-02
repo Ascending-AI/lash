@@ -67,7 +67,9 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     .await
     .expect("prepare the fixture's turn");
     let mut driver = turn.driver;
-    let mut machine = driver.turn_machine(turn.window, turn.messages);
+    let mut machine = driver
+        .turn_machine(turn.window, None)
+        .expect("build the fixture's machine");
     // Warm the session projection and executor's fixed setup before either
     // cohort; their first-use work is unrelated to sequence history depth.
     drop(super::super::local_effects::turn_effect_executor(
@@ -97,9 +99,7 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
             .collect::<Vec<_>>()
             .into();
         // Owned history occurs after a cold restore or a plugin rewrite.
-        // The machine supplies the body history; the driver retains its
-        // independently prepared request context.
-        driver.prepared_context.messages = history.clone();
+        // The machine supplies the body history and the request context.
         machine.adopt_committed_messages(history.clone());
         machine.adopt_prepared_messages(history);
         let measurement = allocation_counter::Measurement::start();

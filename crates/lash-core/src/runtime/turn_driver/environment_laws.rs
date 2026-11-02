@@ -183,7 +183,10 @@ async fn fixture_with(plugins: Vec<Arc<dyn crate::PluginFactory>>) -> Fixture {
     .await
     .expect("prepare the fixture's turn");
     let services = runtime.services.clone();
-    let machine = turn.driver.prepare_machine(turn.window, turn.messages, 0);
+    let machine = turn
+        .driver
+        .turn_machine(turn.window, None)
+        .expect("build the fixture's machine");
     Fixture {
         driver: turn.driver,
         calls,
@@ -216,19 +219,17 @@ async fn stage(
         domain::{CellId, ExecKey, ExecRootWrite},
     };
     let mut tx = f.driver.scoped_effect_controller.begin().await.unwrap();
-    let delta = f.machine.checkpoint_delta();
     let phase = crate::runtime::durable::session::PhaseCheckpoint {
-        saved: delta.saved,
+        window_pin: f.machine.window_pin().cloned(),
         delivered: Vec::new(),
         before_turn: Vec::new(),
         trace: None,
         config: Some(f.driver.run_config.clone()),
         cell: f.driver.cell_start.clone(),
     };
-    let (root, _stored) =
-        crate::runtime::durable::phase_root::StagedPhase::of(&phase, &delta.held, &delta.links)
-            .unwrap()
-            .staged_in(&mut tx);
+    let (root, _stored) = crate::runtime::durable::phase_root::StagedPhase::of(&phase)
+        .unwrap()
+        .staged_in(&mut tx);
     tx.write(DomainWrite::Turn(
         lash_durable::domain::TurnWrite::Advance {
             session: f.driver.session_id.clone(),
@@ -436,7 +437,7 @@ async fn env_round() {
         )
         .await
         .unwrap();
-    let (phase, _) = crate::runtime::durable::phase_root::load(
+    let phase = crate::runtime::durable::phase_root::load(
         &graph,
         graph.root,
         lash_durable::domain::graph::OWNER_READ_LIMITS,
@@ -585,7 +586,7 @@ async fn env_replay() {
         )
         .await
         .unwrap();
-    let (phase, _) = crate::runtime::durable::phase_root::load(
+    let phase = crate::runtime::durable::phase_root::load(
         &graph,
         root,
         lash_durable::domain::graph::OWNER_READ_LIMITS,

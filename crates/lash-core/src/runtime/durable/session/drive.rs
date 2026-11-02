@@ -174,6 +174,18 @@ pub trait TurnDrive: Send {
     /// [`run_config`](Self::run_config).
     fn run_config_stored(&mut self, _stored: &super::super::run_config::RunConfigStored) {}
 
+    /// The turn's build inputs as its journal's first row, until a phase
+    /// commit journaled them (FIG-7585): what a resume and the open-turn
+    /// inspection build the turn's machine from. `None` for a drive that
+    /// builds its machine itself, or once they are journaled.
+    fn unjournaled_build(&self) -> Option<String> {
+        None
+    }
+
+    /// Record that a phase commit journaled
+    /// [`unjournaled_build`](Self::unjournaled_build).
+    fn build_journaled(&mut self) {}
+
     fn trace_scope(&self) -> Option<lash_trace::DurableTraceScope> {
         None
     }

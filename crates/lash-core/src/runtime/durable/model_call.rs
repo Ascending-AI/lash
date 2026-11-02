@@ -160,28 +160,24 @@ pub(super) enum ModelStart {
     },
 }
 
-/// The pinned reference of the model request `checkpoint` waits on: the
-/// digest of how the checkpoint names it, which is the window it pins, how
-/// many of the request's leading messages are that window's render, and the
-/// content digests of the request's frame and of the chain of its other
-/// messages. The window at a pin is immutable and the checkpoint already
-/// hashed the rest, so the reference costs no pass over the prompt.
+/// The pinned reference of the model request `machine` waits on: the
+/// digest of the window the machine pins, the request's envelope and the
+/// content digest of its messages. The window at a pin is immutable and the
+/// messages' digest is kept as they are appended, so the reference costs no
+/// pass over the prompt, and a machine rebuilt from the turn's journal waits
+/// on a request with the same reference.
 ///
 /// # Errors
 ///
-/// [`TurnError::Exec`] when the checkpoint waits on no model call.
-pub(super) fn request_ref(
-    checkpoint: &TurnCheckpoint<HostTurnProtocol>,
-) -> Result<String, TurnError> {
-    let (request, messages, rendered_from_window) =
-        checkpoint.pending_request().ok_or_else(|| {
-            TurnError::Exec("the turn's checkpoint waits on no model call".to_owned())
-        })?;
+/// [`TurnError::Exec`] when the machine waits on no model call.
+pub(super) fn request_ref(machine: &crate::TurnMachine) -> Result<String, TurnError> {
+    let request = machine
+        .waited_request()
+        .ok_or_else(|| TurnError::Exec("the turn's machine waits on no model call".to_owned()))?;
     let named = serde_json::to_vec(&(
-        checkpoint.window_pin(),
-        rendered_from_window,
-        request,
-        messages,
+        machine.window_pin(),
+        request.envelope(),
+        request.messages().content_digest(),
     ))
     .map_err(|error| TurnError::Exec(format!("the model request does not encode: {error}")))?;
     Ok(format!(

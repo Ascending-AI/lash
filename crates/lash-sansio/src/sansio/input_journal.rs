@@ -554,6 +554,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
         Ok(())
     }
 
+    /// The model request the machine waits on, if it waits on one.
+    #[must_use]
+    pub fn waited_request(&self) -> Option<&Arc<RetainedLlmRequest>> {
+        match &self.state {
+            MachineState::Waiting {
+                work: PendingWork::Llm { request, .. },
+                ..
+            } => Some(request),
+            _ => None,
+        }
+    }
+
     /// The request the machine waits on as model call `id`.
     fn waiting_request(&self, id: EffectId) -> Option<Arc<RetainedLlmRequest>> {
         match &self.state {

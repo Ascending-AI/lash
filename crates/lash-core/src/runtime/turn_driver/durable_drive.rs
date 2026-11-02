@@ -105,12 +105,13 @@ impl RuntimeDrive {
         let DurableTurn {
             mut driver,
             window,
+            pinned,
             messages,
             before_turn,
             trace_scope,
             attachments,
         } = turn;
-        let mut machine = fresh_machine(&mut driver, window, messages)?;
+        let mut machine = fresh_machine(&mut driver, window, messages, pinned)?;
         machine.journal_inputs(0);
         Ok(Self::assemble(
             driver,
@@ -140,12 +141,13 @@ impl RuntimeDrive {
         let DurableTurn {
             mut driver,
             window,
+            pinned,
             messages,
             before_turn,
             trace_scope,
             attachments,
         } = turn;
-        let fresh = fresh_machine(&mut driver, window, messages)?;
+        let fresh = fresh_machine(&mut driver, window, messages, pinned)?;
         let syncs = driver.recorded_syncs().await?;
         let RestoredTurn {
             machine,
@@ -701,14 +703,15 @@ fn fresh_machine(
     driver: &mut RuntimeTurnDriver<'static>,
     window: crate::runtime::durable::head::TurnWindow,
     messages: crate::MessageSequence,
-) -> Result<TurnMachine, TurnError> {
+    pinned: Option<crate::runtime::durable::head::TurnWindow>,
+) -> Result<TurnMachine, TurnRestoreError> {
     driver.protocol_reply.mark_run_start(&messages);
-    let refused = driver.validate_recorded_selection().err();
-    let mut machine = driver.turn_machine(window, messages);
-    if let Some(event) = refused {
-        machine.fail_turn(*event);
-    }
-    Ok(machine)
+    driver
+        .turn_machine(window, pinned)
+        .map_err(|divergence| TurnRestoreError::Diverged {
+            run: driver.turn_id.clone(),
+            divergence,
+        })
 }
 
 fn runtime(error: RuntimeError) -> TurnError {
@@ -1019,6 +1022,21 @@ impl TurnDrive for RuntimeDrive {
 
     fn run_config_stored(&mut self, stored: &crate::runtime::durable::run_config::RunConfigStored) {
         self.driver.run_config.stored(stored);
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the turn's build inputs are plain data that always encode"
+    )]
+    fn unjournaled_build(&self) -> Option<String> {
+        (!self.driver.build_journaled).then(|| {
+            crate::runtime::durable::turn_build::build_row(&self.driver.build)
+                .expect("the turn's build inputs encode")
+        })
+    }
+
+    fn build_journaled(&mut self) {
+        self.driver.build_journaled = true;
     }
 
     fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
@@ -1389,11 +1407,6 @@ impl TurnDrive for RuntimeDrive {
         };
         let failure_evidence = driver.failure_evidence.clone();
         model_calls::project_usage(cx, driver, &self.machine, head).await?;
-        driver
-            .turn_pipeline
-            .state_mut()
-            .set_phase_content_preparations(driver.run_config.content_preparations().clone())
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
         let mut commit = driver
             .turn_pipeline
             .durable_commit(
@@ -1580,13 +1593,30 @@ impl RuntimeTurnDriver<'static> {
             .map_err(RuntimeEffectControllerError::into_runtime_error)
     }
 
-    /// The machine a fresh turn starts from `messages`, in `window`.
-    fn turn_machine(
+    /// The turn's machine as its start built it, over the head's `window`,
+    /// rebuilt over `pinned`, the window at the turn's pin, when the head
+    /// has moved past it.
+    pub(super) fn turn_machine(
         &mut self,
         window: crate::runtime::durable::head::TurnWindow,
-        messages: crate::MessageSequence,
-    ) -> TurnMachine {
-        self.prepare_machine(window, messages, 0)
+        pinned: Option<crate::runtime::durable::head::TurnWindow>,
+    ) -> Result<TurnMachine, lash_sansio::ReplayDivergence> {
+        self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
+        let machine = super::tool_catalog::build_turn_machine(
+            super::tool_catalog::MachineBasis {
+                session: &self.session,
+                session_id: &self.session_id,
+                turn_id: &self.turn_id,
+                policy: &self.policy,
+                protocol_turn_options: self.protocol_turn_options.clone(),
+                head_window: window,
+                events: self.turn_pipeline.active_events(),
+            },
+            &self.build,
+            pinned,
+        );
+        self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
+        machine
     }
 
     /// Install the tool surface the turn's checkpoint records as the one its

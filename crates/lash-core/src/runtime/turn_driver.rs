@@ -72,7 +72,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_pipeline: TurnBoundary,
 
     pub(super) prompt_state: lash_core_store::prompt_sections::OwnerPromptState,
-    pub(super) prepared_context: crate::session_model::context::PreparedContext,
+    /// What the turn's machine is built from (FIG-7585), and whether the
+    /// turn's journal holds it: a fresh turn's first phase commit writes it.
+    pub(super) build: crate::runtime::durable::turn_build::TurnBuild,
+    pub(super) build_journaled: bool,
     /// Facts awaiting the existing commit that settles them. Never retained
     /// here after their transaction is staged.
     pub(super) pending_model_calls: Vec<lash_core_store::model_calls::ModelCallFact>,
