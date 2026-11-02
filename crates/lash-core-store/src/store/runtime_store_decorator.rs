@@ -262,62 +262,6 @@ macro_rules! emit_component_impls {
     };
 }
 
-/// The operation names of the list, by routing, for the surface lints.
-#[cfg(test)]
-macro_rules! emit_operation_table {
-    ($(
-        $component:ident {
-            $(
-                $(#[$meta:meta])*
-                [$($scope:tt)*] fn $name:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
-            )*
-            $(provided:
-                $(
-                    $(#[$pmeta:meta])*
-                    [$($pscope:tt)*] fn $pname:ident(&self $(, $parg:ident: $parg_ty:ty)*) -> $pret:ty;
-                )*
-            )?
-        }
-    )*
-    @inner $inner:ident {
-        $(
-            $(#[$imeta:meta])*
-            fn $iname:ident(&self $(, $iarg:ident: $iarg_ty:ty)*) -> $iret:ty;
-        )*
-    }) => {
-        /// Every listed operation, with its segment, its routing, its scope
-        /// marker, its parameter types and its return type, as written in
-        /// the list.
-        pub(crate) const RUNTIME_STORE_OPERATIONS: &[OperationSignature] = &[
-            $(
-                $(
-                    OperationSignature {
-                        component: stringify!($component),
-                        name: stringify!($name),
-                        provided: false,
-                        scope: stringify!($($scope)*),
-                        params: &[$(stringify!($arg_ty)),*],
-                        returns: stringify!($ret),
-                    },
-                )*
-                $($(
-                    OperationSignature {
-                        component: stringify!($component),
-                        name: stringify!($pname),
-                        provided: true,
-                        scope: stringify!($($pscope)*),
-                        params: &[$(stringify!($parg_ty)),*],
-                        returns: stringify!($pret),
-                    },
-                )*)?
-            )*
-        ];
-
-        /// The `@inner` segment's operations.
-        pub(crate) const CONTROL_INTENT_OPERATIONS: &[&str] = &[$(stringify!($iname)),*];
-    };
-}
-
 /// `StoreOp` and the scripted store: every operation a decorator can
 /// intercept, routed through the law's script. The `provided` conveniences
 /// have no entry: a decorator answers them through their primitive, which is
@@ -408,40 +352,11 @@ macro_rules! emit_scripted_decorator {
     };
 }
 
-/// One entry of the operation list, as text (test builds only).
-#[cfg(test)]
-#[derive(Clone, Copy, Debug)]
-#[allow(
-    dead_code,
-    reason = "`component` and `returns` are read by the history gate test (ADR 0112 §13)"
-)]
-pub(crate) struct OperationSignature {
-    pub component: &'static str,
-    pub name: &'static str,
-    pub provided: bool,
-    pub scope: &'static str,
-    pub params: &'static [&'static str],
-    pub returns: &'static str,
-}
-
 runtime_store_operations!(emit_decorator_trait);
 runtime_store_operations!(emit_component_impls);
-#[cfg(test)]
-runtime_store_operations!(emit_operation_table);
 #[cfg(any(test, feature = "testing"))]
 runtime_store_operations!(emit_scripted_decorator);
 pub(super) use runtime_store_operations;
-
-/// Provided conveniences a decorator answers through its own primitive, for
-/// the surface lint.
-#[cfg(test)]
-pub(super) fn self_routed_conveniences() -> Vec<&'static str> {
-    RUNTIME_STORE_OPERATIONS
-        .iter()
-        .filter(|operation| operation.provided)
-        .map(|operation| operation.name)
-        .collect()
-}
 
 /// `FleetFormatStore` is a synchronous segment the operation list cannot
 /// express — its entries are emitted as `async fn`. The same

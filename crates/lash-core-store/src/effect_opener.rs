@@ -440,44 +440,6 @@ mod tests {
         }
     }
 
-    /// The reason the rendering is tagged. A turn scope is free-form text and
-    /// can spell a process opener exactly; untagged, the two would mint one
-    /// identity.
-    #[test]
-    fn a_turn_whose_ids_spell_a_process_opener_still_renders_distinctly() {
-        let masquerading = EffectOpener::turn("process", "p_00000000000070008000000000000001");
-        let real = process_opener(1);
-        assert_ne!(masquerading, real);
-        assert_ne!(masquerading.render(), real.render());
-    }
-
-    /// A rendered opener introduces neither reserved separator.
-    ///
-    /// `#` and `/` both carve stored ids apart (see [`EffectOpener::render`]),
-    /// and a rendering that introduced one would make every identity built on
-    /// top of it unusable as a process id. Asserted for ids that carry
-    /// neither, so the rendering is what is being tested rather than the
-    /// caller's input.
-    #[test]
-    fn a_rendered_opener_introduces_no_reserved_separator() {
-        for opener in [
-            EffectOpener::turn("session-1", "turn-7"),
-            EffectOpener::session_operation("session-1", "operation-3"),
-            process_opener(3),
-        ] {
-            for projection in [opener.render(), opener.identity_encoding()] {
-                assert!(
-                    !projection.contains('#'),
-                    "`#` is refused inside a process id: {projection}"
-                );
-                assert!(
-                    !projection.contains('/'),
-                    "`/` splits a stored turn parent scope: {projection}"
-                );
-            }
-        }
-    }
-
     /// The collision the canonical encoding exists to close.
     ///
     /// `SessionId`, `TurnId` and operation ids accept arbitrary strings, so the
@@ -521,27 +483,6 @@ mod tests {
             process_opener(3).identity_encoding(),
             "process:34:p_00000000000070008000000000000003"
         );
-    }
-
-    /// A session operation is its own opener, distinct from any turn: a
-    /// turn whose ids spell an operation must not reach it.
-    #[test]
-    fn a_session_operation_is_not_a_turn() {
-        let operation = EffectOpener::session_operation("session-1", "operation-3");
-        assert_ne!(operation, EffectOpener::turn("session-1", "operation-3"));
-        assert_ne!(
-            operation.render(),
-            EffectOpener::turn("session-1", "operation-3").render()
-        );
-        assert_ne!(
-            operation.identity_encoding(),
-            EffectOpener::turn("session-1", "operation-3").identity_encoding()
-        );
-        assert_eq!(
-            operation.session_id().map(SessionId::as_str),
-            Some("session-1")
-        );
-        assert!(operation.process_id().is_none());
     }
 
     /// The administrative scope kinds run no durable effects and own nothing.

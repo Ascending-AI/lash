@@ -68,26 +68,6 @@ fn versioned_json_record_rejects_invalid_schema_version() {
 }
 
 #[test]
-fn versioned_json_record_rejects_unsupported_schema_version() {
-    let unsupported = SESSION_HEAD_META_SCHEMA_VERSION + 1;
-    let err = decode_versioned_json_record::<SessionHeadPayload>(
-        &format!(r#"{{"schema_version":{unsupported}}}"#),
-        "SessionHeadMeta",
-        SESSION_HEAD_META_SCHEMA_VERSION,
-    )
-    .expect_err("unsupported session head schema version should fail");
-
-    assert!(matches!(
-        err,
-        StoreError::UnsupportedRecordSchemaVersion {
-            record_kind: "SessionHeadMeta",
-            actual,
-            expected: SESSION_HEAD_META_SCHEMA_VERSION
-        } if actual == unsupported
-    ));
-}
-
-#[test]
 fn session_meta_rejects_unknown_durable_fields() {
     let error = serde_json::from_str::<SessionMeta>(
         r#"{

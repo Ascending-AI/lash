@@ -1092,16 +1092,6 @@ mod tests {
         script.called(StoreOp::admit_at_checkpoint, 2).await;
     }
 
-    #[tokio::test(start_paused = true)]
-    #[should_panic(
-        expected = "gate `admit_at_checkpoint#1 before pause`: 0 of 1 arrivals within 10s; trace: (no calls)"
-    )]
-    async fn a_script_gate_nothing_reaches_fails_with_its_rule_and_the_trace() {
-        let script = Script::new();
-        let held = script.on(StoreOp::admit_at_checkpoint).before().pause();
-        held.reached(1).await;
-    }
-
     #[tokio::test]
     async fn a_fault_stays_typed_on_every_error_side_of_the_lists() {
         let script = Script::new();

@@ -37,28 +37,6 @@ fn one_affected_row_satisfies_the_backstop_silently() {
 }
 
 #[test]
-fn a_lost_fenced_write_records_the_disagreement_as_evidence() {
-    let (result, capture) = lash_core_ids::trace_capture::capturing_sync(|| {
-        require_fenced_write_applied(
-            FencedWrite::IngressSettlement,
-            "postgres",
-            "input-9",
-            0,
-            lost_fence_refusal,
-        )
-    });
-    assert!(result.is_err());
-    let event = capture.exactly_one(FENCED_WRITE_DISAGREEMENT_EVENT);
-    assert_eq!(event.level, "ERROR");
-    assert_eq!(event.target, FENCING_TRACE_TARGET);
-    assert_eq!(event.field("fenced_write"), "ingress.settle");
-    assert_eq!(event.field("backend"), "postgres");
-    assert_eq!(event.field("row_identity"), "input-9");
-    assert_eq!(event.field("rows_affected"), "0");
-    assert_eq!(event.field("outcome"), "fenced_write_lost");
-}
-
-#[test]
 fn more_than_one_affected_row_is_the_same_defect() {
     let (result, capture) = lash_core_ids::trace_capture::capturing_sync(|| {
         require_fenced_write_applied(

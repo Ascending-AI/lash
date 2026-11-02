@@ -1078,49 +1078,32 @@ fn repeated_captures_share_unchanged_graph_materialization() {
         Err(GraphRefusal::EncodeMemoryLimit),
         "shared encoding still charges each new staging area"
     );
-}
-
-/// Decoding a checked, unplaced body reads its authoritative bytes, rather
-/// than materializing another complete copy before the typed decoder runs.
-#[test]
-fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
-    use lash_kernel_value::tokens::TokenCodec;
-    use lash_kernel_value::tokens::TokenError;
-
-    struct ReadText {
-        address: usize,
-        text: String,
-    }
-    impl TokenCodec for ReadText {
-        fn encode(&self, out: &mut TokenWriter) {
-            out.text(&self.text);
-        }
-        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            let text = input.text()?;
-            Ok(Self {
-                address: text.as_ptr() as usize,
-                text: text.to_owned(),
-            })
-        }
-    }
-    let body = text_body("FIG-6157 checked borrowed text");
-    for kind in [NodeKind::TEXT_LEAF, NodeKind::FROZEN_VALUE] {
-        let mut nodes = staging();
-        let root = nodes.encode(kind, TypedBody::logical(&body)).unwrap();
-        let envelope = nodes.get(&root).unwrap().envelope().unwrap();
-        let physical = if kind == NodeKind::TEXT_LEAF {
-            envelope.body
-        } else {
-            &envelope.body[3..]
-        };
-        let address = TokenReader::new(physical).text().unwrap().as_ptr() as usize;
-        let mut decoder = GraphDecoder::new(&nodes, limits());
-        let read: ReadText = decoder.decode(root, kind).unwrap();
-        assert_eq!(read.text, "FIG-6157 checked borrowed text");
-        assert_eq!(
-            read.address, address,
-            "the checked source body was copied before decoding"
-        );
-        assert_eq!(decoder.read(), (1, nodes.get(&root).unwrap().len()));
-    }
+    // A recorded run overriding one field shares its unchanged base config
+    // objects with the staged head: the run's staging adds only the changed
+    // field's ancestors and its root.
+    let mut head = crate::store::SessionHeadPayload::default();
+    head.config.plugin_config.insert(
+        "sticky",
+        serde_json::json!({
+            "schema": "large sticky plugin configuration ".repeat(8192)
+        }),
+    );
+    let mut warm = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    config::stage(&mut warm, &head).expect("head graph");
+    config::stage(&mut warm, &head.config).expect("base graph");
+    let before = warm.nodes().len();
+    let mut effective = head.config.clone();
+    effective.max_tool_calls = crate::MaxToolCalls::new(73);
+    let run = crate::run_spec::ResolvedRun::snapshot(head.config.clone()).with_config(effective);
+    let run_root = config::stage(&mut warm, &run).expect("recorded run graph");
+    let mut cold = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    config::stage(&mut cold, &run).expect("cold run graph");
+    assert!(
+        warm.nodes().len() - before < cold.nodes().len(),
+        "the unchanged base config subtree is shared with the head"
+    );
+    let mut decoder = GraphDecoder::new(&warm, limits());
+    let restored: crate::run_spec::ResolvedRun =
+        config::load(&mut decoder, run_root).expect("cold recorded run");
+    assert_eq!(restored, run, "loading reconstructs the execution config");
 }

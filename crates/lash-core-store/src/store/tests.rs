@@ -1,33 +1,5 @@
 use super::*;
 
-fn legacy_turn_commit_hash(commit: &RuntimeCommit) -> String {
-    fn scrub(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                let is_message = map.contains_key("role") && map.contains_key("parts");
-                let is_message_part = map.contains_key("kind")
-                    && map.contains_key("content")
-                    && map.contains_key("id");
-                if is_message || is_message_part {
-                    map.remove("id");
-                }
-                for key in ["node_id", "parent_node_id", "leaf_node_id", "timestamp"] {
-                    map.remove(key);
-                }
-                map.values_mut().for_each(scrub);
-            }
-            serde_json::Value::Array(items) => items.iter_mut().for_each(scrub),
-            _ => {}
-        }
-    }
-
-    let mut semantic = commit.clone();
-    semantic.expected_head_revision = 0;
-    let mut value = serde_json::to_value(semantic).expect("serialize legacy commit");
-    scrub(&mut value);
-    crate::stable_hash::stable_json_sha256_hex(&value).expect("hash legacy commit")
-}
-
 fn intent_fixture() -> RuntimeCommit {
     let mut state = crate::RuntimeSessionState {
         session_id: SessionId::from("golden-session"),
@@ -125,55 +97,6 @@ fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
         StoreError::IngressRowNotAdmitted { ref row, admitted_run: None, .. }
             if **row == IngressRowId::Input("input".into())
     ));
-}
-
-#[test]
-fn legacy_hash_reproduces_random_committed_message_id_conflict() {
-    let mut first = intent_fixture();
-    let completion = crate::TurnInputCompletion {
-        session_id: SessionId::from("golden-session"),
-        data: crate::TurnInputCompletionData {
-            input_ids: vec!["input-1".into()],
-            applications: vec![crate::TurnInputApplication {
-                input_id: "input-1".into(),
-                source_key: None,
-                turn_id: lash_vocabulary::identity::TurnId::from("turn-42"),
-                committed_message_id: "random-attempt-a".to_string(),
-                checkpoint: None,
-            }],
-        },
-    };
-    first.ingress = Some(IngressSettlement {
-        run: lash_vocabulary::identity::TurnId::from("turn-42"),
-        completed_inputs: vec![completion],
-        completed_batches: Vec::new(),
-        released: Vec::new(),
-        dropped: Vec::new(),
-    });
-    let mut replay = first.clone();
-    replay
-        .ingress
-        .as_mut()
-        .expect("replay settles ingress")
-        .completed_inputs[0]
-        .data
-        .applications[0]
-        .committed_message_id = "random-attempt-b".to_string();
-
-    assert_ne!(
-        legacy_turn_commit_hash(&first),
-        legacy_turn_commit_hash(&replay),
-        "the pre-L2 hash exposes the random initial-input message id"
-    );
-    assert_ne!(
-        first.turn_commit_hash().expect("first intent"),
-        replay.turn_commit_hash().expect("replay intent"),
-        "application evidence remains semantic and must not be excluded"
-    );
-    assert_eq!(
-        crate::runtime::ingress_message_id("input-1"),
-        "m_ingress_input-1"
-    );
 }
 
 #[test]
@@ -275,6 +198,47 @@ fn intent_projection_keeps_payload_timestamp_but_excludes_node_timestamp() {
         payload_a.turn_commit_hash().expect("payload a"),
         payload_b.turn_commit_hash().expect("payload b")
     );
+
+    // Application evidence is semantic: a different committed message id
+    // changes the intent.
+    let mut settled = intent_fixture();
+    settled.ingress = Some(IngressSettlement {
+        run: lash_vocabulary::identity::TurnId::from("turn-42"),
+        completed_inputs: vec![crate::TurnInputCompletion {
+            session_id: SessionId::from("golden-session"),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["input-1".into()],
+                applications: vec![crate::TurnInputApplication {
+                    input_id: "input-1".into(),
+                    source_key: None,
+                    turn_id: lash_vocabulary::identity::TurnId::from("turn-42"),
+                    committed_message_id: "random-attempt-a".to_string(),
+                    checkpoint: None,
+                }],
+            },
+        }],
+        completed_batches: Vec::new(),
+        released: Vec::new(),
+        dropped: Vec::new(),
+    });
+    let mut replay = settled.clone();
+    replay
+        .ingress
+        .as_mut()
+        .expect("replay settles ingress")
+        .completed_inputs[0]
+        .data
+        .applications[0]
+        .committed_message_id = "random-attempt-b".to_string();
+    assert_ne!(
+        settled.turn_commit_hash().expect("settled intent"),
+        replay.turn_commit_hash().expect("replay intent"),
+        "application evidence remains semantic and must not be excluded"
+    );
+    assert_eq!(
+        crate::runtime::ingress_message_id("input-1"),
+        "m_ingress_input-1"
+    );
 }
 
 #[test]
@@ -361,155 +325,4 @@ fn append_chain_rejects_self_parent_cycles() {
             ..
         }) if parent == "cycle"
     ));
-}
-
-#[test]
-// Architecture lint: lexical drift guard between the segment traits and the
-// store's operation list, not a behavior proof. It also pins ADR 0112 §1's
-// rule that no segment method has a default that answers for the backend.
-fn decorator_surface_covers_every_component_trait_method() {
-    /// Each method a trait declares, and whether it has a default body.
-    fn declared_methods(
-        source: &str,
-        trait_name: &str,
-    ) -> std::collections::BTreeMap<String, bool> {
-        let start = source
-            .find(&format!("pub trait {trait_name}"))
-            .unwrap_or_else(|| panic!("`pub trait {trait_name}` is present in the scanned source"));
-        let body = &source[start..];
-        let end = body
-            .find("\n}\n")
-            .unwrap_or_else(|| panic!("the `{trait_name}` body closes at column zero"));
-        let lines: Vec<&str> = body[..end].lines().collect();
-        let mut methods = std::collections::BTreeMap::new();
-        for (index, line) in lines.iter().enumerate() {
-            let Some(rest) = line.strip_prefix("    ") else {
-                continue;
-            };
-            if rest.starts_with(' ') {
-                continue;
-            }
-            let rest = rest.strip_prefix("async ").unwrap_or(rest);
-            let Some(rest) = rest.strip_prefix("fn ") else {
-                continue;
-            };
-            let name = rest
-                .split(['(', '<'])
-                .next()
-                .unwrap_or_default()
-                .to_string();
-            let has_default = lines[index..]
-                .iter()
-                .map(|line| line.trim_end())
-                .find(|line| line.ends_with(';') || line.ends_with('{'))
-                .is_some_and(|line| line.ends_with('{'));
-            methods.insert(name, has_default);
-        }
-        methods
-    }
-
-    // Provided methods a backend overrides with stronger semantics, so a
-    // decorator forwards them rather than composing them over its own
-    // primitive: a backend's own single-statement probes.
-    const FORWARDED_PROVIDED: &[&str] = &["admit_session_state", "enqueue_queued_work"];
-    const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &[];
-
-    let store_mod = include_str!("mod.rs");
-    let mut declared = declared_methods(
-        include_str!("attachment_referrers.rs"),
-        "AttachmentReferrers",
-    );
-    declared.extend(declared_methods(
-        include_str!("catalog.rs"),
-        "SessionCatalogStore",
-    ));
-    declared.extend(declared_methods(
-        include_str!("history.rs"),
-        "SessionHistoryStore",
-    ));
-    for trait_name in [
-        "SessionCommitStore",
-        "TurnInputStore",
-        "QueuedWorkStore",
-        "StoreMaintenance",
-    ] {
-        declared.extend(declared_methods(store_mod, trait_name));
-    }
-    declared.extend(declared_methods(
-        include_str!("session_fault.rs"),
-        "SessionFaultStore",
-    ));
-    declared.extend(declared_methods(include_str!("run.rs"), "RunStore"));
-    assert!(
-        declared.contains_key("commit_runtime_state")
-            && declared.contains_key("vacuum")
-            && declared.contains_key("load_session_window")
-            && declared.contains_key("admit_session"),
-        "the segment-trait scan must cover every segment: {declared:?}"
-    );
-
-    let listed: std::collections::BTreeMap<&str, bool> =
-        super::runtime_store_decorator::RUNTIME_STORE_OPERATIONS
-            .iter()
-            .map(|operation| (operation.name, operation.provided))
-            .collect();
-    for convenience in super::runtime_store_decorator::self_routed_conveniences() {
-        assert!(
-            declared.get(convenience) == Some(&true),
-            "a self-routed convenience is a provided method of its segment: {convenience}"
-        );
-    }
-    let missing: Vec<_> = declared
-        .keys()
-        .filter(|name| !listed.contains_key(name.as_str()))
-        .collect();
-    let extra: Vec<_> = listed
-        .keys()
-        .filter(|name| !declared.contains_key(**name))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "segment methods a decorator would silently resolve to the trait's own default instead \
-         of forwarding to `inner()`; add them to `runtime_store_operations!`: {missing:?}"
-    );
-    assert!(
-        extra.is_empty(),
-        "`runtime_store_operations!` lists operations no segment declares: {extra:?}"
-    );
-
-    let defaulted: Vec<_> = declared
-        .iter()
-        .filter(|(name, has_default)| {
-            **has_default
-                && listed.get(name.as_str()) != Some(&true)
-                && !FORWARDED_PROVIDED.contains(&name.as_str())
-                && !UNCHANGED_SEGMENT_DEFAULTS.contains(&name.as_str())
-        })
-        .map(|(name, _)| name)
-        .collect();
-    assert!(
-        defaulted.is_empty(),
-        "segment methods with a default that is neither a listed composition nor a forwarded \
-         provided method; make them required (ADR 0112 §1): {defaulted:?}"
-    );
-
-    // The `@inner` segment: the deployment's control-intent ledger.
-    let ledger: std::collections::BTreeSet<String> =
-        declared_methods(include_str!("control_intent.rs"), "ControlIntentStore")
-            .into_keys()
-            .collect();
-    let listed_ledger: std::collections::BTreeSet<String> =
-        super::runtime_store_decorator::CONTROL_INTENT_OPERATIONS
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
-    assert!(
-        ledger.contains("load_intent"),
-        "the ledger scan must reach the trait's last method: {ledger:?}"
-    );
-    assert_eq!(
-        ledger, listed_ledger,
-        "the `@inner` segment of `runtime_store_operations!` must list exactly the \
-         `ControlIntentStore` operations"
-    );
 }

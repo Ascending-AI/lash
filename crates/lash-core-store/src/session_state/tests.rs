@@ -244,12 +244,25 @@ fn an_unpersisted_initial_frame_opens_under_the_installed_plugin_config() {
         initial_frame_protocol_turn_options(&fresh),
         crate::ProtocolTurnOptions::default()
     );
-    let settled = protocol_config(serde_json::json!({ "dialect": "typescript" }));
+    let mut settled = protocol_config(serde_json::json!({ "dialect": "typescript" }));
+    settled.insert("cap_owner", serde_json::json!({ "cap": 9 }));
     fresh.authority.plugin_config = settled.clone();
     fresh.open_unpersisted_initial_frame_under_current_assignment();
     assert_eq!(
         initial_frame_protocol_turn_options(&fresh),
         settled.protocol_turn_options()
+    );
+    assert_eq!(
+        fresh
+            .session_graph
+            .nodes
+            .first()
+            .expect("the initial frame")
+            .frame_config()
+            .expect("a frame carries its config")
+            .plugin_config,
+        settled,
+        "the frame captures the installed configuration"
     );
 
     let mut reopened = RuntimeSessionState::fixture(crate::SessionPolicy::new(
@@ -574,20 +587,6 @@ fn assert_read_views_current_frame(
     }
 }
 
-/// FIG-5248: a fresh session exposes its initial frame without a snapshot projection.
-#[test]
-fn read_view_current_frame_is_the_initial_frame() {
-    let mut state = RuntimeSessionState::fixture(crate::SessionPolicy::new(
-        crate::TurnBudget::Unbounded,
-        crate::MaxToolCalls::new(1024),
-        crate::NoProgressBudget::bounded(12),
-    ));
-    assert_read_views_current_frame(&state, None);
-    state.ensure_agent_frame_initialized();
-    let initial_frame = state.current_frame_node_id.as_ref().expect("initial frame");
-    assert_read_views_current_frame(&state, Some(initial_frame));
-}
-
 /// ADR 0112 §9, §14 test 6: once a frame switch is durable, the resident
 /// graph is the new frame. The window base is the new `FrameOpen`, both
 /// resident nodes stay durable, and one frame
@@ -604,6 +603,7 @@ fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
             crate::NoProgressBudget::bounded(12),
         ))
     };
+    assert_read_views_current_frame(&state, None);
     state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
     let old_frame = state.current_frame_node_id.clone().expect("initial frame");
     let old_view = crate::SessionReadView::from_persisted_state(&state);
@@ -712,27 +712,6 @@ fn a_redriven_run_executes_under_its_admitted_plugin_config_revision() {
     state.install_run_view(&resolved);
     let expected = crate::AdmittedPluginConfig::new(capped_plugin_config(12), 4);
     assert_eq!(state.admitted_plugin_config(), expected);
-}
-
-/// FIG-4379: every frame open captures the installed configuration, so a
-/// fork point carries the configuration its frame ran under.
-#[test]
-fn a_frame_captures_the_installed_plugin_config() {
-    let mut state = fresh_state_with_initial_frame();
-    state.authority.plugin_config = capped_plugin_config(9);
-    state.open_unpersisted_initial_frame_under_current_assignment();
-    let frame = state
-        .session_graph
-        .nodes
-        .first()
-        .expect("the initial frame");
-    assert_eq!(
-        frame
-            .frame_config()
-            .expect("a frame carries its config")
-            .plugin_config,
-        capped_plugin_config(9)
-    );
 }
 
 /// The wire fence (FIG-6074): a checkpoint that still names the retired

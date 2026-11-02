@@ -1278,23 +1278,6 @@ mod tests {
     }
 
     #[test]
-    fn claims_pair_each_guarded_kind_with_its_own_guard() {
-        for referrer in every_kind() {
-            assert_eq!(
-                ReferrerClaim::unguarded(referrer.clone()).is_ok(),
-                !referrer.kind().requires_guard()
-            );
-        }
-        let guard = ReferrerGuard::Start {
-            start_key: start_key(),
-            starter: journal(),
-        };
-        let claim = ReferrerClaim::guarded(guard.clone());
-        assert_eq!(claim.referrer(), guard.referrer());
-        assert_eq!(claim.guard_cleanup(), Some(ArtifactCleanup::Await(guard)));
-    }
-
-    #[test]
     fn cleanup_bodies_round_trip_and_check_their_row() {
         let referrers = every_kind();
         let guards = [

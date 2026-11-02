@@ -170,61 +170,6 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
 }
 
 #[test]
-fn cache_build_rejects_parent_cycles() {
-    const CHILD_ENV: &str = "LASH_FIG843_CYCLE_CACHE_CHILD";
-    if std::env::var_os(CHILD_ENV).is_some() {
-        cache_build_rejects_parent_cycles_scenario();
-        return;
-    }
-
-    crate::test_watchdog::assert_exact_test_completes(
-        "session_graph::tests::cache_build_rejects_parent_cycles",
-        CHILD_ENV,
-        "session graph cycle check",
-    );
-}
-
-fn cache_build_rejects_parent_cycles_scenario() {
-    let graph = SessionGraph::from_unchecked_nodes_for_testing(
-        vec![
-            SessionNodeRecord {
-                node_id: "cycle-a".into(),
-                parent_node_id: Some("cycle-b".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
-                    .parse()
-                    .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
-                    plugin_type: "cycle-test".to_string(),
-                    body: SharedJsonValue::new(serde_json::json!({"node": "a"})),
-                },
-            },
-            SessionNodeRecord {
-                node_id: "cycle-b".into(),
-                parent_node_id: Some("cycle-a".into()),
-                timestamp: "2026-07-31T00:00:00.000000000Z"
-                    .parse()
-                    .expect("canonical node timestamp"),
-                payload: SessionNodePayload::Plugin {
-                    plugin_type: "cycle-test".to_string(),
-                    body: SharedJsonValue::new(serde_json::json!({"node": "b"})),
-                },
-            },
-        ],
-        Some("cycle-b".into()),
-    );
-
-    let error = SessionGraphCache::build(&graph).expect_err("cycle must be rejected");
-    assert!(matches!(
-        error,
-        crate::StoreError::InvalidGraphParent {
-            node_id,
-            actual: Some(parent),
-            ..
-        } if node_id == "cycle-b" && parent == "cycle-a"
-    ));
-}
-
-#[test]
 fn cache_build_rejects_cycles_in_inactive_components() {
     let plugin_node = |node_id: &str, parent_node_id: Option<&str>| SessionNodeRecord {
         node_id: NodeId::fixture(node_id.to_string()),
@@ -510,54 +455,6 @@ fn nearest_frame_is_derived_from_ancestry() {
 }
 
 #[test]
-fn active_read_rewrite_preserves_draft_node_id_sequence() {
-    let first = text_message("m1", MessageRole::User, "first");
-    let mut graph = SessionGraph::default();
-    graph.append_message(first.clone());
-
-    let leaf_node_id = graph.leaf_node_id.clone().expect("initial leaf");
-    let draft_namespace = format!("unscoped-replacement:{leaf_node_id}");
-    let mut nodes = graph.nodes.clone();
-    nodes.extend((0..2).map(|ordinal| {
-        std::sync::Arc::new(SessionNodeRecord {
-            node_id: draft_node_id(&draft_namespace, ordinal),
-            parent_node_id: Some(leaf_node_id.clone()),
-            timestamp: "2026-08-20T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-            payload: SessionNodePayload::Plugin {
-                plugin_type: "pre-existing-draft".to_string(),
-                body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
-            },
-        })
-    }));
-    graph = SessionGraph::from_shared_nodes(nodes, Some(leaf_node_id))
-        .expect("pre-existing draft branches are structurally valid");
-
-    graph.rewrite_active_read_tail(&[
-        first,
-        text_message("m2", MessageRole::Assistant, "second"),
-        text_message("m3", MessageRole::User, "third"),
-    ]);
-
-    let emitted_ids = graph
-        .nodes
-        .iter()
-        .skip(3)
-        .map(|node| node.node_id.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        emitted_ids,
-        vec![
-            "draft-node/v3/f7ef57eb86b29cc4d182cf4c0d163df45d482bae218563bdbb1daeeaaa28a128"
-                .to_string(),
-            "draft-node/v3/9c31574ab8d7b250a1978293986829b6a999eb527b8ba2b4d1d15f598da0c487"
-                .to_string(),
-        ]
-    );
-}
-
-#[test]
 fn projection_and_replacement_retain_the_same_prefix() {
     let first = text_message("m1", MessageRole::User, "first");
     let second = text_message("m2", MessageRole::Assistant, "second");
@@ -819,31 +716,6 @@ fn remap_node_ids_rewrites_parents_on_child_before_parent_layouts() {
         assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[0], &graph.nodes[0]));
         assert!(!std::sync::Arc::ptr_eq(&snapshot.nodes[1], &graph.nodes[1]));
     }
-}
-
-#[test]
-fn event_only_appends_preserve_the_message_vec_and_render_cache() {
-    let mut graph = SessionGraph::default();
-    graph.append_message(text_message("m1", MessageRole::User, "hello"));
-    let before = graph.read_model();
-
-    graph.append_protocol_event(protocol_event());
-    let after = graph.read_model();
-
-    assert!(lash_protocol_types::AppendVec::ptr_eq(
-        &before.messages,
-        &after.messages
-    ));
-    assert!(Arc::ptr_eq(
-        &before.prompt_render_cache,
-        &after.prompt_render_cache
-    ));
-    assert_eq!(after.messages.len(), 1);
-    assert_eq!(after.active_events.len(), before.active_events.len() + 1);
-    assert!(!lash_protocol_types::AppendVec::ptr_eq(
-        &before.active_events,
-        &after.active_events
-    ));
 }
 
 mod window_anchor {

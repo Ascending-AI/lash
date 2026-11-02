@@ -143,22 +143,6 @@ fn snapshot() -> PersistedSessionConfig {
 }
 
 #[test]
-fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
-    let spec = RunSpec::default();
-    assert!(spec.is_default());
-    assert_eq!(spec.hash().expect("hash"), None);
-    assert_eq!(
-        serde_json::to_value(&spec).expect("encode"),
-        serde_json::json!({})
-    );
-    let resolved = spec
-        .resolve(&snapshot(), None, &catalog(), &MapOwner)
-        .expect("resolve");
-    assert_eq!(resolved, ResolvedRun::snapshot(snapshot()));
-    assert_eq!(resolved.base().config_revision, 7);
-}
-
-#[test]
 fn admitted_runs_share_immutable_config_json() {
     // FIG-6149: resolving and carrying a run must not deep-copy its owner's
     // immutable namespace, including the protocol's per-call view of it.

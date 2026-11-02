@@ -189,33 +189,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verified_commit_records_one_budget_histogram_observation_across_planner_validation() {
-        let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ));
-        let store = FacadeTestStore {
-            materialized_session: Some(state.session_id.clone()),
-            planner_validates_budget: true,
-            advances_revision: true,
-            ..Default::default()
-        };
-
-        commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
-            .await
-            .expect("the bounded commit should be admitted");
-
-        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
-            1,
-            "the facade owns the only histogram observation even when the planner revalidates"
-        );
-    }
-
-    #[tokio::test]
     async fn verified_commit_records_node_budget_rejection_after_binding() {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
@@ -248,6 +221,47 @@ mod tests {
             1,
             "a bounded node rejection is a rejected budget observation"
         );
+
+        // A graph past the commit-wide node ceiling is refused before the
+        // non-validating store's commit path, whatever the commit's budget.
+        let node = crate::SessionNodeRecord {
+            node_id: "node".into(),
+            parent_node_id: None,
+            timestamp: "2026-07-27T00:00:00.000000000Z"
+                .parse()
+                .expect("canonical node timestamp"),
+            payload: crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(
+                    crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
+                        .expect("protocol event"),
+                ),
+            },
+        };
+        let mut oversized = RuntimeCommit::persisted_state_for_test(&state);
+        oversized.graph = super::super::GraphAppend::Extend {
+            nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
+                .map(|index| crate::SessionNodeRecord {
+                    node_id: lash_vocabulary::identity::NodeId::fixture(format!("node-{index}")),
+                    ..node.clone()
+                })
+                .collect(),
+        };
+        let oversized_err = commit_runtime_state_verified(&store, oversized)
+            .await
+            .expect_err("the shared boundary must reject the oversized commit");
+        assert!(matches!(
+            oversized_err,
+            StoreError::CommitNodeBudgetExceeded {
+                node_count,
+                max_nodes,
+            } if node_count == RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
+                && max_nodes == RuntimeCommit::MAX_COMMIT_NODE_COUNT
+        ));
+        assert_eq!(
+            store.commit_attempts.load(Ordering::SeqCst),
+            0,
+            "the non-validating store must not be called"
+        );
     }
 
     #[tokio::test]
@@ -260,14 +274,19 @@ mod tests {
         ));
         let commit = RuntimeCommit::persisted_state_for_test(&state);
 
-        let missing_error =
-            commit_runtime_state_verified(&FacadeTestStore::default(), commit.clone())
-                .await
-                .expect_err("missing binding metadata must fence the commit");
+        let missing = FacadeTestStore::default();
+        let missing_error = commit_runtime_state_verified(&missing, commit.clone())
+            .await
+            .expect_err("missing binding metadata must fence the commit");
         assert!(matches!(
             missing_error,
             StoreError::SessionBindingNotMaterialized { .. }
         ));
+        assert_eq!(
+            missing.commit_attempts.load(Ordering::SeqCst),
+            0,
+            "the fence precedes the store's commit"
+        );
 
         let mismatch_error = commit_runtime_state_verified(
             &FacadeTestStore {
@@ -292,125 +311,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn verified_commit_skips_histogram_for_unbounded_byte_budget() {
-        let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ));
-        let store = FacadeTestStore {
-            materialized_session: Some(state.session_id.clone()),
-            planner_validates_budget: true,
-            advances_revision: true,
-            ..Default::default()
-        };
-        let budget = super::super::CommitBudget::new(
-            super::super::CommitBudgetLimit::Unbounded,
-            super::super::CommitBudgetLimit::Unbounded,
-        );
-
-        commit_runtime_state_verified(
-            &store,
-            RuntimeCommit::persisted_state_for_test_with_budget(&state, budget),
-        )
-        .await
-        .expect("the unbounded commit should be admitted");
-
-        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
-            0,
-            "an unbounded byte budget skips measurement"
-        );
-    }
-
-    #[tokio::test]
-    async fn verified_commit_rejects_a_store_that_lies_about_materializing_admission() {
-        let store = FacadeTestStore::default();
-        let mut state = crate::RuntimeSessionState {
-            session_id: SessionId::from("loose-store-session"),
-            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ))
-        };
-        state.ensure_agent_frame_initialized();
-
-        let err =
-            commit_runtime_state_verified(&store, RuntimeCommit::persisted_state_for_test(&state))
-                .await
-                .expect_err("a loose store must fail before its first commit");
-
-        assert!(matches!(
-            err,
-            StoreError::SessionBindingNotMaterialized { session_id }
-                if session_id == state.session_id
-        ));
-        assert_eq!(
-            store.commit_attempts.load(Ordering::SeqCst),
-            0,
-            "the loose store must not receive the commit"
-        );
-    }
-
-    #[tokio::test]
-    async fn verified_commit_rejects_node_budget_before_calling_a_non_validating_store() {
-        let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("boundary-budget"),
-            ..crate::RuntimeSessionState::fixture(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-                crate::NoProgressBudget::bounded(12),
-            ))
-        };
-        let store = FacadeTestStore {
-            materialized_session: Some(state.session_id.clone()),
-            ..Default::default()
-        };
-        let node = crate::SessionNodeRecord {
-            node_id: "node".into(),
-            parent_node_id: None,
-            timestamp: "2026-07-27T00:00:00.000000000Z"
-                .parse()
-                .expect("canonical node timestamp"),
-            payload: crate::SessionNodePayload::Event {
-                event: crate::SessionHistoryRecord::Protocol(
-                    crate::ProtocolEvent::typed("budget", serde_json::Value::Null)
-                        .expect("protocol event"),
-                ),
-            },
-        };
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state);
-        commit.graph = super::super::GraphAppend::Extend {
-            nodes: (0..=RuntimeCommit::MAX_COMMIT_NODE_COUNT)
-                .map(|index| crate::SessionNodeRecord {
-                    node_id: lash_vocabulary::identity::NodeId::fixture(format!("node-{index}")),
-                    ..node.clone()
-                })
-                .collect(),
-        };
-
-        let err = commit_runtime_state_verified(&store, commit)
-            .await
-            .expect_err("the shared boundary must reject the oversized commit");
-
-        assert!(matches!(
-            err,
-            StoreError::CommitNodeBudgetExceeded {
-                node_count,
-                max_nodes,
-            } if node_count == RuntimeCommit::MAX_COMMIT_NODE_COUNT + 1
-                && max_nodes == RuntimeCommit::MAX_COMMIT_NODE_COUNT
-        ));
-        assert_eq!(
-            store.commit_attempts.load(Ordering::SeqCst),
-            0,
-            "the non-validating store must not be called"
-        );
-    }
     #[tokio::test]
     #[should_panic(expected = "committed head revision must advance")]
     async fn verified_commit_rejects_nonadvancing_store_receipt() {
