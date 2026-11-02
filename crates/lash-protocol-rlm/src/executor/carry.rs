@@ -142,7 +142,13 @@ impl KernelCarry {
             return Err(state("a parked cell root lacks its envelope".to_owned()));
         };
         let carried_cell = CellEnvelope::load(&mut decoder, envelope).map_err(graph)?;
-        let base = carried_cell.document;
+        self.cell_document(&carried_cell.document)
+    }
+
+    pub(super) fn cell_document(
+        &self,
+        base: &lash_kernel_doc::Document,
+    ) -> Result<(), KernelMigrationRefusal> {
         if base
             .requires
             .kernels
@@ -154,7 +160,7 @@ impl KernelCarry {
         {
             return Ok(());
         }
-        self.successor(&base).map(|_| ())
+        self.successor(base).map(|_| ())
     }
 }
 

@@ -554,7 +554,7 @@ impl DurableSnapshotStore {
         book: &mut super::graph::AdmissionBook,
         ledger: &mut EffectLedger,
         requests: Requests,
-        run: Option<RunFingerprint>,
+        run: Option<(RunFingerprint, Option<NodeId>)>,
     ) -> Result<(Vec<AdmittedCall>, Vec<AdmittedExecution>), QuietPointRefusal> {
         let Requests {
             mut requested,
@@ -564,7 +564,7 @@ impl DurableSnapshotStore {
         if requested.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
-        let run = run.ok_or_else(|| refused("a run's end admits nothing"))?;
+        let (run, context) = run.ok_or_else(|| refused("a run's end admits nothing"))?;
         let mut calls = Vec::new();
         let mut admitted: Vec<AdmittedExecution> = Vec::new();
         if !drafts.is_empty() {
@@ -593,6 +593,7 @@ impl DurableSnapshotStore {
                         &self.exec,
                         FrozenAdmission {
                             run: run.clone(),
+                            context,
                             effect: entry.identity.clone(),
                             wait: entry.wait,
                             effect_name: entry.effect,
@@ -627,6 +628,7 @@ impl DurableSnapshotStore {
                         &self.exec,
                         FrozenAdmission {
                             run: run.clone(),
+                            context,
                             effect: entry.identity.clone(),
                             wait: entry.wait,
                             effect_name: entry.effect,
@@ -822,6 +824,11 @@ impl DurableSnapshotStore {
         }
         let mut staging = staging();
         let admits = !requests.is_empty();
+        let context = if admits {
+            host.stage_context(&mut staging).map_err(refused)?
+        } else {
+            None
+        };
         // The book takes this park's admissions in place, not a copy of
         // every admission so far: a commit that does not land takes them
         // out again, so each park's work is its own (FIG-7585).
@@ -847,10 +854,13 @@ impl DurableSnapshotStore {
                 &mut book,
                 &mut ledger,
                 requests,
-                Some(RunFingerprint {
-                    document,
-                    closure: closure.reference(),
-                }),
+                Some((
+                    RunFingerprint {
+                        document,
+                        closure: closure.reference(),
+                    },
+                    context,
+                )),
             )?;
             (calls, admitted, booked)
         };
@@ -1131,9 +1141,14 @@ impl DurableSnapshotStore {
             &mut book,
             &mut ledger,
             requests,
-            own.map(|closure| RunFingerprint {
-                document: *document,
-                closure,
+            own.map(|closure| {
+                (
+                    RunFingerprint {
+                        document: *document,
+                        closure,
+                    },
+                    None,
+                )
             }),
         )?;
         // Records no saved state can reach again go, in the transaction

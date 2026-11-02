@@ -1228,7 +1228,7 @@ impl TokenCodec for AdmissionPinView {
     fn encode(&self, _out: &mut TokenWriter) {}
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         input.text()?;
         input.skip_tree()?;
         input.skip_tree()?;
@@ -1254,6 +1254,7 @@ impl TokenCodec for AdmissionPinView {
         };
         input.skip_tree()?;
         input.unsigned()?;
+        let _context: Option<NodeId> = Option::decode(input)?;
         Ok(Self(pin))
     }
 }

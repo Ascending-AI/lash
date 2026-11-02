@@ -309,6 +309,8 @@ pub struct Admission {
     /// closure its functions link against. A replay of an in-turn run
     /// from its start is refused when either differs (FIG-7585).
     pub run: RunFingerprint,
+    /// Immutable host build inputs, retained by the initial admissions.
+    pub context: Option<NodeId>,
     pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
     pub wait: lash_kernel_value::sites::WaitId,
@@ -335,7 +337,7 @@ pub struct ParkProgress {
 
 impl TokenCodec for Admission {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(10);
+        out.seq(11);
         out.text(&self.exec.stored());
         self.run.document.encode(out);
         // The closure's digest, not a reference: an admission does not
@@ -356,10 +358,11 @@ impl TokenCodec for Admission {
         }
         self.progress.charge.encode(out);
         out.unsigned(self.progress.prints);
+        self.context.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let run = RunFingerprint {
             document: DocumentId::decode(input)?,
@@ -397,9 +400,11 @@ impl TokenCodec for Admission {
             charge: Option::decode(input)?,
             prints: input.unsigned()?,
         };
+        let context = Option::decode(input)?;
         Ok(Self {
             exec,
             run,
+            context,
             effect,
             wait,
             effect_name,
@@ -707,6 +712,8 @@ struct Admitted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
     pub run: RunFingerprint,
+    /// Immutable host build inputs, retained by the initial admissions.
+    pub context: Option<NodeId>,
     pub effect: EffectId,
     pub wait: lash_kernel_value::sites::WaitId,
     /// The effect performed; none for a sleep.
@@ -840,6 +847,7 @@ impl AdmissionBook {
         let admission = Admission {
             exec: exec.clone(),
             run: frozen.run,
+            context: frozen.context,
             effect: frozen.effect.clone(),
             wait: frozen.wait,
             effect_name: frozen.effect_name,

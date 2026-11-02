@@ -153,6 +153,12 @@ pub trait KernelEffects: Projections + Send + Sync {
         Ok(HostParts::default())
     }
 
+    /// Stage immutable inputs needed to reconstruct this run without a
+    /// heap checkpoint. The admission transaction retains the returned node.
+    fn stage_context(&self, _staging: &mut GraphStaging) -> Result<Option<NodeId>, ParentFault> {
+        Ok(None)
+    }
+
     /// The save that staged the host's state committed.
     fn host_committed(&self) {}
 

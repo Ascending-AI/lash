@@ -17,7 +17,25 @@ pub(super) async fn link_cell(
         // envelope carries the document and everything it was lowered
         // against, and nothing here is journaled or lowered again.
         ctx.restore_started_process_ids(&resumed.started_process_ids);
+        let journal_only = resumed.journal_only;
         let envelope = resumed.cell;
+        let carry_after_replay =
+            journal_only && envelope.document.kernel() < services.kernel.writes().number();
+        if journal_only {
+            services
+                .kernel
+                .cell_document(&envelope.document)
+                .map_err(|refusal| {
+                    Refused::Nested(Box::new(
+                        super::cell_carry::Error::Migration(refusal).into_runtime(),
+                    ))
+                })?;
+            state.replay_committed_bindings();
+            state
+                .prepare_cell(ctx.session_pages())
+                .await
+                .map_err(store_error)?;
+        }
 
         if envelope.dialect != state.dialect() {
             return Err(host_failure(format!(
@@ -73,16 +91,32 @@ pub(super) async fn link_cell(
             .operations
             .into_keys()
             .collect();
+        if journal_only {
+            let owner = lash_core::facade_support::execution_actor(ctx);
+            if owner.holds_carried_session().await.map_err(store_error)? {
+                // The journal keeps the proved predecessor program, which this
+                // build interprets. No heap rewrite is needed to retain it.
+                // Publish decoder ownership before its pending wait releases
+                // the actor, even when replay admits no new effect.
+                let mut tx = owner.begin().await.map_err(store_error)?;
+                tx.stamp_formats(owner.backend().formats().session().clone());
+                owner
+                    .commit(tx, lash_durable::CommitLabel::SESSION_COMMAND)
+                    .await
+                    .map_err(store_error)?;
+            }
+        }
         return Ok(LinkedCell {
             invoked,
             document: envelope.document.clone(),
 
             envelope,
-            // The machine resumes from its parked state, not from a start.
+            // A checkpoint resumes its machine; a journal re-runs its admitted start.
             ledgers: resumed.ledgers,
             graph: resumed.graph,
             open_sites: resumed.open_sites,
-            resumed: true,
+            resumed: !journal_only,
+            carry_after_replay,
             code,
             frame_links: BTreeSet::new(),
         });
@@ -386,6 +420,7 @@ pub(super) async fn link_cell(
         graph: host::HostGraph::default(),
         open_sites: BTreeMap::new(),
         resumed: false,
+        carry_after_replay: false,
         code,
         frame_links,
     })
@@ -408,4 +443,10 @@ pub(super) fn execution_id(
             lash_core_store::resolutions::ExecutionId::process(process)
         }
     }
+}
+
+fn store_error(error: impl std::fmt::Display) -> Refused {
+    Refused::Nested(Box::new(
+        lash_core::RuntimeEffectControllerError::retryable_response_derivation(error.to_string()),
+    ))
 }

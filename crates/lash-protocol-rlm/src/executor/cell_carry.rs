@@ -8,6 +8,8 @@ pub(crate) enum Error {
     Migration(lash_vm_runtime::KernelMigrationRefusal),
     #[error("{0}")]
     Host(String),
+    #[error("{0}")]
+    Journal(String),
 }
 impl From<String> for Error {
     fn from(message: String) -> Self {
@@ -29,6 +31,11 @@ impl Error {
             Self::Migration(refusal) => Some((
                 "lash.kernel.migration",
                 serde_json::to_value(refusal),
+                PluginFailureClass::Parked,
+            )),
+            Self::Journal(reason) => Some((
+                "lash.kernel.journal",
+                Ok(serde_json::json!({"refused": "diverged", "reason": reason})),
                 PluginFailureClass::Parked,
             )),
             _ => None,

@@ -34,6 +34,8 @@ use crate::EngineStateFormat;
 ///         path = "crates/lash-durable/src/domain/processes.rs",
 ///         cover(TerminalDriver),
 ///     ),
+///     impls(path = "crates/lash-vm-broker/src/kernel/graph.rs", "TokenCodec for Admission"),
+///     impls(path = "crates/lash-core-execution/src/runtime/actor/round/graph.rs", "TokenCodec for AdmissionPinView"),
 ///     items(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", StoredWaitId),
 ///     impls(path = "crates/lash-core-execution/src/runtime/actor/process/driver.rs", "Serialize for StoredWaitId", "Deserialize for StoredWaitId"),
 /// )

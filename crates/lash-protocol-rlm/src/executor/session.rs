@@ -154,6 +154,8 @@ pub struct CodeModeExecutionState {
     pub(super) documents: Option<lash_vm_runtime::KernelDocuments>,
     numbers: NumberPolicy,
     current: Version,
+    /// The committed descriptor before transient format succession.
+    replay_base: Option<Version>,
     /// The descriptor the store holds as of the last acknowledged capture
     /// or restore.
     installed: Option<NodeId>,
@@ -209,6 +211,7 @@ impl CodeModeExecutionState {
             documents: None,
             numbers,
             current: Version::default(),
+            replay_base: None,
             installed: None,
             closures: BTreeMap::new(),
             installed_closures: BTreeSet::new(),
@@ -496,6 +499,17 @@ impl CodeModeExecutionState {
         version.bytes = Some(spool.read(&id)?);
         version.descriptor = Some(id);
         Ok(version)
+    }
+
+    /// An old journal still names the committed function identities, even
+    /// when opening the session prepared their successors in memory.
+    pub(super) fn replay_committed_bindings(&mut self) {
+        if let Some(base) = &self.replay_base
+            && base.kernel != self.current.kernel
+        {
+            self.current = base.clone();
+            self.view = View::default();
+        }
     }
 
     /// Readies the session for a cell: the host's defaults sealed in, the
@@ -934,6 +948,7 @@ impl CodeModeExecutionState {
             return;
         };
         self.installed = Some(pending.root);
+        self.replay_base = None;
         for closure in &pending.closures {
             self.closures.remove(closure);
         }
@@ -1028,6 +1043,7 @@ impl CodeModeExecutionState {
             notes: read.notes,
             pins: read.pins,
         };
+        self.replay_base = Some(self.current.clone());
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;
         self.withdraw_pending();

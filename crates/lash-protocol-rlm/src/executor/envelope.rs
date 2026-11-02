@@ -1,17 +1,11 @@
 //! A code cell's envelope: the host's half of its parked run (ADR 0132 §8).
 //!
-//! Every park of a cell commits the machine's state with the effect
-//! membership that matches it, and this envelope and the cell's HostRoot
-//! beside them in the cell's execution root. Together they carry what the
-//! activation that resumes the cell needs to carry on as if the cell had
-//! never stopped: the document the cell was lowered to, the effects it was
-//! lowered against with the tool each is, the grants its deferred
-//! resolutions recorded, its prints, and the calls it admitted. All of it
-//! is graph nodes, so nothing keeps a cell on the process that started it.
-//!
-//! The document is recorded, never lowered again: a resumed cell runs the
-//! program its first activation admitted, whatever the session's catalog
-//! has become since.
+//! A cell's initial journal admissions retain its immutable envelope: the
+//! admitted document, links, environment and Written metadata. Later parks
+//! record effects and deliveries without another envelope or heap checkpoint.
+//! At a checkpoint, the execution root retains this envelope with the sealed
+//! machine and host state. Recovery runs the admitted program, even when the
+//! session's catalog has changed since it was lowered.
 
 use std::collections::BTreeMap;
 
@@ -108,6 +102,7 @@ impl CellEnvelope {
 /// host's records, prints and started processes, and the host graph its
 /// next park builds on.
 pub(super) struct ResumedCell {
+    pub journal_only: bool,
     /// The cell's root this was read from.
     pub root: NodeId,
     pub cell: CellEnvelope,
@@ -263,6 +258,7 @@ pub(super) fn load_cell(
         .collect();
     graph.state = state;
     Ok(ResumedCell {
+        journal_only: false,
         root,
         cell,
         prints,
@@ -279,14 +275,66 @@ pub(super) async fn resumed_cell(
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     code: &str,
 ) -> Result<Option<ResumedCell>, String> {
-    let Some(read) = snapshots
+    let cell = match snapshots
         .latest_root()
         .await
-        .map_err(|refusal| refusal.to_string())?
-    else {
-        return Ok(None);
+        .map_err(|error| error.to_string())?
+    {
+        Some(read) => load_cell(&read.graph, read.held.root, read.read_limits)?,
+        None => {
+            let cx = snapshots.context();
+            let reads = cx.durable_reads().map_err(|error| error.to_string())?;
+            let rows = reads
+                .effect_admissions(snapshots.exec())
+                .await
+                .map_err(|error| error.to_string())?;
+            if rows.is_empty() {
+                return Ok(None);
+            }
+            let limits = cx.backend().config().settings().graph_reads.execution();
+            let mut retained = None;
+            for row in rows {
+                let graph = reads
+                    .hydrate(
+                        lash_durable::domain::graph::RootOwner::EffectAdmission {
+                            exec: snapshots.exec().clone(),
+                            effect: row.effect,
+                        },
+                        Some(row.admission),
+                        limits,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut decoder = GraphDecoder::new(&graph, limits);
+                let admission: lash_vm_broker::kernel::graph::Admission = decoder
+                    .decode(row.admission, NodeKind::ADMISSION)
+                    .map_err(|error| error.to_string())?;
+                if let Some(root) = admission.context {
+                    retained = Some((graph, root));
+                    break;
+                }
+            }
+            let (graph, root) =
+                retained.ok_or("the cell journal records no executable envelope")?;
+            let mut decoder = GraphDecoder::new(&graph, limits);
+            let cell = CellEnvelope::load(&mut decoder, root).map_err(|error| error.to_string())?;
+            ResumedCell {
+                journal_only: true,
+                root,
+                cell,
+                prints: Vec::new(),
+                ledgers: CellHostLedgers::default(),
+                started_process_ids: Vec::new(),
+                open_sites: BTreeMap::new(),
+                session: None,
+                graph: HostGraph {
+                    envelope: Some(root),
+                    installed: [root].into(),
+                    ..Default::default()
+                },
+            }
+        }
     };
-    let cell = load_cell(&read.graph, read.held.root, read.read_limits)?;
     if cell.cell.code != CellEnvelope::code_digest(code) {
         return Err("the root under this cell's execution holds other source".to_owned());
     }

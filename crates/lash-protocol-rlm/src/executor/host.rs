@@ -1035,6 +1035,24 @@ impl KernelEffects for CellHost<'_> {
         })
     }
 
+    fn stage_context(&self, staging: &mut GraphStaging) -> Result<Option<NodeId>, ParentFault> {
+        let mut graph = self.graph.lock_recover();
+        if let Some(envelope) = graph.envelope
+            && graph.installed.contains(&envelope)
+        {
+            // The initial admissions retain the immutable envelope. Later
+            // admissions do not need another edge to that same host context.
+            return Ok(None);
+        }
+        let envelope = self
+            .envelope
+            .stage(staging)
+            .map_err(|error| ParentFault(error.to_string()))?;
+        graph.envelope = Some(envelope);
+        graph.staged = Some([envelope].into());
+        Ok(Some(envelope))
+    }
+
     fn host_committed(&self) {
         let mut graph = self.graph.lock_recover();
         if let Some(staged) = graph.staged.take() {

@@ -311,7 +311,7 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
                     AdmitMember::Pinned(member) if admissions.is_empty() => pins.push(*member),
                     AdmitMember::Admission(node) if admissions.len() == pins.len() => {
                         let admitted = graph::admission_pin(&mut decoder, node)
-                            .map_err(|refusal| refusal.to_string())?;
+                            .map_err(|refusal| format!("admission {node}: {refusal}"))?;
                         if admitted.run != row.run.0
                             || admitted.ordinal != super::member_ordinal(index).0
                         {
