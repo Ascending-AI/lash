@@ -1,11 +1,11 @@
-//! Every returned native graph is prepared before the source journal accepts.
+//! Native storage, input/result facts and ordered scratch share one preparation.
 use super::*;
 use crate::compile::LibRun;
 use doc::Value;
-use lash_kernel_state::arena::PreparedBatch;
+use lash_kernel_state::arena::{PreparedBatch, Registration};
 use lash_kernel_state::kernel_internals::logical::Ledger;
 use lash_kernel_state::kernel_internals::logical::{
-    Owner, PublicationValue as PV, VirtualBody, VirtualEntity,
+    BoundaryTransaction, Dependencies, Owner, PublicationValue as PV, VirtualBody, VirtualEntity,
 };
 use room::{Measure, Point};
 
@@ -32,6 +32,19 @@ pub(in crate::machine) struct PreparedNative {
     pub(in crate::machine) batch: PreparedBatch,
     pub(in crate::machine) allocated: bool,
     graph_entities: usize,
+    output: Owner,
+    contract: doc::NativeResourceContract,
+    function: lash_kernel_value::FunctionId,
+    #[allow(
+        dead_code,
+        reason = "core charge binding consumes the retained actual operands"
+    )]
+    arguments: Vec<Value>,
+    #[allow(
+        dead_code,
+        reason = "core must extend FormulaValues for detached heap results"
+    )]
+    measurements: Vec<(crate::compile::Source, doc::Measure, u64)>,
     depth: u32,
     at: Point,
     release: Box<[room::Owner]>,
@@ -55,15 +68,157 @@ impl StoragePreparation for NativeStorage<'_> {
         {
             return Ok(None);
         }
+        let Some(detached) = self.prepare_storage(arena, &event.inputs)? else {
+            return Ok(None);
+        };
+        let DetachedNative {
+            registration,
+            storage,
+            page,
+            entities,
+        } = detached;
+        let mut event = event.clone();
+        event.native = Some(storage.contract().clone());
+        event.outputs.push((storage.output, PV::Page(page)));
+        event.entities = entities;
+        Ok(Some(PreparedStorage {
+            registration,
+            storage,
+            actual: Program::new(vec![event]),
+        }))
+    }
+    fn allowance(storage: &PreparedNative, allowance: &mut Allowance) {
+        allowance.units = storage.units;
+        allowance.depth = allowance.depth.max(u64::from(storage.depth));
+    }
+    fn facts(storage: &PreparedNative, facts: &mut LeafExecution) -> Result<(), HeapFault> {
+        let facts = facts
+            .0
+            .get_mut(&storage.at)
+            .ok_or_else(|| malformed("native value lost its release event"))?;
+        facts.values.insert(
+            Measure::Release(storage.release.clone()),
+            i128::from(storage.released),
+        );
+        facts.values.insert(
+            Measure::NativeScratch {
+                at: storage.at.site.clone(),
+                function: storage.function,
+            },
+            i128::from(
+                storage
+                    .contract
+                    .peak_scratch_bytes()
+                    .ok_or_else(|| malformed("native scratch schedule changed"))?,
+            ),
+        );
+        facts.call = Some((
+            storage.at.site.clone(),
+            room::CallSource::Native(storage.function),
+            room::CheckedRoom::native(storage.function, &storage.contract)
+                .ok_or_else(|| malformed("native result contract changed"))?,
+        ));
+        Ok(())
+    }
+}
+
+struct DetachedNative<'a> {
+    registration: Registration<'a>,
+    storage: PreparedNative,
+    page: doc::heap::PageValue,
+    entities: Vec<VirtualEntity>,
+}
+
+/// Core authenticates source exit/entry/charges before accepting this boundary.
+/// No event journal is evaluated or published by this path.
+#[allow(dead_code, reason = "core owns authenticated region entrypoint wiring")]
+pub(in crate::machine) struct NativeBoundary<'a> {
+    pub(in crate::machine) transaction: BoundaryTransaction<'a>,
+    pub(in crate::machine) storage: PreparedNative,
+}
+
+impl NativeStorage<'_> {
+    #[allow(dead_code, reason = "core owns authenticated region entrypoint wiring")]
+    pub(in crate::machine) fn prepare_boundary<'a>(
+        self,
+        arena: &'a mut Arena,
+        inputs: &[Owner],
+    ) -> Result<Option<NativeBoundary<'a>>, HeapFault> {
+        let ledger = std::rc::Rc::clone(&self.ledger);
+        let heap = self.heap;
+        let mut handles: Vec<_> = self.args.iter().filter_map(Value::handle).collect();
+        handles.extend(self.known.and_then(|(value, _)| value.handle()));
+        let Some(dependencies) = Dependencies::capture(&ledger.borrow(), arena, &handles) else {
+            return Ok(None);
+        };
+        let Some(DetachedNative {
+            registration,
+            storage,
+            page,
+            entities,
+        }) = self.prepare_storage(arena, inputs)?
+        else {
+            return Ok(None);
+        };
+        let Some(transaction) = ledger.borrow().prepare_native_boundary(
+            registration,
+            heap,
+            inputs,
+            storage.output,
+            &page,
+            &entities,
+            &storage.contract,
+            dependencies,
+        )?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(NativeBoundary {
+            transaction,
+            storage,
+        }))
+    }
+
+    fn prepare_storage<'a>(
+        self,
+        arena: &'a mut Arena,
+        inputs: &[Owner],
+    ) -> Result<Option<DetachedNative<'a>>, HeapFault> {
+        let LibRun::Native { native, .. } = &self.function.run else {
+            return Ok(None);
+        };
+        if !supports(&self.contract)
+            || self.args.len() > self.function.arity
+            || self.function.limit.is_some()
+            || self.function.shares_params
+            || self.function.specialization.resource
+                != room::CallSource::Native(self.function.specialization.function)
+        {
+            return Ok(None);
+        }
+        // The installed implementation, not a caller-authored declaration,
+        // authenticates the changing input facts. Unknown contracts decline.
+        match native.resource_contract(doc::Args::new(
+            &self.args,
+            arena.objects(),
+            &arena.semantics(),
+        )) {
+            Ok(Some(contract)) if contract == self.contract => {}
+            Err(doc::NativeError::Host(error)) => return Err(error),
+            Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
+            _ => return Ok(None),
+        }
         let (value, work, depth, new) = if let Some((value, depth)) = self.known {
-            (value, 0, depth, vec![])
-        } else {
-            let LibRun::Native { native, .. } = &self.function.run else {
-                return Ok(None);
-            };
-            if self.function.limit.is_some() {
+            if !crate::compile::scalar(&value)
+                || !crate::compile::import_result_fits(
+                    &self.function.header.signature.result,
+                    value,
+                )
+            {
                 return Ok(None);
             }
+            (value, 0, depth, vec![])
+        } else {
             let semantics = arena.semantics().with_limits(self.limits);
             let mut nursery = match self.room {
                 Some(room) => doc::Nursery::new(arena.objects(), doc::heap::LogicalBytes(room)),
@@ -126,6 +281,42 @@ impl StoragePreparation for NativeStorage<'_> {
                 .map_err(native_fault)?;
             identities.push(entity);
         }
+        // Retain the canonical changing formula inputs while the detached
+        // graph is readable. A region must bind these facts to its compiled
+        // plan; it cannot accept the legacy allowance's fee as authority.
+        let mut measurements = Vec::new();
+        for &(source, measure) in self
+            .function
+            .charge
+            .measurements()
+            .iter()
+            .filter(|_| self.charging)
+        {
+            let operand = match source {
+                crate::compile::Source::Arg(index) => self.args.get(index),
+                crate::compile::Source::Result => Some(&value),
+                crate::compile::Source::Nothing => None,
+            };
+            let measured = if let Some(value) = operand {
+                let measured = match measure {
+                    doc::Measure::Size => crate::data::view_size(&installation, value),
+                    doc::Measure::DeepSize => crate::data::view_deep_size(&installation, value),
+                    doc::Measure::NestedSize => crate::data::view_nested_size(&installation, value),
+                    doc::Measure::Magnitude => {
+                        Ok(crate::data::view_magnitude(&installation, value))
+                    }
+                };
+                match measured {
+                    Ok(measured) => measured,
+                    Err(doc::NativeError::Host(error)) => return Err(error),
+                    Err(doc::NativeError::Malformed(reason)) => return Err(malformed(reason)),
+                    Err(_) => return Ok(None),
+                }
+            } else {
+                0
+            };
+            measurements.push((source, measure, measured));
+        }
         let units = if self.charging {
             let Some(units) = crate::machine::islands::cx::measured_prepared_formula(
                 &installation,
@@ -154,21 +345,37 @@ impl StoragePreparation for NativeStorage<'_> {
         let released = self.ledger.borrow().release_cost_preserving_graph(
             registration.arena(),
             self.heap,
-            &event.inputs,
+            inputs,
             &entities,
             &page,
         )?;
-        let mut event = event.clone();
-        event.native = Some(self.contract);
-        event.outputs.push((self.output, PV::Page(page)));
-        event.entities = entities;
-        Ok(Some(PreparedStorage {
+        // Authenticate the result against its input-evaluated contract before
+        // either the old source consumer or the region consumer can publish.
+        let actual = PV::Page(page.clone());
+        let owners = entities
+            .iter()
+            .zip(self.contract.events.iter().filter_map(|event| match event {
+                doc::NativeResourceEvent::Entity { owner, .. } => Some(*owner),
+                _ => None,
+            }))
+            .map(|(entity, owner)| (entity.entity, owner))
+            .collect();
+        if actual.native_holding(self.heap, registration.arena(), &owners)? != self.contract.output
+        {
+            return Ok(None);
+        }
+        Ok(Some(DetachedNative {
             registration,
             storage: PreparedNative {
                 value,
                 batch,
                 allocated,
-                graph_entities: event.entities.len(),
+                graph_entities: entities.len(),
+                output: self.output,
+                contract: self.contract,
+                function: self.function.specialization.function,
+                arguments: self.args,
+                measurements,
                 units,
                 work,
                 known: self.known.is_some(),
@@ -177,27 +384,37 @@ impl StoragePreparation for NativeStorage<'_> {
                 release: self.release,
                 released,
             },
-            actual: Program::new(vec![event]),
+            page,
+            entities,
         }))
-    }
-    fn allowance(storage: &PreparedNative, allowance: &mut Allowance) {
-        allowance.units = storage.units;
-        allowance.depth = allowance.depth.max(u64::from(storage.depth));
-    }
-    fn facts(storage: &PreparedNative, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        let facts = facts
-            .0
-            .get_mut(&storage.at)
-            .ok_or_else(|| malformed("native value lost its release event"))?;
-        facts.values.insert(
-            Measure::Release(storage.release.clone()),
-            i128::from(storage.released),
-        );
-        Ok(())
     }
 }
 
 impl PreparedNative {
+    #[allow(dead_code, reason = "core owns region charge compiler wiring")]
+    pub(in crate::machine) fn formula_values(&self) -> room::charges::FormulaValues<'_> {
+        room::charges::FormulaValues {
+            arguments: &self.arguments,
+            result: self.value,
+        }
+    }
+    #[allow(
+        dead_code,
+        reason = "core must extend FormulaValues for detached heap results"
+    )]
+    pub(in crate::machine) fn measure(
+        &self,
+        source: crate::compile::Source,
+        measure: doc::Measure,
+    ) -> Option<u64> {
+        self.measurements
+            .iter()
+            .find_map(|(s, m, value)| (*s == source && *m == measure).then_some(*value))
+    }
+    pub(in crate::machine) fn contract(&self) -> &doc::NativeResourceContract {
+        &self.contract
+    }
+
     pub(in crate::machine) fn known(&self) -> bool {
         self.known
     }
@@ -278,4 +495,60 @@ fn project_body(
         ),
         _ => return Err(malformed("native mutable recipe has another body kind")),
     })
+}
+
+/// Retain the canonical lease boundaries, including a release before an entity
+/// allocation. Equal peaks do not imply interchangeable phase schedules.
+pub(in crate::machine) fn scratch_events(
+    output: Owner,
+    contract: &doc::NativeResourceContract,
+) -> Result<Vec<lash_kernel_state::kernel_internals::logical::ScratchEvent>, HeapFault> {
+    use doc::{NativeResourceEvent as Event, NativeResourceRelease as Release};
+    use lash_kernel_state::kernel_internals::logical::{ScratchEvent, Slot};
+    let Owner::Value {
+        task,
+        invocation,
+        slot: Slot::Operand(_),
+    } = output
+    else {
+        return Err(malformed("native output has no operand owner"));
+    };
+    if contract.peak_scratch_bytes().is_none() {
+        return Err(malformed("native scratch contract is invalid"));
+    }
+    let owner = |index: doc::NativeResourceOwner| Owner::Value {
+        task,
+        invocation,
+        slot: Slot::Scratch(index.0),
+    };
+    let mut active = Vec::new();
+    let mut events = Vec::new();
+    for event in &contract.events {
+        active.retain(|(index, release)| {
+            if *release == Release::Before(event.owner()) {
+                events.push(ScratchEvent::End {
+                    owner: owner(*index),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        if let Event::Scratch {
+            owner: index,
+            bytes,
+            release,
+        } = event
+        {
+            events.push(ScratchEvent::Begin {
+                owner: owner(*index),
+                bytes: *bytes,
+            });
+            active.push((*index, *release));
+        }
+    }
+    events.extend(active.into_iter().map(|(index, _)| ScratchEvent::End {
+        owner: owner(index),
+    }));
+    Ok(events)
 }

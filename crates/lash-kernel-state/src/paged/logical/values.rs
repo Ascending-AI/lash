@@ -265,3 +265,135 @@ pub(crate) fn stream_value_edges(
     }
     Ok(())
 }
+
+impl Ledger {
+    /// Prepare a native's detached canonical graph and surviving result in one
+    /// boundary. The declaration is checked against actual body/member facts
+    /// before any identity grant. Scratch retains its declared phase order.
+    #[expect(clippy::too_many_arguments, reason = "one native storage boundary")]
+    pub fn prepare_native_boundary<'a>(
+        &self,
+        mut registration: crate::arena::Registration<'a>,
+        heap: &super::super::heap_impl::PagedHeap,
+        inputs: &[Owner],
+        output: Owner,
+        value: &PageValue,
+        entities: &[VirtualEntity],
+        contract: &lash_kernel_doc::NativeResourceContract,
+        dependencies: Dependencies,
+    ) -> Result<Option<BoundaryTransaction<'a>>, HeapFault> {
+        use lash_kernel_doc::{NativeResourceEvent, NativeResourceExit};
+        if contract.exit != NativeResourceExit::Returned
+            || !dependencies.is_current(self, registration.arena())
+        {
+            return Ok(None);
+        }
+        let construction = contract
+            .peak_extra_bytes()
+            .and_then(|peak| peak.checked_sub(contract.output.bytes))
+            .ok_or_else(|| invalid("invalid native phase schedule"))?;
+        let declarations: Vec<_> = contract
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                NativeResourceEvent::Entity {
+                    owner,
+                    kind,
+                    members,
+                    ..
+                } => Some((*owner, *kind, members)),
+                NativeResourceEvent::Scratch { .. } => None,
+            })
+            .collect();
+        if declarations.len() != entities.len() {
+            return Ok(None);
+        }
+        let owners: BTreeMap<_, _> = entities
+            .iter()
+            .zip(&declarations)
+            .map(|(entity, (owner, _, _))| (entity.entity, *owner))
+            .collect();
+        if owners.len() != entities.len() {
+            return Ok(None);
+        }
+        for (entity, (_, kind, members)) in entities.iter().zip(&declarations) {
+            let (actual_kind, actual_members) =
+                entity
+                    .body
+                    .native_members(heap, registration.arena(), &owners)?;
+            if actual_kind != *kind || actual_members != **members {
+                return Ok(None);
+            }
+        }
+        if PublicationValue::Page(value.clone()).native_holding(
+            heap,
+            registration.arena(),
+            &owners,
+        )? != contract.output
+        {
+            return Ok(None);
+        }
+        if entities.is_empty() {
+            return self
+                .prepare_source_boundary(
+                    registration,
+                    heap,
+                    inputs,
+                    &[(output, RootValue::Page(value))],
+                )?
+                .bind_dependencies(dependencies)?
+                .require_source_room(construction)
+                .map(Some)
+                .ok_or_else(|| invalid("native construction peak overflow"));
+        }
+        let access = heap.pages();
+        let mut pending = Vec::new();
+        let mut headers = Vec::with_capacity(entities.len());
+        let mut bodies = Vec::with_capacity(entities.len());
+        for entity in entities {
+            if registration.reserve_entity().map_err(arena_fault)? != entity.entity
+                || self.entity_holding(entity.entity, access)?.is_some()
+            {
+                return Ok(None);
+            }
+            headers.push(Change::Allocate {
+                entity: entity.entity,
+                body: Holding::scalar(Cost::OBJECT),
+            });
+            let body = entity.body.holding(heap, registration.arena())?;
+            body.each_edge(access, &mut |edge| {
+                if let Identity::Object(child) = edge.target {
+                    pending.push(child);
+                }
+                Ok(())
+            })?;
+            bodies.push(Change::Mutate {
+                entity: entity.entity,
+                body,
+            });
+        }
+        let roots = self.ownership_changes(
+            registration.arena(),
+            access,
+            inputs,
+            &[(output, RootValue::Page(value))],
+            &mut pending,
+        )?;
+        pending.retain(|entity| !owners.contains_key(entity));
+        let mut changes =
+            self.allocate_membership_from(registration.arena(), access, pending, Some(heap))?;
+        changes.extend(headers);
+        changes.extend(bodies);
+        changes.push(Change::Roots(roots));
+        let prepared = self
+            .prepare_event(changes, access)?
+            .require_source_room(construction)
+            .ok_or_else(|| invalid("native construction peak overflow"))?;
+        Ok(Some(BoundaryTransaction::from_program(
+            registration,
+            dependencies,
+            prepared,
+            Vec::new(),
+        )))
+    }
+}

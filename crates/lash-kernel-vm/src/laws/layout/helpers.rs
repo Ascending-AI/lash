@@ -33,6 +33,98 @@ pub(in crate::laws) fn helper_probes(
     ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
 ) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
     let mut out = call_probes(registry, ids);
+    struct BoundaryNative;
+    impl lash_kernel_doc::NativeFunction for BoundaryNative {
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            use lash_kernel_doc::{NativeError, NewObject, Value};
+            match call.args.values() {
+                [Value::Int(0 | 2)] => Ok(Value::Int(7)),
+                [Value::Int(1 | 3)] => {
+                    call.counter.spend(2)?;
+                    Ok(call
+                        .new
+                        .allocate(NewObject::List(vec![Value::Int(7), Value::Int(8)])))
+                }
+                [Value::Int(4)] => panic!("unknown contracts must decline before native execution"),
+                _ => Err(NativeError::Refused {
+                    kind: "boundary_refused",
+                    message: "native refusal".into(),
+                }),
+            }
+        }
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<lash_kernel_doc::NativeResourceContract>, lash_kernel_doc::NativeError>
+        {
+            use lash_kernel_doc::{
+                NativeResourceContract as Contract, NativeResourceEntity as Kind,
+                NativeResourceEvent as Event, NativeResourceExit as Exit,
+                NativeResourceHolding as Holding, NativeResourceOrigin as Origin,
+                NativeResourceOwner as Owner, NativeResourceRelease as Release, Value,
+            };
+            let [Value::Int(mode)] = args.values() else {
+                return Ok(None);
+            };
+            Ok(match mode {
+                0 | 5 => Some(Contract::value(Exit::Returned, 17, Origin::Immutable)),
+                2 => Some(Contract::value(Exit::Returned, 16, Origin::Immutable)),
+                1 | 3 => Some(Contract {
+                    exit: Exit::Returned,
+                    events: vec![
+                        Event::Scratch {
+                            owner: Owner(0),
+                            bytes: 40,
+                            release: Release::Before(Owner(1)),
+                        },
+                        Event::Scratch {
+                            owner: Owner(1),
+                            bytes: 20,
+                            release: Release::Exit,
+                        },
+                        Event::Scratch {
+                            owner: Owner(2),
+                            bytes: 30,
+                            release: Release::Before(Owner(3)),
+                        },
+                        Event::Entity {
+                            owner: Owner(3),
+                            kind: Kind::List,
+                            release: None,
+                            members: vec![
+                                Holding {
+                                    bytes: 17,
+                                    origin: Origin::Immutable,
+                                },
+                                Holding {
+                                    bytes: if *mode == 3 { 16 } else { 17 },
+                                    origin: Origin::Immutable,
+                                },
+                            ],
+                        },
+                    ],
+                    output: Holding {
+                        bytes: 16,
+                        origin: Origin::Fresh(Owner(3)),
+                    },
+                }),
+                _ => None,
+            })
+        }
+    }
+    let boundary = lash_kernel_doc::parse_definition(
+        "function resident.boundary(value: Int) -> Any\nkernel 1\ncharge sum(1, size(value), size(result))\nnative\n",
+    ).unwrap();
+    out.push((
+        "resident.boundary",
+        registry
+            .register(boundary, Some(std::sync::Arc::new(BoundaryNative)))
+            .unwrap(),
+    ));
+
     for (definition, native) in lash_kernel_lib::text_json() {
         let name = match definition.name.as_str() {
             "text.join" => "text.join",
@@ -661,6 +753,18 @@ const LOOKALIKE_COUNTERS: &str = r#"main {
 /// charge event and source continuation while entering the common loop.
 #[test]
 fn helper_frames_agree() {
+    // FIG-7614: exercise the staged ABI itself, since core has not enabled
+    // authenticated region placement yet. A fallback-only green cannot pass.
+    let boundary = Embedder::with(
+        "main { return resident.boundary(0) }",
+        Setup {
+            probes: Some(helper_probes),
+            ..Setup::default()
+        },
+    );
+    boundary
+        .machine
+        .assert_native_boundary_law(boundary.library.ids["resident.boundary"]);
     use super::ExecutionMode as Mode;
     use crate::machine::islands::witness::{self, Exit, Family};
     use crate::perf_witness::execution::{self, Owner};

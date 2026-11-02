@@ -2,9 +2,7 @@
 use super::*;
 use crate::admission::Allowance;
 use crate::machine::source_publication::native_storage;
-use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, Program, RootValue, ScratchEvent, Slot,
-};
+use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program, RootValue};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
@@ -211,25 +209,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Ok(ValuePublication::Unavailable);
         };
-        if let Some((value, _)) = answer
-            && value.handle().is_none()
-            && args.iter().all(|arg| arg.handle().is_none())
-            && !collection
-            && scratch == 0
-            && interval.native_commit(source)
-            && let Some(joined) =
-                self.join_native(frame, site, args, &contract, &input_sites, &at, value)?
-        {
-            #[cfg(any(test, feature = "testing"))]
-            if matches!(joined, ValuePublication::Published(_)) {
-                if prepared {
-                    crate::machine::islands::witness::prepared_native_published();
-                } else {
-                    crate::machine::islands::witness::native_read_published();
-                }
-            }
-            return Ok(joined);
-        }
         self.source_bindings(frame)?;
         let activation = frame
             .state
@@ -354,30 +333,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             },
             safe_point: self.charged,
         };
-        let scratch_events = if scratch == 0 {
-            vec![]
-        } else {
-            let Owner::Value {
-                task,
-                invocation,
-                slot: Slot::Operand(index),
-            } = output
-            else {
-                return Err(malformed("native output has no operand index"));
-            };
-            let owner = Owner::Value {
-                task,
-                invocation,
-                slot: Slot::Scratch(index),
-            };
-            vec![
-                ScratchEvent::Begin {
-                    owner,
-                    bytes: scratch,
-                },
-                ScratchEvent::End { owner },
-            ]
-        };
+        let scratch_events = native_storage::scratch_events(output, &contract)?;
         let make = || {
             Program::new(vec![JournalEvent {
                 inputs: inputs.clone(),
@@ -447,112 +403,5 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         } else {
             ValuePublication::Declined
         })
-    }
-
-    /// A proven native commit with a scalar answer over scalar operands joins
-    /// the open region. Its checked journal releases the operands and holds
-    /// the answer; its shared admission is the call's peak above the region's
-    /// envelope, the units the checked storage would charge, the close and
-    /// the helper depth. `None` leaves the call to the checked path, which
-    /// decides every refusal exactly.
-    #[allow(clippy::too_many_arguments)]
-    fn join_native(
-        &mut self,
-        frame: &mut Values<'_, '_>,
-        site: &NativeSite,
-        args: &[Value],
-        contract: &doc::NativeResourceContract,
-        input_sites: &[lash_kernel_value::sites::Site],
-        at: &Point,
-        value: Value,
-    ) -> Result<Option<ValuePublication>, HeapFault> {
-        let source = &self.exe.code(frame.state.callee.plan.code).source_room;
-        let Some(activation) = frame.state.source.as_mut() else {
-            return Ok(None);
-        };
-        let Some(frontier) = activation.frontier.as_mut() else {
-            return Ok(None);
-        };
-        let slots = source
-            .owner_slots()
-            .map_err(|_| malformed("native read owners failed verification"))?;
-        let invocation = activation.invocation.id();
-        let root = |at: &lash_kernel_value::sites::Site| {
-            slots.root(&room::Owner::Operand(at.clone()), self.task, invocation)
-        };
-        let Some(output) = root(&at.site) else {
-            return Ok(None);
-        };
-        let mut inputs = Vec::with_capacity(input_sites.len());
-        for at in input_sites {
-            let Some(input) = root(at) else {
-                return Ok(None);
-            };
-            if !self.logical.holds(input, self.heap.pages())? {
-                return Ok(Some(ValuePublication::Unavailable));
-            }
-            inputs.push(input);
-        }
-        if self.logical.holds(output, self.heap.pages())? {
-            return Ok(Some(ValuePublication::Declined));
-        }
-        // The checked storage replaces the kernel's units by the measured
-        // formula over the answer; scalars measure alike in either arena.
-        let units = if self.charging {
-            let Some(units) = crate::machine::islands::cx::measured_formula(
-                self.arena,
-                &self.exe.lib(site.lib).charge,
-                args,
-                Some(&value),
-            ) else {
-                return Ok(None);
-            };
-            units
-        } else {
-            0
-        };
-        let close = self
-            .accounting
-            .then_some(site.close)
-            .flatten()
-            .map_or(0, |close| u64::from(close.total));
-        let need = match site.depth {
-            Depth::None => 0,
-            Depth::Operation(extra) if extra <= 1 => 1,
-            Depth::Operation(extra) | Depth::Template(extra) => u64::from(extra) + 1,
-        };
-        let depth = (self.base + u64::from(self.depth)).saturating_sub(1);
-        let Some(end) = self
-            .charged
-            .checked_add(units)
-            .and_then(|end| end.checked_add(close))
-        else {
-            return Ok(None);
-        };
-        // Either the call's envelope or the answer's holding prices the
-        // event's peak; the larger bounds both.
-        let Some(peak) = contract.peak_extra_bytes() else {
-            return Ok(None);
-        };
-        let peak = peak.max(Holding::from_native(self.arena, self.heap.pages(), &value)?.bytes());
-        if end > self.bound
-            || depth
-                .checked_add(need)
-                .is_none_or(|depth| depth > self.call_depth)
-            || !self
-                .logical
-                .admit(self.arena, self.heap, peak, self.memory_bound)?
-        {
-            return Ok(None);
-        }
-        frontier.proven()?;
-        for input in inputs {
-            self.logical.replace(input, None);
-        }
-        self.logical
-            .replace(output, Some(SourceValue::Value(value)));
-        self.charged = end;
-        frame.regs[site.reg as usize] = value;
-        Ok(Some(ValuePublication::Published(value)))
     }
 }

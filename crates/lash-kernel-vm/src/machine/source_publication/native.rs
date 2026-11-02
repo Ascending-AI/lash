@@ -5,9 +5,7 @@ use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurre
 use crate::compile::{LibId, LibRun};
 use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{
-    Holding, JournalEvent, Owner, ScratchEvent, Slot,
-};
+use lash_kernel_state::kernel_internals::logical::{Holding, JournalEvent};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 struct NativeResult<'bank, 'recipe> {
@@ -161,30 +159,7 @@ impl KernelMachine {
             .ledger()
             .borrow()
             .release_cost(&inputs, self.heap.pages())?;
-        let scratch_events = if scratch == 0 {
-            vec![]
-        } else {
-            let Owner::Value {
-                task,
-                invocation,
-                slot: Slot::Operand(index),
-            } = output
-            else {
-                return Err(malformed("native output has no operand index").into());
-            };
-            let owner = Owner::Value {
-                task,
-                invocation,
-                slot: Slot::Scratch(index),
-            };
-            vec![
-                ScratchEvent::Begin {
-                    owner,
-                    bytes: scratch,
-                },
-                ScratchEvent::End { owner },
-            ]
-        };
+        let scratch_events = native_storage::scratch_events(output, &contract)?;
         let active = self
             .tasks
             .get_mut(running.task.0 as usize)?
@@ -424,3 +399,6 @@ impl KernelMachine {
         Ok(published)
     }
 }
+
+#[cfg(test)]
+mod laws;
