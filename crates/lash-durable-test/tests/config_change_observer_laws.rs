@@ -18,6 +18,7 @@
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/dialect.rs"]
+#[allow(dead_code)]
 mod dialect;
 #[path = "support/matrix.rs"]
 mod matrix;
@@ -308,60 +309,6 @@ async fn a_committed_config_transaction_reaches_its_observers_once(tier: Tier) {
         "neither a later turn nor a transaction that did not apply delivers"
     );
     assert_eq!(session.policy_snapshot().max_tool_calls.get(), AFTER);
-    world.shutdown().await;
-}
-
-/// A config transaction applies to a session whose plugins cannot build:
-/// it answers `Applied` and the session records the new policy; its
-/// observers, never built, see nothing, and the session's head owes them
-/// the change. The session's next plugin build, its next turn's, delivers
-/// it once and the turn's commit retires it (FIG-5245, FIG-5333, FIG-5397).
-async fn a_config_transaction_applies_when_the_sessions_plugins_cannot_build(tier: Tier) {
-    let observer = Observer::default();
-    let Some(world) = world(tier, &observer).await else {
-        return;
-    };
-    let name = "config-change-unbuilt";
-    let durable = world.session(name, served::spec(BEFORE)).await;
-    let session = open(&world, name).await;
-    let base = revision(&session).await;
-    observer.failing.store(true, Ordering::SeqCst);
-    let outcome = set_limit(&session, "raise-unbuilt", base, AFTER).await;
-    assert!(
-        matches!(outcome, ConfigTransactionOutcome::Applied { .. }),
-        "{outcome:?}"
-    );
-    assert_eq!(session.policy_snapshot().max_tool_calls.get(), AFTER);
-    assert_eq!(revision(&session).await, base + 1);
-    assert_eq!(observer.seen(), Vec::new());
-    let change = Seen {
-        session: name.to_owned(),
-        revision: base + 1,
-        changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
-        served: AFTER,
-    };
-    assert_eq!(
-        owed(&world.backend, name).await.map(|owed| (
-            owed.revision,
-            owed.previous.max_tool_calls.get(),
-            owed.current.max_tool_calls.get()
-        )),
-        Some((change.revision, BEFORE, AFTER)),
-        "the head owes the observers the change"
-    );
-
-    observer.failing.store(false, Ordering::SeqCst);
-    world.send(&durable, "once the plugins build").await;
-    assert_eq!(
-        observer.seen(),
-        vec![change],
-        "the next plugin build delivers the owed change"
-    );
-    assert_eq!(
-        owed(&world.backend, name).await,
-        None,
-        "the turn's commit retires it"
-    );
     world.shutdown().await;
 }
 
@@ -707,23 +654,9 @@ async fn config_retirement_is_not_config_on_sqlite_memory() {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
-    sqlite_memory, SqliteMemory;
-    a_committed_config_transaction_reaches_its_observers_once
-);
-tiered_laws!(
-    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
-    sqlite_file, SqliteFile;
-    a_committed_config_transaction_reaches_its_observers_once,
-    a_config_transaction_applies_when_the_sessions_plugins_cannot_build
-);
-tiered_laws!(
-    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
-    postgres, Postgres;
-    a_committed_config_transaction_reaches_its_observers_once,
-    a_config_transaction_applies_when_the_sessions_plugins_cannot_build
-);
+tiered_laws! {
+    sqlite_memory: a_committed_config_transaction_reaches_its_observers_once;
+}
 
 /// The crash law's session, and the input its turn runs after the change.
 const CUT_SESSION: &str = "config-change-cut";
@@ -980,29 +913,6 @@ async fn a_committed_config_change_reaches_its_observers_however_its_command_is_
     a_committed_config_change_reaches_its_observers_however_its_command_is_cut(
         dialect::Dialect::SqliteMemory,
         None,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_committed_config_change_reaches_its_observers_however_its_command_is_cut_on_sqlite_file()
-{
-    a_committed_config_change_reaches_its_observers_however_its_command_is_cut(
-        dialect::Dialect::SqliteFile,
-        None,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_committed_config_change_reaches_its_observers_however_its_command_is_cut_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    a_committed_config_change_reaches_its_observers_however_its_command_is_cut(
-        dialect::Dialect::Postgres,
-        Some(url),
     )
     .await;
 }

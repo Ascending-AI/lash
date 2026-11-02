@@ -1785,17 +1785,18 @@ async fn batch_of_spawns_overlaps(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    spawn_agent_record_carries_child_identity,
-    a_session_lifetime_subagent_survives_its_waiting_turn,
-    declared_start_child_records_only_its_creators_facts,
-    declared_start_cancel_at_each_point,
-    declared_start_discarded_retry_launches_nothing,
-    declared_start_refusal_settles_the_call,
-    declared_start_rejects_foreign_or_reused_serialized_identity_before_launch,
-    declared_start_refuses_a_launch_its_attempt_did_not_hold,
-    batch_of_spawns_overlaps,
-);
+tiered_laws! {
+    sqlite_memory:
+        spawn_agent_record_carries_child_identity,
+        a_session_lifetime_subagent_survives_its_waiting_turn,
+        declared_start_child_records_only_its_creators_facts,
+        declared_start_cancel_at_each_point,
+        declared_start_discarded_retry_launches_nothing,
+        declared_start_refusal_settles_the_call,
+        declared_start_rejects_foreign_or_reused_serialized_identity_before_launch,
+        declared_start_refuses_a_launch_its_attempt_did_not_hold,
+        batch_of_spawns_overlaps,
+}
 
 #[path = "declared_start/process_own_env.rs"]
 mod process_own_env;

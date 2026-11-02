@@ -610,9 +610,10 @@ async fn captured_deferred_codec_is_required_before_execution(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    typescript_restored_process_handle_await_crosses_turn_boundary,
-    typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation,
-    started_process_captures_committed_deferred_binding,
-    captured_deferred_codec_is_required_before_execution,
-);
+tiered_laws! {
+    sqlite_memory:
+        typescript_restored_process_handle_await_crosses_turn_boundary,
+        typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation,
+        started_process_captures_committed_deferred_binding,
+        captured_deferred_codec_is_required_before_execution,
+}

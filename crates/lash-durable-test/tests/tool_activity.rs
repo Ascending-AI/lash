@@ -1189,11 +1189,12 @@ async fn a_tool_s_intent_outcome_never_reaches_the_model(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    a_durable_turn_streams_provider_deltas_before_its_committed_rows,
-    a_durable_turn_streams_a_native_call_s_activity_to_its_sink,
-    a_presentation_step_presents_every_native_round_call,
-    a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows,
-    a_commit_on_one_node_reaches_a_subscriber_attached_through_another,
-    a_tool_s_intent_outcome_never_reaches_the_model,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_durable_turn_streams_provider_deltas_before_its_committed_rows,
+        a_durable_turn_streams_a_native_call_s_activity_to_its_sink,
+        a_presentation_step_presents_every_native_round_call,
+        a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows,
+        a_commit_on_one_node_reaches_a_subscriber_attached_through_another,
+        a_tool_s_intent_outcome_never_reaches_the_model,
+}

@@ -711,11 +711,12 @@ async fn a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once(tier: Ti
     a_lost_nodes_admission_is_exported_once(tier, Lost::InCellCall).await;
 }
 
-tiered_laws!(
-    a_turn_resumed_on_its_node_keeps_its_trace_scope,
-    a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope,
-    a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once,
-    a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once,
-    a_suspended_cell_answered_on_a_takeover_node_is_one_span,
-    a_suspended_cell_discarded_on_a_takeover_node_exports_its_code,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_turn_resumed_on_its_node_keeps_its_trace_scope,
+        a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope,
+        a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once,
+        a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once,
+        a_suspended_cell_answered_on_a_takeover_node_is_one_span,
+        a_suspended_cell_discarded_on_a_takeover_node_exports_its_code,
+}

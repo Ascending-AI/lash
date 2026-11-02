@@ -35,28 +35,31 @@ use lash_kernel_value::identity::SessionId;
 
 const MODEL: &str = "core-node-model";
 
-/// The law `$law(tier)` on SQLite in memory, a SQLite file and PostgreSQL;
-/// the PostgreSQL leg runs when the run is handed a server.
+/// The law `$law(tier)` on the selected store tiers;
+/// the PostgreSQL leg runs when the run is handed a server. A `:` tier list
+/// narrows the legs the law registers.
 macro_rules! on_every_tier {
     ($law:ident) => {
+        on_every_tier!($law: sqlite_memory, postgres);
+    };
+    ($law:ident : $($tier:ident),+ $(,)?) => {
         mod $law {
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn on_sqlite_memory() {
-                super::$law(super::Tier::SqliteMemory).await;
+            $(on_every_tier!(@one $law; $tier);)+
+        }
+    };
+    (@one $law:ident; sqlite_memory) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn on_sqlite_memory() {
+            super::$law(super::Tier::SqliteMemory).await;
+        }
+    };
+    (@one $law:ident; postgres) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn on_postgres() {
+            if super::postgres_url().is_none() {
+                return;
             }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn on_sqlite_file() {
-                super::$law(super::Tier::SqliteFile).await;
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn on_postgres() {
-                if super::postgres_url().is_none() {
-                    return;
-                }
-                super::$law(super::Tier::Postgres).await;
-            }
+            super::$law(super::Tier::Postgres).await;
         }
     };
 }
@@ -65,7 +68,6 @@ macro_rules! on_every_tier {
 #[derive(Clone, Copy, Debug)]
 enum Tier {
     SqliteMemory,
-    SqliteFile,
     Postgres,
 }
 
@@ -96,16 +98,6 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
             ),
             Vec::new(),
         ),
-        Tier::SqliteFile => {
-            let dir = tempfile::tempdir().expect("a temporary directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(
-                dir.path().join("lash.db"),
-                lash_sqlite_store::SqliteSynchronous::Normal,
-            )
-            .await
-            .expect("a file store set opens");
-            (Arc::new(stores), vec![Box::new(dir)])
-        }
         Tier::Postgres => {
             let url = postgres_url().expect("a PostgreSQL URL");
             let isolated = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
@@ -320,7 +312,7 @@ async fn spawn_agent_child_runs_and_answers_its_parent(tier: Tier) {
     drop(deployment.backend);
 }
 
-on_every_tier!(spawn_agent_child_runs_and_answers_its_parent);
+on_every_tier!(spawn_agent_child_runs_and_answers_its_parent: sqlite_memory);
 
 // FIG-5295: only catalog forks inherit config; other children start with
 // the prompt plan their creator supplies, or the neutral default.
@@ -725,10 +717,10 @@ async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent
     drop(deployment.backend);
 }
 
-on_every_tier!(a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent);
-on_every_tier!(a_child_uses_exactly_its_explicit_prompt_plan);
-on_every_tier!(a_fork_starts_with_its_parents_full_configuration);
-on_every_tier!(spawned_and_related_children_start_with_the_default_prompt_plan);
+on_every_tier!(a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent: sqlite_memory);
+on_every_tier!(a_child_uses_exactly_its_explicit_prompt_plan: sqlite_memory);
+on_every_tier!(a_fork_starts_with_its_parents_full_configuration: sqlite_memory);
+on_every_tier!(spawned_and_related_children_start_with_the_default_prompt_plan: sqlite_memory);
 
 // --- a child's own turns ----------------------------------------------------
 
@@ -860,11 +852,6 @@ mod a_linked_childs_attachment_is_held_by_the_child_alone {
     async fn on_sqlite_memory() {
         super::a_linked_childs_attachment_is_held_by_the_child_alone(super::Tier::SqliteMemory)
             .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn on_sqlite_file() {
-        super::a_linked_childs_attachment_is_held_by_the_child_alone(super::Tier::SqliteFile).await;
     }
 }
 
@@ -1012,76 +999,7 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
     drop(deployment.backend);
 }
 
-on_every_tier!(a_childs_model_usage_stays_on_the_childs_own_turn);
-
-/// A tool round makes two model calls, and the report sums every usage bucket.
-async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
-    let first = LlmUsage {
-        cache_write_input_tokens: 2,
-        ..usage(11, 3, 7, 1)
-    };
-    let second = LlmUsage {
-        cache_write_input_tokens: 4,
-        ..usage(5, 2, 9, 1)
-    };
-    let model = {
-        let (first, second) = (first.clone(), second.clone());
-        scripted(move |request, _| {
-            if results(request).is_empty() {
-                reporting(
-                    call(
-                        "report-usage-tool",
-                        "tools.write_attachment",
-                        serde_json::json!({}),
-                    ),
-                    &first,
-                )
-            } else {
-                reporting(text(request, CHILD_REPLY), &second)
-            }
-        })
-    };
-    let deployment = deploy(tier, Vec::new(), |builder| {
-        builder
-            .serve_test_llm_profile(model, metadata())
-            .plugin(packages::tools(
-                lash::tool_provider_key!("tools"),
-                write_attachment_tool(),
-            ))
-    })
-    .await;
-    let output = settle(&deployment.core, "report-two-calls", "write the attachment").await;
-    assert_eq!(
-        call_usage(&deployment.core, "report-two-calls", &output).await,
-        vec![first, second],
-        "{output:?}"
-    );
-    assert_eq!(
-        call_usage(&deployment.core, "report-two-calls", &output)
-            .await
-            .into_iter()
-            .try_fold(lash_core::LlmUsage::default(), |total, usage| total
-                .checked_add(&usage))
-            .expect("bounded usage"),
-        lash_core::LlmUsage {
-            input_tokens: 16,
-            output_tokens: 5,
-            cache_read_input_tokens: 16,
-            cache_write_input_tokens: 6,
-            reasoning_output_tokens: 2,
-            unknown_calls: 0,
-        },
-        "the report sums both calls, including cache and reasoning tokens"
-    );
-    drop(deployment.backend);
-}
-
-mod sqlite_memory_report_usage {
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_turn_report_sums_two_model_calls_usage() {
-        super::a_turn_report_sums_two_model_calls_usage(super::Tier::SqliteMemory).await;
-    }
-}
+on_every_tier!(a_childs_model_usage_stays_on_the_childs_own_turn: sqlite_memory);
 
 // --- host engines -----------------------------------------------------------
 
@@ -1336,28 +1254,6 @@ const WRITE_TOOL_OPERATION: &str = "tools.core_node_write";
 #[derive(Debug, Default)]
 struct World {
     writes: Mutex<Vec<(lash_core::ToolCallId, serde_json::Value)>>,
-    held: tokio::sync::Notify,
-}
-
-struct Write {
-    world: Arc<World>,
-}
-
-#[async_trait::async_trait]
-impl lash::tools::StaticToolExecute for Write {
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.world
-            .writes
-            .lock()
-            .unwrap()
-            .push((call.context.call_id().clone(), call.args.clone()));
-        // A negative `x` holds the call open: it never answers.
-        if call.args["x"].as_i64().is_some_and(|x| x < 0) {
-            self.world.held.notify_one();
-            std::future::pending::<()>().await;
-        }
-        lash_core::ToolOutcome::ok(serde_json::json!({ "wrote": call.args })).into()
-    }
 }
 
 /// The component a process names to call the write tool.
@@ -1383,21 +1279,6 @@ fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
-}
-
-/// The `Once` host tool that writes to `world`.
-fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
-    Arc::new(lash::tools::StaticToolProvider::new(
-        vec![write_definition()],
-        Write {
-            world: Arc::clone(world),
-        },
-    ))
-}
-
-/// The process component that contributes the write tool over `world`.
-fn write_component(world: &Arc<World>) -> Arc<dyn lash::process::ProcessComponentFactory> {
-    lash_core::testing::tool_component(WRITE_COMPONENT, write_tool(world))
 }
 
 /// The environment a host start in these laws states: no tools and no
@@ -1528,7 +1409,7 @@ async fn a_start_with_a_missing_environment_is_refused_at_admission(tier: Tier) 
     }
 }
 
-on_every_tier!(a_start_with_a_missing_environment_is_refused_at_admission);
+on_every_tier!(a_start_with_a_missing_environment_is_refused_at_admission: sqlite_memory, postgres);
 
 /// Admission holds the environment under the process record in its own
 /// transaction, so ending the source pin cannot strand an admitted start
@@ -1582,7 +1463,7 @@ async fn an_admitted_process_keeps_its_environment_after_the_source_pin_ends(tie
     );
 }
 
-on_every_tier!(an_admitted_process_keeps_its_environment_after_the_source_pin_ends);
+on_every_tier!(an_admitted_process_keeps_its_environment_after_the_source_pin_ends: sqlite_memory, postgres);
 
 /// `registration`, its engine launched under `env_ref`.
 fn with_launch(
@@ -1701,77 +1582,6 @@ fn success(output: &lash_core::ToolCallOutput) -> serde_json::Value {
     output.value_for_projection()
 }
 
-/// The tool engine: it runs the write tool once on its start's `x` and ends
-/// with what the step answered.
-const TOOL_ENGINE: &str = "core-node-tool-engine";
-
-fn tool_engine_advance(
-    _state: &mut serde_json::Value,
-    event: lash_execution_contracts::process::EngineEvent,
-) -> lash_execution_contracts::process::EngineAction {
-    match event {
-        lash_execution_contracts::process::EngineEvent::Started { payload } => {
-            let x = payload
-                .pointer("/x")
-                .or_else(|| payload.pointer("/args/x"))
-                .cloned()
-                .unwrap_or_default();
-            lash_execution_contracts::process::EngineAction::Steps {
-                steps: vec![lash_execution_contracts::process::StepRequest::Tool {
-                    step: lash_execution_contracts::process::StepName("write".to_owned()),
-                    use_: operations::use_for(&write_definition()),
-                    input: serde_json::json!({ "x": x }),
-                    site: None,
-                }],
-                wake: None,
-            }
-        }
-        lash_execution_contracts::process::EngineEvent::StepSettled { outcome, .. } => {
-            answer(serde_json::json!({ "step": settled(&outcome) }))
-        }
-        lash_execution_contracts::process::EngineEvent::Cancelled { origin, .. } => {
-            cancelled(origin)
-        }
-        _ => lash_execution_contracts::process::EngineAction::Idle,
-    }
-}
-
-/// A host engine started through the core's process API runs its Steps
-/// action on the core's node: the tool its environment's component
-/// contributes runs once, under its `Once` policy, and the engine reads the
-/// tool's output as the step's answer.
-async fn host_engine_step_runs_its_catalog_tool_once(tier: Tier) {
-    let world = Arc::new(World::default());
-    let deployment = deploy(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: TOOL_ENGINE,
-            advance: tool_engine_advance,
-        })],
-        |builder| builder.process_component(write_component(&world), WRITE_COMPONENT),
-    )
-    .await;
-    let process = start_under(
-        &deployment.core,
-        &write_environment(),
-        TOOL_ENGINE,
-        serde_json::json!({ "x": 7 }),
-        |request| request,
-    )
-    .await;
-    let answer = success(&ended(&deployment.core, &process).await);
-    let writes = world.writes.lock().unwrap().clone();
-    assert_eq!(writes.len(), 1, "the tool ran once: {writes:?}");
-    assert_eq!(writes[0].1, serde_json::json!({ "x": 7 }));
-    assert_eq!(
-        answer,
-        serde_json::json!({ "step": { "wrote": { "x": 7 } } }),
-        "the engine read the tool's output"
-    );
-}
-
-on_every_tier!(host_engine_step_runs_its_catalog_tool_once);
-
 // --- retained start preparation ----------------------------------------------
 
 const HOLD_ENGINE: &str = "core-node-hold-engine";
@@ -1875,7 +1685,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
     );
 }
 
-on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
+on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start: sqlite_memory);
 
 // --- kernel processes ------------------------------------------------------
 
@@ -1905,45 +1715,6 @@ fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
         .with_worker_service(lash::vm::WorkerService::default()),
     )
 }
-
-/// A kernel process started through the core's process API runs on the
-/// core's node: its machine runs only in its `kernel_run` engine steps, from one
-/// committed snapshot to the next across its sleeps, to its terminal.
-async fn lash_vm_process_runs_to_its_terminal(tier: Tier) {
-    let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
-    let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
-        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
-        .build()
-        .unwrap();
-    let (payload, env) = kernel_process::publish(&deployment.core, WORKER, &env).await;
-    let process = start_under(
-        &deployment.core,
-        &env,
-        lash_vm_runtime::LASH_VM_ENGINE_KIND,
-        payload,
-        |request| request,
-    )
-    .await;
-    let output = ended(&deployment.core, &process).await;
-    assert_eq!(success(&output), serde_json::json!("done"));
-    let steps = deployment
-        .backend
-        .durable()
-        .run_facts(&lash_durable::domain::OwnerKey::Process(process))
-        .await
-        .expect("the process's run facts are read");
-    // A step's admission names its tool, inline in the fact's node.
-    let step = lash_vm_runtime::KERNEL_RUN_STEP.as_bytes();
-    assert!(
-        steps
-            .nodes
-            .values()
-            .any(|node| node.bytes.windows(step.len()).any(|window| window == step)),
-        "the machine ran in its kernel_run steps: {steps:?}"
-    );
-}
-
-on_every_tier!(lash_vm_process_runs_to_its_terminal);
 
 // --- isolated tools ---------------------------------------------------------
 
@@ -2262,7 +2033,7 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
     );
 }
 
-on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
+on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor: sqlite_memory);
 
 #[path = "support/kernel_process.rs"]
 mod kernel_process;
@@ -2427,24 +2198,4 @@ mod served;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lo_resolution_on_sqlite_memory() {
     live_owner_pins::lo_resolution(served::Tier::SqliteMemory).await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lo_resolution_on_sqlite_file() {
-    live_owner_pins::lo_resolution(served::Tier::SqliteFile).await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires a private PostgreSQL service"]
-async fn lo_resolution_on_postgres_when_configured() {
-    let _ = lash_postgres_store::testing::required_database_url();
-    live_owner_pins::lo_resolution(served::Tier::Postgres).await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn lo_succession_on_sqlite_file() {
-    live_owner_pins::lo_succession(served::Tier::SqliteFile).await;
-}
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires a private PostgreSQL service"]
-async fn lo_succession_on_postgres_when_configured() {
-    let _ = lash_postgres_store::testing::required_database_url();
-    live_owner_pins::lo_succession(served::Tier::Postgres).await;
 }

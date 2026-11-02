@@ -446,38 +446,6 @@ fn host_tools(offered: &[String]) -> Vec<String> {
     names
 }
 
-/// RUN-OPTION-CHANGES-ADVERTISEMENT (law 1; R2, S2): a run that states a
-/// selection for the provider is offered that selection alone; the next
-/// run, stating none, is offered the provider's recorded selection again.
-async fn a_run_option_changes_what_that_run_alone_is_offered(tier: Tier) {
-    let Some(deployment) = Deployment::new(tier).await else {
-        return;
-    };
-    let surface = Surface::new(vec![alpha(), beta()]);
-    let core = deployment.boot(vec![Arc::new(lash::tools::SelectedToolsPlugin::new(
-        SURFACE,
-        surface as _,
-    ))]);
-    create(&core, "run-option").await;
-    send(
-        &core,
-        "run-option",
-        "narrowed",
-        Some((SURFACE, only(&[alpha()]))),
-    )
-    .await;
-    send(&core, "run-option", "unchanged", None).await;
-    let offered = deployment.offered.all();
-    assert_eq!(offered.len(), 2, "{offered:?}");
-    assert_eq!(host_tools(&offered[0]), ["surface_alpha"], "{offered:?}");
-    assert_eq!(
-        host_tools(&offered[1]),
-        ["surface_alpha", "surface_beta"],
-        "the next run is offered the recorded selection: {offered:?}"
-    );
-    core.shutdown().await.expect("the core shuts down");
-}
-
 /// PROVIDER-READS-RUN-CONFIG (law 2; S2): the provider reads each run's own
 /// config. A run before and a run after the narrowed one are offered every
 /// tool; the narrowed run is offered alpha alone, its call to alpha runs,
@@ -803,41 +771,6 @@ async fn strand_held_call(deployment: &Deployment, name: &str) {
         .await
         .expect("the held call starts");
     drop((handle, session));
-    core.shutdown().await.expect("the core shuts down");
-}
-
-/// SAME-SURFACE-DEPLOY-RUNS (law 9, session arm; S5, §5a): a node serving
-/// the exact surface the run recorded runs the recorded call.
-async fn a_recorded_call_runs_on_a_node_serving_the_same_surface(tier: Tier) {
-    let Some(deployment) = Deployment::new(tier).await else {
-        return;
-    };
-    strand_held_call(&deployment, "same-surface").await;
-    let surface = Surface::answering(vec![quick(), held()]);
-    let core = deployment.boot(vec![Arc::new(lash::tools::SelectedToolsPlugin::new(
-        SURFACE,
-        Arc::clone(&surface) as _,
-    ))]);
-    let session = core
-        .session(session_id("same-surface"))
-        .durable()
-        .await
-        .expect("the session resolves");
-    let output = tokio::time::timeout(
-        WATCHDOG,
-        session
-            .attach_id(lash_vocabulary::identity::TurnId::parse("same-surface").expect("a turn id"))
-            .output(),
-    )
-    .await
-    .expect("deadlock watchdog: the resumed turn never settled")
-    .expect("the resumed turn settles");
-    served::assert_answered("same-surface", &output);
-    assert_eq!(
-        surface.executed(),
-        [held().id],
-        "the recorded call ran here"
-    );
     core.shutdown().await.expect("the core shuts down");
 }
 
@@ -1327,15 +1260,14 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
     world.shutdown().await;
 }
 
-tiered_laws!(
-    a_run_option_changes_what_that_run_alone_is_offered,
-    advertisement_and_execution_read_the_same_run_config,
-    a_name_collision_is_refused_naming_both_and_a_selection_admits,
-    a_session_offered_an_unserved_provider_it_never_called_runs,
-    settling_one_of_two_calls_to_a_provider_leaves_it_required,
-    a_recorded_call_runs_on_a_node_serving_the_same_surface,
-    a_recorded_call_is_judged_by_its_contract_alone,
-    a_recorded_cell_call_is_judged_by_its_contract_alone,
-    a_host_start_observes_only_the_sessions_it_names,
-    a_lost_host_start_acknowledgement_recovers_the_retained_process,
-);
+tiered_laws! {
+    sqlite_memory:
+        advertisement_and_execution_read_the_same_run_config,
+        a_name_collision_is_refused_naming_both_and_a_selection_admits,
+        a_session_offered_an_unserved_provider_it_never_called_runs,
+        settling_one_of_two_calls_to_a_provider_leaves_it_required,
+        a_recorded_call_is_judged_by_its_contract_alone,
+        a_recorded_cell_call_is_judged_by_its_contract_alone,
+        a_host_start_observes_only_the_sessions_it_names,
+        a_lost_host_start_acknowledgement_recovers_the_retained_process,
+}

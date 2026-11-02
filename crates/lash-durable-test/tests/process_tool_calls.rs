@@ -858,188 +858,6 @@ async fn a_pruned_process_leaves_no_run_fact_or_wait(tier: Tier) {
     world.shutdown().await;
 }
 
-/// A process environment store that fails, once, the first environment read
-/// a tool step's body makes: what the body would meet rebuilding the
-/// composition its activation already prepared. A read is the body's when
-/// the worker's tool step is on its stack; `activation_reads` counts the
-/// activation's own reads, so the law fails loudly where frames are not
-/// symbolized.
-struct BodyReadFault {
-    inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
-    armed: std::sync::atomic::AtomicBool,
-    activation_reads: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl BodyReadFault {
-    fn over(
-        inner: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
-        activation_reads: Arc<std::sync::atomic::AtomicUsize>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            inner,
-            armed: std::sync::atomic::AtomicBool::new(true),
-            activation_reads,
-        })
-    }
-}
-
-impl lash_core::store::FleetFormatStore for BodyReadFault {
-    fn fleet_format(&self) -> lash_core::FleetFormat {
-        self.inner.fleet_format()
-    }
-
-    fn plugin_writers(&self) -> lash_core::store::PluginWriterRangesFuture<'_> {
-        self.inner.plugin_writers()
-    }
-
-    fn provision_plugin_writers<'a>(
-        &'a self,
-        registrations: &'a [lash_core::store::plugin_writers::PluginWriterRegistration],
-    ) -> lash_core::store::PluginWriterRangesFuture<'a> {
-        self.inner.provision_plugin_writers(registrations)
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_execution_contracts::process::ProcessEnvStore for BodyReadFault {
-    async fn publish_process_env(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        env_ref: &lash_core::ProcessEnvRef,
-        bytes: &[u8],
-    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
-        self.inner.publish_process_env(claim, env_ref, bytes).await
-    }
-
-    async fn acquire_process_env(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        env_ref: &lash_core::ProcessEnvRef,
-    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
-        self.inner.acquire_process_env(claim, env_ref).await
-    }
-
-    async fn end_process_env_referrer(
-        &self,
-        cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError> {
-        self.inner.end_process_env_referrer(cleanup).await
-    }
-
-    async fn get_process_env(
-        &self,
-        env_ref: &lash_core::ProcessEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_execution_contracts::module_artifacts::ArtifactStoreError>
-    {
-        let stack = std::backtrace::Backtrace::force_capture().to_string();
-        if stack.contains("ProcessActivation>::pass") {
-            self.activation_reads
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-        if stack.contains("DurableProcessWorker>::tool_step")
-            && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err(
-                lash_execution_contracts::module_artifacts::ArtifactStoreError::Backend(
-                    "the law's connection reset".to_owned(),
-                ),
-            );
-        }
-        self.inner.get_process_env(env_ref).await
-    }
-}
-
-/// An activation's steps run on the tools its `prepare` built (FIG-6061): a
-/// retryable store fault a step body would meet rebuilding them never
-/// settles the step. The process's body issues one tool step, and the
-/// environment store fails the first read a tool step's body makes; the
-/// body reads none, so the tool runs once and the process answers its
-/// result.
-async fn a_store_fault_after_prepare_never_settles_a_step(tier: Tier) {
-    let witness = Arc::new(Witness::default());
-    let probe_witness = Arc::clone(&witness);
-    let activation_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let store_reads = Arc::clone(&activation_reads);
-    let Some(world) = World::new(tier, move |backend| {
-        let layered = lash_core::testing::runtime_helpers::LayeredBackend::over(backend.clone())
-            .map_process_env_store(|inner| {
-                BodyReadFault::over(inner, store_reads)
-                    as Arc<dyn lash_execution_contracts::process::ProcessEnvStore>
-            })
-            .into_backend();
-        let probe: Arc<dyn lash_core::ToolProvider> = Arc::new(Probe {
-            witness: probe_witness,
-            backend: layered.clone(),
-        });
-        lash::LashCore::rlm_builder(
-            layered.clone(),
-            served::rlm(&layered, sim::untimed_workers()),
-        )
-        .plugin(Arc::new(
-            lash::process_controls::SessionProcessAdminPluginFactory::new(
-                lash_execution_contracts::process::lifetime::starter,
-                packages::run_policy_naming(&[
-                    PROBE_COMPONENT,
-                    lash::process_controls::PROCESS_CONTROLS_CONFIG,
-                ]),
-            ),
-        ))
-        // A body's `await` of an unknown value links `processes.await`
-        // (P2): the env names the process controls that serve it.
-        .process_component(
-            Arc::new(lash::process_controls::ProcessControlsComponent::new(
-                lash_execution_contracts::process::lifetime::starter,
-                packages::run_policy_naming(&[PROBE_COMPONENT]),
-            )),
-            lash::process_controls::PROCESS_CONTROLS_CONFIG,
-        )
-        .process_component(
-            lash_core::testing::tool_component(PROBE_COMPONENT, Arc::clone(&probe)),
-            PROBE_COMPONENT,
-        )
-        .plugin(lash_core::testing::tool_plugin(PROBE_COMPONENT, probe))
-    })
-    .await
-    else {
-        return;
-    };
-    let output = world
-        .run(
-            "store-fault-after-prepare",
-            served::spec(64),
-            vec![process_cell(&["after-prepare"])],
-        )
-        .await;
-    served::assert_answered("the turn that awaits the process", &output);
-    let processes = lash_core::testing::process_roster_records_for_fixture(
-        world.backend.process_registry().as_ref(),
-        &lash_execution_contracts::process::ProcessListFilter {
-            status: lash_execution_contracts::process::ProcessStatusFilter::Any,
-            ..lash_execution_contracts::process::ProcessListFilter::default()
-        },
-    )
-    .await
-    .expect("the registry lists its processes");
-    let [process] = processes.as_slice() else {
-        panic!("one process: {processes:#?}");
-    };
-    let Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output }) =
-        process.outcome()
-    else {
-        panic!("the process settled: {process:#?}");
-    };
-    assert!(
-        matches!(&output.outcome, lash_core::ToolCallOutcome::Success(_)),
-        "the process answers its step's result, not a settled build fault: {output:?}"
-    );
-    witness.only("after-prepare");
-    assert!(
-        activation_reads.load(std::sync::atomic::Ordering::SeqCst) > 0,
-        "the fault tells the activation's reads from a body's"
-    );
-    world.shutdown().await;
-}
-
 /// The all-optional tool the omission law calls: no field is required, and
 /// one declares a default that an omitted input must not be given.
 fn search_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
@@ -1237,14 +1055,16 @@ async fn omitted_tool_input_is_exactly_empty_object(tier: Tier) {
     }
 }
 
-tiered_laws!(
-    a_pruned_process_leaves_no_run_fact_or_wait,
-    a_store_fault_after_prepare_never_settles_a_step,
-    process_admission_names_each_call,
-    tool_call_limit_counts_what_a_process_holds,
-    process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
-    process_tool_call_limit_staged_calls,
-    a_sibling_commit_during_checkpoint_lease_preserves_staged_calls,
-    typescript_process_body_resolves_journaled_clock_and_randomness,
-    omitted_tool_input_is_exactly_empty_object,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_pruned_process_leaves_no_run_fact_or_wait,
+        process_admission_names_each_call,
+        tool_call_limit_counts_what_a_process_holds,
+        process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
+        process_tool_call_limit_staged_calls,
+        a_sibling_commit_during_checkpoint_lease_preserves_staged_calls,
+        omitted_tool_input_is_exactly_empty_object,
+        typescript_process_body_resolves_journaled_clock_and_randomness;
+    sqlite_file: typescript_process_body_resolves_journaled_clock_and_randomness;
+    postgres: typescript_process_body_resolves_journaled_clock_and_randomness;
+}

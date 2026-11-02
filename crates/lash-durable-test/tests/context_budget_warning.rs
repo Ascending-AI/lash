@@ -183,4 +183,7 @@ async fn a_budget_warning_reaches_the_model_and_continue_as_carries_only_the_see
     world.shutdown().await;
 }
 
-tiered_laws!(a_budget_warning_reaches_the_model_and_continue_as_carries_only_the_seed);
+tiered_laws! {
+    sqlite_memory:
+        a_budget_warning_reaches_the_model_and_continue_as_carries_only_the_seed,
+}

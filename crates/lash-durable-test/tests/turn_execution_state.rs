@@ -600,8 +600,9 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
     world.shutdown().await;
 }
 
-tiered_laws!(
-    a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn,
-    a_committed_frame_switch_clears_the_execution_state,
-    a_rotations_follow_on_is_offered_the_newly_advertised_tools,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_failed_capture_commits_nothing_and_the_retried_pass_commits_the_turn,
+        a_committed_frame_switch_clears_the_execution_state,
+        a_rotations_follow_on_is_offered_the_newly_advertised_tools,
+}

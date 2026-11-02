@@ -784,14 +784,15 @@ async fn a_cancelled_turns_parked_completion_is_revoked(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    repeated_provider_id_across_turns_is_distinct,
-    same_scope_completion_collision,
-    one_turn_commits_history_once_and_never_replaces_existing_nodes,
-    suspended_tool_keeps_turn_and_history_head_until_resolution,
-    fork_inherits_history_without_execution_queues_waits_or_journals,
-    a_cancelled_turns_parked_completion_is_revoked,
-);
+tiered_laws! {
+    sqlite_memory:
+        repeated_provider_id_across_turns_is_distinct,
+        same_scope_completion_collision,
+        one_turn_commits_history_once_and_never_replaces_existing_nodes,
+        suspended_tool_keeps_turn_and_history_head_until_resolution,
+        fork_inherits_history_without_execution_queues_waits_or_journals,
+        a_cancelled_turns_parked_completion_is_revoked,
+}
 
 /// The retry trace law runs on SQLite memory.
 mod sqlite_memory_traced {

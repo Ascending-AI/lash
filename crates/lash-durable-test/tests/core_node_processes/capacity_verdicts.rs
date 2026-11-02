@@ -265,7 +265,7 @@ async fn a_capacity_verdict_reruns_its_step_at_the_same_ordinal(tier: Tier) {
     );
 }
 
-on_every_tier!(a_capacity_verdict_reruns_its_step_at_the_same_ordinal);
+on_every_tier!(a_capacity_verdict_reruns_its_step_at_the_same_ordinal: sqlite_memory);
 
 /// A failure of the step's own is recorded and spends its `Repeatable`
 /// attempts, which the verdicts before it did not: two verdicts, then three
@@ -303,7 +303,7 @@ async fn a_failure_after_capacity_verdicts_still_spends_its_attempts(tier: Tier)
     );
 }
 
-on_every_tier!(a_failure_after_capacity_verdicts_still_spends_its_attempts);
+on_every_tier!(a_failure_after_capacity_verdicts_still_spends_its_attempts: sqlite_memory);
 
 /// A host that stays saturated parks the process through the
 /// activation-loop budget, never ending it; once capacity frees, a redrive
@@ -369,7 +369,7 @@ async fn persistent_saturation_parks_and_a_redrive_completes(tier: Tier) {
     assert_eq!(runs.load(Ordering::SeqCst), parked_runs + 1);
 }
 
-on_every_tier!(persistent_saturation_parks_and_a_redrive_completes);
+on_every_tier!(persistent_saturation_parks_and_a_redrive_completes: sqlite_memory);
 
 /// A kernel run whose worker pool is full waits for capacity: while the
 /// pool's one worker is held and its queue admits nothing, the run meets the
@@ -459,4 +459,4 @@ async fn a_kernel_run_waits_for_a_full_worker_pool(tier: Tier) {
     assert_eq!(success(&output), serde_json::json!("done"));
 }
 
-on_every_tier!(a_kernel_run_waits_for_a_full_worker_pool);
+on_every_tier!(a_kernel_run_waits_for_a_full_worker_pool: sqlite_memory);

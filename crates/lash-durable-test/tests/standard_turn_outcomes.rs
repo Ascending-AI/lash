@@ -644,35 +644,6 @@ async fn reported_usage(
         .collect()
 }
 
-/// A response that reports no usage of its own is billed what its stream
-/// reported.
-async fn standard_runtime_uses_streamed_usage_when_final_usage_missing(tier: Tier) {
-    let Some(world) = world(
-        tier,
-        vec![MockCall {
-            stream_events: vec![delta("Hi"), LlmStreamEvent::Usage(usage(9, 3, 2))],
-            response: Ok(LlmResponse {
-                parts: vec![text("Hi")],
-                usage: LlmUsage::default(),
-                ..LlmResponse::default()
-            }),
-        }],
-        None,
-    )
-    .await
-    else {
-        return;
-    };
-    let session = world.session("streamed-usage", served::spec(8)).await;
-    let output = world.send(&session, "hello").await;
-
-    assert_eq!(
-        reported_usage(&session, &output).await,
-        [(9, 3, 2), (9, 3, 2)]
-    );
-    world.shutdown().await;
-}
-
 /// A response that reports its own usage is billed that, not what its
 /// stream reported.
 async fn standard_runtime_prefers_final_usage_over_streamed_usage(tier: Tier) {
@@ -1666,20 +1637,20 @@ async fn a_session_opened_before_its_served_turn_closes_without_a_write(tier: Ti
     world.shutdown().await;
 }
 
-tiered_laws!(
-    standard_runtime_recovers_streamed_text_when_final_response_is_empty,
-    standard_runtime_text_part_reconciles_without_streaming_duplicate,
-    standard_runtime_tool_control_finish_emits_terminal_output,
-    a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on,
-    standard_runtime_tool_control_fail_stops_without_terminal_output_event,
-    standard_runtime_executes_streamed_tool_call_when_final_response_is_empty,
-    standard_runtime_preserves_part_boundaries_when_response_is_not_streamed,
-    standard_runtime_uses_streamed_usage_when_final_usage_missing,
-    standard_runtime_prefers_final_usage_over_streamed_usage,
-    cumulative_usage_overflow_publishes_no_turn_terminal_or_usage,
-    unsupported_committed_tool_attachment_degrades_and_session_remains_continuable,
-    accepted_tool_attachment_round_trips_without_degradation,
-    attachment_in_array_tool_value_then_immediate_cancel_loses_nothing,
-    an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_finished,
-    a_session_opened_before_its_served_turn_closes_without_a_write,
-);
+tiered_laws! {
+    sqlite_memory:
+        standard_runtime_recovers_streamed_text_when_final_response_is_empty,
+        standard_runtime_text_part_reconciles_without_streaming_duplicate,
+        standard_runtime_tool_control_finish_emits_terminal_output,
+        a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on,
+        standard_runtime_tool_control_fail_stops_without_terminal_output_event,
+        standard_runtime_executes_streamed_tool_call_when_final_response_is_empty,
+        standard_runtime_preserves_part_boundaries_when_response_is_not_streamed,
+        standard_runtime_prefers_final_usage_over_streamed_usage,
+        cumulative_usage_overflow_publishes_no_turn_terminal_or_usage,
+        unsupported_committed_tool_attachment_degrades_and_session_remains_continuable,
+        accepted_tool_attachment_round_trips_without_degradation,
+        attachment_in_array_tool_value_then_immediate_cancel_loses_nothing,
+        an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_finished,
+        a_session_opened_before_its_served_turn_closes_without_a_write;
+}

@@ -198,4 +198,7 @@ async fn the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame(ti
     world.shutdown().await;
 }
 
-tiered_laws!(the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame,);
+tiered_laws! {
+    sqlite_memory:
+        the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame,
+}

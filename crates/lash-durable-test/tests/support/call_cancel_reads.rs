@@ -9,13 +9,13 @@ impl CancelCase {
 }
 
 cancellation_cases! {
-    read_host_cancel, read_host_cancel_on_postgres => host(CommitOrder::Cancel, None, true).reading();
-    read_host_final, read_host_final_on_postgres => host(CommitOrder::PlainFinal, None, true).reading();
-    read_python_cancel, read_python_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, None, true).reading();
-    read_python_final, read_python_final_on_postgres => CancelCase::python(CommitOrder::PlainFinal, None, true).reading();
-    read_typescript_cancel, read_typescript_cancel_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, true).reading();
-    read_typescript_final, read_typescript_final_on_postgres => CancelCase::typescript(CommitOrder::PlainFinal, None, true).reading();
-    read_control, read_control_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, false).reading();
+    read_host_cancel => host(CommitOrder::Cancel, None, true).reading();
+    read_host_final => host(CommitOrder::PlainFinal, None, true).reading();
+    read_python_cancel => CancelCase::python(CommitOrder::Cancel, None, true).reading();
+    read_python_final => CancelCase::python(CommitOrder::PlainFinal, None, true).reading();
+    read_typescript_cancel => CancelCase::typescript(CommitOrder::Cancel, None, true).reading();
+    read_typescript_final => CancelCase::typescript(CommitOrder::PlainFinal, None, true).reading();
+    read_control => CancelCase::typescript(CommitOrder::Cancel, None, false).reading();
 }
 
 #[async_trait::async_trait]

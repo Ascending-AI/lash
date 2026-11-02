@@ -762,17 +762,34 @@ pub fn assert_answered(context: &str, output: &lash::TurnOutput) {
 
 /// Register `laws` once per tier, conformance-suite style: each law is an
 /// `async fn(Tier)`, instantiated under `sqlite_memory::`, `sqlite_file::`
-/// and `postgres::`. A law run on simulated nodes takes `current_thread:`:
+/// and `postgres::`. A `tier:` prefix narrows the following laws to the
+/// named tier: `sqlite_memory: law_a; postgres: law_b`.
+/// A law run on simulated nodes takes `current_thread:`:
 /// the simulation observes quiescence on its one thread.
 #[macro_export]
 macro_rules! tiered_laws {
-    (current_thread: $($law:ident),+ $(,)?) => {
-        $crate::tiered_laws!(@all tokio::test; $($law),+);
+    (@input $test:meta; $tier:ident : $($rest:tt)*) => {
+        $crate::tiered_laws!(@groups $test; $tier : $($rest)*);
     };
-    ($($law:ident),+ $(,)?) => {
-        $crate::tiered_laws!(
-            @all tokio::test(flavor = "multi_thread", worker_threads = 8); $($law),+
-        );
+    (@input $test:meta; $($law:ident),+ $(,)?) => {
+        $crate::tiered_laws!(@all $test; $($law),+);
+    };
+    (@groups $test:meta;) => {};
+    (@groups $test:meta; $tier:ident : $($law:ident),+ $(,)?; $($rest:tt)*) => {
+        $crate::tiered_laws!(@one $test; $tier; $($law),+);
+        $crate::tiered_laws!(@groups $test; $($rest)*);
+    };
+    (@groups $test:meta; $tier:ident : $($law:ident),+ $(,)?) => {
+        $crate::tiered_laws!(@one $test; $tier; $($law),+);
+    };
+    (@one $test:meta; sqlite_memory; $($law:ident),+) => {
+        $crate::tiered_laws!(@tier $test; sqlite_memory, SqliteMemory; $($law),+);
+    };
+    (@one $test:meta; sqlite_file; $($law:ident),+) => {
+        $crate::tiered_laws!(@tier $test; sqlite_file, SqliteFile; $($law),+);
+    };
+    (@one $test:meta; postgres; $($law:ident),+) => {
+        $crate::tiered_laws!(@tier $test; postgres, Postgres; $($law),+);
     };
     (@all $test:meta; $($law:ident),+) => {
         $crate::tiered_laws!(@tier $test; sqlite_memory, SqliteMemory; $($law),+);
@@ -788,5 +805,13 @@ macro_rules! tiered_laws {
                 }
             )+
         }
+    };
+    (current_thread: $($rest:tt)*) => {
+        $crate::tiered_laws!(@input tokio::test; $($rest)*);
+    };
+    ($($rest:tt)*) => {
+        $crate::tiered_laws!(
+            @input tokio::test(flavor = "multi_thread", worker_threads = 8); $($rest)*
+        );
     };
 }

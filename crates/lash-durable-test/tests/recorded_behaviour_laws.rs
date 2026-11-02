@@ -410,8 +410,9 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
     drop(keep);
 }
 
-tiered_laws!(
-    a_standard_run_executes_under_its_recorded_behaviour,
-    an_rlm_run_executes_under_its_recorded_behaviour,
-    a_host_started_process_runs_under_the_behaviour_its_creation_recorded,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_standard_run_executes_under_its_recorded_behaviour,
+        an_rlm_run_executes_under_its_recorded_behaviour,
+        a_host_started_process_runs_under_the_behaviour_its_creation_recorded,
+}

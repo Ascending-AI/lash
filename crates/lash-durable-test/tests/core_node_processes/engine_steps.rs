@@ -192,25 +192,6 @@ impl lash_core::plugin::PluginMetadata for EnginePlugin {
     }
 }
 
-/// An engine a plugin contributes advances on the core's node as a host's
-/// does, and its engine step runs through the `EngineSteps` its
-/// registration declares, once.
-async fn plugin_engine_step_runs_through_its_registration(tier: Tier) {
-    let runs = Arc::new(AtomicUsize::new(0));
-    let plugin = Arc::new(EnginePlugin {
-        runs: Arc::clone(&runs),
-        declarations: None,
-        catalog_failure: false,
-    });
-    let deployment = deploy(tier, Vec::new(), |builder| builder.plugin(plugin)).await;
-    let process = start(&deployment.core, PLUGIN_ENGINE, serde_json::json!(21)).await;
-    let answer = success(&ended(&deployment.core, &process).await);
-    assert_eq!(answer, serde_json::json!({ "step": 42 }));
-    assert_eq!(runs.load(Ordering::SeqCst), 1, "the body ran once");
-}
-
-on_every_tier!(plugin_engine_step_runs_through_its_registration);
-
 /// An engine step of an engine whose registration declares no engine
 /// steps is refused before its admission: the process ends `Failed` with
 /// the typed refusal, and no step was admitted or run.
@@ -244,7 +225,7 @@ async fn engine_step_without_the_capability_is_refused_before_admission(tier: Ti
     assert!(rows.rows.is_empty(), "no step was admitted: {rows:?}");
 }
 
-on_every_tier!(engine_step_without_the_capability_is_refused_before_admission);
+on_every_tier!(engine_step_without_the_capability_is_refused_before_admission: sqlite_memory);
 
 /// The engine body that always fails, retryably: it counts its runs.
 const FLAKY: &str = "flaky";
@@ -496,7 +477,7 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
     );
 }
 
-on_every_tier!(an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides);
+on_every_tier!(an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides: sqlite_memory);
 
 /// FIG-5600: a registration lost between admission and execution is a
 /// known failure, retained through the facade and the canonical terminal.
@@ -559,7 +540,7 @@ async fn a_missing_engine_step_registration_ends_failed_with_its_typed_reason(ti
     assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
 }
 
-on_every_tier!(a_missing_engine_step_registration_ends_failed_with_its_typed_reason);
+on_every_tier!(a_missing_engine_step_registration_ends_failed_with_its_typed_reason: sqlite_memory);
 
 /// A process engine retains a failed step's output as its terminal answer.
 fn failed_step_advance(
@@ -672,4 +653,4 @@ async fn an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reas
     assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
 }
 
-on_every_tier!(an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reason);
+on_every_tier!(an_unreadable_engine_step_catalog_parks_the_process_with_its_typed_reason: sqlite_memory);

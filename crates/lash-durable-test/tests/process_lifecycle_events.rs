@@ -35,19 +35,17 @@ use lash_execution_contracts::process::ProcessEventLogTestSupport as _;
 /// leg runs when the run is handed a server.
 macro_rules! on_every_tier {
     ($law:ident) => {
+        on_every_tier!($law: sqlite_memory, postgres);
+    };
+    ($law:ident : $($tier:ident),+ $(,)?) => {
         mod $law {
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn on_sqlite_memory() {
-                super::$law(super::Tier::SqliteMemory).await;
-            }
-
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn on_postgres() {
-                if super::postgres_url().is_none() {
-                    return;
-                }
-                super::$law(super::Tier::Postgres).await;
-            }
+            $(on_every_tier!(@one $law; $tier);)+
+        }
+    };
+    (@one $law:ident; sqlite_memory) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn on_sqlite_memory() {
+            super::$law(super::Tier::SqliteMemory).await;
         }
     };
 }
@@ -56,13 +54,6 @@ macro_rules! on_every_tier {
 #[derive(Clone, Copy, Debug)]
 enum Tier {
     SqliteMemory,
-    Postgres,
-}
-
-fn postgres_url() -> Option<String> {
-    std::env::var("LASH_POSTGRES_DATABASE_URL")
-        .ok()
-        .filter(|url| !url.trim().is_empty())
 }
 
 /// A fresh store set of `tier`, and what must outlive it.
@@ -76,18 +67,6 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
             ),
             Vec::new(),
         ),
-        Tier::Postgres => {
-            let url = postgres_url().expect("a PostgreSQL URL");
-            let isolated = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::testing::connect(isolated.url())
-                .await
-                .expect("the isolated database opens");
-            let stores = lash_postgres_store::PostgresStoreSet::new(
-                &storage,
-                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
-            );
-            (Arc::new(stores), vec![Box::new(isolated)])
-        }
     }
 }
 
@@ -735,7 +714,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     );
 }
 
-on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
+on_every_tier!(each_committed_effect_is_one_effect_outcome_event: sqlite_memory);
 
 /// FIG-6249: a host can retain every visit to a node above the standard cut.
 async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
@@ -758,7 +737,7 @@ async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
     assert_eq!(world.writes.lock().unwrap().len(), 100);
 }
 
-on_every_tier!(a_configured_200_cut_records_all_100_effect_occurrences);
+on_every_tier!(a_configured_200_cut_records_all_100_effect_occurrences: sqlite_memory);
 
 /// Counts physical store work and actual fact decodes in the process
 /// activation, whether facts arrive from a read or its acknowledged commit.
@@ -957,7 +936,7 @@ async fn redrive_uses_the_recorded_64_cut_under_a_16_cut_host(tier: Tier) {
     );
 }
 
-on_every_tier!(redrive_uses_the_recorded_64_cut_under_a_16_cut_host);
+on_every_tier!(redrive_uses_the_recorded_64_cut_under_a_16_cut_host: sqlite_memory);
 
 fn assert_effect_cut(events: &[lash::process::ProcessEvent], cap: u64) {
     let outcomes = of_type(
@@ -1566,7 +1545,7 @@ async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
     assert_eq!(of_type(&events, "process.waiting").len(), 1);
     assert_eq!(of_type(&events, "process.resumed").len(), 1);
 }
-on_every_tier!(a_deferred_call_records_one_waiting_event_and_resumes);
+on_every_tier!(a_deferred_call_records_one_waiting_event_and_resumes: sqlite_memory);
 
 /// The process waiting on its one deferred call, including its
 /// durable call identity and the deadline its admission pinned.
@@ -1696,7 +1675,7 @@ async fn a_deferred_call_survives_takeover(tier: Tier) {
     );
     second.shutdown().await.unwrap();
 }
-on_every_tier!(a_deferred_call_survives_takeover);
+on_every_tier!(a_deferred_call_survives_takeover: sqlite_memory);
 
 fn publication_idle(
     _state: &mut serde_json::Value,

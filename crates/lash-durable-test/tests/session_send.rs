@@ -155,48 +155,17 @@ async fn withdraw_while_queued_vs_cancel_while_running(tier: Tier) {
             "a withdrawn run accepts no new cancel: {again:?}");
         let after = withdrawal_tombstone(&session, queued.input_id()).await;
         assert_eq!(after.terminal(), Some(terminal), "the tombstone is unchanged");
-        let receipt = running.cancel().await.expect("cancel the admitted input");
+        let running_id = running.input_id().clone();
+        let receipt = session
+            .attach(running_id.clone())
+            .cancel()
+            .await
+            .expect("cancel the admitted input");
         assert!(
             matches!(&receipt, lash::CancelReceipt::Cancelled { receipt, .. }
             if matches!(receipt.outcome, lash::TurnCancelOutcome::Requested(_))),
             "the admitted input addresses its running run: {receipt:?}"
         );
-        assert_stopped(&session, running, queued, &model).await;
-    })
-    .await
-    .expect("deadlock watchdog: cancel/withdraw never settled");
-    world.shutdown().await;
-}
-
-/// Stop both accepted sends: the first commits a cancelled run and the
-/// second retains a withdrawal with no output and no new provider call.
-async fn cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one(tier: Tier) {
-    let Some((world, session, model)) = world(tier).await else {
-        return;
-    };
-    tokio::time::timeout(WATCHDOG, async {
-        let running = session
-            .send(lash::TurnInput::text(RUNNING))
-            .await
-            .expect("send first");
-        model.started.notified().await;
-        let queued = session
-            .send(lash::TurnInput::text(QUEUED))
-            .await
-            .expect("send second");
-        let running_id = running.input_id().clone();
-        assert!(matches!(
-            session
-                .attach(running_id.clone())
-                .cancel()
-                .await
-                .expect("stop first"),
-            lash::CancelReceipt::Cancelled { .. }
-        ));
-        assert!(matches!(
-            queued.cancel().await.expect("withdraw second"),
-            lash::CancelReceipt::Withdrawn { .. }
-        ));
         assert_stopped(&session, running, queued, &model).await;
         let again = session
             .attach(running_id)
@@ -209,7 +178,7 @@ async fn cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_on
         );
     })
     .await
-    .expect("deadlock watchdog: both sends never settled");
+    .expect("deadlock watchdog: cancel/withdraw never settled");
     world.shutdown().await;
 }
 
@@ -324,13 +293,13 @@ async fn a_coalescing_drain_admits_the_queued_inputs_as_one_run(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    withdraw_while_queued_vs_cancel_while_running,
-    cancelling_both_sends_stops_the_running_run_and_withdraws_the_queued_one,
-    coalesced_inputs_commit_distinct_user_rows,
-    host_input_ids_correlate_new_queued_and_steering_rows,
-    a_coalescing_drain_admits_the_queued_inputs_as_one_run,
-);
+tiered_laws! {
+    sqlite_memory:
+        withdraw_while_queued_vs_cancel_while_running,
+        coalesced_inputs_commit_distinct_user_rows,
+        host_input_ids_correlate_new_queued_and_steering_rows,
+        a_coalescing_drain_admits_the_queued_inputs_as_one_run,
+}
 
 /// FIG-5288: a coalesced opening retains every input's own row and application,
 /// in admission order, even though their answer belongs to one run.

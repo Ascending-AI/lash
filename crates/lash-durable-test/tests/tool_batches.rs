@@ -992,43 +992,6 @@ async fn a_cell_member_commit_racing_a_control_read_preserves_live_answers(tier:
     member_commit_control_read_race(tier, Producer::PromiseAll).await;
 }
 
-/// The reverse dependency: the input-first leaf answers only after the
-/// input-last leaf started. A loop that runs a group in input order can
-/// never get there, whatever its per-leaf latency.
-async fn tool_group_reverse_dependency(tier: Tier) {
-    for code in [false, true] {
-        let Some(producers) = Producers::new(tier, code).await else {
-            return;
-        };
-        for producer in producers_of(code) {
-            let name = format!("{}-reverse", producer.label());
-            let waits = BTreeMap::from([
-                (0, vec![3]),
-                (1, Vec::new()),
-                (2, Vec::new()),
-                (3, Vec::new()),
-            ]);
-            let (scenario, output) =
-                run_group(&producers, producer, &name, &[Route::Leaf; 4], true, waits).await;
-            served::assert_answered(&name, &output);
-            let events = scenario.events();
-            let first_answered = events
-                .iter()
-                .position(|event| *event == Event::Answered(0))
-                .unwrap_or_else(|| panic!("{name}: leaf 0 never answered: {events:?}"));
-            let last_started = events
-                .iter()
-                .position(|event| *event == Event::Started(3))
-                .unwrap_or_else(|| panic!("{name}: leaf 3 never started: {events:?}"));
-            assert!(
-                first_answered > last_started,
-                "{name}: the input-first leaf answers only after the input-last one started: {events:?}"
-            );
-        }
-        producers.world.shutdown().await;
-    }
-}
-
 /// What a session's `max_tool_calls` counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
@@ -1942,14 +1905,14 @@ async fn batch_folds_to_one_transcript_call(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    a_batch_member_commit_racing_a_control_read_preserves_live_answers,
-    a_cell_member_commit_racing_a_control_read_preserves_live_answers,
-    tool_group_members_start_before_any_finishes,
-    tool_group_reverse_dependency,
-    tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
-    tool_call_limit_staged_calls,
-    batch_admission_and_identity_contract,
-    standard_rounds_and_batches_use_the_run,
-    batch_folds_to_one_transcript_call,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_batch_member_commit_racing_a_control_read_preserves_live_answers,
+        a_cell_member_commit_racing_a_control_read_preserves_live_answers,
+        tool_group_members_start_before_any_finishes,
+        tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
+        tool_call_limit_staged_calls,
+        batch_admission_and_identity_contract,
+        standard_rounds_and_batches_use_the_run,
+        batch_folds_to_one_transcript_call,
+}

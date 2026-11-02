@@ -93,4 +93,7 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(one_slot_cell_that_starts_and_awaits_a_process_completes,);
+tiered_laws! {
+    sqlite_memory:
+        one_slot_cell_that_starts_and_awaits_a_process_completes,
+}

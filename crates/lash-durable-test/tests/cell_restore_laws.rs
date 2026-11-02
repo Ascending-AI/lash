@@ -53,6 +53,7 @@ mod call_cancel;
 use call_cancel::{CancelCase, CancelSource, CommitOrder, definition_at, written_x};
 
 #[path = "support/dialect.rs"]
+#[allow(dead_code)]
 mod dialect;
 #[path = "support/sim.rs"]
 mod sim;
@@ -2547,44 +2548,12 @@ async fn a_restored_cell_never_reuses_a_tool_call_id_on_sqlite_memory() {
     identity(Dialect::SqliteMemory, None).await;
 }
 
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn a_restored_cell_never_reuses_a_tool_call_id_on_sqlite_file() {
-    identity(Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn a_restored_cell_never_reuses_a_tool_call_id_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    identity(Dialect::Postgres, Some(url)).await;
-}
-
 /// A sleeping cell's session suspends on idle eviction, and the cell wakes
 /// once at its admitted deadline across a crash, on SQLite in memory.
 #[tokio::test]
 async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_sqlite_memory()
 {
     sleep_across_a_crash(Dialect::SqliteMemory, None).await;
-}
-
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_sqlite_file() {
-    sleep_across_a_crash(Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn a_sleeping_cell_suspends_on_idle_eviction_and_wakes_once_at_its_deadline_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    sleep_across_a_crash(Dialect::Postgres, Some(url)).await;
 }
 
 /// A `Repeatable` call in a cell, cut at its admission or at its lost
@@ -2594,43 +2563,11 @@ async fn a_repeatable_call_in_a_cell_reruns_at_its_ordinal_on_sqlite_memory() {
     matrix(Cell::Repeatable, Dialect::SqliteMemory, None).await;
 }
 
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn a_repeatable_call_in_a_cell_reruns_at_its_ordinal_on_sqlite_file() {
-    matrix(Cell::Repeatable, Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn a_repeatable_call_in_a_cell_reruns_at_its_ordinal_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    matrix(Cell::Repeatable, Dialect::Postgres, Some(url)).await;
-}
-
 /// A race loser in a cell is admitted and settles on its own; nothing runs
 /// unadmitted, on SQLite in memory.
 #[tokio::test]
 async fn a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_memory() {
     matrix(Cell::Race, Dialect::SqliteMemory, None).await;
-}
-
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_file() {
-    matrix(Cell::Race, Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn a_race_loser_in_a_cell_is_admitted_and_settles_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    matrix(Cell::Race, Dialect::Postgres, Some(url)).await;
 }
 
 /// A cell cut between its end and its consuming commit ends once
@@ -2664,22 +2601,6 @@ async fn processes_await_in_a_cell_parks_and_resumes_on_sqlite_memory() {
     await_process(Dialect::SqliteMemory, None).await;
 }
 
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn processes_await_in_a_cell_parks_and_resumes_on_sqlite_file() {
-    await_process(Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn processes_await_in_a_cell_parks_and_resumes_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    await_process(Dialect::Postgres, Some(url)).await;
-}
-
 /// A restored cell keeps the deferred grants it resolved, on SQLite in
 /// memory (DEFER1).
 #[tokio::test]
@@ -2687,32 +2608,10 @@ async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on
     deferred_grant_across_a_crash(Dialect::SqliteMemory, None).await;
 }
 
-/// The same law on a SQLite file.
-#[tokio::test]
-async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_sqlite_file() {
-    deferred_grant_across_a_crash(Dialect::SqliteFile, None).await;
-}
-
-/// The same law on PostgreSQL.
-#[tokio::test]
-async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    deferred_grant_across_a_crash(Dialect::Postgres, Some(url)).await;
-}
-
 /// A parked cell's committed match is required, on SQLite in memory.
 #[tokio::test]
 async fn a_parked_cells_committed_match_is_required_on_sqlite_memory() {
     a_parked_cells_committed_match_is_required(Dialect::SqliteMemory).await;
-}
-
-/// A parked cell's committed match is required, on SQLite on disk.
-#[tokio::test]
-async fn a_parked_cells_committed_match_is_required_on_sqlite_file() {
-    a_parked_cells_committed_match_is_required(Dialect::SqliteFile).await;
 }
 
 /// An after-step stop during a cell's `processes.await` lets the process

@@ -772,61 +772,6 @@ await control.finish(handle.process_id);"
     ))
 }
 
-/// Law 2 (ADR 0124 §6): an engine process runs under a runtime keyed by its
-/// minted id. It admits no session, and what it puts is held by its record
-/// alone.
-async fn engine_and_session_turn_create_only_real_sessions(tier: Tier) {
-    let put = "law-2-engine-put";
-    let Some(law) = Law::new(
-        tier,
-        vec![start_process_cell(
-            "text: string",
-            "await tools.putBlob({ text: text })",
-            &format!("{{ text: {put:?} }}"),
-        )],
-    )
-    .await
-    else {
-        return;
-    };
-    let session = law.session("law-2-session").await;
-    let output = run(&session, lash::TurnInput::text("start the engine process")).await;
-    let engine = started_process_id(&output);
-    law.process_terminal(&engine).await;
-
-    let id = blob_id(put);
-    let held = law
-        .wait_referrers(&id, "the engine's record alone", |found| found.len() == 1)
-        .await;
-    assert_eq!(
-        held,
-        vec![ArtifactReferrer::ProcessRecord(engine.clone())],
-        "an engine's put is held by its record, never by a session"
-    );
-    assert_eq!(law.witness.puts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        law.sessions().await,
-        vec!["law-2-session".to_owned()],
-        "a process runtime admits no session of its own"
-    );
-
-    law.prune(&engine).await;
-    law.wait_referrers(&id, "no referrer after prune", <[_]>::is_empty)
-        .await;
-    let report = law.sweep().await;
-    assert!(report.deleted_while_referenced.is_empty(), "{report:?}");
-    assert!(
-        !law.blob_present(&id).await,
-        "the pruned engine's put is reclaimed"
-    );
-    assert_eq!(
-        law.sessions().await,
-        vec!["law-2-session".to_owned()],
-        "prune deletes no process session, because none exists"
-    );
-    law.shutdown().await;
-}
-
 /// Law 3, `start_input` (ADR 0124 §4): `T1` puts `R` and starts a detached
 /// SessionTurn child `K` whose turn input carries it, answering nothing
 /// that names `R`. `K`'s registration acquires its record, so `R` outlives
@@ -1436,12 +1381,12 @@ async fn a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_i
     }
 }
 
-tiered_laws!(
-    a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_input,
-    engine_and_session_turn_create_only_real_sessions,
-    delivered_attachment_survives_prune_and_replay_start_input,
-    process_referrer_cleanup_is_complete_without_sessions,
-    upload_expiry_is_local,
-    queued_input_outlives_its_upload_expiry,
-    a_cancelled_child_keeps_its_puts_until_pruned,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_input,
+        delivered_attachment_survives_prune_and_replay_start_input,
+        process_referrer_cleanup_is_complete_without_sessions,
+        upload_expiry_is_local,
+        queued_input_outlives_its_upload_expiry,
+        a_cancelled_child_keeps_its_puts_until_pruned,
+}

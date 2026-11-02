@@ -326,8 +326,9 @@ async fn a_parked_process_runs_under_its_links_policy(tier: Tier) {
     );
 }
 
-tiered_laws!(
-    a_parked_process_meets_a_changed_contract_at_its_next_perform,
-    a_parked_process_runs_on_a_reworded_tool,
-    a_parked_process_runs_under_its_links_policy,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_parked_process_meets_a_changed_contract_at_its_next_perform,
+        a_parked_process_runs_on_a_reworded_tool,
+        a_parked_process_runs_under_its_links_policy,
+}

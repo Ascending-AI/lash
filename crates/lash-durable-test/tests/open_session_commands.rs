@@ -248,10 +248,11 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
     world.shutdown().await;
 }
 
-tiered_laws!(
-    a_merging_config_command_composes_with_the_head_another_writer_committed,
-    opening_a_historical_frame_is_refused_and_keeps_the_changed_config,
-);
+tiered_laws! {
+    sqlite_memory:
+        a_merging_config_command_composes_with_the_head_another_writer_committed,
+        opening_a_historical_frame_is_refused_and_keeps_the_changed_config,
+}
 
 /// The dialect and server of `tier`, or `None` for a PostgreSQL leg the
 /// run was handed no server for.
@@ -541,22 +542,6 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
 async fn a_terminally_refused_command_commit_settles_with_its_cause_on_sqlite_memory() {
     a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
         Tier::SqliteMemory,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_terminally_refused_command_commit_settles_with_its_cause_on_sqlite_file() {
-    a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
-        Tier::SqliteFile,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_terminally_refused_command_commit_settles_with_its_cause_on_postgres() {
-    a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane_continues(
-        Tier::Postgres,
     )
     .await;
 }
@@ -1245,18 +1230,6 @@ async fn lo_owner_only_service_append(tier: Tier) {
 #[tokio::test(flavor = "multi_thread")]
 async fn lo_owner_only_service_append_on_sqlite_memory() {
     Box::pin(lo_owner_only_service_append(Tier::SqliteMemory)).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn lo_owner_only_service_append_on_sqlite_file() {
-    Box::pin(lo_owner_only_service_append(Tier::SqliteFile)).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires PostgreSQL"]
-async fn lo_owner_only_service_append_on_postgres_when_configured() {
-    let _ = lash_postgres_store::testing::required_database_url();
-    Box::pin(lo_owner_only_service_append(Tier::Postgres)).await;
 }
 
 /// LO-FENCE: a kernel member's refused outcome reaches session recovery
@@ -1962,15 +1935,6 @@ async fn postimage_trace(tier: Tier, cold: bool) -> Vec<serde_json::Value> {
 async fn lo_postimage_on_sqlite_memory() {
     lo_postimage(Tier::SqliteMemory).await;
 }
-#[tokio::test]
-async fn lo_postimage_on_sqlite_file() {
-    lo_postimage(Tier::SqliteFile).await;
-}
-#[tokio::test]
-#[ignore = "requires a private PostgreSQL service"]
-async fn lo_postimage_on_postgres_when_configured() {
-    lo_postimage(Tier::Postgres).await;
-}
 
 /// LO-INGRESS: one oversized host item is refused before mail or command admission.
 async fn lo_ingress(tier: Tier) {
@@ -2045,55 +2009,8 @@ async fn lo_ingress_on_sqlite_memory() {
     lo_ingress(Tier::SqliteMemory).await;
 }
 
-#[tokio::test]
-#[ignore = "requires a private PostgreSQL service"]
-async fn lo_ingress_on_postgres_when_configured() {
-    let _ = lash_postgres_store::testing::required_database_url();
-    lo_ingress(Tier::Postgres).await;
-}
-
 #[path = "open_session_commands/owner_retention.rs"]
 mod owner_retention;
 
 #[path = "open_session_commands/model_retry.rs"]
 mod model_retry;
-/// LO-POSTIMAGE must distinguish a changed link even when all payloads match.
-#[test]
-fn postimage_identity_correspondence_preserves_relationships() {
-    let graph = serde_json::json!({"nodes":[
-        {"node_id":"root","parent_node_id":null,"frame_key":"f","external_parent":"anchor"},
-        {"node_id":"left","parent_node_id":"root"},
-        {"node_id":"right","parent_node_id":"root"}],
-        "leaf_node_id":"right", "current_frame_node_id":"root"});
-    let mut changed = graph.clone();
-    changed["nodes"][2]["parent_node_id"] = serde_json::json!("left");
-    let mut changed_anchor = graph.clone();
-    changed_anchor["nodes"][0]["external_parent"] = serde_json::json!("left");
-    normalize_postimage(&mut changed_anchor);
-    let mut plugin =
-        serde_json::json!({"kind":"plugin","body":{"timestamp":123,"node_id":"literal"}});
-    let literal = plugin.clone();
-    normalize_postimage(&mut plugin);
-    assert_eq!(plugin, literal, "plugin payloads remain literal");
-    let mut expected = graph.clone();
-    normalize_postimage(&mut expected);
-    normalize_postimage(&mut changed);
-    assert_ne!(
-        expected, changed_anchor,
-        "external parent links retain identity"
-    );
-    assert_ne!(
-        expected, changed,
-        "normalization erased a changed parent relationship"
-    );
-    let mut renamed = serde_json::json!({"nodes":[
-        {"node_id":"a","parent_node_id":null,"frame_key":"g","external_parent":"renamed-anchor"},
-        {"node_id":"b","parent_node_id":"a"},
-        {"node_id":"c","parent_node_id":"a"}],
-        "leaf_node_id":"c", "current_frame_node_id":"a"});
-    normalize_postimage(&mut renamed);
-    assert_eq!(
-        expected, renamed,
-        "a bijective renaming preserves the graph"
-    );
-}

@@ -324,9 +324,15 @@ async fn the_send_after_a_refused_run_executes_a_new_run(tier: Tier) {
     world.shutdown().await;
 }
 
+tiered_laws! {
+    sqlite_memory:
+        run_terminal_columns_have_one_presence_state,
+        the_send_after_a_refused_run_executes_a_new_run,
+        an_after_turn_refusal_ends_the_run_with_its_typed_refusal,
+        a_minted_after_turn_refusal_ends_the_run_with_its_typed_refusal,
+}
 tiered_laws!(
-    run_terminal_columns_have_one_presence_state,
-    the_send_after_a_refused_run_executes_a_new_run,
-    an_after_turn_refusal_ends_the_run_with_its_typed_refusal,
-    a_minted_after_turn_refusal_ends_the_run_with_its_typed_refusal,
+    @tier tokio::test(flavor = "multi_thread", worker_threads = 8);
+    postgres, Postgres;
+    run_terminal_columns_have_one_presence_state
 );

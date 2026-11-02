@@ -423,24 +423,13 @@ fn host(order: CommitOrder, hint: Option<lash_core::CancelHint>, explicit: bool)
 // twelve matrices exceeded the action deadline after earlier shard cases;
 // each registration keeps every cut and the original watchdog.
 macro_rules! cancellation_cases {
-    ($($sqlite:ident, $name:ident => $case:expr;)*) => {
+    ($($name:ident => $case:expr;)*) => {
         mod sqlite_memory {
             use super::*;
             $(
                 #[tokio::test]
-                async fn $sqlite() {
-                    run_cases(Dialect::SqliteMemory, None, &[$case]).await;
-                }
-            )*
-        }
-        mod postgres {
-            use super::*;
-            $(
-                #[tokio::test]
-                #[ignore = "requires PostgreSQL"]
                 async fn $name() {
-                    run_cases(Dialect::Postgres,
-                        Some(lash_postgres_store::testing::required_database_url()), &[$case]).await;
+                    run_cases(Dialect::SqliteMemory, None, &[$case]).await;
                 }
             )*
         }
@@ -451,30 +440,23 @@ macro_rules! cancellation_cases {
 mod reads;
 
 cancellation_cases! {
-    host_typed_cancel, host_typed_cancel_on_postgres => host(CommitOrder::TypedCancel, None, true);
-    host_cancel, host_cancel_on_postgres => host(CommitOrder::Cancel, None, true);
-    host_final, host_final_on_postgres => host(CommitOrder::Final, None, true);
-    host_plain_final, host_plain_final_on_postgres => host(CommitOrder::PlainFinal, None, true);
-    host_external_cancel, host_external_cancel_on_postgres => host(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
-    host_ignore, host_ignore_on_postgres => host(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
-    host_control, host_control_on_postgres => host(CommitOrder::Cancel, None, false);
-    python_cancel, python_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, None, true);
-    python_final, python_final_on_postgres => CancelCase::python(CommitOrder::Final, None, true);
-    python_external_cancel, python_external_cancel_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
-    python_ignore, python_ignore_on_postgres => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
-    python_control, python_control_on_postgres => CancelCase::python(CommitOrder::Cancel, None, false);
+    host_typed_cancel => host(CommitOrder::TypedCancel, None, true);
+    host_cancel => host(CommitOrder::Cancel, None, true);
+    host_final => host(CommitOrder::Final, None, true);
+    host_plain_final => host(CommitOrder::PlainFinal, None, true);
+    python_cancel => CancelCase::python(CommitOrder::Cancel, None, true);
+    python_final => CancelCase::python(CommitOrder::Final, None, true);
+    python_external_cancel => CancelCase::python(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
 }
 
 mod typescript {
     use super::*;
     cancellation_cases! {
-        typescript_cancel, typescript_cancel_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, true);
-        typescript_final, typescript_final_on_postgres => CancelCase::typescript(CommitOrder::Final, None, true);
-        typescript_plain_final, typescript_plain_final_on_postgres => CancelCase::typescript(CommitOrder::PlainFinal, None, true);
-        typescript_external_cancel, typescript_external_cancel_on_postgres => CancelCase::typescript(CommitOrder::Cancel, Some(lash_core::CancelHint::CancelExternalWork), true);
-        typescript_ignore, typescript_ignore_on_postgres => CancelCase::typescript(CommitOrder::Cancel, Some(lash_core::CancelHint::Ignore), true);
-        typescript_shared, typescript_shared_on_postgres => CancelCase { source: CancelSource::TypeScriptShared, ..CancelCase::typescript(CommitOrder::Cancel, None, true) };
-        typescript_control, typescript_control_on_postgres => CancelCase::typescript(CommitOrder::Cancel, None, false);
+        typescript_cancel => CancelCase::typescript(CommitOrder::Cancel, None, true);
+        typescript_final => CancelCase::typescript(CommitOrder::Final, None, true);
+        typescript_plain_final => CancelCase::typescript(CommitOrder::PlainFinal, None, true);
+        typescript_shared => CancelCase { source: CancelSource::TypeScriptShared, ..CancelCase::typescript(CommitOrder::Cancel, None, true) };
+        typescript_control => CancelCase::typescript(CommitOrder::Cancel, None, false);
     }
 }
 

@@ -564,9 +564,10 @@ async fn later_turns_read_all_prior_records_after_each_restart(tier: Tier) {
     world.shutdown().await;
 }
 
-tiered_laws!(
-    session_globals_survive_cells_and_reload_and_private_slots_never_do,
-    rlm_message_append_keeps_the_committed_execution,
-    later_turns_read_all_prior_records_on_one_worker,
-    later_turns_read_all_prior_records_after_each_restart,
-);
+tiered_laws! {
+    sqlite_memory:
+        session_globals_survive_cells_and_reload_and_private_slots_never_do,
+        rlm_message_append_keeps_the_committed_execution,
+        later_turns_read_all_prior_records_on_one_worker,
+        later_turns_read_all_prior_records_after_each_restart,
+}

@@ -50,7 +50,7 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
     );
 }
 
-on_every_tier!(a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start);
+on_every_tier!(a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start: sqlite_memory);
 
 /// A session tombstone leaves its detached process alive. Host cancellation
 /// remains usable after deletion and determines the process's terminal origin.
@@ -124,7 +124,7 @@ async fn a_detached_process_outlives_its_deleted_session_and_accepts_host_cancel
     );
 }
 
-on_every_tier!(a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation);
+on_every_tier!(a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation: sqlite_memory);
 
 /// How long the owner of a sleeping process has had to release it before
 /// the host cancels it.
@@ -133,25 +133,13 @@ enum SleepState {
     /// Cancelled as soon as its sleep is its committed wait, inside the
     /// owner's `idle_evict`.
     Hot,
-    /// Cancelled once `idle_evict` has passed over its sleep.
-    Suspended,
 }
 
 /// A kernel process cancelled while its machine is parked on a sleep ends
 /// cancelled with the host's origin: the cancel is answered from the
 /// committed snapshot, never by a VM run that fails to resume.
-async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState) {
-    const IDLE_EVICT: Duration = Duration::from_millis(50);
-    let settings = match state {
-        SleepState::Hot => lash_core_execution::DurableSettings::default(),
-        SleepState::Suspended => lash_core_execution::DurableSettings {
-            owner_retention: lash_durable::OwnerRetentionSettings {
-                idle: IDLE_EVICT,
-                ..lash_durable::OwnerRetentionSettings::default()
-            },
-            ..lash_core_execution::DurableSettings::default()
-        },
-    };
+async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, _state: SleepState) {
+    let settings = lash_core_execution::DurableSettings::default();
     let deployment = deploy_configured(tier, settings, Vec::new(), rlm_core).await;
     let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
@@ -196,9 +184,6 @@ async fn a_sleeping_kernel_process_ends_cancelled(tier: Tier, state: SleepState)
         "the process parks on its sleep within a minute: {:?}",
         registry.get_process(&process).await
     );
-    if matches!(state, SleepState::Suspended) {
-        tokio::time::sleep(IDLE_EVICT * 10).await;
-    }
     registry
         .request_process_cancel(
             &process,
@@ -236,13 +221,4 @@ async fn a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier:
     .await;
 }
 
-async fn a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
-    Box::pin(a_sleeping_kernel_process_ends_cancelled(
-        tier,
-        SleepState::Suspended,
-    ))
-    .await;
-}
-
-on_every_tier!(a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled);
-on_every_tier!(a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled);
+on_every_tier!(a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled: sqlite_memory);

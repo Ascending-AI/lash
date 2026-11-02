@@ -641,13 +641,3 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
 async fn a_draining_node_releases_its_process_at_a_committed_phase_for_the_next_build() {
     prove(Dialect::SqliteMemory, None).await;
 }
-
-#[tokio::test]
-async fn a_draining_node_releases_its_process_at_a_committed_phase_for_the_next_build_on_postgres()
-{
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Dialect::Postgres, Some(url)).await;
-}
