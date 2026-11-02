@@ -337,7 +337,7 @@ fn compiled_formulas_equal_the_recursive_oracle() {
     }
     fn generate(seed: &mut u64, depth: usize, names: &[Param]) -> F {
         let choice = next(seed);
-        if depth == 0 || choice % 5 == 0 {
+        if depth == 0 || choice.is_multiple_of(5) {
             let at = (next(seed) % 12) as usize;
             let operand = if at < names.len() {
                 O::Param(names[at].name.clone())
@@ -432,7 +432,7 @@ fn compiled_formulas_equal_the_recursive_oracle() {
                     }]
                 }
             };
-            let oracle = |formula: &F| {
+            let oracle = |formula: &F, shallow: bool| {
                 formula.evaluate(&mut |operand, kind| {
                     let source = match operand {
                         O::Result => Source::Result,
@@ -441,7 +441,18 @@ fn compiled_formulas_equal_the_recursive_oracle() {
                             .position(|param| param.name == *name)
                             .map_or(Source::Nothing, Source::Arg),
                     };
-                    measure(source, kind)
+                    if shallow && kind == M::NestedSize {
+                        0
+                    } else {
+                        measure(
+                            source,
+                            if shallow && kind == M::DeepSize {
+                                M::Size
+                            } else {
+                                kind
+                            },
+                        )
+                    }
                 })
             };
             let mut asked = Vec::new();
@@ -451,7 +462,7 @@ fn compiled_formulas_equal_the_recursive_oracle() {
             });
             assert_eq!(
                 compiled,
-                oracle(formula),
+                oracle(formula, false),
                 "formula {index}, measurement row {row}: {formula:?}"
             );
             if index == 3 {
@@ -461,7 +472,7 @@ fn compiled_formulas_equal_the_recursive_oracle() {
             let shallow = formula.shallow();
             assert_eq!(
                 Plan::new(&shallow, &params).evaluate(measure),
-                oracle(&shallow),
+                oracle(formula, true),
                 "shallow formula {index}, row {row}"
             );
         }

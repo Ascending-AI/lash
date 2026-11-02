@@ -74,11 +74,10 @@ pub(super) fn pure_calls() {
         assert_eq!(call.verify(&exe), Ok(()));
         let source = &exe.code(caller.code).source_room;
         let points: Vec<_> = (stmt.ops.start..pc)
-            .filter_map(|pc| {
-                matches!(stream.ops[pc as usize], Op::Const { .. }).then(|| Point {
-                    site: (**stream.source_sites[pc as usize].as_ref().unwrap()).clone(),
-                    phase: Phase::Commit,
-                })
+            .filter(|pc| matches!(stream.ops[*pc as usize], Op::Const { .. }))
+            .map(|pc| Point {
+                site: (**stream.source_sites[pc as usize].as_ref().unwrap()).clone(),
+                phase: Phase::Commit,
             })
             .collect();
         assert_eq!(
@@ -138,6 +137,55 @@ pub(super) fn pure_calls() {
             )
             .unwrap()
             .unwrap();
+        // A broader source prefix cannot borrow this statement's smaller
+        // charge debt, even when its final operands and values are identical.
+        let entered_at = Point {
+            site: source.site.clone(),
+            phase: Phase::Enter,
+        };
+        let broader_route: Vec<_> = std::iter::once(Selection::Event {
+            at: entered_at.clone(),
+            exit: ExitKind::Normal,
+        })
+        .chain(route.iter().cloned())
+        .collect();
+        let broader = source
+            .compile_scalar_region(
+                source
+                    .compile_between(
+                        &entered_at,
+                        points.last().unwrap(),
+                        &broader_route,
+                        broader_route.len(),
+                    )
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut broader_values = vec![Value::Null; broader.fact_count()];
+        for (at, fact) in broader.results() {
+            let original = region.results().find(|(point, _)| *point == at).unwrap().1;
+            broader_values[fact.index()] = values[original.index()];
+        }
+        let broader = broader
+            .bind_activation(
+                &ledger,
+                &mut arena,
+                heap,
+                &invocation,
+                &activation,
+                ScalarRegionValues {
+                    values: &broader_values,
+                    calls: &[],
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            call.bind(&exe, call.callee(), &ledger, &mut arena, heap, &broader)
+                .unwrap()
+                .is_none(),
+            "the genuine unpaid head must own the entire composed debt"
+        );
         let before = ledger.prospective_invocation(TaskId::MAIN).id();
         let wrong = exe
             .islands
@@ -162,11 +210,11 @@ pub(super) fn pure_calls() {
             .unwrap()
             .unwrap();
         assert!(bound.result().same(&Value::Int(3)));
-        // The two caller arguments move into parameters. Their two source
-        // reads coexist with them, then the native answer is live before
-        // the read operands are released. Each nonzero word here adds one payload byte to its reference.
-        assert_eq!(bound.peak(), Cost::FRAME + 3 * (Cost::REFERENCE + 1));
-        assert_eq!(bound.delta(), -i128::from(Cost::REFERENCE + 1));
+        // Three evaluated caller operands remain live at call entry. The
+        // callee then needs its frame plus two reads and a native answer.
+        // Each nonzero word adds one payload byte to its reference.
+        assert_eq!(bound.peak(), Cost::FRAME + 6 * (Cost::REFERENCE + 1));
+        assert_eq!(bound.delta(), 2 * i128::from(Cost::REFERENCE + 1));
         assert_eq!(bound.depth(), 1);
         let debt = bound.debt().unwrap();
         // Caller statement plus five expression nodes, then the two body

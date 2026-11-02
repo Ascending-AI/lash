@@ -420,7 +420,7 @@ fn derive(
         if !op.kind().in_region() {
             match op {
                 Op::Operator { lib, args } | Op::Call { lib, args } => {
-                    native(
+                    completion(
                         exe,
                         LibId(lib.0),
                         args.len as usize,
@@ -433,7 +433,7 @@ fn derive(
                 Op::Nested { act, args } => {
                     let nested = stream.nested.get(act.ix()).ok_or(Refused::Source)?;
                     if let Some(lib) = nested.kind.operator_lib() {
-                        native(
+                        completion(
                             exe,
                             lib,
                             args.len as usize,
@@ -471,7 +471,7 @@ fn derive(
     Ok((closes, formulas))
 }
 
-fn native(
+fn completion(
     exe: &Executable,
     lib: LibId,
     arguments: usize,

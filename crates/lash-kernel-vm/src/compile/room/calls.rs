@@ -524,6 +524,16 @@ impl VerifiedCall {
         let Some(last) = caller.region.recovery.last() else {
             return Ok(None);
         };
+        if caller
+            .region
+            .interval
+            .events()
+            .next()
+            .map(|event| &event.point)
+            != Some(self.charges.caller().first())
+        {
+            return Ok(None);
+        }
         if self
             .caller_source
             .next_after_commit(&last.after.site)
@@ -557,7 +567,7 @@ impl VerifiedCall {
             .filter(|(slot, _)| !self.argument_slots.contains(slot))
             .map(|(slot, fact)| (*slot, caller.values[fact.index()]))
             .collect();
-        self.bind_arguments(
+        let Some(mut bound) = self.bind_arguments(
             exe,
             ledger,
             arena,
@@ -565,7 +575,26 @@ impl VerifiedCall {
             &caller.invocation,
             arguments,
             caller_values,
-        )
+        )?
+        else {
+            return Ok(None);
+        };
+        // The same prefix owns both the debt and the memory envelope. Caller
+        // operands stay live while the callee reaches its transient peak.
+        let Some(peak) = caller
+            .delta
+            .checked_add(i128::from(bound.peak))
+            .map(|peak| peak.max(i128::from(caller.peak)))
+            .and_then(|peak| u64::try_from(peak).ok())
+        else {
+            return Ok(None);
+        };
+        let Some(delta) = caller.delta.checked_add(bound.delta) else {
+            return Ok(None);
+        };
+        bound.peak = peak;
+        bound.delta = delta;
+        Ok(Some(bound))
     }
 
     /// A zero-argument call has no preceding operand region to bind. Its
@@ -730,10 +759,10 @@ impl VerifiedCall {
         if delta != price(&result, arena)? - given {
             return Ok(None);
         }
-        if let Some(lib) = self.library {
-            if !compile::import_result_fits(&exe.lib(lib).header.signature.result, result) {
-                return Ok(None);
-            }
+        if let Some(lib) = self.library
+            && !compile::import_result_fits(&exe.lib(lib).header.signature.result, result)
+        {
+            return Ok(None);
         }
         let caller_formulas = self
             .charges
