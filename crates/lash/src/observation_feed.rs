@@ -131,14 +131,30 @@ impl FeedSource {
 
     /// A commit wake can precede its publication. Retry after this node's
     /// publication window closes, keeping the existing live tail meanwhile.
-    async fn recover_retained_commit(&self, held: SessionRevision) -> Result<FeedRecovery> {
+    async fn recover_retained_commit(
+        &self,
+        held: SessionRevision,
+        after: &SessionCursor,
+    ) -> Result<FeedRecovery> {
         let head = self.durable_revision().await?;
         if head <= held {
             return Ok(FeedRecovery::Unchanged);
         }
         loop {
             let window = self.published_heads.window(&self.session_id, head);
-            let cursor = self.live_replay.current_cursor(&self.session_id, held);
+            let recovery = self.live_replay.current_cursor(&self.session_id, held);
+            let cursor = match (
+                after.parse_for_session(&self.session_id),
+                recovery.parse_for_session(&self.session_id),
+            ) {
+                (Ok(after), Ok(before))
+                    if after.replay_incarnation_id == before.replay_incarnation_id
+                        && before.live_position < after.live_position =>
+                {
+                    recovery
+                }
+                _ => after.clone(),
+            };
             match self
                 .live_replay
                 .subscribe_after_cursor(&cursor)
@@ -771,11 +787,12 @@ impl FeedState {
     fn start_recovery(&mut self) {
         self.recovery = self.delivered.map(|held| {
             let source = self.source.clone();
+            let after = self.cursor.clone();
             // A paused inline read can retain a work checkout after live
             // delivery. Complete the read independently so a consumer can
             // query settlement facts before polling this feed again.
             let recovery = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-                (held, source.recover_retained_commit(held).await)
+                (held, source.recover_retained_commit(held, &after).await)
             }));
             async move {
                 match recovery.await {

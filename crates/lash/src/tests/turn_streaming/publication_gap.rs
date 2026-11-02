@@ -520,8 +520,10 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        for miss_notification in [false, true] {
-            let replay = CommitPublicationStore::new(if miss_notification {
+        for (miss_notification, silent) in [(false, false), (true, false), (false, true)] {
+            let replay = CommitPublicationStore::new(if silent {
+                Fault::SilentLive
+            } else if miss_notification {
                 Fault::MissNotification
             } else {
                 Fault::Hold
@@ -581,14 +583,26 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
             released.notify_one();
             reached.notified().await;
             assert_ne!(a.input_id(), b.input_id(), "B is a separately queued input");
+            let expected_applications = vec![a.input_id().clone(), b.input_id().clone()];
 
             let mut commits = Vec::new();
-            let record = |item: SessionObservationStreamItem, commits: &mut Vec<String>| match item
-            {
+            let mut applications = Vec::new();
+            let mut record = |item: SessionObservationStreamItem, commits: &mut Vec<String>| match item {
                 SessionObservationStreamItem::Gap { gap, .. } => {
                     panic!("retained commits have no gap: {gap:?}, missed={miss_notification}")
                 }
                 SessionObservationStreamItem::Event(event) => {
+                    if let SessionObservationEventPayload::TurnActivity(activity) = &event.payload
+                        && let lash_core::TurnEvent::QueuedInputAccepted {
+                            applications: accepted,
+                        } = &activity.event
+                    {
+                        applications.extend(
+                            accepted
+                                .iter()
+                                .map(|application| application.input_id.clone()),
+                        );
+                    }
                     if let SessionObservationEventPayload::Committed { entries, .. } =
                         &event.payload
                     {
@@ -674,6 +688,10 @@ async fn queued_turn_commits_reach_the_reader_without_a_live_notification_or_tim
                 "ordered and once, missed={miss_notification}, cursor={:?}, retained={:?}",
                 feed.cursor().parse(),
                 replay.inner.tail_cursor(&session_id).parse()
+            );
+            assert_eq!(
+                applications, expected_applications,
+                "commit recovery must deliver retained input applications, missed={miss_notification}, silent={silent}"
             );
             tokio::time::resume();
             drop(release_clock);
