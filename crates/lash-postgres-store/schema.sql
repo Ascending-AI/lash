@@ -1444,7 +1444,8 @@ CREATE OR REPLACE FUNCTION lash_owner_commit(
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT, p_profile BOOLEAN)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB, o_inserted BYTEA[])
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB, o_inserted BYTEA[],
+    o_root_leases BIGINT[], o_answered JSONB)
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -1476,6 +1477,8 @@ DECLARE
     v_first JSONB;
     v_slots JSONB := '{}';
     v_session_heads JSONB := '[]';
+    v_leases BIGINT[] := '{}';
+    v_answered JSONB := '{}';
     v_when JSONB;
     v_leaves TEXT[] := '{}';
     v_node TEXT;
@@ -1494,9 +1497,9 @@ DECLARE
     v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry db0dbb2f29d0e581); a call
+    -- Generated from this build's statements (registry ccd9813b7e0f1ddc); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'db0dbb2f29d0e581'
+    IF p_registry IS DISTINCT FROM 'ccd9813b7e0f1ddc'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1844,6 +1847,42 @@ BEGIN
                 v_rows := v_rows + 1;
                 IF v_row."record_ref" IS NOT NULL THEN v_retired := v_retired || v_row."record_ref"::BYTEA; END IF;
             END LOOP;
+        WHEN 'durable_postgres_process_view.control_answered' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT (lifecycle_json::jsonb -> 'cancel_request')::text AS cancel,
+                    (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint AS last_event_sequence,
+                    (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint AS updated_at_ms,
+                    (lifecycle_json::jsonb -> 'external_ref')::text AS external_ref
+             FROM lash_processes WHERE process_id = (v_p->>0) FOR UPDATE LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                v_answered := v_answered || jsonb_build_object('process_frontier', to_jsonb(v_row));
+            END LOOP;
+        WHEN 'durable_pages_postgres.lease_exec_root' THEN
+            v_rows := 0;
+            FOR v_row IN INSERT INTO lash_root_leases (owner_key, root_ref, actor_key, epoch, ttl_ms, expires_at_ms)
+             SELECT (decode(v_p->>0, 'hex')), snapshot.root_ref, (v_p->>2), ((v_p->>3)::BIGINT), ((v_p->>4)::BIGINT), (v_now) + ((v_p->>4)::BIGINT) FROM lash_exec_snapshots AS snapshot
+             WHERE snapshot.exec_key = (v_p->>6)
+               AND snapshot.root_ref = (SELECT id FROM lash_blobs WHERE hash = (decode(v_p->>1, 'hex')))
+             RETURNING lease_id LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."lease_id" IS NOT NULL THEN v_leases := v_leases || v_row."lease_id"::BIGINT; END IF;
+            END LOOP;
+        WHEN 'durable_pages.lease_release' THEN
+            v_rows := 0;
+            FOR v_row IN DELETE FROM lash_root_leases WHERE lease_id = ((v_p->>0)::BIGINT)
+             RETURNING (SELECT hash FROM lash_blobs WHERE id = root_ref) AS root_ref LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+                IF v_row."root_ref" IS NOT NULL THEN v_retired := v_retired || v_row."root_ref"::BYTEA; END IF;
+            END LOOP;
         WHEN 'durable_snapshot.put_first' THEN
             v_rows := 0;
             FOR v_row IN INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
@@ -2026,6 +2065,10 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
+        WHEN 'durable_graph.admissions_cover' THEN
+            UPDATE lash_effect_admissions SET covered = TRUE, delivered_batch = NULL, delivered_position = NULL WHERE exec_key = (v_p->>0) AND NOT covered;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_run_record.delete_owner' THEN
             v_rows := 0;
             FOR v_row IN DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) RETURNING (SELECT hash FROM lash_blobs WHERE id = record_ref) AS record_ref LOOP
@@ -3510,7 +3553,7 @@ BEGIN
         NULL;
     END CASE;
     INSERT INTO lash_owner_commit_latches (token, created_ms, answer)
-             VALUES ((p_token), (v_clock), (jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode), 'session_heads', v_session_heads)));
+             VALUES ((p_token), (v_clock), (jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode), 'session_heads', v_session_heads, 'root_leases', to_jsonb(v_leases), 'now', v_now, 'answered', v_answered)));
     DELETE FROM lash_owner_commit_latches WHERE token IN (
                  SELECT token FROM lash_owner_commit_latches WHERE created_ms < (v_clock - 900000)
                  ORDER BY created_ms
@@ -3519,7 +3562,7 @@ BEGIN
              );
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
-        v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END;
+        v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
 END
 $lash_owner_commit$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(

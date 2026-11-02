@@ -778,19 +778,14 @@ impl Checkout {
         Ok(step)
     }
 
-    /// Counts the `CheckpointRoot` page a park or seal hands over: it
-    /// crosses in the step's seal batch.
+    /// Counts the `CheckpointRoot` page a seal hands over: it crosses in
+    /// the seal's batch.
     #[cfg(feature = "perf-witness")]
     fn count_checkpoint_root(&self, step: &RunStep) {
-        let (RunStep::Parked {
-            seal: Some(seal),
-            candidate: Some(candidate),
-            ..
-        }
-        | RunStep::Sealed {
+        let RunStep::Sealed {
             seal: Some(seal),
             candidate,
-        }) = step
+        } = step
         else {
             return;
         };
