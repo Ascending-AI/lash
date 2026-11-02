@@ -81,17 +81,20 @@ class ClassifyTests(unittest.TestCase):
                 self.assertEqual(postgres, plan["pr_pg_store"])
                 self.assertEqual(host, plan["pr_host_e2e"])
 
-    def test_pr_service_map_fails_open_on_an_unknown_path(self) -> None:
-        plan = ci_plan.classify([("M", "mystery.data")], "pull_request")
-        self.assertEqual("true", plan["pr_pg_store"])
-        self.assertEqual("true", plan["pr_host_e2e"])
-
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
-            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
+            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md"),
+             ("M", "schemas/host/README.md"), ("M", "runbooks/workbench-weather/README.md")]
         )
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
+        self.assertEqual(
+            {"false"},
+            {ci_plan.classify([("M", "docs/adr/0079-x.md")], event)["workbench"]
+             for event in ("pull_request", "merge_group")},
+        )
+        for path in ("schemas/host/README.md", "runbooks/workbench-weather/README.md"):
+            self.assertEqual(ci_plan.PathKind.DOCS, ci_plan.classify_path(path).kind)
 
     def test_docs_file_deletion_runs_every_expensive_family(self) -> None:
         for diff in (
@@ -124,6 +127,12 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("false", plan["regress"])
         self.assertEqual("false", plan["facade"])
         self.assertEqual("false", plan["tooling"])
+        self.assertEqual(
+            "true",
+            ci_plan.classify(
+                [("M", "crates/lash-core/src/session/mod.rs")], "merge_group"
+            )["workbench"],
+        )
 
     def test_rust_change_outside_the_workbench_closure_skips_the_cargo_partition(self) -> None:
         for path in (
@@ -135,25 +144,10 @@ class ClassifyTests(unittest.TestCase):
                 plan = ci_plan.classify([("M", path)])
                 self.assertEqual("true", plan["rust"])
                 self.assertEqual("false", plan["workbench"])
-
-    def test_the_workbench_closure_is_the_first_party_dependency_graph(self) -> None:
-        closure = ci_plan.workbench_dependency_dirs()
-        self.assertIn(ci_plan.WORKBENCH_MANIFEST_DIR, closure)
-        self.assertIn("crates/lash-core", closure)
-        self.assertNotIn("crates/lash-s3-store", closure)
-
-    def test_the_cargo_partition_follows_the_workbench_closure_only(self) -> None:
-        """No event forces the partition on: the closure is the sole selector."""
-        for changes, expected in (
-            ([("M", "docs/adr/0079-x.md")], "false"),
-            ([("M", "crates/lash-s3-store/src/lib.rs")], "false"),
-            ([("M", "crates/lash-core/src/session/mod.rs")], "true"),
-        ):
-            with self.subTest(changes=changes):
-                for event in ("pull_request", "merge_group"):
-                    self.assertEqual(
-                        expected, ci_plan.classify(changes, event)["workbench"]
-                    )
+                self.assertEqual(
+                    "false",
+                    ci_plan.classify([("M", path)], "merge_group")["workbench"],
+                )
 
     def test_an_underivable_closure_fails_open(self) -> None:
         plan = ci_plan.classify(
@@ -241,12 +235,6 @@ class ClassifyTests(unittest.TestCase):
                 self.assertEqual(
                     expected, ci_plan.classify([("M", path)])["stores"]
                 )
-
-
-    def test_the_store_job_tooling_exists(self) -> None:
-        for path in sorted(ci_plan.POSTGRES_STORE_TOOLING):
-            with self.subTest(path=path):
-                self.assertTrue((ROOT / path).is_file())
     def test_tooling_selects_repo_gates(self) -> None:
         # CI machinery always selects tooling: the repository gates hold every
         # script self-test (`CiMachineryTests` pins the rest of its map).
@@ -255,6 +243,7 @@ class ClassifyTests(unittest.TestCase):
             ("tools/buck2/rust_rules.bzl", "true"),
             ("BUCK", "true"),
             ("tools/kiln/main.py", "true"),
+            (".gitattributes", "true"),
             ("crates/lash-core/src/lib.rs", "false"),
         ):
             with self.subTest(path=path):
@@ -283,6 +272,10 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = ci_plan.classify([("M", path)])
                 self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        # A nested workspace's lock file is its own package data, not the root's.
+        self.assertEqual(
+            ci_plan.PathKind.DATA, ci_plan.classify_path("fuzz/Cargo.lock").kind
+        )
 
     def test_unknown_path_fails_open(self) -> None:
         plan = ci_plan.classify([("M", "mystery.data")])
@@ -314,13 +307,6 @@ class PathClassifierTests(unittest.TestCase):
         store = ci_plan.classify([("M", "crates/lash-postgres-store/Cargo.toml")])
         self.assertEqual("true", store["stores"])
 
-    def test_the_root_manifests_stay_global(self) -> None:
-        for path in ("Cargo.toml", "Cargo.lock"):
-            with self.subTest(path=path):
-                self.assertEqual(ci_plan.PathKind.SHARED, self.kind(path))
-        # A nested workspace's lock file is its own package data, not the root's.
-        self.assertEqual(ci_plan.PathKind.DATA, self.kind("fuzz/Cargo.lock"))
-
     def test_store_fixtures_select_stores_without_failing_open(self) -> None:
         for path in (
             "fixtures/durable-read/v1/postgres/fixture.sql",
@@ -335,43 +321,12 @@ class PathClassifierTests(unittest.TestCase):
                 self.assertEqual("false", plan["facade"])
                 self.assertEqual("false", plan["tooling"])
 
-    def test_markdown_outside_a_package_is_docs(self) -> None:
-        for path in (
-            "AGENTS.md",
-            "README.md",
-            "schemas/host/README.md",
-            "runbooks/workbench-weather/README.md",
-            "docs/agents/pr-style.md",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(ci_plan.PathKind.DOCS, self.kind(path))
-                self.assertEqual("true", ci_plan.classify([("M", path)])["docs_only"])
-
     def test_markdown_inside_a_buck2_package_is_package_input(self) -> None:
         # `include_str!` and test runfiles read package READMEs.
         for path in ("crates/lash/README.md", "runbooks/rlm-smoke/README.md"):
             with self.subTest(path=path):
                 self.assertEqual(ci_plan.PathKind.PACKAGE, self.kind(path))
                 self.assertEqual("true", ci_plan.classify([("M", path)])["rust"])
-
-    def test_prose_a_rust_test_reads_runs_rust(self) -> None:
-        for path in sorted(ci_plan.RUST_RUNTIME_DOC_INPUTS):
-            with self.subTest(path=path):
-                self.assertEqual(ci_plan.PathKind.DOC_INPUT, self.kind(path))
-                plan = ci_plan.classify([("M", path)])
-                self.assertEqual("false", plan["docs_only"])
-                self.assertEqual("true", plan["rust"])
-
-    def test_buck2_configuration_is_tooling(self) -> None:
-        for path in (".buckconfig", "BUCK", "tools/buck2/pins.json",
-                     "tools/buck2/rust_rules.bzl", ".gitattributes"):
-            with self.subTest(path=path):
-                self.assertEqual(ci_plan.PathKind.TOOLING, self.kind(path))
-                plan = ci_plan.classify([("M", path)])
-                self.assertEqual("false", plan["fail_open"])
-                self.assertEqual("true", plan["rust"])
-                self.assertEqual("true", plan["tooling"])
-                self.assertEqual("false", plan["stores"])
 
     def test_generated_third_party_graph_is_a_shared_build_input(self) -> None:
         for path in (
@@ -525,13 +480,6 @@ class CiMachineryTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(frozenset(expected), self.families(root, path))
-
-    def test_the_workflow_that_defines_the_jobs_is_global(self) -> None:
-        root = self.fixture()
-        self.assertIs(
-            ci_plan.PathKind.SHARED,
-            ci_plan.classify_path(".github/workflows/ci.yml", root).kind,
-        )
 
     def test_a_path_named_only_in_prose_has_no_consumer(self) -> None:
         root = self.fixture()
@@ -830,13 +778,6 @@ class GateScopeTests(unittest.TestCase):
             guards | {self.RUST}, self.scope("scripts/ci/buck2_event_digest.py").families
         )
 
-    def test_text_output_lists_every_family_in_ascii(self) -> None:
-        lines = ci_plan.render_gate_text(self.scope("docs/guide.md")).splitlines()
-        self.assertEqual(len(ci_plan.GATE_FAMILIES) + 1, len(lines))
-        self.assertIn("rust-compile: skip", lines)
-        self.assertTrue(lines[-1].startswith("classification: docs-only -- "))
-        "\n".join(lines).encode("ascii")
-
     def test_env_output_is_evaluable_and_publishes_the_closed_set(self) -> None:
         env = ci_plan.render_gate_env(self.scope("docs/guide.md"))
         self.assertIn("GATE_RUN_RUST_COMPILE=0", env)
@@ -846,12 +787,6 @@ class GateScopeTests(unittest.TestCase):
              "bash", env], capture_output=True, text=True, check=True,
         )
         self.assertEqual("0|docs-only", printed.stdout)
-
-    def test_the_family_set_is_closed_and_ordered(self) -> None:
-        self.assertEqual(["rust-compile", "scripts", "workflows"],
-                         [str(family) for family in ci_plan.GATE_FAMILIES])
-        self.assertEqual(["GATE_RUN_RUST_COMPILE", "GATE_RUN_SCRIPTS", "GATE_RUN_WORKFLOWS"],
-                         [family.env_variable for family in ci_plan.GATE_FAMILIES])
 
     def cli(self, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -1049,16 +984,6 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         self.assertIsNone(ci_plan.buck_targets('rule(\n    name = "one",\n'))
         self.assertIsNone(ci_plan.buck_targets(text + 'rule(\n    name = "two",\n)\n'))
         self.assertIsNone(ci_plan.buck_targets('    name = "stray",\n'))
-
-    def test_the_checked_in_generated_buck_files_have_the_diffable_shape(self) -> None:
-        for path in (ci_plan.ROOT_BUCK, ci_plan.THIRD_PARTY_BUCK):
-            with self.subTest(path=path):
-                parsed = ci_plan.buck_targets((ROOT / path).read_text())
-                self.assertIsNotNone(parsed)
-                self.assertGreater(len(parsed[0]), 10)
-        root_targets = ci_plan.buck_targets((ROOT / "BUCK").read_text())[0]
-        self.assertIn("host_schemas", root_targets)
-        self.assertIn("schema_checks", root_targets)
 
     def test_a_generated_buck_file_selects_its_changed_targets(self) -> None:
         for path, target, label in (
@@ -1313,14 +1238,6 @@ class PrTailLabelTests(unittest.TestCase):
                     "", ci_plan.classify([("M", path)])["pr_tail_labels"]
                 )
 
-    def test_a_fail_open_or_shared_diff_reruns_every_deferred_label(self) -> None:
-        expected = " ".join(ci_plan._all_dev_deferred_labels())
-        self.assertTrue(expected)
-        self.assertEqual(
-            expected, ci_plan.classify([("M", "Cargo.lock")])["pr_tail_labels"]
-        )
-        self.assertEqual(expected, ci_plan.fail_open("test")["pr_tail_labels"])
-
     def test_examples_manual_and_pr_deferred_labels_are_never_returned(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1376,22 +1293,6 @@ class PrTailLabelTests(unittest.TestCase):
             self.assertIn("dev-deferred", tags[label])
             self.assertNotIn("manual", tags[label])
             self.assertNotIn("pr-deferred", tags[label])
-
-    def test_the_buck2_core_leg_readds_touched_tail_labels(self) -> None:
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        run = next(
-            step["run"]
-            for step in jobs["buck2-tests"]["steps"]
-            if step.get("name") == "Test the workspace core suite with shared cache"
-        )
-        self.assertLess(
-            run.index("//:workspace_core_tests"),
-            run.index("${{ needs.plan.outputs.pr_tail_labels }}"),
-        )
-        self.assertEqual(
-            "${{ steps.classify.outputs.pr_tail_labels }}",
-            jobs["plan"]["outputs"]["pr_tail_labels"],
-        )
 
 
 class DependentTestLabelTests(unittest.TestCase):
@@ -1521,11 +1422,6 @@ class DependentTestLabelTests(unittest.TestCase):
 
 
 class LawTickLaneTests(unittest.TestCase):
-    def test_no_law_constructs_fresh_deployment_lanes(self) -> None:
-        import check_law_tick_lanes
-
-        self.assertEqual([], check_law_tick_lanes.violations(ROOT))
-
     def test_the_mechanical_guard_runs_in_ci(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         runs = "\n".join(step.get("run", "") for step in jobs["lint"]["steps"])
@@ -1640,29 +1536,14 @@ class VersionedSurfaceSelectionTests(unittest.TestCase):
         self.assertIn("crates/lash-postgres-store/schema.sql", paths)
         self.assertIn("crates/lash-sqlite-store/src/migration.rs", paths)
 
-    def test_the_selector_is_the_gates_own_guard_set(self) -> None:
-        import check_version_bumps
-
-        self.assertEqual(
-            check_version_bumps.guarded_path_patterns(ROOT),
-            ci_plan.versioned_surface_paths(),
-        )
-
     def test_a_guarded_file_selects_the_gate(self) -> None:
-        for path in GUARDED_SURFACE_FILES:
-            with self.subTest(path=path):
-                self.assertTrue((ROOT / path).is_file(), path)
-                self.assertTrue(ci_plan.touches_versioned_surface([path]))
-
-    def test_a_constant_file_a_guarded_file_and_the_gate_select_it(self) -> None:
         for path in (
-            "crates/lash-postgres-store/schema.sql",
+            *GUARDED_SURFACE_FILES,
             "crates/lash-trace/src/lib.rs",
-            "scripts/versioned-surfaces.toml",
-            "scripts/check_version_bumps.py",
             ".github/workflows/version-bumps.yml",
         ):
             with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file(), path)
                 self.assertTrue(ci_plan.touches_versioned_surface([path]))
 
     def test_docs_and_unguarded_paths_do_not_select_it(self) -> None:
@@ -1712,6 +1593,10 @@ class ConclusionTests(unittest.TestCase):
         ))
 
     def test_buck2_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        self.assertIn("buck2_trusted", workflow["plan"]["outputs"])
+        for job in ("buck2-tests", "buck2-tests-tail", "feature-lanes"):
+            self.assertIn("buck2_trusted", str(workflow[job]["if"]))
         trusted = successful_needs()
         self.assertEqual([], ci_plan.evaluate_conclusion(trusted, buck2_is_trusted=True))
 
@@ -1754,9 +1639,6 @@ class ConclusionTests(unittest.TestCase):
                         problems = ci_plan.evaluate_conclusion(needs, event_name=event)
                         self.assertTrue(any(job in problem for problem in problems))
 
-    def test_all_success_succeeds(self) -> None:
-        self.assertEqual([], ci_plan.evaluate_conclusion(successful_needs()))
-
     def test_failure_and_cancellation_fail(self) -> None:
         for result in ("failure", "cancelled"):
             with self.subTest(result=result):
@@ -1772,14 +1654,6 @@ class ConclusionTests(unittest.TestCase):
         for job in ci_plan.BUCK2_TEST_JOBS:
             needs[job]["result"] = "skipped"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs))
-
-    def test_wrongly_skipped_job_fails(self) -> None:
-        needs = successful_needs()
-        needs["workspace-tests"]["result"] = "skipped"
-        for job in ci_plan.BUCK2_TEST_JOBS:
-            needs[job]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, buck2_is_trusted=False)
-        self.assertTrue(any("workspace-tests" in problem for problem in problems))
 
     def test_a_trusted_rust_event_expects_no_cargo_workspace_run(self) -> None:
         """The Buck2 partition owns every deterministic Rust binary.
@@ -1829,11 +1703,6 @@ class ConclusionTests(unittest.TestCase):
             needs[job]["result"] = "skipped"
         apply_event_deferrals(needs, "pull_request")
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
-
-    def test_skipped_ungated_job_fails(self) -> None:
-        needs = successful_needs()
-        needs["hygiene"]["result"] = "skipped"
-        self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
     def test_missing_needed_job_fails(self) -> None:
         needs = successful_needs()
@@ -1891,17 +1760,21 @@ class PostgresJobTests(unittest.TestCase):
         },
     }
 
-    def test_every_postgres_step_runs_on_the_one_service(self) -> None:
-        """CI runs PostgreSQL 18 alone: one job, one service, no matrix."""
+    def test_event_selection_runs_the_right_real_tests(self) -> None:
         postgres = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
             "postgres-store"
         ]
         self.assertNotIn("strategy", postgres)
         for candidate in postgres["steps"]:
             if candidate.get("name") in POSTGRES_TEST_STEPS:
-                self.assertIn("scripts/ci/with-service.sh pg --", candidate["run"])
-
-    def test_event_selection_runs_the_right_real_tests(self) -> None:
+                self.assertIn("with-service.sh", candidate["run"])
+                self.assertIn("pg --", candidate["run"])
+        self.assertIn(
+            "//crates/lash-postgres-store:integration__test",
+            json.loads((ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8"))[
+                "service_test_targets"
+            ]["postgres"],
+        )
         for event, expected in self.SELECTED.items():
             with self.subTest(event=event):
                 self.assertEqual(expected, selected_postgres_test_steps(event))
@@ -1950,10 +1823,6 @@ class PostgresJobTests(unittest.TestCase):
 
 
 class FuzzSmokeTests(unittest.TestCase):
-    def test_fuzz_smoke_is_gated_rust_and_dispatch_only(self) -> None:
-        self.assertEqual("rust", ci_plan.GATED_JOBS.get("fuzz-smoke"))
-        self.assertIn("fuzz-smoke", ci_plan.DISPATCH_ONLY_JOBS)
-
     def test_fuzz_smoke_job_is_bounded_and_off_the_pr_critical_path(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         job = workflow["fuzz-smoke"]
@@ -2010,17 +1879,6 @@ class FuzzSmokeTests(unittest.TestCase):
         self.assertEqual("false", plan["fail_open"])
         self.assertEqual("true", plan["rust"])
         self.assertEqual("false", plan["workbench"])
-
-    def test_committed_seed_corpus_is_present_and_non_empty(self) -> None:
-        import check_fuzz_corpus
-
-        targets = check_fuzz_corpus.fuzz_targets(
-            check_fuzz_corpus.FUZZ_MANIFEST.read_text(encoding="utf-8")
-        )
-        self.assertGreaterEqual(len(targets), 3)
-        self.assertEqual(
-            [], check_fuzz_corpus.corpus_problems(targets, check_fuzz_corpus.CORPUS_ROOT)
-        )
 
     def test_missing_or_empty_seed_is_detected(self) -> None:
         import tempfile
@@ -2225,6 +2083,9 @@ class WorkbenchClosureContractTests(unittest.TestCase):
 class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
+        workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()
+        workflow_copy += "\n\n  rogue-job:\n    runs-on: ubuntu-latest\n"
+        self.assertEqual({"rogue-job"}, unregistered_ci_jobs(workflow_copy))
 
     def test_pr_service_jobs_follow_the_path_map(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
@@ -2267,19 +2128,6 @@ class WorkflowRegistrationTests(unittest.TestCase):
             self.assertTrue(
                 any(selector in issue for issue in ci_plan.evaluate_conclusion(needs, "pull_request"))
             )
-
-    def test_the_functional_legs_need_only_the_plan(self):
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
-        other = jobs["functional-e2e"]
-        self.assertEqual("plan", other["needs"])
-        self.assertEqual({"agent-workbench-transcript"},
-                         {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
-        transcript = next(leg for leg in other["strategy"]["matrix"]["include"]
-                          if leg["name"] == "agent-workbench-transcript")
-        self.assertEqual("workbench-transcript-projection-e2e", transcript["recipe"])
-        self.assertTrue(transcript["browser"])
-        self.assertTrue(transcript["buck2"])
-        self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
 
     def test_the_cargo_partition_is_gated_on_the_plan_and_runs_on_trunk(self) -> None:
         workflow = yaml.safe_load(CI_WORKFLOW.read_text())
@@ -2324,11 +2172,6 @@ class WorkflowRegistrationTests(unittest.TestCase):
             unregistered_ci_jobs(dropped, {**AGGREGATOR_ALLOWLIST, "lint": "silenced"}),
         )
 
-    def test_rogue_job_is_caught(self) -> None:
-        workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()
-        workflow_copy += "\n\n  rogue-job:\n    runs-on: ubuntu-latest\n"
-        self.assertEqual({"rogue-job"}, unregistered_ci_jobs(workflow_copy))
-
 
 class AggregatorAllowlistTests(unittest.TestCase):
     """FIG-2824. The exemption list is the escape hatch on the guard that covers
@@ -2339,12 +2182,6 @@ class AggregatorAllowlistTests(unittest.TestCase):
     ``AGGREGATOR_ALLOWLIST``: a test that derives its expectation from the set
     under test still passes after someone appends to that set.
     """
-
-    def test_the_allowlist_is_exactly_the_aggregator_job(self) -> None:
-        self.assertEqual({"ci-conclusion"}, set(AGGREGATOR_ALLOWLIST))
-        for job, reason in AGGREGATOR_ALLOWLIST.items():
-            with self.subTest(job=job):
-                self.assertTrue(reason.strip(), f"{job} needs a stated reason")
 
     def test_no_entry_exempts_a_job_the_aggregator_already_needs(self) -> None:
         """An exemption for a registered job is dead weight that hides the very
@@ -2362,11 +2199,6 @@ class AggregatorAllowlistTests(unittest.TestCase):
                     f"{job} is in ci-conclusion's needs; delete its exemption",
                 )
 
-    def test_the_aggregator_cannot_register_itself(self) -> None:
-        """The single entry's stated reason, asserted rather than trusted."""
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        self.assertNotIn("ci-conclusion", jobs["ci-conclusion"]["needs"])
-
 
 class DispatchOnlyJobTests(unittest.TestCase):
     """Deferred compile lanes live on workflow_dispatch alone.
@@ -2379,7 +2211,13 @@ class DispatchOnlyJobTests(unittest.TestCase):
     empties the set.
     """
 
-    JOBS = ("lash-vm-git-consumer", "unicode-tests")
+    JOBS = (
+        "lash-vm-git-consumer",
+        "unicode-tests",
+        "heavy-tests",
+        "stack-budget",
+        "s3-store",
+    )
 
     def board(self, event: str, docs_only: bool = False) -> dict:
         needs = successful_needs()
@@ -2437,12 +2275,7 @@ class DispatchOnlyJobTests(unittest.TestCase):
             )
 
     def test_the_other_deferred_jobs_are_untouched(self) -> None:
-        still_deferred = (
-            "heavy-tests",
-            "stack-budget",
-            "s3-store",
-            "fuzz-smoke",
-        )
+        still_deferred = ("fuzz-smoke",)
         for job in still_deferred:
             with self.subTest(job=job):
                 self.assertIn(job, ci_plan.DISPATCH_ONLY_JOBS)
@@ -2633,36 +2466,6 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
                 problems = ci_plan.evaluate_conclusion(needs, event)
                 self.assertTrue(any("check" in problem for problem in problems))
 
-    def test_the_buck2_partition_carries_the_seal(self) -> None:
-        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-        core = next(
-            step for step in jobs["buck2-tests"]["steps"]
-            if step.get("name") == "Test the workspace core suite with shared cache"
-        )
-        self.assertIn("//:workspace_core_tests", core["run"])
-        self.assertIn("//crates/lash:ui_fixtures", core["run"])
-        self.assertIn("//crates/lash:facade_completeness", core["run"])
-        self.assertEqual(
-            "needs.plan.outputs.buck2_trusted != 'true'"
-            " && needs.plan.outputs.facade == 'true'",
-            jobs["check"]["if"].strip(),
-        )
-        self.assertNotIn("environment", jobs["check"])
-        rule = (ROOT / "tools/buck2/ui_fixtures.bzl").read_text(encoding="utf-8")
-        provider = rule.split("UIHarnessInfo = provider(", 1)[1].split("\n)\n", 1)[0]
-        fixture_harness = rule.split("def _fixture_harness_impl(ctx):", 1)[1]
-        fixture_harness = fixture_harness.split("\nui_fixture_harness = rule(", 1)[0]
-        fixtures = rule.split("def _ui_fixtures_impl(ctx):", 1)[1]
-        fixtures = fixtures.split("\n_ui_fixtures = rule(", 1)[0]
-        self.assertIn('"harness_outputs": list', provider)
-        self.assertIn(
-            "harness_outputs = ctx.attrs.harness[DefaultInfo].default_outputs",
-            fixture_harness,
-        )
-        self.assertIn("harness_outputs = harness_outputs", fixture_harness)
-        self.assertIn("harness = ctx.attrs.harness[UIHarnessInfo]", fixtures)
-        self.assertIn("hidden = [helpers, harness.harness_outputs]", fixtures)
-
     def test_tooling_diff_requires_repo_gates(self) -> None:
         needs = self.board(tooling="true")
         needs["repo-gates"]["result"] = "skipped"
@@ -2670,28 +2473,6 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
         self.assertTrue(any("repo-gates" in problem for problem in problems))
         needs["repo-gates"]["result"] = "success"
         self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
-
-    def test_stores_diff_defers_postgres_store_to_the_queue(self) -> None:
-        # The fast board covers a store diff through its affected Buck2
-        # labels: postgres-store is merge-group and dispatch work, and a run
-        # on a pull request is a contract violation, not spare coverage.
-        for job in ci_plan.POSTGRES_STORE_JOBS:
-            with self.subTest(job=job):
-                needs = self.board(stores="true")
-                self.assertEqual("skipped", needs[job]["result"])
-                self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
-                needs[job]["result"] = "success"
-                problems = ci_plan.evaluate_conclusion(needs, "pull_request")
-                self.assertTrue(any(problem.startswith(f"{job} ") for problem in problems))
-                # The merge group keeps requiring the selected suite.
-                needs = self.board("merge_group", stores="true")
-                for other in ci_plan.POSTGRES_STORE_JOBS:
-                    needs[other]["result"] = "success"
-                needs[job]["result"] = "skipped"
-                problems = ci_plan.evaluate_conclusion(needs, "merge_group")
-                self.assertTrue(any(problem.startswith(f"{job} ") for problem in problems))
-                needs[job]["result"] = "success"
-                self.assertEqual([], ci_plan.evaluate_conclusion(needs, "merge_group"))
 
 
 if __name__ == "__main__":

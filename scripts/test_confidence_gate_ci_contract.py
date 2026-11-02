@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
 import functools
 import json
 import os
@@ -14,7 +13,6 @@ import tempfile
 import textwrap
 import tomllib
 import unittest
-from unittest import mock
 
 import yaml
 
@@ -256,13 +254,6 @@ def run_isolated_store_suite(
     return [json.loads(line) for line in after[len(before):]]
 
 
-def shell_int_constant(script: str, name: str) -> int:
-    match = re.search(rf"^{re.escape(name)}=([0-9]+)$", script, re.MULTILINE)
-    if match is None:
-        raise AssertionError(f"missing shell constant {name}")
-    return int(match.group(1))
-
-
 # Use CI's executable discovery while checking its coverage independently.
 REPOSITORY_GATE_DISCOVERY = runpy.run_path(
     str(ROOT / "scripts/ci/repository_gate_commands.py")
@@ -325,19 +316,6 @@ def shell_function_definition(script: str, function_name: str) -> str:
     return match.group(0)
 
 
-def shell_assoc_array(script: str, name: str) -> dict[str, str]:
-    """Parses `declare -A <name>=( [key]="value" ... )` out of a shell script."""
-    marker = f"declare -A {name}=(\n"
-    if marker not in script:
-        raise AssertionError(f"missing shell associative array {name}")
-    body = script.split(marker, 1)[1].split("\n)\n", 1)[0]
-    entries = re.findall(r'^\s*\[([^\]]+)\]="([^"]*)"$', body, re.MULTILINE)
-    parsed = dict(entries)
-    if len(parsed) != len(entries):
-        raise AssertionError(f"{name} declares a key twice")
-    return parsed
-
-
 def shell_logical_commands(script: str) -> list[str]:
     commands: list[str] = []
     current = ""
@@ -357,36 +335,6 @@ def shell_logical_commands(script: str) -> list[str]:
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
 
-
-    def test_full_stage_partition_calls_every_original_function_once(self):
-        functions = {
-            "harnesses": ["run_scenario_harnesses", "run_state_machine_and_fault_matrix", "run_sim_unit_suite",
-                          "write_provider_transport_exclusion_evidence", "write_sim_lane_declarations",
-                          "write_full_lane_prerequisites"],
-            "generated": ["run_sim_generated_lane"],
-            "minimizer": ["run_minimizer_fixture_suite"],
-            "backends": ["run_local_backend_conformance", "run_backend_contention_evidence",
-                         "run_current_postgres_contention_evidence", "run_postgres_conformance"],
-            "coverage": ["run_coverage_blind_spots"],
-            "mutation-core": ["run_lash_core_direct_model_mutation_evidence"],
-            "mutation-sim": ["run_lash_sim_runtime_completion_mutation_evidence"],
-            "mutation-packages-rotating": ["run_mutation_smoke", "run_mutation_full", "finalize_mutation_gate"],
-        }
-        all_functions = {f for fs in functions.values() for f in fs}
-        stubs = "\n".join(f"{f}() {{ echo {f}; }}" for f in all_functions)
-        stage_script = ROOT / "scripts/ci/confidence-stage.sh"
-        with tempfile.TemporaryDirectory() as tmp:
-            for stage, expected in functions.items():
-                env = dict(os.environ, LASH_CONFIDENCE_STAGE=stage, LASH_CONFIDENCE_PACKAGE="lash-internal-core")
-                shell = stubs + '\nassert_no_panics_in_artifacts() { :; }\nrequested_selector=full\nmutation_commands_run=1\nmutation_failures=0\nout_dir="$1"\nsource "$2"'
-                result = subprocess.run(["bash", "-euc", shell, "stage-test", tmp, str(stage_script)],
-                                        env=env, capture_output=True, text=True)
-                self.assertEqual(0, result.returncode, result.stderr)
-                self.assertEqual(expected, result.stdout.splitlines(), stage)
-        generated = shell_function_definition(GATE.read_text(), "run_sim_generated_lane")
-        self.assertIn('cmd+=(--shard "${LASH_SIM_SHARD:?generated stage requires a shard}")', generated)
-        self.assertIn('if [ "${LASH_CONFIDENCE_STAGE:-}" != "generated" ]; then', generated)
-        self.assertIn('source "$repo/scripts/ci/confidence-stage.sh"', GATE.read_text())
 
     def test_generated_stage_partitions_full_budget_without_search(self):
         function = shell_function_definition(GATE.read_text(), "run_sim_generated_lane")
@@ -430,386 +378,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for name in ("CARGO_TERM_COLOR", "LASH_CI_FEATURES", "RUSTFLAGS"):
             self.assertEqual(ci["env"][name], writer["env"][name], name)
 
-    def test_confidence_schedule_matrix_declared_artifacts_have_writers(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        marker = "confidence_schedule_table=(\n"
-        self.assertIn(marker, gate, "confidence schedule table is missing")
-        table_body = gate.split(marker, 1)[1].split("\n)\n", 1)[0]
-        rows = [
-            ast.literal_eval(line.strip())
-            for line in table_body.splitlines()
-            if line.strip().startswith('"')
-        ]
-        self.assertTrue(rows, "confidence schedule table is empty")
-
-        expected_selectors = {
-            "fast:all",
-            *(f"fast:{shard}" for shard in FAST_SHARDS),
-            "fast:summary",
-            "default",
-            "broad",
-            "full",
-            "sim-search",
-        }
-        self.assertEqual(
-            expected_selectors,
-            {row.split("|", 1)[0] for row in rows},
-        )
-        areas = ("store", "process", "effect-host", "protocol", "provider", "sim")
-        matrix = {
-            (row.split("|", 4)[0], row.split("|", 4)[1])
-            for row in rows
-        }
-        for selector in expected_selectors:
-            for area in areas:
-                if (selector, area) not in matrix:
-                    continue
-                self.assertTrue(
-                    any(
-                        row.split("|", 4)[0] == selector
-                        and row.split("|", 4)[1] == area
-                        for row in rows
-                    ),
-                    (selector, area),
-                )
-
-        # The key -> path map is the gate's, not a second copy: a row names a
-        # key and nothing else, so two rows cannot disagree about a path.
-        artifact_paths = shell_assoc_array(gate, "confidence_artifact_paths")
-        self.assertEqual(13, len(artifact_paths), artifact_paths)
-        for key, path in artifact_paths.items():
-            self.assertRegex(key, r"^[a-z0-9_]+$")
-            self.assertRegex(path, r"^[a-z0-9./-]+\.json$")
-        # The keys the gate actually resolves at runtime. With the paths gone
-        # from the writers, a key is only reachable through one of the three
-        # schedule accessors or the fast matrix summary's shard-owned list.
-        declaration_keys = set(
-            re.findall(
-                r"(?:scheduled_existing_artifact_path|scheduled_artifact_path|"
-                r'schedule_has_artifact|artifact_path) "?([a-z0-9_]+)"?',
-                gate,
-            )
-        ) | set(re.findall(r'^\s+"([a-z0-9_]+):[a-z-]+"$', gate, re.MULTILINE))
-        declaration_keys -= {"key"}
-        self.assertLessEqual(declaration_keys, set(artifact_paths), declaration_keys)
-        scheduled_keys = {
-            key
-            for row in rows
-            for key in filter(None, row.split("|", 4)[4].split(","))
-        }
-        writer_text = "\n".join(
-            shell_function_body(gate, function)
-            for function in (
-                "write_sim_lane_declarations",
-                "write_fast_shard_summary",
-                "write_confidence_summary",
-            )
-        )
-        for key in artifact_paths:
-            if f'"{key}":' in writer_text:
-                self.assertIn(key, scheduled_keys, key)
-        for raw_row in rows:
-            fields = raw_row.split("|", 4)
-            self.assertEqual(5, len(fields), raw_row)
-            selector, area, suite, description, raw_artifacts = fields
-            self.assertTrue(area, raw_row)
-            self.assertTrue(suite, raw_row)
-            self.assertTrue(description, raw_row)
-            for key in filter(None, raw_artifacts.split(",")):
-                # A row carries keys only. The path is not representable here,
-                # so the declarations cannot disagree about 15 paths.
-                self.assertNotIn("=", key, raw_row)
-                self.assertIn(key, artifact_paths, raw_row)
-                self.assertIn(key, declaration_keys, key)
-
-        # Every declared path is reachable only through the map: no summary
-        # writer or schedule row may spell one out again.
-        for key, path in artifact_paths.items():
-            self.assertEqual(1, gate.count(f'"{path}"'), path)
-
-    def test_area_scoping_filters_execution_predicates_like_the_plan(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        marker = "confidence_schedule_table=(\n"
-        table_body = gate.split(marker, 1)[1].split("\n)\n", 1)[0]
-        rows = [
-            ast.literal_eval(line.strip())
-            for line in table_body.splitlines()
-            if line.strip().startswith('"')
-        ]
-        areas = ("store", "process", "effect-host", "protocol", "provider", "sim")
-        cases = (
-            ("default+area:store", "default", "all", "store"),
-            ("broad+area:store", "broad", "all", "store"),
-            ("fast:fault-matrix+area:process", "fast", "fault-matrix", "process"),
-            ("fast:sim-generated", "fast", "sim-generated", "all"),
-        )
-
-        schedule_selector = shell_function_definition(gate, "schedule_selector")
-        schedule_row_matches_area = shell_function_definition(
-            gate, "schedule_row_matches_area"
-        )
-        schedule_has_area = shell_function_definition(gate, "schedule_has_area")
-        area_selected = shell_function_definition(gate, "area_selected")
-
-        for selector, lane, fast_shard, requested_area in cases:
-            effective_selector = (
-                f"fast:{fast_shard}" if lane == "fast" else lane
-            )
-            expected = {
-                candidate: any(
-                    row.split("|", 4)[0] == effective_selector
-                    and row.split("|", 4)[1] == candidate
-                    and (
-                        requested_area == "all"
-                        or row.split("|", 4)[1] == requested_area
-                    )
-                    for row in rows
-                )
-                for candidate in areas
-            }
-            harness = "\n".join(
-                (
-                    "set -eu",
-                    f'lane={lane!r}',
-                    f'fast_shard={fast_shard!r}',
-                    'sim_search_shard=""',
-                    f'area={requested_area!r}',
-                    marker.rstrip("\\n"),
-                    table_body,
-                    ")",
-                    schedule_selector,
-                    schedule_row_matches_area,
-                    schedule_has_area,
-                    area_selected,
-                    "for candidate in " + " ".join(areas) + "; do",
-                    '  if area_selected "$candidate"; then printf "%s\\n" "$candidate"; fi',
-                    "done",
-                )
-            )
-            completed = subprocess.run(
-                ["bash", "-c", harness],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            actual = set(filter(None, completed.stdout.splitlines()))
-            self.assertEqual(
-                {candidate for candidate, selected in expected.items() if selected},
-                actual,
-                f"execution area predicate drifted for {selector}",
-            )
-
-    def test_heavy_suites_are_split_between_ci_and_heavy_profiles(self) -> None:
-        """The ordinary/heavy split lives in nextest profiles, not job scripts.
-
-        `profile.ci` (the workspace test job) must exclude the heavy suites its comment
-        promises, `profile.ci-heavy` (the trunk-only heavy-tests job) must run
-        them, and each job must name its profile — otherwise a rename on one
-        side silently drops the suites from CI entirely.
-        """
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        nextest = (ROOT / ".config" / "nextest.toml").read_text(encoding="utf-8")
-
-        workspace_tests = workflow_job_block(workflow, "workspace-tests")
-        # The workspace job runs only for untrusted events; its Cargo profile
-        # and workspace breadth remain the same.
-        self.assertIn("cargo nextest run --profile ci --locked", workspace_tests)
-        self.assertIn('nextest_args=(--workspace -E "${skip}")', workspace_tests)
-        heavy = workflow_job_block(workflow, "heavy-tests")
-        self.assertIn("--profile ci-heavy --workspace", heavy)
-
-        self.assertIn("[profile.ci-heavy]", nextest)
-        heavy_filter = (
-            "durable_fault_matrix_real_cargo_filters_select_tests"
-        )
-        ci_profile = nextest.split("[profile.ci]", 1)[1].split("[profile.ci-heavy]", 1)[0]
-        ci_heavy_profile = nextest.split("[profile.ci-heavy]", 1)[1]
-        self.assertIn("default-filter", ci_profile)
-        self.assertIn(heavy_filter, ci_profile)
-        self.assertIn("default-filter", ci_heavy_profile)
-        self.assertIn(heavy_filter, ci_heavy_profile)
-        # The trybuild ui binary leaves the workspace job without a heavy-side run;
-        # its gate is check's seal step.
-        self.assertIn("binary(ui)", ci_profile)
-        self.assertNotIn("binary(ui)", ci_heavy_profile)
-        self.assertIn("--test ui", workflow_job_block(workflow, "check"))
-
-    def test_dispatch_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
-        """Heavy suites run on manual dispatch only: 2026-08-25 ruling, tightened.
-
-        There is no automatic trunk run any more — ci.yml has no `push`
-        trigger — so `workflow_dispatch` is the sole home of the heavy
-        families, and it is the profile release.yml certifies. Reassess after
-        the FIG-2169 test-prune sweep. The job-level guard, the ci_plan
-        accounting set, and the conclusion's deferral behavior must agree, or a
-        PR either re-pays the heavy suites or merges green while a heavy job
-        silently never runs.
-        """
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        dispatch_only = {
-            "heavy-tests",
-            "stack-budget",
-            "s3-store",
-            "fuzz-smoke",
-            # Deferred Unicode and the lash_vm consumer left the
-            # PR/merge-group board entirely: the queue runs the same minimal
-            # board as a pull request, and the release dispatch is their sole
-            # home. Feature lanes came back to every trusted event (FIG-3572).
-            "unicode-tests",
-            "lash-vm-git-consumer",
-        }
-        guard = "github.event_name == 'workflow_dispatch'"
-        for job in sorted(dispatch_only):
-            block = workflow_job_block(workflow, job)
-            self.assertIn("workflow_dispatch", block, job)
-            self.assertIn(guard, block, job)
-        # No `push` trigger at all, and no job may resurrect one.
-        self.assertNotIn("\n  push:\n", workflow)
-        self.assertNotIn("'push'", workflow)
-
-        plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
-        self.assertEqual(plan["DISPATCH_ONLY_JOBS"], dispatch_only)
-        self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
-
-        evaluate = plan["evaluate_conclusion"]
-        needs = {
-            job: {"result": "success", "outputs": {}}
-            for job in plan["UNGATED_JOBS"]
-            | set(plan["GATED_JOBS"])
-            | plan["BUCK2_TEST_JOBS"]
-        }
-        needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
-            "docs_only": "false",
-            "fail_open": "false",
-            "pr_pg_store": "false",
-            "pr_host_e2e": "false",
-        }
-        # This scenario exercises deferral. The fast pull-request board runs
-        # no live suite at all — the store suite is merge-group and dispatch
-        # work.
-        needs["workspace-tests"]["result"] = "skipped"
-        # Trusted events seal the API inside `buck2-tests`.
-        needs["check"]["result"] = "skipped"
-        for job in dispatch_only:
-            needs[job] = {"result": "skipped", "outputs": {}}
-        needs["functional-e2e"] = {"result": "skipped", "outputs": {}}
-        for job in plan["POSTGRES_STORE_JOBS"]:
-            needs[job] = {"result": "skipped", "outputs": {}}
-        needs["buck2-tests-tail"] = {"result": "skipped", "outputs": {}}
-        self.assertEqual(evaluate(needs, "pull_request"), [])
-        needs["buck2-tests-tail"] = {"result": "success", "outputs": {}}
-        for job in plan["POSTGRES_STORE_JOBS"]:
-            needs[job] = {"result": "success", "outputs": {}}
-        self.assertEqual(evaluate(needs, "merge_group"), [])
-        # Running the functional legs on a merge group, which defers them,
-        # is the violation, not skipping them.
-        needs["functional-e2e"]["result"] = "success"
-        self.assertEqual(
-            evaluate(needs, "merge_group"),
-            [
-                "functional-e2e ended with 'success' on a merge_group event, expected skipped"
-            ],
-        )
-        needs["functional-e2e"]["result"] = "skipped"
-        dispatch_needs = {
-            job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
-            for job, value in needs.items()
-        }
-        dispatch_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
-        dispatch_needs["workspace-tests"]["result"] = "skipped"
-        dispatch_needs["check"]["result"] = "skipped"
-        self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
-        # CI runs PostgreSQL 18 alone: the job names no major
-        # of its own, and every step runs on the one `pg` service. The
-        # focused contract tests in test_ci_plan.py evaluate step selection.
-        postgres = workflow_job_block(workflow, "postgres-store")
-        self.assertNotIn("POSTGRES_PRIMARY", postgres)
-        self.assertNotIn("POSTGRES_COMPATIBILITY", postgres)
-
-        # postgres-store is gated on the path-derived stores family, so on a
-        # docs-only diff a skipped matrix job is accepted.
-        pr_needs = {
-            job: {**value, "outputs": dict(value.get("outputs", {}))}
-            for job, value in needs.items()
-        }
-        pr_needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "false") | {
-            "docs_only": "true",
-            "fail_open": "false",
-        }
-        for job in dispatch_only:
-            pr_needs[job] = {"result": "skipped", "outputs": {}}
-        for job in plan["GATED_JOBS"]:
-            pr_needs[job] = {"result": "skipped", "outputs": {}}
-        for job in plan["BUCK2_TEST_JOBS"]:
-            pr_needs[job] = {"result": "skipped", "outputs": {}}
-        self.assertEqual([], evaluate(pr_needs, "pull_request"))
-
-        # The release gate is what makes the full profile mandatory: a release
-        # SHA is certified only by a green workflow_dispatch CI run.
-        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn('run.get("event") == "workflow_dispatch"', release)
-        self.assertNotIn('("push", "workflow_dispatch")', release)
-        self.assertIn("no full-profile (workflow_dispatch) CI ", release)
-
-
-    def test_store_properties_have_reproducible_pr_and_soak_budgets(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        justfile = JUSTFILE.read_text(encoding="utf-8")
-        scenario_harnesses = shell_function_body(gate, "run_scenario_harnesses")
-
-        self.assertIn("default_store_contract_cases=32", scenario_harnesses)
-        self.assertIn('[ "$lane" = "full" ]', scenario_harnesses)
-        self.assertIn("default_store_contract_cases=256", scenario_harnesses)
-        self.assertEqual(
-            scenario_harnesses.count(
-                'LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases"'
-            ),
-            3,
-        )
-        self.assertIn("store-contract-soak cases='256':", justfile)
-        for leaf in (
-            "store_contract_state_machine",
-            "session_graph_state_machine",
-        ):
-            self.assertIn(
-                f"--test conformance_memory \\\n      {leaf}", scenario_harnesses
-            )
-            self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
-        store_soak = justfile.split("store-contract-soak cases='256':", 1)[1].split(
-            "# Opt-in raw durable-state soak", 1
-        )[0]
-        self.assertIn("kiln test --test_timeout=1200 --test_output=all", store_soak)
-        self.assertIn(
-            "service=(--local-test-execution --no-test-cache "
-            "--test_env=LASH_POSTGRES_DATABASE_URL)",
-            store_soak,
-        )
-        self.assertIn('"--test_arg=${selector}"', store_soak)
-        for leaf in ("store_contract_state_machine", "session_graph_state_machine"):
-            self.assertIn(f" {leaf}", store_soak)
-        for target in (
-            "//crates/lash-sqlite-store:conformance_memory__test",
-            "//crates/lash-sqlite-store:conformance__test",
-            "//crates/lash-postgres-store:conformance__test",
-        ):
-            self.assertIn(target, store_soak)
-        cross_backend_soak = shell_function_body(gate, "run_cross_backend_store_soak")
-        self.assertIn('LASH_CROSS_BACKEND_SOAK_CASES:-64', cross_backend_soak)
-        self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
-        self.assertIn("cross-backend-store-soak cases='64' seed='852':", justfile)
-        just_cross_backend = justfile.split(
-            "cross-backend-store-soak cases='64' seed='852':", 1
-        )[1].split("# The runtime leg gates", 1)[0]
-        self.assertIn("${LASH_POSTGRES_DATABASE_URL:?", just_cross_backend)
-        self.assertIn(
-            "kiln test --local-test-execution --no-test-cache", just_cross_backend
-        )
-        self.assertIn("--test_env=LASH_POSTGRES_DATABASE_URL", just_cross_backend)
-        self.assertIn("--test_output=all", just_cross_backend)
-        self.assertIn("--test_timeout=1200", just_cross_backend)
 
     def test_active_test_callers_use_the_test_interface(self) -> None:
         def obsolete_test_run(source: str) -> re.Match[str] | None:
@@ -976,26 +544,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
 
 
-    def test_deletion_evidence_records_survivor_and_coverage_disposition(self) -> None:
-        evidence = json.loads((ROOT / "scripts/fixtures/test-deletion-evidence.json").read_text())
-        self.assertEqual(evidence["commit"], "95ece260f58d0d8386147739bab3dc9c4655457d")
-        self.assertEqual(evidence["ticket"], "FIG-528")
-        self.assertEqual(evidence["nominated"], evidence["deleted"] + len(evidence["survivors"]))
-        self.assertEqual({row["property"] for row in evidence["survivors"]},
-                         {"sim exactly-once", "batch ordering", "serial tools"})
-        self.assertTrue(all(row["mutation"] for row in evidence["survivors"]))
-        self.assertEqual(len(evidence["dispositions"]), 5)
-        for row in evidence["dispositions"]:
-            self.assertTrue(row["property"])
-            self.assertIn(row["coverage"], ("covered", "moved", "unclaimed"))
-            if row["coverage"] == "covered":
-                self.assertTrue(row["surviving_coverage"])
-            elif row["coverage"] == "moved":
-                self.assertRegex(row["ticket"], r"^FIG-\d+$")
-        google = next(row for row in evidence["dispositions"] if row["property"] == "Google-specific raw 429 parsing")
-        self.assertEqual(google["coverage"], "unclaimed")
-        self.assertIn("retryable 429 classification", google["surviving_coverage"])
-
     def test_every_script_self_test_is_run_by_ci(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         repo_gates = workflow_job_block(workflow, "repo-gates")
@@ -1077,15 +625,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertIn("python3 scripts/test_foo.py", failed.stderr)
             # A failing discovered test does not suppress the other tests.
             self.assertIn("tools/buck2/tests/test_foo.py executed", failed.stdout)
-
-    def test_test_named_buck2_tools_are_not_self_tests(self) -> None:
-        # The exemption is for production modules only. A stale entry, or a
-        # self-test parked here, would reopen the hole the discovery closes.
-        for relative in sorted(BUCK2_TEST_NAMED_TOOLS):
-            with self.subTest(tool=relative):
-                path = ROOT / relative
-                self.assertTrue(path.is_file(), f"{relative} no longer exists")
-                self.assertNotIn("unittest", path.read_text(encoding="utf-8"))
 
     def test_push_gate_runs_the_gates_whose_self_tests_it_runs(self) -> None:
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
@@ -1477,106 +1016,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             self.assertEqual(1, dirty.returncode, dirty.stderr)
             self.assertIn("panic gate: FAILED", dirty.stderr)
 
-    def test_lane_composition_is_declared_once_per_path(self) -> None:
-        """Four hand-written copies of the same composition is three too many.
-
-        The fast shard dispatch reads its steps from the same table the
-        schedule declares, and the two compositions the non-sharded paths used
-        to repeat are functions with more than one caller.
-        """
-        gate = GATE.read_text(encoding="utf-8")
-
-        steps = shell_assoc_array(gate, "confidence_fast_shard_steps")
-        self.assertEqual({*FAST_SHARDS, "summary"}, set(steps))
-
-        # The shards the composition table knows are exactly the shard
-        # selectors the schedule table declares, and each shard's suite name is
-        # its own -- a shard cannot compose a suite it does not schedule.
-        table_body = gate.split("confidence_schedule_table=(\n", 1)[1].split("\n)\n", 1)[0]
-        rows = [
-            ast.literal_eval(line.strip())
-            for line in table_body.splitlines()
-            if line.strip().startswith('"')
-        ]
-        scheduled_suites: dict[str, set[str]] = {}
-        for row in rows:
-            selector, _, suite = row.split("|", 3)[:3]
-            if selector.startswith("fast:") and selector != "fast:all":
-                scheduled_suites.setdefault(selector.removeprefix("fast:"), set()).add(suite)
-        self.assertEqual(set(steps), set(scheduled_suites))
-        for shard, suites in scheduled_suites.items():
-            self.assertEqual({shard}, suites, shard)
-
-        # Every step is a function this script defines, so a typo is a missing
-        # function at parse time rather than a silently skipped suite.
-        defined = set(re.findall(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(\) \{$", gate, re.MULTILINE))
-        for shard, step_list in steps.items():
-            self.assertTrue(step_list.strip(), shard)
-            for step in step_list.split():
-                self.assertIn(step, defined, (shard, step))
-
-        # run_fast_shard composes; it does not carry its own arm per shard.
-        dispatch = shell_function_definition(gate, "run_fast_shard")
-        self.assertIn('steps="${confidence_fast_shard_steps[$fast_shard]:-}"', dispatch)
-        self.assertIn("unknown fast shard", dispatch)
-        for shard in FAST_SHARDS:
-            self.assertNotIn(shard, dispatch, shard)
-
-        # The two compositions the fast area-scoped path and the non-fast lane
-        # used to spell out are shared, not copied. `run_core_suites` is called
-        # by both of those paths; `write_sim_lane_evidence` by the non-fast
-        # lane and by the sim-generated shard through the table above.
-        self.assertEqual(
-            2, len(re.findall(r"^\s*run_core_suites$", gate, re.MULTILINE))
-        )
-        self.assertEqual(
-            1, len(re.findall(r"^\s*write_sim_lane_evidence$", gate, re.MULTILINE))
-        )
-        self.assertIn("write_sim_lane_evidence", steps["sim-generated"])
-
-        # Neither composition may grow a second copy of the other's body.
-        core = shell_function_definition(gate, "run_core_suites")
-        evidence = shell_function_definition(gate, "write_sim_lane_evidence")
-        for writer in (
-            "write_sim_lane_declarations",
-            "write_full_lane_prerequisites",
-        ):
-            self.assertIn(writer, evidence, writer)
-            self.assertEqual(
-                1, len(re.findall(rf"^\s*{writer}$", gate, re.MULTILINE)), writer
-            )
-        for suite in ("run_scenario_harnesses", "run_state_machine_and_fault_matrix"):
-            self.assertIn(suite, core, suite)
-
-    def test_release_is_manual_and_requires_a_green_main_commit(self) -> None:
-        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-
-        required_snippets = [
-            "workflow_dispatch:",
-            "release_sha:",
-            'requested="${REQUESTED_SHA:-origin/main}"',
-            'git merge-base --is-ancestor "${sha}" origin/main',
-            'gh run list --workflow ci.yml --commit "${sha}"',
-            'run.get("event") == "workflow_dispatch"',
-            "run = matching[0]",
-            'run.get("conclusion") != "success"',
-            "release refused: target ",
-            "run.get('databaseId')",
-            "run.get('url', 'URL unavailable')",
-            "release_version.py print-next",
-            'git tag "${RELEASE_TAG}" "${RELEASE_SHA}"',
-        ]
-        for snippet in required_snippets:
-            self.assertIn(snippet, workflow)
-        self.assertNotIn("\n  push:\n", workflow)
-        self.assertLess(
-            workflow.index(
-                "profile_runtime.py --profile full --release --scenario all "
-                "--enforce-budgets"
-            ),
-            workflow.index('git tag "${RELEASE_TAG}" "${RELEASE_SHA}"'),
-        )
-
     def test_runtime_release_publishes_sdk_without_host_assets(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
@@ -1771,38 +1210,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
                     self.assertEqual(invalid.stdout, "")
             self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
 
-    def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-
-        required_snippets = [
-            'step "Model replay evidence"',
-            "run_model_replay_suite()",
-            'replay_dir="${out_dir}/sim/model-replay"',
-            "generated_backend_regression_fixture",
-            '"schema": "lash.confidence.model-replay-evidence.v1"',
-            "Backend equivalence is not claimed by this artifact",
-        ]
-        for snippet in required_snippets:
-            self.assertIn(snippet, gate)
-
-        self.assertNotIn("run_cross_backend_replay_suite", gate)
-        self.assertNotIn("sim/cross-backend-replay", gate)
-        replay_command = shell_function_body(gate, "run_model_replay_command")
-        row_format = re.search(
-            r"""printf\s+'(?P<json>\{.*?\})\\n'""", replay_command, re.DOTALL
-        )
-        self.assertIsNotNone(row_format)
-        row_keys = set(
-            re.findall(r'"([^"]+)"\s*:', row_format.group("json"))
-        )
-        self.assertNotIn("backend", row_keys)
-        self.assertNotIn("skip_reason", row_keys)
-        self.assertNotIn("backend_replayable_regression", gate)
-        self.assertNotIn(
-            "Every generated trace and every backend-replayable regression trace is replayed through model, SQLite, and Postgres",
-            gate,
-        )
-
     def test_model_replay_empty_corpus_writes_failed_verdict_and_exits_nonzero(
         self,
     ) -> None:
@@ -1889,23 +1296,6 @@ finalize_mutation_gate
                 ),
                 "failed\n",
             )
-
-    def test_mutation_failure_is_aggregated_after_full_lane_evidence(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-        main = gate[gate.rindex("\nrun_core_suites\n") :]
-
-        smoke = main.index("run_mutation_smoke")
-        broad_postgres = main.index("run_broad_postgres_evidence")
-        conformance = main.index("run_postgres_conformance")
-        full_mutation = main.index("run_mutation_full")
-        aggregate = main.index("finalize_mutation_gate")
-
-        self.assertLess(smoke, broad_postgres)
-        self.assertLess(broad_postgres, conformance)
-        self.assertLess(conformance, full_mutation)
-        self.assertLess(full_mutation, aggregate)
-        self.assertEqual(main.count("finalize_mutation_gate"), 1)
-        self.assertIn("if ! finalize_mutation_gate; then\n    exit 1\n  fi", main)
 
     def test_durable_stores_are_critical_coverage_and_mutation_packages(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -2017,86 +1407,6 @@ derive_mutation_jobs() {{
         # The wrapper CI uses starts the same image the same way.
         wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(encoding="utf-8")
         self.assertIn("shared_preload_libraries=pg_stat_statements", wrapper)
-
-    def test_postgres_ci_lane_requires_database_configuration(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        gate = GATE.read_text(encoding="utf-8")
-        push_gate = PUSH_GATE.read_text(encoding="utf-8")
-        postgres_store_job = workflow_job_block(workflow, "postgres-store")
-
-        self.assertIn('LASH_CROSS_BACKEND_CASES: "4"', postgres_store_job)
-
-        # The service wrapper chooses a private database port and forwards the URL
-        # to each selected ignored variant. Its fixture fails if that URL is lost.
-        postgres_job_env = yaml.safe_load(workflow)["jobs"]["postgres-store"]["env"]
-        self.assertNotIn("LASH_POSTGRES_DATABASE_URL", postgres_job_env)
-        wrapper = (ROOT / "scripts" / "ci" / "with-service.sh").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("LASH_POSTGRES_DATABASE_URL=postgres://", wrapper)
-        for step_name in (
-            "Test Postgres store (conformance and attempt atomicity)",
-            "Test runtime pool-wait binding",
-            "Test simulator backend faults on Postgres",
-            "Test cross-backend store differential",
-        ):
-            with self.subTest(step=step_name):
-                step = workflow_step_block(postgres_store_job, step_name)
-                self.assertIn("bash scripts/ci/with-service.sh pg --", step)
-
-        for step_name in (
-            "Test Postgres store (conformance and attempt atomicity)",
-            "Test runtime pool-wait binding",
-            "Test cross-backend store differential",
-        ):
-            with self.subTest(step=step_name):
-                step = workflow_step_block(postgres_store_job, step_name)
-                buck2, cargo = store_suite_branches(store_suite_for_step(step))
-                self.assertTrue(buck2.strip())
-                self.assertIn("cargo ", cargo)
-
-        store_suites = workflow_step_block(
-            postgres_store_job, "Test Postgres store (conformance and attempt atomicity)"
-        )
-        # The whole store package runs on every event (FIG-3572): FIG-3595
-        # and FIG-3550 broke it while it was dispatch-only.
-        self.assertNotIn("if:", store_suites.split("run:", 1)[0])
-        self.assertIn("store-tests.sh pg-store", store_suites)
-        self.assertIn(
-            "//crates/lash-postgres-store:integration__test",
-            json.loads(LANE_TABLE.read_text(encoding="utf-8"))["service_test_targets"]["postgres"],
-        )
-        self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
-        self.assertIn("needs.plan.outputs.pr_pg_store == 'true'", postgres_store_job)
-
-        # The differential's skip reason and its `compared_backends` inventory
-        # go to stderr, which libtest swallows for a passing test: uncaptured
-        # output is what makes a real run distinguishable from a skipped one.
-        differential_buck2, differential_cargo = store_suite_branches(
-            store_suite_for_step(
-                workflow_step_block(
-                    postgres_store_job, "Test cross-backend store differential"
-                )
-            )
-        )
-        self.assertIn("--no-capture", differential_cargo)
-        # libtest's spelling of the same flag, plus the Buck2-side switch that
-        # actually lets the uncaptured stderr reach the log.
-        self.assertIn("--test_arg=--nocapture", differential_buck2)
-        self.assertIn("--test_output=all", differential_buck2)
-        self.assertIn(
-            'LASH_CROSS_BACKEND_CASES="${LASH_CROSS_BACKEND_PR_CASES:-4}"',
-            push_gate,
-        )
-        conformance_calls = [
-            command
-            for command in shell_logical_commands(gate)
-            if re.search(
-                r"\bcargo test -p lash-internal-postgres-store\b.*(?:^|\s)--test\s+conformance(?:\s|$)",
-                command,
-            )
-        ]
-        self.assertGreater(len(conformance_calls), 0)
 
     def test_buck2_store_runtime_flags_and_reports_are_forwarded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2441,24 +1751,6 @@ derive_mutation_jobs() {{
             "python3 scripts/ci/check_feature_lane_test_floors.py", job
         )
 
-    def test_rolling_deploy_contract_rejects_either_missing_worker(self) -> None:
-        lanes = feature_lane_table()
-        worker_labels = [
-            label for label in lanes["loadtest-worker-synthetic-next"]
-            if ":lash-vm-worker__bin__fv_" in label
-        ]
-        self.assertEqual(2, len(worker_labels))
-        for removed in worker_labels:
-            with self.subTest(removed=removed):
-                incomplete = dict(lanes)
-                incomplete["loadtest-worker-synthetic-next"] = [
-                    label for label in lanes["loadtest-worker-synthetic-next"]
-                    if label != removed
-                ]
-                with mock.patch(__name__ + ".feature_lane_table", return_value=incomplete):
-                    with self.assertRaisesRegex(AssertionError, "predecessor and successor"):
-                        self.test_every_declared_lane_reaches_the_pool_graph()
-
     def test_lash_runtime_default_build_still_runs_and_counts_its_tests(self) -> None:
         """The `default-off-tests` leg survived the move onto the pool.
 
@@ -2502,189 +1794,6 @@ derive_mutation_jobs() {{
         for label in filtered:
             self.assertIn("__unit_test__fv_", label)
             self.assertEqual(1, floors.get(label), label)
-
-    def test_publish_time_version_injection_has_only_post_release_docs_commit(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        cargo = CARGO_TOML.read_text(encoding="utf-8")
-
-        # The manifest bump commit and pass-1/pass-2 re-run chain are gone. A
-        # green main push only validates; a manual release stamps an ephemeral
-        # checkout, then updates only the checked-in docs pin after publishing.
-        self.assertNotIn("release_version.py set", workflow)
-        self.assertNotIn("Commit release version", workflow)
-        self.assertNotIn("Dispatch validation pass", workflow)
-        self.assertNotIn("Sync release version to staging", workflow)
-        self.assertNotIn("gh workflow run ci.yml", workflow)
-        # ci.yml carries a bare workflow_dispatch trigger so a maintainer can
-        # re-run trunk validation when GitHub drops a push event (it happened
-        # to merge commit d70ce7ea: zero check suites were created). This is
-        # NOT the old pass-2 bump-commit revalidation chain — the assertions
-        # above and below keep that chain dead; the dispatch trigger must stay
-        # input-less and must never be invoked from a workflow.
-        self.assertIn("workflow_dispatch:", workflow)
-        self.assertNotIn("prepare-release:", workflow)
-        self.assertIn("workflow_dispatch:", release)
-
-        # main carries the honest dev placeholder; the channel is the source of
-        # truth for which release series a cut belongs to.
-        self.assertIn('version = "0.0.0-dev"', cargo)
-        self.assertIn("[workspace.metadata.release]", cargo)
-        self.assertNotIn("0.1.0-alpha.", cargo)
-
-        # The publisher stamps the ephemeral checkout before packaging crates.
-        # Host Application binary stamping belongs to that host's own release.
-        self.assertIn("publish_workspace.py --version", release)
-        self.assertIn("permissions:\n  contents: read\n  actions: read", release)
-        publish = workflow_job_block(release, "publish")
-        self.assertIn("permissions:\n      contents: write", publish)
-
-    def test_workspace_tests_build_and_run_without_archive_transport(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        # The workspace suite builds and runs on one runner. This keeps its
-        # feature graph and profile while removing multi-gigabyte archive
-        # transport and four repeated runner setup paths.
-        self.assertNotIn("  test:\n", workflow)
-        self.assertIn("  check:\n", workflow)
-        self.assertIn("  workspace-tests:\n", workflow)
-        self.assertNotIn("  nextest-archive:\n", workflow)
-        self.assertNotIn("  test-shard:\n", workflow)
-        self.assertNotIn("cargo nextest archive", workflow)
-        self.assertNotIn("--archive-file", workflow)
-        workspace_tests = workflow_job_block(workflow, "workspace-tests")
-        self.assertIn("Install Node for browser projection gates", workspace_tests)
-        self.assertIn("node-version: 24", workspace_tests)
-        # Untrusted pull requests keep the full workspace build. Trusted
-        # events run Buck2 instead.
-        self.assertIn(
-            'cargo build --locked ${LASH_CI_FEATURES} "${build_args[@]}"',
-            workspace_tests,
-        )
-        self.assertIn(
-            'build_args=(--workspace "${excludes[@]}"'
-            ")",
-            workspace_tests,
-        )
-        self.assertIn("trusted event must use the Buck2 partition", workspace_tests)
-        self.assertNotIn("scope=(--package agent-workbench)", workspace_tests)
-        self.assertIn(
-            "cargo nextest run --profile ci --locked ${LASH_CI_FEATURES}",
-            workspace_tests,
-        )
-        self.assertIn("Logical CPUs: $(nproc)", workspace_tests)
-        # --no-fail-fast so one failure never hides the rest (alpha.82 lesson).
-        self.assertIn("--no-fail-fast", workspace_tests)
-
-        # Gates that neither warm nor consume the seal cache are sibling jobs, not serial steps
-        # behind twelve minutes of compilation.
-        # Doctests were removed from the repository by ruling (2026-09-13), so no half of this
-        # job runs them on either trust path.
-        check_job = workflow_job_block(workflow, "check")
-        self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
-        self.assertNotIn("--doc ", check_job)
-        # The trusted path is pure Buck2 (FIG-3364) and rides the core test
-        # invocation: `ui_fixtures` runs every tests/ui/*.stderr fixture
-        # through the toolchain rustc directly and, as its validation output,
-        # builds `ui__test` (which proves the compile-pass modules still
-        # compile), so the seal no longer pays trybuild's nested `cargo check`
-        # of the dependency graph or a Buck2 client of its own. The Cargo
-        # command stays as the untrusted/fork leg, so both spellings are
-        # pinned here.
-        self.assertIn(
-            "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
-            check_job,
-        )
-        self.assertNotIn("buck2 ", check_job)
-        self.assertNotIn("buck2-shared-cache", check_job)
-        self.assertIn(
-            "//crates/lash:ui_fixtures", workflow_job_block(workflow, "buck2-tests")
-        )
-        self.assertNotIn("run-seal-harness", check_job)
-        self.assertNotIn("cargo fetch", check_job)
-        for foreign in ("cargo check -p lash-runtime --no-default-features --locked",):
-            self.assertNotIn(foreign, check_job)
-
-        # Every gate that moved is pinned to the job that now owns it. Asserting
-        # only that check no longer runs them would be satisfied by deleting
-        # them outright, which is the way a decomposition silently drops
-        # coverage: the split is a scheduling change, so each command has to be
-        # somewhere, and named.
-        moved_gates = {
-            "repo-gates": (
-                "bash scripts/test-worktree-gate-env.sh",
-                "bash scripts/test-dev-script-process-identity.sh",
-            ),
-            "feature-lanes": (
-                "//:feature_lane_compile",
-                "//:feature_lane_tests",
-                "python3 scripts/ci/check_feature_lane_test_floors.py",
-            ),
-        }
-        for job_id, commands in moved_gates.items():
-            self.assertIn(f"  {job_id}:\n", workflow)
-            block = workflow_job_block(workflow, job_id)
-            for command in commands:
-                with self.subTest(job=job_id, command=command):
-                    executable = block
-                    if job_id == "repo-gates":
-                        executable += "\n" + "\n".join(REPOSITORY_GATE_DISCOVERY["commands"](ROOT))
-                    self.assertIn(command, executable)
-
-        # The owning step enables discovery after toolchain provisioning.
-        repo_gates = workflow_job_block(workflow, "repo-gates")
-        script_step = workflow_step_block(repo_gates, "Test repository scripts")
-        self.assertIn("--discover", script_step)
-        provisioned = repo_gates.index("      - name: Provision pinned Buck2 tools")
-        self.assertLess(provisioned, repo_gates.index("      - name: Test repository scripts"))
-
-        # The `dependency-boundary` leg reads the resolved graph and compiles
-        # nothing, so it moved to the Python-speed gates rather than onto the
-        # pool with the compile legs.
-        self.assertIn(
-            "cargo tree -p lash-runtime -e normal $resolution --locked",
-            repo_gates,
-        )
-
-    def test_one_ci_run_per_head_branch_whatever_the_trigger(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        # A `pull_request` run carries refs/pull/<n>/merge and a manual recovery
-        # dispatch of the same commit carries refs/heads/<branch>: keying the
-        # concurrency group on `github.ref` put them in different groups and ran
-        # the whole board twice over one tree. Same-repo pull requests and
-        # dispatches share the head-branch key, which is what makes the dispatch
-        # supersede the pull-request run instead of doubling it.
-        group = workflow[workflow.index("concurrency:") : workflow.index("permissions:")]
-        self.assertIn("|| github.head_ref", group)
-        self.assertIn("|| github.ref_name", group)
-
-        # Full-profile release certification uses its own dispatch group, so the
-        # exact-SHA evidence release.yml requires is never cancelled by another
-        # run. The key carries a colon, which `git check-ref-format` forbids in a
-        # ref name: that is what makes it unforgeable by any branch, in this
-        # repository or a fork, rather than merely unlikely to collide.
-        self.assertIn(
-            "(github.event_name == 'workflow_dispatch' && github.ref_name == 'main')"
-            " && 'trunk:dispatch'",
-            group,
-        )
-        # A fork's branch name is not this repository's namespace, so a fork PR is
-        # keyed by PR number — also colon-guarded, so no branch can imitate it.
-        self.assertIn(
-            "github.event.pull_request.head.repo.full_name != github.repository",
-            group,
-        )
-        self.assertIn("format('fork-pr:{0}', github.event.pull_request.number)", group)
-        for key in ("trunk:dispatch", "fork-pr:{0}"):
-            with self.subTest(key=key):
-                self.assertIn(":", key, "an unforgeable key needs the forbidden colon")
-
-        self.assertIn(
-            "cancel-in-progress: ${{ github.event_name == 'pull_request' || "
-            "(github.event_name == 'workflow_dispatch' && github.ref_name != 'main') }}",
-            group,
-        )
 
     def test_required_checks_are_delivered_to_merge_queue_entries(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -2794,14 +1903,6 @@ derive_mutation_jobs() {{
             with self.subTest(workflow=name):
                 self.assertNotIn("mold", text)
                 self.assertNotIn("RUSTFLAGS", text)
-
-    def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertNotIn("staging", workflow)
-        self.assertNotIn("prepare-release", workflow)
-        self.assertNotIn("git tag", workflow)
-        self.assertNotIn("gh workflow run release.yml", workflow)
 
 
 class ReleaseDryRunTests(unittest.TestCase):

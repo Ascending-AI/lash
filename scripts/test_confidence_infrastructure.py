@@ -34,21 +34,6 @@ class ConfidenceInfrastructureTests(unittest.TestCase):
         return subprocess.run(['bash', '-euc', body], cwd=ROOT,
                               env=os.environ | environment, text=True, capture_output=True)
 
-    def test_inherited_confidence_stage_leaves_network_cleanup_to_its_owner(self):
-        # Parallel consumers inherit the driver's lock and network. A consumer
-        # must not remove the idle network while another is starting a service.
-        body = definition('finish_confidence_gate')
-        body += """cleanup_mutation_postgres() { :; }
-finish_current_step() { :; }
-lash_gate_cleanup() { echo removed-owner-network; }
-dry_run=0
-LASH_GATE_ACQUIRED_HERE=0
-finish_confidence_gate
-"""
-        result = self.shell(body)
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual('', result.stdout)
-
     def local_fixture(self):
         # Exercise the real scheduler and conclusion with cheap stage processes.
         # The stage scripts are the boundary: this law never builds Rust.

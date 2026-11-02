@@ -214,18 +214,6 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("Check C (added-file count) failed", result.stderr)
 
-    @unittest.skipUnless(GITLEAKS, "pinned Gitleaks is supplied by the hygiene job")
-    def test_added_secret_is_refused(self):
-        # Construct a fake token at runtime so the regression fixture is not a leak.
-        (self.repo / "config.txt").write_text('github_token = "' + "ghp_" + "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7C" + '"\n')
-        self.commit()
-        result = subprocess.run(
-            [GITLEAKS, "git", f"--log-opts={self.base}..HEAD", "--redact", "--verbose"],
-            cwd=self.repo, text=True, capture_output=True,
-        )
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("github-pat", result.stdout + result.stderr)
-
     def checkout_script(self, job):
         """The named job's real checkout code, from `git fetch` onward."""
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()

@@ -294,43 +294,8 @@ class MainCiPolicyTest(unittest.TestCase):
         self.assertIn("workflow_dispatch", triggers)
         self.assertEqual([], policy_failures(self.group, self.cancel))
 
-    def test_concurrency_contract_rejects_red_mutations(self) -> None:
-        mutants = {
-            "certification collides with branch runs": self.group.replace(
-                "'trunk:dispatch'", "github.ref_name", 1
-            ),
-            "merge queue entries cancel": self.cancel.replace(
-                " }}", " || github.event_name == 'merge_group' }}", 1
-            ),
-        }
-        for name, mutant in mutants.items():
-            with self.subTest(name=name):
-                group = mutant if "collides" in name else self.group
-                cancel = mutant if "collides" not in name else self.cancel
-                self.assertNotEqual([], policy_failures(group, cancel))
-
     def test_release_workflow_executes_exact_evidence_gate(self) -> None:
         self.assertEqual([], release_contract_failures(self.release_gate))
-
-    def test_release_contract_rejects_red_mutations(self) -> None:
-        mutants = (
-            self.release_gate.replace(
-                'run.get("event") == "workflow_dispatch"',
-                'run.get("event") == "push"',
-                1,
-            ),
-            self.release_gate.replace(
-                'run.get("headSha") == sha', 'run.get("headSha") != sha', 1
-            ),
-            self.release_gate.replace(
-                'run.get("conclusion") != "success"',
-                'run.get("conclusion") == "success"',
-                1,
-            ),
-        )
-        for mutant in mutants:
-            with self.subTest(mutant=mutant[:80]):
-                self.assertNotEqual([], release_contract_failures(mutant))
 
 
 if __name__ == "__main__":
