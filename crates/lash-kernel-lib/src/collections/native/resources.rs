@@ -309,64 +309,34 @@ pub(super) fn sort(args: Args<'_>, utf16: bool) -> Result<Contract, NativeError>
                     .ok_or_else(overflow)?;
             }
         }
-        // A structural comparison's active path contains no repeated pair
-        // of nodes. Each pair needs at most two operand slots, two member
-        // cursors, their continuation, and two active-identity slots.
-        let mut sorted: Vec<_> = (0..listed.len()).collect();
-        let mut out = vec![0; sorted.len()];
-        let mut width = 1;
-        while width < sorted.len() {
-            for start in (0..sorted.len()).step_by(2 * width) {
-                let mid = (start + width).min(sorted.len());
-                let end = (mid + width).min(sorted.len());
-                let (mut left, mut right, mut dest) = (start, mid, start);
-                while left < mid && right < end {
-                    let (before, after) = (sorted[left], sorted[right]);
-                    let (a, b) = if *descending {
-                        (before, after)
-                    } else {
-                        (after, before)
-                    };
-                    let order = if utf16 {
-                        Some(crate::comparison::utf16_compare(
-                            &ranks[a], &ranks[b], &args,
-                        )?)
-                    } else {
-                        crate::comparison::compare_reading(
-                            &ranks[a],
-                            &ranks[b],
-                            &args,
-                            |a, b| {
-                                let numeric =
-                                |value: &Value| -> Result<crate::numeric::Numeric, NativeError> {
-                                    match value {
-                                        Value::Float(f) => Ok(crate::numeric::Numeric::Float(*f)),
-                                        _ => Ok(crate::numeric::Numeric::Int(
-                                            args.integer(value)?.ok_or_else(overflow)?.into_owned(),
-                                        )),
-                                    }
-                                };
-                                crate::numeric::scalar_cmp(&numeric(a)?, &numeric(b)?)
-                            },
-                            |bytes| comparison_scratch = comparison_scratch.max(bytes),
-                        )?
-                    };
-                    if order == Some(std::cmp::Ordering::Less) {
-                        out[dest] = after;
-                        right += 1;
-                    } else {
-                        out[dest] = before;
-                        left += 1;
-                    }
-                    dest += 1;
-                }
-                out[dest..dest + mid - left].copy_from_slice(&sorted[left..mid]);
-                dest += mid - left;
-                out[dest..dest + end - right].copy_from_slice(&sorted[right..end]);
+        let sorted = super::sort::keys(&ranks, *descending, utf16, |a, b| {
+            if utf16 {
+                Ok(Some(crate::comparison::utf16_compare(
+                    &ranks[a], &ranks[b], &args,
+                )?))
+            } else if let Some(order) = crate::comparison::scalar_compare(&ranks[a], &ranks[b]) {
+                order
+            } else {
+                crate::comparison::compare_reading(
+                    &ranks[a],
+                    &ranks[b],
+                    &args,
+                    |a, b| {
+                        let numeric =
+                            |value: &Value| -> Result<crate::numeric::Numeric, NativeError> {
+                                match value {
+                                    Value::Float(f) => Ok(crate::numeric::Numeric::Float(*f)),
+                                    _ => Ok(crate::numeric::Numeric::Int(
+                                        args.integer(value)?.ok_or_else(overflow)?.into_owned(),
+                                    )),
+                                }
+                            };
+                        crate::numeric::scalar_cmp(&numeric(a)?, &numeric(b)?)
+                    },
+                    |bytes| comparison_scratch = comparison_scratch.max(bytes),
+                )
             }
-            std::mem::swap(&mut sorted, &mut out);
-            width *= 2;
-        }
+        })?;
         Ok(constructed(
             Entity::List,
             sorted

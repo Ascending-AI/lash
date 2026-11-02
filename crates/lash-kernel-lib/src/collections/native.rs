@@ -11,6 +11,7 @@ use super::{CollectionError, copy, raise};
 use crate::numbers::KIND_NAMES;
 
 mod resources;
+pub(super) mod sort;
 
 type NativeDefinition<T> = (T, Arc<dyn NativeFunction>);
 
@@ -1093,108 +1094,21 @@ impl NativeFunction for SortByKeys {
         let _items = crate::native_contract_laws::scratch_values(args, &listed);
         #[cfg(test)]
         let _keys = crate::native_contract_laws::scratch_values(args, &ranks);
-        let n = listed.len();
-        let mut sorted: Vec<usize> = (0..n).collect();
-        #[cfg(test)]
-        let _permutation = crate::native_contract_laws::scratch_indices(&sorted);
-        // Homogeneous resident keys have a total, infallible order. Their
-        // comparisons are unobservable. Cache integer keys once while
-        // retaining stable ties and the same completion formula.
-        if !self.utf16 && ranks.iter().all(|rank| matches!(rank, Value::Int(_))) {
-            let key = |at: &usize| match ranks[*at] {
-                Value::Int(value) => {
-                    #[cfg(test)]
-                    {
-                        crate::native_contract_laws::CachedKey::new(value, *at)
-                    }
-                    #[cfg(not(test))]
-                    {
-                        value
-                    }
-                }
-                _ => unreachable!("the complete key list was checked"),
-            };
-            if *descending {
-                sorted.sort_by_cached_key(|at| std::cmp::Reverse(key(at)));
+        let sorted = sort::keys(&ranks, *descending, self.utf16, |first, second| {
+            if self.utf16 {
+                Ok(Some(crate::comparison::utf16_compare(
+                    &ranks[first],
+                    &ranks[second],
+                    &args,
+                )?))
+            } else if let Some(order) =
+                crate::comparison::scalar_compare(&ranks[first], &ranks[second])
+            {
+                order
             } else {
-                sorted.sort_by_cached_key(key);
+                crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)
             }
-            return Ok(call.new.allocate(NewObject::List(
-                sorted.into_iter().map(|at| listed[at]).collect(),
-            )));
-        }
-        if !self.utf16 && ranks.iter().all(|rank| matches!(rank, Value::Text(_))) {
-            sorted.sort_by(|first, second| {
-                let (Value::Text(first), Value::Text(second)) = (ranks[*first], ranks[*second])
-                else {
-                    unreachable!("the complete key list was checked")
-                };
-                let order = first.as_bytes().cmp(second.as_bytes());
-                if *descending { order.reverse() } else { order }
-            });
-            return Ok(call.new.allocate(NewObject::List(
-                sorted.into_iter().map(|at| listed[at]).collect(),
-            )));
-        }
-        let mut out = vec![0; n];
-        #[cfg(test)]
-        let mut _merge = crate::native_contract_laws::scratch_indices(&out);
-        let mut width = 1;
-        while width < n {
-            let mut start = 0;
-            while start < n {
-                let mid = (start + width).min(n);
-                let end = (mid + width).min(n);
-                let (mut left, mut right, mut dest) = (start, mid, start);
-                while left < mid && right < end {
-                    let (before, after) = (sorted[left], sorted[right]);
-                    let (first, second) = if *descending {
-                        (before, after)
-                    } else {
-                        (after, before)
-                    };
-                    let order = if self.utf16 {
-                        Some(crate::comparison::utf16_compare(
-                            &ranks[first],
-                            &ranks[second],
-                            &args,
-                        )?)
-                    } else if let Some(order) =
-                        crate::comparison::scalar_compare(&ranks[first], &ranks[second])
-                    {
-                        order?
-                    } else {
-                        crate::comparison::compare(&ranks[first], &ranks[second], &args, call.new)?
-                    };
-                    if order == Some(std::cmp::Ordering::Less) {
-                        out[dest] = after;
-                        right += 1;
-                    } else {
-                        out[dest] = before;
-                        left += 1;
-                    }
-                    dest += 1;
-                    #[cfg(test)]
-                    _merge.resize(
-                        out.iter()
-                            .map(|n| 16 + u64::from(usize::BITS - n.leading_zeros()).div_ceil(8))
-                            .sum(),
-                    );
-                }
-                out[dest..dest + (mid - left)].copy_from_slice(&sorted[left..mid]);
-                dest += mid - left;
-                out[dest..dest + (end - right)].copy_from_slice(&sorted[right..end]);
-                #[cfg(test)]
-                _merge.resize(
-                    out.iter()
-                        .map(|n| 16 + u64::from(usize::BITS - n.leading_zeros()).div_ceil(8))
-                        .sum(),
-                );
-                start = end;
-            }
-            std::mem::swap(&mut sorted, &mut out);
-            width *= 2;
-        }
+        })?;
         Ok(call.new.allocate(NewObject::List(
             sorted.into_iter().map(|at| listed[at]).collect(),
         )))

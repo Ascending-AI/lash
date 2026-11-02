@@ -177,6 +177,51 @@ fn k_ljson_001_json_syntax_and_surrogate_pairs_are_strict() {
 fn k_eff_003_json_collections_are_fresh_and_ordered() {
     let mut lab = Lab::new();
     let json = r#"{"z":1,"a":[2],"z":3}"#;
+    // K-EFF-003: duplicate fields are replaced before source-ordered entity
+    // construction. The query creates no identities and retains the list and
+    // record once each, including both record names and three occurrences.
+    let args = lab.values(&[t(json), t("number"), t("by_spelling")]);
+    let contract = lab.spy(&args, |args, new| {
+        let contract = super::super::json::resources::evaluate(args, "parse").unwrap();
+        assert!(
+            new.built().is_empty(),
+            "a JSON graph query allocates no guest objects"
+        );
+        contract
+    });
+    let cost = lash_kernel_doc::LogicalHeldV1::REFERENCE;
+    assert_eq!(
+        contract.retained_bytes(),
+        Some(4 * cost + 4 + 2 * lash_kernel_doc::LogicalHeldV1::OBJECT)
+    );
+    // The graph query itself must use the strict canonical parser even when
+    // duplicate replacement would otherwise hide an invalid earlier value.
+    let malformed = lab.values(&[t(r#"{"a":[1,],"a":2}"#), t("int"), t("by_spelling")]);
+    let refused = lab.spy(&malformed, |args, _| {
+        super::super::json::resources::evaluate(args, "parse").unwrap()
+    });
+    assert_eq!(refused.exit, lash_kernel_doc::NativeResourceExit::Raised);
+
+    // Cold input is a retry before any graph can be published. Restoring the
+    // same input body must recover the identical owner and member description.
+    let long = format!(r#"{{"payload":"{}","a":[1,2]}}"#, "é😀".repeat(100));
+    let cold_args = lab.values(&[t(&long), t("int"), t("by_spelling")]);
+    let warm = lab.spy(&cold_args, |args, _| {
+        super::super::json::resources::evaluate(args, "parse").unwrap()
+    });
+    let handle = cold_args[0].handle().unwrap();
+    let body = lab.heap.arena_mut().chill(handle).unwrap().unwrap();
+    let cold = lab.spy(&cold_args, |args, _| {
+        super::super::json::resources::evaluate(args, "parse")
+    });
+    assert!(
+        matches!(cold, Err(lash_kernel_doc::NativeError::Retry(lash_kernel_doc::Retry::Cold { object, .. })) if object == handle)
+    );
+    lab.heap.arena_mut().thaw(handle, body).unwrap();
+    let restored = lab.spy(&cold_args, |args, _| {
+        super::super::json::resources::evaluate(args, "parse").unwrap()
+    });
+    assert_eq!(restored, warm);
     let a = parsed(&mut lab, json, &Type::Any, NumberPolicy::BySpelling).unwrap();
     let z = parsed(&mut lab, json, &Type::Any, NumberPolicy::BySpelling).unwrap();
     let (Value::Record(a), Value::Record(z)) = (a, z) else {
@@ -345,6 +390,10 @@ fn k_ljson_008_direct_render_bounds_and_preserves_decimal_policy() {
     let result = lab.call("json.render", &args).unwrap();
     let text = format!("[{expected},{expected}]");
     assert_eq!(lab.datum(&result), t(&text));
+    let contract = lab.spy(&args, |args, _| {
+        super::super::json::resources::evaluate(args, "render").unwrap()
+    });
+    assert_eq!(contract.retained_bytes(), Some(VALUE + text.len() as u64));
     // No fragment slots or per-number texts: only the output and its buffer.
     assert_eq!(lab.reserved, 2 * text.len() as u64);
     lab.room(Some(lab.reserved - 1));
@@ -836,6 +885,10 @@ fn k_ljson_009_configured_encoding_preserves_lexical_policy_and_room() {
     lab.room(None);
     let result = lab.call("json.encode", &args).unwrap();
     assert_eq!(lab.datum(&result), t(text));
+    let contract = lab.spy(&args, |args, _| {
+        super::super::json::resources::evaluate(args, "encode").unwrap()
+    });
+    assert_eq!(contract.retained_bytes(), Some(VALUE + text.len() as u64));
     let reserved = lab.reserved;
     lab.room(Some(reserved - 1));
     assert!(crate::testsupport::exhausted(

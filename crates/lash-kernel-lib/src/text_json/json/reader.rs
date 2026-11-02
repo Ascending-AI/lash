@@ -3,16 +3,16 @@ use super::{Json, raise, room};
 use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
 use std::borrow::Cow;
 
-struct Parser<'text, 'read, 'call> {
+struct Parser<'text, R> {
     input: &'text [u8],
     cursor: usize,
-    new: &'read mut Nursery<'call>,
+    reserve: R,
     depth_limit: usize,
     /// The room the first refused reservation asked for, and what the
     /// reservations after it would have added.
     refused: Option<(u64, u64)>,
 }
-impl<'text> Parser<'text, '_, '_> {
+impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
     fn byte(&mut self) -> Result<Option<u8>, NativeError> {
         Ok(self.input.get(self.cursor).copied())
     }
@@ -32,7 +32,7 @@ impl<'text> Parser<'text, '_, '_> {
             *owed = owed.saturating_add(16).saturating_add(bytes);
             return Ok(false);
         }
-        match self.new.reserve(1, bytes) {
+        match (self.reserve)(1, bytes) {
             Ok(()) => Ok(true),
             Err(NativeError::Retry(Retry::Room { wanted })) => {
                 self.refused = Some((wanted.0, 0));
@@ -204,10 +204,20 @@ pub(super) fn read<'text>(
     depth_limit: usize,
     new: &mut Nursery<'_>,
 ) -> Result<Json<'text>, NativeError> {
+    read_with(text, depth_limit, |slots, bytes| new.reserve(slots, bytes))
+}
+
+/// Uses the canonical tokenizer and duplicate-field policy without allocating
+/// guest identities. The caller supplies physical reservation, if needed.
+pub(super) fn read_with(
+    text: &str,
+    depth_limit: usize,
+    reserve: impl FnMut(u64, u64) -> Result<(), NativeError>,
+) -> Result<Json<'_>, NativeError> {
     let mut parser = Parser {
         input: text.as_bytes(),
         cursor: 0,
-        new,
+        reserve,
         depth_limit: depth_limit.min(64),
         refused: None,
     };

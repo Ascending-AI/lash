@@ -15,7 +15,9 @@ use num_traits::ToPrimitive;
 
 use super::{Function, arg, definition, materialized_text, raise, room, text_arg};
 
+mod output;
 pub(super) mod resources;
+use output::{Output, Text as TextOutput};
 
 /// Whether `error` is a stated-type mismatch a union tries past, rather
 /// than a cause that ends the call.
@@ -64,6 +66,17 @@ fn convert_number(
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
 ) -> Result<Number, NativeError> {
+    convert_number_with(token, expected, policy, &mut |bytes| new.reserve(0, bytes))
+}
+
+/// Number policy and exact conversion are shared by execution and the logical
+/// graph description. Only execution reserves physical nursery storage.
+fn convert_number_with(
+    token: &str,
+    expected: &Type,
+    policy: NumberPolicy,
+    reserve: &mut impl FnMut(u64) -> Result<(), NativeError>,
+) -> Result<Number, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
             if policy == NumberPolicy::BySpelling && !token.contains(['.', 'e', 'E']) {
@@ -74,7 +87,7 @@ fn convert_number(
         }
         Type::Union(members) => {
             for member in members {
-                match convert_number(token, member, policy, new) {
+                match convert_number_with(token, member, policy, reserve) {
                     Ok(number) => return Ok(number),
                     Err(error) if raised(&error) => {}
                     Err(error) => return Err(error),
@@ -89,7 +102,7 @@ fn convert_number(
             if let Ok(word) = token.parse::<i64>() {
                 return Ok(Number::Int(Integer::from(word)));
             }
-            let integer = exact_integer(token, new)?;
+            let integer = exact_integer(token, reserve)?;
             Ok(Number::Int(Integer::new(integer)))
         }
         Type::Float => token
@@ -106,7 +119,10 @@ fn mismatch() -> NativeError {
     raise("effect_result", "JSON value does not fit the stated type")
 }
 
-fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeError> {
+fn exact_integer(
+    token: &str,
+    reserve: &mut impl FnMut(u64) -> Result<(), NativeError>,
+) -> Result<BigInt, NativeError> {
     let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
     let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
     let negative = mantissa.starts_with('-');
@@ -134,7 +150,7 @@ fn exact_integer(token: &str, new: &mut Nursery<'_>) -> Result<BigInt, NativeErr
         // digits the integer has: the zeros and the integer they spell are
         // reserved first.
         let add = shift.to_usize().ok_or_else(crate::exhausted)?;
-        new.reserve(0, room(add).saturating_mul(2))?;
+        reserve(room(add).saturating_mul(2))?;
         digits.try_reserve(add).map_err(|_| crate::exhausted())?;
         digits.extend(std::iter::repeat_n('0', add));
         #[cfg(test)]
@@ -335,25 +351,19 @@ pub fn parse_json(
     Ok(build(checked, new))
 }
 
-/// The text `stringify` writes. Input-only resource counting has its own
-/// model, so the native keeps its concrete nursery and text operations.
-struct Out<'a, 'call> {
-    text: String,
+/// Canonical codec state, independent of its physical output destination.
+struct Out<'a, 'call, S> {
+    output: S,
     args: &'a Args<'call>,
-    new: &'a mut Nursery<'call>,
     layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
     encoding: Option<Encoding>,
 }
 
-impl Out<'_, '_> {
+impl<S: Output> Out<'_, '_, S> {
     fn push(&mut self, piece: &str) -> Result<(), NativeError> {
-        self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece);
-        #[cfg(test)]
-        let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
-        Ok(())
+        self.output.push(piece)
     }
 
     fn separator(&mut self, item: bool) -> Result<(), NativeError> {
@@ -367,11 +377,7 @@ impl Out<'_, '_> {
                     policy.key_separator.as_str()
                 }
             });
-        self.new.reserve(0, room(piece.len()).saturating_mul(2))?;
-        self.text.push_str(piece);
-        #[cfg(test)]
-        let _output = crate::native_contract_laws::scratch(self.text.len() as u64);
-        Ok(())
+        self.output.push(piece)
     }
 
     fn quote(&mut self, text: &str) -> Result<(), NativeError> {
@@ -477,15 +483,14 @@ impl Out<'_, '_> {
                     };
                     // Reserve decimal scratch before converting arbitrary-precision
                     // integers; three digits per byte bounds their decimal extent.
-                    self.new.reserve(
-                        0,
+                    self.output.reserve(
                         number
                             .bits()
                             .div_ceil(8)
                             .saturating_mul(3)
                             .saturating_add(1),
                     )?;
-                    let text = integer_digits(&number, self.new)?;
+                    let text = self.integer_digits(&number)?;
                     #[cfg(test)]
                     let _digits = crate::native_contract_laws::scratch(text.len() as u64);
                     let digits = text.strip_prefix('-').unwrap_or(&text);
@@ -513,13 +518,32 @@ impl Out<'_, '_> {
                 let Some(number) = self.args.integer(value)? else {
                     return Err(NativeError::Malformed("an integer names another body"));
                 };
-                let text = integer_digits(&number, self.new)?;
+                let text = self.integer_digits(&number)?;
                 #[cfg(test)]
                 let _digits = crate::native_contract_laws::scratch(text.len() as u64);
                 self.push(&text)
             }
             Value::Float(number) => self.push(&number.to_string()),
             _ => unreachable!("the JSON writer selects only numbers"),
+        }
+    }
+
+    fn integer_digits(&mut self, number: &Integer) -> Result<String, NativeError> {
+        self.output.read_whole(number.bits().div_ceil(8))?;
+        Ok(number.to_string())
+    }
+
+    fn text_held<'call>(
+        &mut self,
+        args: &Args<'call>,
+        value: &'call Value,
+    ) -> Result<Cow<'call, str>, NativeError> {
+        match args.text(value)? {
+            Some(text) => {
+                self.output.read_whole(text.len())?;
+                text.whole()
+            }
+            None => Err(raise("type_error", "expected text")),
         }
     }
 
@@ -554,12 +578,6 @@ fn text_held<'call>(
     }
 }
 
-/// `number`'s digits, as the heap copied a paged integer out to spell it.
-fn integer_digits(number: &Integer, new: &mut Nursery<'_>) -> Result<String, NativeError> {
-    new.read_whole(number.bits().div_ceil(8))?;
-    Ok(number.to_string())
-}
-
 fn inline_i64(value: &Value) -> Option<i64> {
     match value {
         Value::Int(value) => Some(*value),
@@ -582,7 +600,7 @@ fn write(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_>,
+    out: &mut Out<'_, '_, impl Output>,
 ) -> Result<(), NativeError> {
     let limit = out.args.limits().document_depth().min(64);
     if depth > limit {
@@ -605,7 +623,7 @@ fn write(
             let Some(text) = args.text(value)? else {
                 return Err(NativeError::Malformed("a text names another body"));
             };
-            out.new.read_whole(text.len())?;
+            out.output.read_whole(text.len())?;
             out.quote(&text.whole()?)?;
         }
         Value::Tuple(_) => {
@@ -632,11 +650,11 @@ fn write(
                         if !matches!(pair[0], Value::Text(_) | Value::LongText(_)) {
                             return Err(raise("json_key", "JSON map keys must be text"));
                         }
-                        if matches!(value, Value::Record(_))
-                            && let Some(policy) = &out.encoding
-                        {
-                            let key = text_held(args, out.new, &pair[0])?;
-                            if policy.excluded.iter().any(|field| *key == **field) {
+                        if matches!(value, Value::Record(_)) && out.encoding.is_some() {
+                            let key = out.text_held(args, &pair[0])?;
+                            if out.encoding.as_ref().is_some_and(|policy| {
+                                policy.excluded.iter().any(|field| *key == **field)
+                            }) {
                                 return Err(raise("not_data", "record has an excluded field"));
                             }
                         }
@@ -672,7 +690,7 @@ fn write(
                     if index != 0 {
                         out.separator(true)?;
                     }
-                    let name = text_held(args, out.new, name)?;
+                    let name = out.text_held(args, name)?;
                     out.quote(&name)?;
                     out.separator(false)?;
                     write(value, active, depth + 1, raw_numbers, out)?;
@@ -692,7 +710,7 @@ fn write_array(
     active: &mut Vec<ArenaHandle>,
     depth: usize,
     raw_numbers: bool,
-    out: &mut Out<'_, '_>,
+    out: &mut Out<'_, '_, impl Output>,
 ) -> Result<(), NativeError> {
     #[cfg(test)]
     let _items = crate::native_contract_laws::scratch_values(*out.args, items);
@@ -720,16 +738,18 @@ pub fn stringify_json<'call>(
     new: &mut Nursery<'call>,
 ) -> Result<String, NativeError> {
     let mut out = Out {
-        text: String::new(),
+        output: TextOutput {
+            text: String::new(),
+            new,
+        },
         args,
-        new,
         layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
         encoding: None,
     };
     write(value, &mut Vec::new(), 0, false, &mut out)?;
-    Ok(out.text)
+    Ok(out.output.text)
 }
 
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {
@@ -954,16 +974,18 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     };
     let layout = DecimalLayout::read(arg(args.values(), 3)?, &args)?;
     let mut out = Out {
-        text: String::new(),
+        output: TextOutput {
+            text: String::new(),
+            new: call.new,
+        },
         args: &args,
-        new: call.new,
         layout: Some(layout),
         verbatim_kinds,
         verbatim_field,
         encoding: None,
     };
     write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
-    let text = out.text;
+    let text = out.output.text;
     Ok(call.new.text(&text))
 }
 
@@ -981,7 +1003,7 @@ impl DecimalLayout {
         self,
         mut value: u64,
         negative: bool,
-        out: &mut Out<'_, '_>,
+        out: &mut Out<'_, '_, impl Output>,
     ) -> Result<(), NativeError> {
         let mut scratch = [0u8; 20];
         let mut start = scratch.len();
@@ -1044,7 +1066,7 @@ impl DecimalLayout {
         negative: bool,
         digits: &str,
         exponent: i64,
-        out: &mut Out<'_, '_>,
+        out: &mut Out<'_, '_, impl Output>,
     ) -> Result<(), NativeError> {
         if negative && (digits != "0" || self.negative_zero) {
             out.push("-")?;
@@ -1232,15 +1254,17 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         excluded,
     };
     let mut out = Out {
-        text: String::new(),
+        output: TextOutput {
+            text: String::new(),
+            new: call.new,
+        },
         args: &args,
-        new: call.new,
         layout: Some(layout),
         verbatim_kinds: 0,
         verbatim_field: None,
         encoding: Some(encoding),
     };
     write(arg(args.values(), 0)?, &mut Vec::new(), 0, true, &mut out)?;
-    let text = out.text;
+    let text = out.output.text;
     Ok(call.new.text(&text))
 }

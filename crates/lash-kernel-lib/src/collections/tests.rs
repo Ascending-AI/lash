@@ -606,6 +606,63 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
 /// ordering. Its charge bounds the comparisons that sort makes.
 #[test]
 fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
+    // A keyed sort retains mutable input identities instead of copying their
+    // bodies into its fresh result. Describing that graph allocates nothing.
+    let mut bench = crate::testsupport::heap();
+    let child = crate::testsupport::decode(&mut bench, list(&[7]));
+    let items = bench
+        .run(&[], u64::MAX, |_, new| {
+            new.allocate(lash_kernel_doc::NewObject::List(vec![child, child]))
+        })
+        .unwrap()
+        .0;
+    let keys = crate::testsupport::decode(&mut bench, list(&[2, 1]));
+    let args = [items, keys, lash_kernel_doc::Value::Bool(false)];
+    let registry = registry();
+    let native = registry
+        .iter()
+        .find(|(_, entry)| entry.name() == "list.sort_by_keys")
+        .unwrap()
+        .1
+        .native()
+        .unwrap();
+    let (contract, usage) = bench
+        .run(&args, u64::MAX, |args, _| {
+            native.resource_contract(args).unwrap().unwrap()
+        })
+        .unwrap();
+    assert_eq!(
+        usage.objects, 0,
+        "a graph query creates no guest identities"
+    );
+    let cost = lash_kernel_doc::LogicalHeldV1::REFERENCE;
+    assert_eq!(
+        contract.retained_bytes(),
+        Some(cost * 3 + lash_kernel_doc::LogicalHeldV1::OBJECT)
+    );
+    let result = bench
+        .call(
+            &**native,
+            &args,
+            u64::MAX,
+            &mut lash_kernel_doc::WorkCounter::new(None),
+        )
+        .answer
+        .unwrap();
+    let members = bench
+        .arena()
+        .semantics()
+        .sequence(result.handle().unwrap())
+        .unwrap();
+    assert_eq!(
+        members
+            .iter()
+            .map(lash_kernel_doc::Value::handle)
+            .collect::<Vec<_>>(),
+        [child.handle(), child.handle()],
+        "both result members retain the original child identity"
+    );
+
     let charged = |source: &str| {
         let mut machine = crate::testsupport::start(
             program(source),
@@ -807,40 +864,78 @@ fn k_iter_003_maps_and_sets_visit_additions_and_skip_removals() {
 }
 
 fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
-    // The uninterrupted witness has the same callback body without its effect.
-    // S4 owns checkpoint sealing; this law pins ordinary activation
-    // waits, resuming the machine through its public delivery interface.
+    // K-ITER-001 / K-COL-011: a cold reopen must retain the exact taken
+    // element and comparator operands, without repeating a callback.
     let uninterrupted = source.replace("let y = perform 0(x) as Any", "let y = x");
     assert_eq!(result(&uninterrupted), expected);
-    let program = program(source);
-    let mut machine = crate::testsupport::start(
-        program.clone(),
-        BOUNDS,
-        lash_kernel_vm::kernel_internals::Layout::default(),
-    )
-    .unwrap();
-    let mut effects = 0;
-    loop {
-        match machine.run(&mut World::default(), u64::MAX).unwrap() {
-            Step::Ended(End::Finished(done)) => {
-                assert_eq!(done.result, expected);
-                break;
-            }
-            Step::Ended(other) => panic!("{other:?}"),
-            Step::Slice => {}
-            Step::Parked(park) => {
-                for request in park.requests {
-                    let Request::Effect(effect) = request;
-                    effects += 1;
-                    machine
-                        .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
+    let prepare = || program(source);
+    let mut warm = None;
+    for cold in [false, true] {
+        let pages = crate::testsupport::Source::default();
+        let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
+            prepare(),
+            BOUNDS,
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: Vec::new(),
+                session: None,
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+            lash_kernel_vm::kernel_internals::Layout::default(),
+            Box::new(pages.clone()),
+        )
+        .unwrap();
+        let mut effects = Vec::new();
+        loop {
+            match machine.run(&mut World::default(), u64::MAX).unwrap() {
+                Step::Ended(End::Finished(done)) => {
+                    assert_eq!(done.result, expected);
+                    break;
+                }
+                Step::Ended(other) => panic!("{other:?}"),
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    if cold {
+                        let sealed = machine
+                            .seal(lash_kernel_state::paged::SealBudget {
+                                pages: u64::MAX,
+                                bytes: u64::MAX,
+                            })
+                            .unwrap()
+                            .unwrap();
+                        machine = KernelMachine::open(
+                            prepare(),
+                            BOUNDS,
+                            &sealed.checkpoint(),
+                            Box::new(pages.clone()),
+                        )
                         .unwrap();
+                    }
+                    for request in park.requests {
+                        let Request::Effect(effect) = request;
+                        effects.push(effect.args.clone());
+                        machine
+                            .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
+                            .unwrap();
+                    }
                 }
             }
         }
+        assert_eq!(effects.len(), expected_effects);
+        let observed = (effects, machine.meters().charged.unwrap());
+        if let Some(warm) = &warm {
+            assert_eq!(
+                &observed, warm,
+                "cold callbacks preserve charge and request order"
+            );
+        } else {
+            warm = Some(observed);
+        }
     }
-    assert_eq!(effects, expected_effects);
 }
+
 #[test]
 fn map_callback_wait_resumes_the_taken_element() {
     callback_law(
@@ -867,6 +962,25 @@ fn reduce_callback_wait_resumes_the_accumulator() {
 }
 #[test]
 fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
+    // K-COL-011: suspending a comparison may not advance it or reread
+    // changed operands. [3,1,2] merges (3,1), then (1,2), then (3,2).
+    use super::native::sort::{Comparison, Merge};
+    let mut merge = Merge::new(3);
+    for (before, after, take_right, sorted, output) in [
+        (0, 1, true, &[0, 1, 2][..], &[][..]),
+        (1, 2, false, &[1, 0, 2][..], &[0, 1, 2][..]),
+        (0, 2, true, &[1, 0, 2][..], &[1, 1, 2][..]),
+    ] {
+        let pending = Comparison { before, after };
+        assert_eq!(merge.comparison(), Some(pending));
+        assert_eq!(merge.source_positions(), (sorted, output));
+        merge = merge.clone();
+        assert_eq!(merge.comparison(), Some(pending));
+        merge.place(take_right).unwrap();
+    }
+    assert_eq!(merge.comparison(), None);
+    assert_eq!(merge.finish().unwrap(), [1, 2, 0]);
+
     callback_law(
         "definition \"function f(a: Any, b: Any) -> Any\\nkernel 1\\nmetering statements\\nimport 0 operation host.echo(x: Any) -> Any\\nbody { let x = num.sub(a, b) let y = perform 0(x) as Any return y }\"\n main { let xs = [3, 1, 2] do invoke list.sort(xs, &f) return xs }",
         list(&[1, 2, 3]),
