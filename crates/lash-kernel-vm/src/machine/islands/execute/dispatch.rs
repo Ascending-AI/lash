@@ -780,7 +780,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
 
                 return self.deferred(frame, operation);
             }
-            Opcode::Begin
+            Opcode::Certified
+            | Opcode::Begin
             | Opcode::Constant
             | Opcode::Local
             | Opcode::Session

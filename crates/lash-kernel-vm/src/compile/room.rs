@@ -16,6 +16,7 @@ pub(crate) mod charges;
 mod derive;
 mod evaluate;
 mod interval;
+pub(crate) mod placement;
 pub(crate) mod publication;
 pub(crate) mod region;
 mod root_owners;

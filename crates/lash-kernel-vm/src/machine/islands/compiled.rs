@@ -14,6 +14,8 @@ use crate::compile::{
 
 #[path = "program.rs"]
 mod program;
+#[path = "resource.rs"]
+pub(super) mod resource;
 pub(crate) use super::code::Op;
 use program::Build;
 pub(super) use program::{
@@ -470,7 +472,11 @@ impl Compiled {
 
     fn of_mode(plan: &IslandPlan, exe: &Executable, fused: bool) -> Option<Self> {
         let stream = plan.stream(exe);
+        let placement = crate::compile::room::placement::BindingPlacement::compile(exe, plan.code)
+            .ok()
+            .map(std::sync::Arc::new);
         let mut measure = Build::new(exe, &plan.shared, stream, None, 0);
+        measure.placement = placement.clone();
         measure.fused = fused;
         measure.charged = plan.charged;
         measure.block(&plan.body)?;
@@ -482,6 +488,7 @@ impl Compiled {
             measure.registers as u32,
         );
         cx.fused = fused;
+        cx.placement = placement;
         cx.charged = plan.charged;
         cx.block(&plan.body)?;
         if fused {

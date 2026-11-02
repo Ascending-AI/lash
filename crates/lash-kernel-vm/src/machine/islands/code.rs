@@ -47,6 +47,12 @@ macro_rules! check_field {
     };
 }
 macro_rules! check_tuple {
+    (Certified, $record:ident, $stream:ident) => {
+        $record
+            .value
+            .verify($stream)
+            .map_err(crate::compile::islands::Refused::Room)?;
+    };
     (Format, $record:ident, $stream:ident) => {
         $record.value.verify($stream)?;
     };
@@ -429,6 +435,7 @@ operations! {
         }
     }
     tuples {
+        Certified certified(Box<compiled::resource::CertifiedStatement>)
         Keep keep(compiled::Restart)
         Cold cold(Deferred)
         Access access(Box<AccessSite>)

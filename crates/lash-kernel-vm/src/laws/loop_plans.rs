@@ -826,6 +826,31 @@ fn scalar_region_lifetimes() {
     for (at, fact) in region.results() {
         values[fact.index()] = Value::Bool(at == &from);
     }
+    let mut wrong_branch = values.clone();
+    for (_, fact) in region.entries() {
+        wrong_branch[fact.index()] = Value::Bool(false);
+    }
+    for (at, fact) in region.results() {
+        if at == &from {
+            wrong_branch[fact.index()] = Value::Bool(false);
+        }
+    }
+    assert!(
+        region
+            .bind(
+                &ledger,
+                &mut arena,
+                heap,
+                &invocation,
+                ScalarRegionValues {
+                    values: &wrong_branch,
+                    calls: &[],
+                }
+            )
+            .unwrap()
+            .is_none(),
+        "a same-price condition cannot select another source branch"
+    );
     // Equal holding prices do not authenticate a source read or literal.
     // The condition reads the old binding; the assignment computes false.
     for (_, fact) in region.results() {

@@ -821,6 +821,9 @@ impl evaluate::Events for Trace<'_> {
     }
 }
 impl CompiledInterval {
+    pub(super) fn selections(&self) -> &[Selection] {
+        &self.route
+    }
     pub(crate) fn return_loops(&self) -> Option<&[Site]> {
         self.return_loops.as_deref()
     }

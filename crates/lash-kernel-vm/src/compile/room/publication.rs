@@ -14,6 +14,8 @@ use lash_kernel_state::{
     },
 };
 use std::collections::BTreeSet;
+mod region;
+pub(crate) use region::CompiledExit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Occurrence {

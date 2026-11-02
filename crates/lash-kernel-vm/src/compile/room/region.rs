@@ -105,6 +105,7 @@ struct CallFact {
 struct Recovery {
     after: Point,
     roles: Box<[(Slot, ScalarFact)]>,
+    condition: Option<ScalarFact>,
 }
 
 /// The checked source owner compiles the topology once. The hot product has
@@ -122,6 +123,7 @@ pub(crate) struct ScalarRegion {
     facts: usize,
     prices: usize,
     recovery: Box<[Recovery]>,
+    guards: Box<[(ScalarFact, bool)]>,
 }
 
 struct Compiler<'a> {
@@ -370,13 +372,17 @@ impl Compiler<'_> {
     }
 }
 
-enum ScalarInput {
+pub(super) enum ScalarInput {
     Literal(Value),
     Binding(Slot),
 }
 
 impl Source {
-    fn scalar_input(&self, slots: &OwnerSlots, at: &Point) -> Result<ScalarInput, Refused> {
+    pub(super) fn scalar_input(
+        &self,
+        slots: &OwnerSlots,
+        at: &Point,
+    ) -> Result<ScalarInput, Refused> {
         if at.phase != Phase::Commit
             || at.site.unit != self.site.unit
             || !at.site.path.starts_with(&self.site.path)
@@ -461,10 +467,12 @@ impl Source {
             facts: compiler.facts,
             prices: compiler.prices,
             recovery: Box::new([]),
+            guards: Box::new([]),
         };
         // The independent source replay supplies cold logical liveness. It
         // cannot inherit the emitter's canceled temporary lifetime claims.
         region.recovery = region.verify_lifetimes()?.into();
+        region.guards = region.branch_guards(&region.recovery)?.into();
         region.verify()?;
         Ok(region)
     }
@@ -485,6 +493,29 @@ pub(crate) struct BoundScalarRegion<'a> {
     delta: i128,
 }
 impl ScalarRegion {
+    fn branch_guards(&self, recovery: &[Recovery]) -> Result<Vec<(ScalarFact, bool)>, Refused> {
+        let mut cursor = 0_usize;
+        let mut guards = Vec::new();
+        for selection in self.interval.selections() {
+            match selection {
+                Selection::Event { at, .. } => {
+                    if recovery.get(cursor).is_none_or(|map| &map.after != at) {
+                        return Err(Refused::Path);
+                    }
+                    cursor += 1;
+                }
+                Selection::Branch { at, taken } => {
+                    let map = cursor
+                        .checked_sub(1)
+                        .and_then(|at| recovery.get(at))
+                        .filter(|map| map.after.site == *at && map.after.phase == Phase::Test)
+                        .ok_or(Refused::Path)?;
+                    guards.push((map.condition.ok_or(Refused::Facts)?, *taken));
+                }
+            }
+        }
+        Ok(guards)
+    }
     #[cfg(test)]
     pub(crate) fn understate_peak_for_law(&mut self) {
         self.peaks = Box::new([]);
@@ -509,9 +540,14 @@ impl ScalarRegion {
                 .iter()
                 .zip(expected)
                 .any(|(actual, expected)| {
-                    actual.after != expected.after || actual.roles != expected.roles
+                    actual.after != expected.after
+                        || actual.roles != expected.roles
+                        || actual.condition != expected.condition
                 })
         {
+            return Err(Refused::Exit);
+        }
+        if self.branch_guards(&self.recovery)?.as_slice() != self.guards.as_ref() {
             return Err(Refused::Exit);
         }
         Ok(())
@@ -693,6 +729,10 @@ impl ScalarRegion {
             recovery.push(Recovery {
                 after: event.point.clone(),
                 roles: live.iter().map(|(slot, live)| (*slot, live.fact)).collect(),
+                condition: (event.point.phase == Phase::Test)
+                    .then_some(input)
+                    .flatten()
+                    .map(|input| input.fact),
             });
         }
         if result_index != self.results.len()
@@ -719,13 +759,53 @@ impl ScalarRegion {
     pub(crate) fn fact_count(&self) -> usize {
         self.facts
     }
+    pub(crate) fn source(&self) -> &Arc<Source> {
+        &self.source
+    }
+    pub(crate) fn interval(&self) -> &Arc<CompiledInterval> {
+        &self.interval
+    }
+    pub(crate) fn bind_activation<'a>(
+        &'a self,
+        ledger: &Ledger,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        invocation: &logical::Invocation,
+        activation: &super::placement::DenseActivation,
+        values: ScalarRegionValues<'_>,
+    ) -> Result<Option<BoundScalarRegion<'a>>, doc::heap::HeapFault> {
+        if !activation.current(&self.source, ledger, invocation)
+            || self.entries.iter().any(|entry| {
+                activation.value(entry.slot).is_none_or(|expected| {
+                    values
+                        .values
+                        .get(entry.live.fact.0)
+                        .is_none_or(|actual| !actual.same(&expected))
+                })
+            })
+        {
+            return Ok(None);
+        }
+        self.bind_values(ledger, arena, heap, invocation, values)
+    }
     pub(crate) fn recovery_after(&self, point: &Point) -> Option<&[(Slot, ScalarFact)]> {
         self.recovery
             .iter()
             .find(|map| &map.after == point)
             .map(|map| &*map.roles)
     }
+    #[cfg(test)]
     pub(crate) fn bind<'a>(
+        &'a self,
+        ledger: &Ledger,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        invocation: &logical::Invocation,
+        values: ScalarRegionValues<'_>,
+    ) -> Result<Option<BoundScalarRegion<'a>>, doc::heap::HeapFault> {
+        self.bind_values(ledger, arena, heap, invocation, values)
+    }
+    fn bind_values<'a>(
         &'a self,
         ledger: &Ledger,
         arena: &mut Arena,
@@ -753,6 +833,11 @@ impl ScalarRegion {
                 )
             })
         {
+            return Ok(None);
+        }
+        if self.guards.iter().any(|(fact, taken)| {
+            !matches!(values.values.get(fact.0), Some(Value::Bool(actual)) if actual == taken)
+        }) {
             return Ok(None);
         }
         let mut prices = vec![0_i128; self.prices];
@@ -825,6 +910,12 @@ impl ScalarRegion {
     }
 }
 impl BoundScalarRegion<'_> {
+    pub(crate) fn region(&self) -> &ScalarRegion {
+        self.region
+    }
+    pub(crate) fn invocation(&self) -> &logical::Invocation {
+        &self.invocation
+    }
     pub(crate) fn peak(&self) -> u64 {
         self.peak
     }

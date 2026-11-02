@@ -774,6 +774,44 @@ fn observe_scalar_selected(
 /// source layout, with and without a tape, warm or cold.
 #[test]
 fn scalar_layouts_agree() {
+    // A successful prefix must use the certificate; tight windows must
+    // preserve the exact unpaid source suffix and its cold checkpoint.
+    let prefix = scalar_document(
+        "let first = 7 let second = first set first = second do perform 0(first) as Any return second",
+    );
+    crate::machine::islands::take_certified_statements();
+    packet_modes(&prefix, super::embedder::ROOMY, u64::MAX, false, false);
+    assert!(
+        crate::machine::islands::take_certified_statements() > 0,
+        "literal/copy prefixes must publish through the compiled certificate"
+    );
+    for slice in [1, 2, 3, 7] {
+        packet_modes(&prefix, super::embedder::ROOMY, slice, true, true);
+    }
+    for charge_limit in 0..12 {
+        packet_modes(
+            &prefix,
+            Bounds {
+                charge_limit,
+                ..super::embedder::ROOMY
+            },
+            u64::MAX,
+            false,
+            true,
+        );
+    }
+    for memory in [128, 160, 192, 224, 256, 512] {
+        packet_modes(
+            &prefix,
+            Bounds {
+                memory,
+                ..super::embedder::ROOMY
+            },
+            u64::MAX,
+            false,
+            true,
+        );
+    }
     use crate::machine::islands::witness::{self, Exit, Family};
     witness::begin();
     for (case, body) in [

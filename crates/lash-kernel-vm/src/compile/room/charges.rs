@@ -38,6 +38,8 @@ pub(crate) struct ChargeProgram {
     formulas: Box<[Formula]>,
     fixed: u64,
     recording: bool,
+    first: Point,
+    through: Point,
 }
 
 /// Actual evaluated operands, in source argument order, and the canonical
@@ -56,6 +58,11 @@ pub(crate) struct ChargeDebt<'a> {
 }
 
 impl ChargeDebt<'_> {
+    pub(crate) fn matches(&self, source: &Arc<Source>, first: &Point, through: &Point) -> bool {
+        Arc::ptr_eq(source, &self.program.source)
+            && &self.program.first == first
+            && &self.program.through == through
+    }
     pub(crate) fn units(&self) -> u64 {
         self.units
     }
@@ -101,6 +108,12 @@ impl ChargeProgram {
             return Err(Refused::Source);
         }
         let (closes, formulas) = derive(exe, code, statement, range)?;
+        let first = source.first_event(&if range == stmt.ops {
+            stmt.site.clone()
+        } else {
+            stmt.site.child(0)
+        })?;
+        let through = closes.last().ok_or(Refused::Exit)?.at.clone();
         let fixed = closes
             .iter()
             .flat_map(|close| close.tape.iter())
@@ -117,6 +130,8 @@ impl ChargeProgram {
             formulas: formulas.into(),
             fixed,
             recording: exe.charging(),
+            first,
+            through,
         };
         program.verify(exe, code)?;
         Ok(program)

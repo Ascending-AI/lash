@@ -16,6 +16,9 @@ mod accumulate;
 mod boundary;
 mod call;
 mod dispatch;
+mod resource;
+#[cfg(test)]
+pub(crate) use resource::take_certified_statements;
 mod merge;
 mod numeric;
 mod pending;
@@ -417,6 +420,15 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 Ok(Next::Return(value))
             } else {
                 match packet.opcode {
+                    Opcode::Certified => {
+                        let certificate = &code.sites.certified[packet.x as usize].value;
+                        match self.certified_statement(&mut slab.view(active), certificate) {
+                            Ok(()) => continue,
+                            Err(stop) => {
+                                return self.slow_exit(active, &mut callers, slab, recovery, stop);
+                            }
+                        }
+                    }
                     Opcode::Begin => {
                         let begin = &code.sites.begin[packet.x as usize];
                         if let Err(stop) =

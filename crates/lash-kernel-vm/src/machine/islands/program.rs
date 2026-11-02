@@ -132,6 +132,7 @@ pub(crate) struct AccessStart {
 }
 
 pub(super) struct Build<'e> {
+    pub(super) placement: Option<std::sync::Arc<crate::compile::room::placement::BindingPlacement>>,
     exe: &'e Executable,
     stream: &'e Stream,
     shared: &'e [bool],
@@ -165,6 +166,7 @@ impl<'e> Build<'e> {
         source_registers: u32,
     ) -> Self {
         Self {
+            placement: None,
             exe,
             stream,
             shared,
@@ -335,6 +337,21 @@ impl<'e> Build<'e> {
         self.statement = Some(statement.id);
         self.captures.clear();
         self.live.clear();
+        if self.fused
+            && statement.leaves == 0
+            && statement.root.is_none()
+            && let Some(placement) = &self.placement
+            && let Some(certificate) = super::resource::CertifiedStatement::compile(
+                self.exe,
+                std::sync::Arc::clone(placement),
+                statement.id,
+                index,
+            )
+        {
+            self.emit(Op::Certified(Box::new(certificate)));
+            self.open = None;
+            return Some(());
+        }
         let ahead = self.start();
         self.cover(1);
         if self.fused
