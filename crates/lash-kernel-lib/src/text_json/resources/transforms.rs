@@ -63,6 +63,28 @@ fn pad_bytes(text: &str, width: usize, fill: &str) -> Result<usize, NativeError>
         .ok_or_else(crate::exhausted)
 }
 pub(super) fn text_op(args: Args<'_>, op: &str) -> Result<NativeResourceContract, NativeError> {
+    if matches!(op, "slice" | "utf16_slice") {
+        let text = crate::text_json::text_view(&args, 0)?;
+        let utf16 = op == "utf16_slice";
+        let summary = text.summary();
+        let length = usize::try_from(if utf16 {
+            summary.utf16_units
+        } else {
+            summary.chars
+        })
+        .map_err(|_| overflow())?;
+        let start = crate::text_json::text::position(&*integer_value(&args, 1)?, length);
+        let end = crate::text_json::text::position(&*integer_value(&args, 2)?, length);
+        let [from, to] = crate::text_json::text::slice_boundaries(
+            text,
+            [
+                start as u64,
+                if utf16 { end } else { end.max(start) } as u64,
+            ],
+            utf16,
+        )?;
+        return output(usize::try_from(to.saturating_sub(from)).map_err(|_| overflow())?);
+    }
     if op == "utf16_compare" {
         for at in 0..2 {
             if args.text(arg(args.values(), at)?)?.is_none() {
@@ -116,35 +138,6 @@ pub(super) fn text_op(args: Args<'_>, op: &str) -> Result<NativeResourceContract
                     i64::from(a.encode_utf16().nth(at).ok_or_else(overflow)?),
                 )
             }
-        }
-        "slice" | "utf16_slice" => {
-            let length = if op == "slice" {
-                a.chars().count()
-            } else {
-                a.encode_utf16().count()
-            };
-            let start = crate::text_json::text::position(&*integer_value(&args, 1)?, length);
-            let end =
-                crate::text_json::text::position(&*integer_value(&args, 2)?, length).max(start);
-            let mut units = 0;
-            let mut start_byte = None;
-            let mut end_byte = None;
-            for (at, c) in a.char_indices().chain(std::iter::once((a.len(), '\0'))) {
-                if units == start {
-                    start_byte = Some(at);
-                }
-                if units == end {
-                    end_byte = Some(at);
-                }
-                units += if op == "slice" { 1 } else { c.len_utf16() };
-            }
-            let (Some(start), Some(end)) = (start_byte, end_byte) else {
-                return Err(raise(
-                    "text_boundary",
-                    "UTF-16 slice splits a surrogate pair",
-                ));
-            };
-            output(end - start)
         }
         "find" | "utf16_find" => {
             let needle = text_arg(&args, 1)?;

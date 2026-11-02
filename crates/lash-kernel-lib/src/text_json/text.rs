@@ -570,7 +570,7 @@ fn utf16_slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 /// the text's length, read from the front up to the farther one. Both slice
 /// operations fault only that prefix's chunks (FIG-6193, FIG-6750). A UTF-16
 /// position inside a surrogate pair is refused.
-fn slice_boundaries(
+pub(super) fn slice_boundaries(
     text: TextView<'_>,
     targets: [u64; 2],
     utf16: bool,

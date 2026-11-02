@@ -316,6 +316,12 @@ fn native_contracts_match_logical_holdings_and_reject_understatements() {
     crate::register_collections(&mut registry).unwrap();
     crate::register_text_json(&mut registry).unwrap();
     crate::register_brands(&mut registry).unwrap();
+    check_case(
+        &registry,
+        "text.utf16_slice",
+        vec![text("a😀z"), int(3), int(2)],
+    )
+    .unwrap();
     let mut checked = 0;
     let mut uncertified = std::collections::BTreeSet::new();
     for shard in crate::corpus_tests::NATIVE_SHARDS {
