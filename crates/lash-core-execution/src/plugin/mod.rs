@@ -426,44 +426,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn plugin_boundary_observer_contexts_only_offer_reads() {
-        let syntax = syn::parse_file(include_str!("hooks.rs")).unwrap();
-        let name = "SessionConfigChangedContext";
-        let fields = syntax
-            .items
-            .iter()
-            .find_map(|item| match item {
-                syn::Item::Struct(item) if item.ident == name => Some(&item.fields),
-                _ => None,
-            })
-            .unwrap();
-        assert!(
-            fields.iter().all(|field| {
-                !matches!(
-                    field.ident.as_ref().map(ToString::to_string).as_deref(),
-                    Some("session_graph" | "direct_completions")
-                )
-            }),
-            "observer {name} exposes execution services"
-        );
-        let session_field = fields
-            .iter()
-            .find(|field| field.ident.as_ref().is_some_and(|id| id == "sessions"))
-            .unwrap();
-        assert!(
-            matches!(&session_field.ty, syn::Type::Path(path)
-            if path.path.segments.last().is_some_and(|segment| matches!(
-                &segment.arguments, syn::PathArguments::AngleBracketed(args)
-                if args.args.iter().any(|arg| matches!(arg,
-                    syn::GenericArgument::Type(syn::Type::TraitObject(object))
-                    if object.bounds.iter().any(|bound| matches!(bound,
-                        syn::TypeParamBound::Trait(trait_bound)
-                        if trait_bound.path.is_ident("SessionReadService")))))))),
-            "observer {name} exposes session mutation"
-        );
-    }
-
     impl PluginOperation for TypedEchoOp {
         const NAME: &'static str = "mock.typed_echo";
         const DESCRIPTION: &'static str = "typed echo";

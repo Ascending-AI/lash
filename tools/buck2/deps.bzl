@@ -454,7 +454,6 @@ PACKAGE_DEPS = {
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_trace": "//crates/lash-trace:lash-trace",
-            "syn": "//third-party/rust:p0365",
             "tempfile": "//third-party/rust:p0370",
             "tokio": "//third-party/rust:p0379"
         },

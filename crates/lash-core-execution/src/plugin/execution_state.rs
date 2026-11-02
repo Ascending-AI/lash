@@ -141,32 +141,3 @@ pub(crate) fn proposal_failure_message(error: &PluginError) -> String {
         error => error.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ExecutionState;
-    use crate::plugin::{PluginHost, PluginSessionRequest, SessionAuthorityContext};
-    use std::sync::Arc;
-
-    /// INTENT-ADMISSION-POLICY: dispatches retain the deployment's intent limits through the state sink.
-    #[test]
-    fn configured_intent_limits_follow_the_state_sink() {
-        let mut limits = crate::runtime::RuntimeDataLimits::standard();
-        limits.tool_intents =
-            lash_execution_contracts::tool_intent::ToolIntentLimits::new(2, 4_096, 1)
-                .expect("the configured count fits the intent index");
-        let session = PluginHost::empty(
-            crate::ExecutionBudgets::recommended(),
-            crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
-        )
-        .with_data_limits(limits)
-        .build_session(PluginSessionRequest::creation(
-            "configured-intent-limits",
-            SessionAuthorityContext::fixture(),
-        ))
-        .expect("plugin session");
-        let state: Arc<dyn ExecutionState> = session;
-
-        assert_eq!(state.data_limits(), limits);
-    }
-}

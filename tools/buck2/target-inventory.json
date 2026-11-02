@@ -99554,7 +99554,6 @@
         "serde",
         "serde_json",
         "sha2",
-        "syn",
         "tempfile",
         "thiserror",
         "tokio",
