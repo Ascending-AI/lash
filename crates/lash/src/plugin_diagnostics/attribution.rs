@@ -591,15 +591,31 @@ impl PluginDiagnostics {
         let RecordLocator::TurnPhase { session, run } = record else {
             return Ok(Vec::new());
         };
-        let events = lash_core::runtime::durable::read_protocol_events(
-            self.core.backend.durable().as_ref(),
-            session,
-            run,
-        )
-        .await?;
+        let runtime = self
+            .core
+            .session(session.clone())
+            .open_runtime()
+            .await
+            .map_err(|error| lash_core::StoreError::StoredDataCorrupt {
+                record_kind: "open turn",
+                message: error.to_string(),
+            })?;
+        let Some(machine) = runtime.inspect_open_turn(run).await.map_err(|error| {
+            lash_core::StoreError::StoredDataCorrupt {
+                record_kind: "open turn journal",
+                message: error.to_string(),
+            }
+        })?
+        else {
+            return Ok(Vec::new());
+        };
+        let events = machine.events();
         let decoders = self.core.transcript_decoders();
         let mut attributions = Vec::new();
         for event in &events {
+            let lash_core::SessionHistoryRecord::Protocol(event) = event else {
+                continue;
+            };
             let decoded = decoders.decode_event(event).map_err(|error| {
                 lash_core::StoreError::StoredDataCorrupt {
                     record_kind: "cell failure feedback",

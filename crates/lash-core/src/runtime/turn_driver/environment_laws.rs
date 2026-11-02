@@ -221,6 +221,7 @@ async fn stage(
     let mut tx = f.driver.scoped_effect_controller.begin().await.unwrap();
     let phase = crate::runtime::durable::session::PhaseCheckpoint {
         window_pin: f.machine.window_pin().cloned(),
+        journal_inputs: f.machine.journaled_inputs(),
         delivered: Vec::new(),
         before_turn: Vec::new(),
         trace: None,

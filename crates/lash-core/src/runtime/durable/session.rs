@@ -4,11 +4,11 @@
 //! # Contracts
 //!
 //! - The durable entry is: load rows, [`TurnRestore::restore`] (exactly one
-//!   `restore_from_checkpoint`), re-deliver the pending effect, then
+//!   replay of the turn input journal), re-deliver the pending effect, then
 //!   the phase runner (`phases::run_phases`). The turn driver becomes this phase runner; it commits at
 //!   the catalog's labels (`environment.prepare`, `model.start`,
 //!   `model.done`, `round.present+model.start`, `turn.commit`) and never
-//!   re-executes orchestration to reach a recorded outcome.
+//!   re-issues an effect whose committed outcome the journal supplies.
 //! - The activation calls `session_mail::drain_session_mail` first on every
 //!   claim and acts on what it returns.
 //! - Extension points that let L3, L4 and L6b work in parallel: the
@@ -41,7 +41,6 @@ use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
 };
 use lash_protocol_types::llm::types::RecordedRequestTemplate;
-use lash_sansio::SavedTurn;
 use tokio_util::sync::CancellationToken;
 
 use super::head::{SessionHead, SessionOwner};
@@ -49,7 +48,6 @@ use super::{phases, turn_cancel, turn_trace};
 use crate::ActorContext;
 use crate::AdmittedScope;
 use crate::Effect;
-use crate::HostTurnProtocol;
 use crate::TurnMachine;
 use crate::TurnOutcome;
 use lash_execution_contracts::backend::Backend;
@@ -926,6 +924,8 @@ pub struct PhaseCheckpoint {
     /// resume rebuilds its machine over; `None` for a turn started without
     /// one.
     pub window_pin: Option<lash_sansio::TurnWindowPin>,
+    /// Number of machine inputs committed with this phase.
+    pub journal_inputs: usize,
     /// The steering input the turn's checkpoints delivered, with its
     /// application evidence ([`TurnDrive::delivered_inputs`]).
     pub delivered: Vec<crate::AdmittedTurnInputs>,
@@ -1476,6 +1476,7 @@ impl<'a> TurnRestore<'a> {
         let row = self.row;
         let PhaseCheckpoint {
             window_pin,
+            journal_inputs,
             delivered,
             ..
         } = match self.phase.take() {
@@ -1528,12 +1529,12 @@ impl<'a> TurnRestore<'a> {
             .await?;
         let inputs = std::mem::take(&mut self.journal().await?.inputs);
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
-        machine
-            .replay_inputs(inputs, syncs)
-            .map_err(|divergence| TurnRestoreError::Diverged {
+        super::turn_build::replay(&mut machine, inputs, journal_inputs, syncs).map_err(
+            |divergence| TurnRestoreError::Diverged {
                 run: row.run.clone(),
                 divergence,
-            })?;
+            },
+        )?;
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

@@ -7,7 +7,7 @@ use lash_execution_contracts::plugin_error::PluginError;
 /// the events of the turn's draft over the window that draft started from.
 /// None of it needs a claim, a store write or a plugin callback.
 pub(in crate::runtime) struct MachineBasis<'a> {
-    pub(in crate::runtime) session: &'a Session,
+    pub(in crate::runtime) preamble: Arc<crate::TurnDriverPreamble>,
     pub(in crate::runtime) session_id: &'a SessionId,
     pub(in crate::runtime) turn_id: &'a lash_vocabulary::identity::TurnId,
     pub(in crate::runtime) policy: &'a RuntimeSessionPolicy,
@@ -15,7 +15,7 @@ pub(in crate::runtime) struct MachineBasis<'a> {
     /// The window the turn's draft started from, the session's head.
     pub(in crate::runtime) head_window: crate::runtime::durable::head::TurnWindow,
     /// The turn draft's events, led by `head_window`'s.
-    pub(in crate::runtime) events: lash_protocol_types::AppendVec<SessionHistoryRecord>,
+    pub(in crate::runtime) events: lash_protocol_types::AppendVec<crate::SessionHistoryRecord>,
 }
 
 /// The turn's machine as its start built it, from its journaled `build`
@@ -37,7 +37,7 @@ pub(in crate::runtime) fn build_turn_machine(
         lash_core_ids::perf_witness::history::Component::RequestBuild,
     );
     let MachineBasis {
-        session,
+        preamble: turn_driver_preamble,
         session_id,
         turn_id,
         policy,
@@ -50,7 +50,6 @@ pub(in crate::runtime) fn build_turn_machine(
     // shift never reads a surface a replay could not reproduce (FIG-3672
     // P7b). Only the protocol's driver configuration is taken here, and
     // that is host configuration, independent of the tools.
-    let turn_driver_preamble = session.protocol_driver_preamble();
     // ADR 0117: the model's calls are named under the admitted scope's
     // run, continued by this physical turn.
     let model_tool_calls = lash_sansio::ModelToolCalls::new(
@@ -151,27 +150,13 @@ impl RuntimeTurnDriver<'_> {
         crate::runtime::durable::session::TurnError,
     > {
         let store = self.host.core.backend().durable().environments();
-        let mut projected = std::collections::BTreeMap::new();
-        let mut syncs = std::collections::BTreeMap::new();
-        for (iteration, round) in self.run_config.environments() {
-            let sync = match projected.get(&round.version) {
-                Some(sync) => Clone::clone(sync),
-                None => {
-                    let body =
-                        super::super::session_environment::load_body(store.as_ref(), round).await?;
-                    let handle = self.session.project_environment(&body).map_err(|error| {
-                        crate::runtime::durable::session::TurnError::Runtime(
-                            crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                        )
-                    })?;
-                    let sync = environment_sync(&handle);
-                    projected.insert(round.version.clone(), sync.clone());
-                    sync
-                }
-            };
-            syncs.insert(usize::try_from(iteration).unwrap_or(usize::MAX), sync);
-        }
-        Ok(syncs)
+        recorded_syncs(
+            &self.run_config,
+            self.session.plugins(),
+            self.session.fleet_format(),
+            store.as_ref(),
+        )
+        .await
     }
 
     pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {
@@ -293,4 +278,37 @@ fn validate_recorded_selection(
         }
     }
     Ok(())
+}
+
+/// Reconstruct the recorded sync answers for both recovery and inspection.
+pub(in crate::runtime) async fn recorded_syncs(
+    config: &crate::runtime::durable::run_config::RecordedRunConfig,
+    plugins: &crate::PluginSession,
+    fleet: crate::FleetFormat,
+    store: &dyn lash_durable::environment::EnvironmentStore,
+) -> Result<
+    std::collections::BTreeMap<usize, crate::sansio::ExecutionEnvironmentSync>,
+    crate::runtime::durable::session::TurnError,
+> {
+    let mut projected = std::collections::BTreeMap::new();
+    let mut syncs = std::collections::BTreeMap::new();
+    for (iteration, round) in config.environments() {
+        let sync = match projected.get(&round.version) {
+            Some(sync) => Clone::clone(sync),
+            None => {
+                let body = super::super::session_environment::load_body(store, round).await?;
+                let handle = crate::Session::project_environment_for(plugins, fleet, &body)
+                    .map_err(|error| {
+                        crate::runtime::durable::session::TurnError::Runtime(
+                            crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                        )
+                    })?;
+                let sync = environment_sync(&handle);
+                projected.insert(round.version.clone(), sync.clone());
+                sync
+            }
+        };
+        syncs.insert(usize::try_from(iteration).unwrap_or(usize::MAX), sync);
+    }
+    Ok(syncs)
 }

@@ -269,7 +269,7 @@ impl SqliteStore {
                         record_kind: "HydratedSessionCheckpoint",
                         message: format!("manifest projection lost component `{key}`"),
                     })?;
-            if lash_core_store::phase_preparation::is_graph_component(key) {
+            if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
                 continue;
             }
             if let HydratedCheckpointComponent::Changed { body, body_ref, .. } = component {
@@ -388,7 +388,9 @@ impl SqliteStore {
         let blob_refs = checkpoint
             .components
             .iter()
-            .filter(|(key, _)| !lash_core_store::phase_preparation::is_graph_component(key))
+            .filter(|(key, _)| {
+                lash_core_store::plugin_state::namespace_component_plugin(key).is_none()
+            })
             .map(|(_, descriptor)| descriptor.blob_ref.as_str().to_string())
             .collect::<std::collections::BTreeSet<_>>();
         let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
@@ -523,15 +525,16 @@ impl SqliteStore {
                         lash_core_store::checkpoint_graph::NodeSource::fetch(closure, &id)
                     })
                     .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
-            let body = if lash_core_store::phase_preparation::is_graph_component(key) {
-                graph_body.as_ref()
-            } else {
-                bodies.get(descriptor.blob_ref.as_str())
-            }
-            .ok_or_else(|| StoreError::CheckpointComponentMissing {
-                key: key.clone(),
-                blob_ref: descriptor.blob_ref.clone(),
-            })?;
+            let body =
+                if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+                    graph_body.as_ref()
+                } else {
+                    bodies.get(descriptor.blob_ref.as_str())
+                }
+                .ok_or_else(|| StoreError::CheckpointComponentMissing {
+                    key: key.clone(),
+                    blob_ref: descriptor.blob_ref.clone(),
+                })?;
             components.insert(
                 key.clone(),
                 lash_core_store::store::HydratedCheckpointComponent::hydrated(
@@ -547,7 +550,9 @@ impl SqliteStore {
             component_nodes: record
                 .components
                 .iter()
-                .filter(|(key, _)| lash_core_store::phase_preparation::is_graph_component(key))
+                .filter(|(key, _)| {
+                    lash_core_store::plugin_state::namespace_component_plugin(key).is_some()
+                })
                 .map(|(_, descriptor)| {
                     let root = lash_core_store::checkpoint_graph::NodeId::from_hex(
                         descriptor.blob_ref.as_str(),

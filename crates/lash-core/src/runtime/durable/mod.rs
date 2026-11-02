@@ -22,11 +22,12 @@
 pub(in crate::runtime) mod commit_publication;
 pub mod head;
 pub(crate) mod head_commit;
+mod inspect;
 mod model_call;
 pub mod node;
 pub(in crate::runtime) mod phase_root;
 pub(in crate::runtime) mod turn_build;
-pub use phase_root::{RecordedPluginPhase, read_plugin_phase, read_protocol_events};
+pub use phase_root::{RecordedPluginPhase, read_plugin_phase};
 pub mod phases;
 mod publication_window;
 pub mod run_config;

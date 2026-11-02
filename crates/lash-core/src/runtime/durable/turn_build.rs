@@ -9,7 +9,8 @@
 
 use crate::plugin::{AttachmentOmissions, HistoryPartId};
 
-type HostIntent = <crate::HostTurnProtocol as lash_sansio::TurnProtocol>::IntentOutcome;
+pub(in crate::runtime) type HostIntent =
+    <crate::HostTurnProtocol as lash_sansio::TurnProtocol>::IntentOutcome;
 
 /// The turn's build inputs, the first row of its journal.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -124,4 +125,22 @@ pub(in crate::runtime) fn read_journal(rows: Vec<String>) -> Result<ReadJournal,
     let inputs =
         lash_sansio::JournalRow::assemble(inputs).map_err(|divergence| divergence.to_string())?;
     Ok(ReadJournal { build, inputs })
+}
+
+/// Replay exactly the input prefix committed with a phase. The journal can
+/// already contain a later phase when a reader races the serving owner.
+pub(in crate::runtime) fn replay(
+    machine: &mut crate::TurnMachine,
+    mut inputs: Vec<lash_sansio::MachineInput<HostIntent>>,
+    committed: usize,
+    syncs: lash_sansio::RecordedSyncs<'_>,
+) -> Result<(), lash_sansio::ReplayDivergence> {
+    if inputs.len() < committed {
+        return Err(lash_sansio::ReplayDivergence {
+            index: inputs.len(),
+            reason: "the phase names inputs absent from its journal".to_owned(),
+        });
+    }
+    inputs.truncate(committed);
+    machine.replay_inputs(inputs, syncs)
 }

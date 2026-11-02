@@ -225,8 +225,8 @@ impl LashRuntime {
         )
         .with_render_cache(base_read_model.prompt_render_cache);
         let messages = window.then(turn_delta.clone());
-        let build = match recorded_build {
-            Some(build) => build,
+        let (recorded_build, omissions) = match recorded_build {
+            Some(build) => (Some(build), Vec::new()),
             None => {
                 // The attachment-omission history policies (ADR 0133)
                 // decide once, at the turn's start: the turn records what
@@ -259,20 +259,10 @@ impl LashRuntime {
                     )
                     .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
                 drop(context_transform);
-                crate::runtime::durable::turn_build::TurnBuild {
-                    turn_index,
-                    frame: self
-                        .state
-                        .current_frame_node_id
-                        .clone()
-                        .expect("an admitted turn has a committed active agent frame")
-                        .into_inner(),
-                    messages: turn_delta,
-                    omissions: crate::runtime::durable::turn_build::TurnBuild::record_omissions(
-                        &omissions,
-                    ),
-                    pressure: pressure_records,
-                }
+                (
+                    None,
+                    crate::runtime::durable::turn_build::TurnBuild::record_omissions(&omissions),
+                )
             }
         };
         self.state.last_prompt_usage = None;
@@ -333,6 +323,21 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
+        let build = match recorded_build {
+            Some(build) => build,
+            None => crate::runtime::durable::turn_build::TurnBuild {
+                turn_index,
+                frame: turn_pipeline
+                    .state()
+                    .current_frame_node_id
+                    .clone()
+                    .expect("a prepared turn has an active agent frame")
+                    .into_inner(),
+                messages: turn_delta,
+                omissions,
+                pressure: pressure_records,
+            },
+        };
         let after_turn_reads = if plugins.has_after_turn_hooks() {
             Some(self.session_read_service().map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())

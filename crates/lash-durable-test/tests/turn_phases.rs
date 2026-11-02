@@ -1863,7 +1863,8 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         }
     };
     let checkpoint = PhaseCheckpoint {
-        saved: machine.checkpoint(),
+        window_pin: machine.window_pin().cloned(),
+        journal_inputs: machine.journaled_inputs(),
         delivered: Vec::new(),
         before_turn: Vec::new(),
         trace: None,

@@ -788,6 +788,195 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct PressureRecord;
+    #[lash::async_trait]
+    impl ContextPressureHook for PressureRecord {
+        fn id(&self) -> &'static str {
+            "record"
+        }
+        async fn decide(
+            &self,
+            _: &ContextPressureContext<'_>,
+        ) -> Result<ContextPressureDecision, ContextError> {
+            Ok(ContextPressureDecision::Record {
+                nodes: vec![SessionAppendNode::message(
+                    PluginMessage::text(
+                        lash::messages::MessageRole::User,
+                        "retain the pressure decision",
+                    )
+                    .with_id("pressure-record"),
+                )],
+            })
+        }
+    }
+
+    impl AttachmentOmissionPolicy for PressureRecord {
+        fn id(&self) -> &'static str {
+            "omit"
+        }
+        fn omissions(
+            &self,
+            _: &AttachmentOmissionContext,
+            history: &[lash::messages::Message],
+        ) -> Result<AttachmentOmissions, PluginError> {
+            Ok(history
+                .iter()
+                .flat_map(|message| {
+                    message
+                        .parts
+                        .iter()
+                        .enumerate()
+                        .filter_map(move |(part, value)| {
+                            value.attachment().is_some().then(|| {
+                                (
+                                    HistoryPartId {
+                                        message: message.id.clone(),
+                                        part,
+                                    },
+                                    "omitted by the original plugin".to_owned(),
+                                )
+                            })
+                        })
+                })
+                .collect())
+        }
+    }
+
+    /// FIG-7585: recovery must retain the request built under a pressure
+    /// decision after the deciding plugin has been removed. Inspection also
+    /// replays while the original owner is serving, without invoking it.
+    #[tokio::test]
+    async fn a_turn_rebuilds_its_request_without_the_plugin_that_decided_pressure() {
+        let mut registrations = PluginRegistrar::new("pressure-builder");
+        registrations
+            .context()
+            .pressure(lash::hook_key!("record"), 0, |_, _| {
+                Ok(Arc::new(PressureRecord))
+            })
+            .unwrap();
+        registrations
+            .context()
+            .attachment_omissions(lash::hook_key!("omit"), 0, |_, _| {
+                Ok(Arc::new(PressureRecord))
+            })
+            .unwrap();
+        let factory = Arc::new(PluginRecipeFactory::new(
+            PluginDeclaration::initial("pressure-builder"),
+            PluginRecipe::from_registrar("pressure-builder", registrations).stateless(),
+        ));
+        let mut harness = PluginHarness::new(factory, HostPolicy::standard())
+            .await
+            .unwrap();
+        harness.create(PluginOptions::default()).await.unwrap();
+        harness.pause_model_after(0);
+        harness.script([text_response("done")]);
+        let session = harness
+            .core()
+            .unwrap()
+            .session(harness.session_id().clone())
+            .open()
+            .await
+            .unwrap();
+        let attachment = session
+            .put_attachment(
+                vec![1, 2, 3],
+                lash::attachments::AttachmentCreateMeta::new(
+                    lash::attachments::MediaType::parse("image/png").unwrap(),
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .unwrap()
+            .reference;
+        drop(session);
+        let handle = harness
+            .send(lash::TurnInput::text("build once").with_attachment(attachment))
+            .await
+            .unwrap();
+        harness.wait_for_model_pause().await.unwrap();
+        let run = harness
+            .session()
+            .await
+            .unwrap()
+            .current_turn()
+            .await
+            .unwrap()
+            .unwrap();
+        let inspect = || async {
+            harness
+                .core()
+                .unwrap()
+                .session(harness.session_id().clone())
+                .open_runtime()
+                .await
+                .unwrap()
+                .inspect_open_turn(&run)
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        let live = inspect().await;
+        let expected = serde_json::to_value(live.waited_request().unwrap()).unwrap();
+        assert!(live.events().iter().any(|record| matches!(record,
+            lash_core::SessionHistoryRecord::Conversation(message) if message.id == "pressure-record"
+        )), "the law must exercise a recorded pressure decision");
+        assert!(
+            serde_json::to_string(&expected)
+                .unwrap()
+                .contains("omitted by the original plugin"),
+            "the original request must exercise attachment omission"
+        );
+        let callbacks = harness.callback_counts();
+        harness.reopen_without_plugin().await.unwrap();
+        let restored = harness
+            .core()
+            .unwrap()
+            .session(harness.session_id().clone())
+            .open_runtime()
+            .await
+            .unwrap()
+            .inspect_open_turn(&run)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(restored.waited_request().unwrap()).unwrap(),
+            expected
+        );
+        harness.pause_model_after(0);
+        harness.boot(None, true).await.unwrap();
+        harness.wait_for_model_pause().await.unwrap();
+        let requests = harness.requests();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one original attempt and one recovery attempt"
+        );
+        let mut retry = serde_json::to_value(&requests[0]).unwrap();
+        assert_eq!(retry["scope"]["attempt"], serde_json::json!(1));
+        retry["scope"]["attempt"] = serde_json::json!(2);
+        assert_eq!(serde_json::to_value(&requests[1]).unwrap(), retry);
+        assert_eq!(
+            harness.callback_counts(),
+            callbacks,
+            "recovery must serve the pressure decision"
+        );
+        harness.release_model();
+        tokio::time::timeout(
+            harness.policy.scenario_timeout,
+            harness
+                .session()
+                .await
+                .unwrap()
+                .attach(handle.input_id().clone())
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
     struct Resolver {
         empty: bool,
         resolutions: Arc<AtomicUsize>,

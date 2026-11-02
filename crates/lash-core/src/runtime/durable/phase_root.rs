@@ -6,8 +6,8 @@
 //! checkpoint text, with the window the turn started from as a separate
 //! structured pin. The run's resolved shape rides beside it as
 //! configuration graph nodes shared with retained revisions; its tool
-//! surface is a TurnContent node. The first phase stages a nondefault run's
-//! resolution. Default runs instead reference the configuration retained by
+//! surface is retained by its recorded environments. The first phase stages
+//! a nondefault run's resolution. Default runs instead reference the configuration retained by
 //! their acknowledged head, with their own resolved renderer (FIG-3843).
 
 use lash_core_store::checkpoint_graph::EncodeBudget;
@@ -27,6 +27,7 @@ use super::session::PhaseCheckpoint;
 /// The phase's checkpoint text.
 #[derive(serde::Serialize)]
 struct PhaseText<'a> {
+    journal_inputs: usize,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     delivered: &'a [crate::AdmittedTurnInputs],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
@@ -41,6 +42,7 @@ struct PhaseText<'a> {
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PhaseRead {
+    journal_inputs: usize,
     #[serde(default)]
     delivered: Vec<crate::AdmittedTurnInputs>,
     #[serde(default)]
@@ -129,6 +131,7 @@ impl StagedPhase {
             .map(|config| config.stage(&mut staging))
             .transpose()?;
         let text = serde_json::to_string(&PhaseText {
+            journal_inputs: checkpoint.journal_inputs,
             delivered: &checkpoint.delivered,
             before_turn: &checkpoint.before_turn,
             trace: &checkpoint.trace,
@@ -342,6 +345,7 @@ pub(in crate::runtime) fn load(
     };
     Ok(PhaseCheckpoint {
         window_pin: body.window_pin.map(window_pin).transpose()?,
+        journal_inputs: read.journal_inputs,
         delivered: read.delivered,
         before_turn: read.before_turn,
         trace: read.trace,
@@ -388,7 +392,7 @@ pub async fn read_plugin_phase(
     }))
 }
 
-async fn read_phase(
+pub(super) async fn read_phase(
     reads: &dyn lash_durable::DurableReads,
     session: &lash_kernel_value::identity::SessionId,
     run: &lash_vocabulary::identity::TurnId,
@@ -447,7 +451,7 @@ mod tests {
             .encode_value(
                 NodeKind::PHASE_ROOT,
                 &PhaseRootBody {
-                    checkpoint: "{}".into(),
+                    checkpoint: r#"{"journal_inputs":0}"#.into(),
                     window_pin: None,
                     run: Some(reference.clone()),
                     environments: Vec::new(),
@@ -484,7 +488,7 @@ mod tests {
             .encode_value(
                 NodeKind::PHASE_ROOT,
                 &PhaseRootBody {
-                    checkpoint: "{}".into(),
+                    checkpoint: r#"{"journal_inputs":0}"#.into(),
                     window_pin: Some(structure_window_pin(&pin).unwrap()),
                     run: None,
                     environments: Vec::new(),

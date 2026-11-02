@@ -64,9 +64,7 @@ use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel, turn_trace};
 use crate::plugin::prompt::load_admitted_call;
-use crate::{
-    ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
-};
+use crate::{ActorContext, Effect, HeldResponse, SessionStreamEvent, TurnMachine};
 use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::llm::types::AdmittedSend;
 use lash_vocabulary::identity::TurnId;
@@ -82,6 +80,7 @@ fn encode_checkpoint(
     lash_core_ids::operational_metrics::turn::sync_phase("checkpoint encode", || {
         let checkpoint = PhaseCheckpoint {
             window_pin: drive.machine().window_pin().cloned(),
+            journal_inputs: drive.machine().journaled_inputs(),
             delivered: drive.delivered_inputs(),
             before_turn: drive.before_turn(),
             trace: drive.trace_scope(),

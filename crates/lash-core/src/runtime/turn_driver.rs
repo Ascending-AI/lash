@@ -19,7 +19,7 @@ mod model_calls;
 mod prepare;
 mod prompt;
 mod streaming;
-mod tool_catalog;
+pub(in crate::runtime) mod tool_catalog;
 mod tools;
 mod trace;
 pub(in crate::runtime) use trace::TurnPhaseSpan;

@@ -49,13 +49,11 @@ use crate::ActorContext;
 use crate::ExecutionBudgets;
 use crate::ExecutionLimit;
 use crate::FailureCode;
-use crate::HostTurnProtocol;
 use crate::LlmCallError;
 use crate::LlmTerminalReason;
 use crate::ProviderFailureKind;
 use crate::TurnFailureCode;
 use lash_sansio::EffectId;
-use lash_sansio::TurnCheckpoint;
 
 /// version_surface = "coexist"
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))

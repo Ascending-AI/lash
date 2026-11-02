@@ -3,6 +3,7 @@
 //! runner hands it. The phase runner owns every commit; the drive runs what
 //! a phase does in memory and builds the turn's head commit.
 
+use crate::runtime::durable::session::TurnRestoreError;
 use lash_protocol_types::llm::types::RetainedLlmRequest;
 use std::sync::Arc;
 
@@ -1604,7 +1605,7 @@ impl RuntimeTurnDriver<'static> {
         self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
         let machine = super::tool_catalog::build_turn_machine(
             super::tool_catalog::MachineBasis {
-                session: &self.session,
+                preamble: self.session.protocol_driver_preamble(),
                 session_id: &self.session_id,
                 turn_id: &self.turn_id,
                 policy: &self.policy,
