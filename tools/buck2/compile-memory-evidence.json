@@ -138,12 +138,6 @@
       "p99_anon_peak_bytes": 907341824,
       "samples": 129
     },
-    "lash-ext-py-core/plans": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 66007040,
-      "samples": 30
-    },
     "lash-ext-py-helpers/lash_ext_py_helpers": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -166,12 +160,6 @@
       "p99_anon_peak_bytes": 1595011072,
       "samples": 132,
       "worker_memory_kb": 52428800
-    },
-    "lash-ext-ts-core/plans": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 65241088,
-      "samples": 28
     },
     "lash-ext-ts-helpers/build_script_build": {
       "legacy_peak_bytes": 0,
@@ -1876,12 +1864,6 @@
       "samples": 623,
       "worker_memory_kb": 52428800
     },
-    "lash-ext-py-core/plans": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 281546752,
-      "samples": 14
-    },
     "lash-ext-py-helpers/lash_ext_py_helpers": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1904,12 +1886,6 @@
       "p99_anon_peak_bytes": 2199306240,
       "samples": 751,
       "worker_memory_kb": 52428800
-    },
-    "lash-ext-ts-core/plans": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 241258496,
-      "samples": 9
     },
     "lash-ext-ts-helpers/build_script_build": {
       "legacy_peak_bytes": 0,

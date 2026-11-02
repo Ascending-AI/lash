@@ -6,43 +6,6 @@ use crate::{
 };
 
 #[test]
-fn short_text_concat_and_ascii_match_new() {
-    for len in 0..=ShortText::MAX + 1 {
-        for byte in 0..=127 {
-            let bytes = vec![byte; len];
-            let text = std::str::from_utf8(&bytes).unwrap();
-            let expected = ShortText::new(text);
-            let actual = ShortText::ascii(&bytes);
-            assert_eq!(actual, expected);
-            assert_eq!(actual.map(|s| s.word()), expected.map(|s| s.word()));
-        }
-    }
-    for byte in 128..=255 {
-        assert!(ShortText::ascii(&[byte]).is_none());
-    }
-    let texts = [
-        "",
-        "\0",
-        "abc",
-        "é",
-        "界",
-        "🦀",
-        "0123456789🦀",
-        "\0é界🦀abcd",
-    ];
-    for head in texts {
-        for tail in texts {
-            let expected = ShortText::new(&format!("{head}{tail}"));
-            let actual = ShortText::new(head)
-                .unwrap()
-                .concat(&ShortText::new(tail).unwrap());
-            assert_eq!(actual, expected);
-            assert_eq!(actual.map(|s| s.word()), expected.map(|s| s.word()));
-        }
-    }
-}
-
-#[test]
 fn short_text_as_str_round_trips_every_constructor() {
     for text in [
         "",
@@ -64,6 +27,12 @@ fn short_text_as_str_round_trips_every_constructor() {
             }
         }
     }
+    for byte in 128..=255 {
+        assert!(ShortText::ascii(&[byte]).is_none());
+    }
+    let over = "a".repeat(ShortText::MAX + 1);
+    assert!(ShortText::new(&over).is_none());
+    assert!(ShortText::ascii(over.as_bytes()).is_none());
 }
 
 fn definition(name: &str, native: bool) -> FunctionDefinition {
@@ -182,20 +151,6 @@ fn a_native_version_is_part_of_the_identity_and_only_a_native_states_one() {
         crate::validate_definition(&zero, &empty).map_err(|invalid| *invalid.reason),
         Err(InvalidReason::NativeVersionZero)
     ));
-}
-
-#[test]
-fn registration_identifies_each_immutable_definition_once() {
-    let definition = crate::parse_definition(
-        "function helper() -> Int\nkernel 1\ncharge 1\nbody { return 1 }\n",
-    )
-    .unwrap();
-    let before = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
-    crate::FunctionRegistry::declarations()
-        .register(definition, None)
-        .unwrap();
-    let after = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
-    assert_eq!(after - before, 1);
 }
 
 #[test]

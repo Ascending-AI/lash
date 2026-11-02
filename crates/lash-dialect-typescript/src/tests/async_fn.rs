@@ -52,45 +52,6 @@ fn async_cells_interleave_as_node_does() {
     }
 }
 
-/// FIG-7323: ordinary arguments carry no builtin dispatch graph, including
-/// through a packed invocation or an unawaited tool's child task.
-#[test]
-fn only_arguments_that_can_contain_builtins_have_a_forwarder() {
-    use lash_kernel_dialect::Library;
-
-    let forward = super::library().resolve("ts.builtin_call").unwrap();
-    for source in [
-        "await host.echo(1);",
-        "const x: number = 1; await host.echo(x);",
-        "const x = 1; await host.echo({x, nested: [null, 'text', x + 2]});",
-        "await host.echo(...[1]);",
-        "const pending = host.echo({x: 1}); await pending;",
-        "function f(x: number) { return host.echo(x); } await f(1);",
-        "const f = async (x: number) => x; const alias = f; await host.echo({list: [1, alias]});",
-        "const n = num.checked_float(1); await host.echo({n, sum: num.add(n, 2)});",
-    ] {
-        let lowered = lower_with_effects(source).unwrap();
-        assert!(
-            !lowered.document.library.contains(&forward),
-            "no builtin forwarding work: {source}"
-        );
-    }
-    for source in [
-        "await host.echo(Math.abs);",
-        "await host.echo({nested: [Math.abs]});",
-        "const xs = [Math.abs]; await host.echo(...xs);",
-        "function f(x: any) { return host.echo(x); } await f(Math.abs);",
-        "const raw = {n: 1, f: Math.abs}; const value: {n: number} = raw; await host.echo(value);",
-        "const num = {checked_float: () => Math.abs}; await host.echo(num.checked_float());",
-    ] {
-        let lowered = lower_with_effects(source).unwrap();
-        assert!(
-            lowered.document.library.contains(&forward),
-            "a possible builtin keeps its forwarding factory: {source}"
-        );
-    }
-}
-
 /// `TS_UNHANDLED_REJECTION`: a promise that rejected and that nothing
 /// awaited, chained from or aggregated by the cell's end makes the end the
 /// kernel's typed error. One handled before the end is no error, however

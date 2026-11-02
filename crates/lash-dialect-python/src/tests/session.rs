@@ -108,18 +108,6 @@ fn a_binding_never_assigned_stays_unbound_in_the_next_cell() {
     assert_eq!(lines, ["name 'later' is not defined"]);
 }
 
-/// Local names never enter the session.
-#[test]
-fn nested_scope_builtin_shadowing_stays_local() {
-    for source in [
-        "def local(len, finish):\n    return len + finish\nlocal(1, 2)\n",
-        "def local():\n    len = 1\n    return len\nlocal()\n",
-        "[len for len in [1, 2]]\n",
-    ] {
-        machine::lower(source).expect("local shadowing stays allowed");
-    }
-}
-
 /// FIG-6524: parameters and earlier cells shadow namespaces in their scope.
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {

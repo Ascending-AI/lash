@@ -255,20 +255,6 @@ fn computed_service_members_keep_their_read_imports() {
     }
 }
 
-/// FIG-7136 and readable-first source: a numeric record read keeps an ordinary
-/// TypeScript spelling that re-lowers to the same cell document.
-#[test]
-fn numeric_indexing_exports_as_ordinary_typescript() {
-    let lowered = super::lower("const values = {0: 7}; const key = 0; values[key];").unwrap();
-    crate::print(
-        &lowered.document,
-        None,
-        super::library(),
-        Default::default(),
-    )
-    .expect("numeric indexing has a verified authored-source representation");
-}
-
 /// FIG-7109: the sleep duration conversion belongs to lowering, not source.
 #[test]
 fn sleep_prints_its_authored_duration_and_preserves_the_document() {

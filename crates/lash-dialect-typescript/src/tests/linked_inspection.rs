@@ -86,15 +86,6 @@ pub(super) fn main(
     document
 }
 
-/// The exact build library reference selected by lowering.
-pub(super) fn helper_reference(
-    document: &lash_kernel_doc::Document,
-    helper: &str,
-) -> Option<lash_kernel_value::FunctionId> {
-    let id = super::library().resolve(helper)?;
-    document.library.contains(&id).then_some(id)
-}
-
 /// An operation's diagnostic name identifies its declaration, never its call syntax.
 pub(super) fn operation_slot(
     document: &lash_kernel_doc::Document,

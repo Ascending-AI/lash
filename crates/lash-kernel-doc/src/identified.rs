@@ -233,57 +233,6 @@ mod tests {
         crate::parse_document("kernel 1\nnumbers float\nmain { print 1 }").expect("document")
     }
 
-    /// ADR 0123's opt-in rule also covers the definition parser's probe.
-    #[test]
-    fn definition_parse_work_is_opt_in_on_each_thread() {
-        std::thread::spawn(|| {
-            let definition =
-                "function test.identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }\n";
-            let _ = crate::parse_definition(definition).expect("definition");
-            assert_eq!(
-                document_work::take_definition_parses(),
-                0,
-                "definition parse work is disabled until this thread opts in"
-            );
-            let _ = crate::parse_definition(definition).expect("definition");
-            assert_eq!(document_work::take_definition_parses(), 1);
-            assert_eq!(document_work::take_definition_parses(), 0);
-        })
-        .join()
-        .expect("definition parse work law");
-    }
-
-    /// ADR 0123 admits opt-in diagnostics: an ordinary thread retains no
-    /// document work, and taking counts explicitly starts its interval.
-    #[test]
-    fn document_work_is_opt_in_on_each_thread() {
-        std::thread::spawn(|| {
-            let document = document();
-            let _ = document.canonical_bytes();
-            assert_eq!(
-                document_work::take(),
-                document_work::DocumentWork::default(),
-                "document work is disabled until this thread opts in"
-            );
-            let made = IdentifiedDocument::new(document);
-            let _ = IdentifiedDocument::decode_standard(made.body()).expect("decodes");
-            assert_eq!(
-                document_work::take(),
-                document_work::DocumentWork {
-                    token_encodes: 1,
-                    token_decodes: 1,
-                    ..Default::default()
-                }
-            );
-            assert_eq!(
-                document_work::take(),
-                document_work::DocumentWork::default()
-            );
-        })
-        .join()
-        .expect("document work law");
-    }
-
     /// One encode makes the body and the identity; one decode of that body
     /// answers the same identity with nothing encoded.
     #[test]

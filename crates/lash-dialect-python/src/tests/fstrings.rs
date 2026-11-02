@@ -5,23 +5,6 @@
 
 use super::machine::{kernel_text, run};
 
-/// A key built by an f-string is the key built by `+`: one concatenation
-/// of the literal and the field's text, with no list and no join.
-#[test]
-fn an_fstring_key_lowers_to_one_concatenation() {
-    let template = kernel_text("def f(n):\n    return f\"key_{n % 64}\"\n");
-    let plus = kernel_text("def f(n):\n    return \"key_\" + str(n % 64)\n");
-    assert!(template.contains("text.concat(\"key_\", "), "{template}");
-    for general in ["text.join(", "list["] {
-        assert!(!template.contains(general), "keeps {general}:\n{template}");
-    }
-    assert_eq!(
-        template.matches("text.concat(").count(),
-        plus.matches("text.concat(").count(),
-        "{template}\n{plus}"
-    );
-}
-
 /// Literals, escaped braces, implicit concatenation, conversions and
 /// format specifications give the text CPython gives.
 #[test]

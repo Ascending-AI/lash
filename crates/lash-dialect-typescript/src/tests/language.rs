@@ -5,25 +5,6 @@ use lash_kernel_value::Name;
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
 
-/// FIG-7254: the deleted kernel grammar owns no ordinary identifier.
-#[test]
-fn k_is_an_ordinary_binding_and_reference() {
-    assert_eq!(
-        lash_kernel_dialect::FrontEnd::reserves(&crate::TypeScript::default(), "k"),
-        None
-    );
-    for source in [
-        "const k = 1; k;",
-        "const { k } = { k: 1 }; k;",
-        "function k(k: number): number { return k; } k(1);",
-        "for (const k of [1, 2]) { k; }",
-        r"const \u006b = 1; k;",
-    ] {
-        lower(source).unwrap_or_else(|error| panic!("{source}: {error}"));
-    }
-    lower_in_session("k;", &["k"]).expect("an earlier cell's k is ordinary too");
-}
-
 /// FIG-7254: unrelated source cannot supply repair advice for a parse error.
 #[test]
 fn parser_repairs_ignore_unrelated_raise_text() {

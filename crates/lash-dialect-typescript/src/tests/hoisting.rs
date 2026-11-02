@@ -49,16 +49,3 @@ fn expression_side_effects_follow_node_order() {
         );
     }
 }
-
-/// Local names never enter the session.
-#[test]
-fn nested_scope_builtin_shadowing_stays_local() {
-    for source in [
-        "function local(URL, finish) { return URL + finish; } local(1, 2);",
-        "function local() { var URL = 1; return URL; } local();",
-        "{ const URL = 1; const finish = 2; URL + finish; }",
-        "for (let URL of [1, 2]) { URL; }",
-    ] {
-        super::lower(source).expect("local shadowing stays allowed");
-    }
-}

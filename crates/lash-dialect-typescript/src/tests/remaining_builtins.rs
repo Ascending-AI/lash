@@ -108,6 +108,79 @@ fn brand_one_package_constructors_use_canonical_brands_and_their_own_identities(
             "{constructor}"
         );
     }
+
+    use lash_kernel_doc::{Float, Value, WorkCounter};
+    use lash_kernel_state::arena::Bench;
+    use lash_kernel_value::FunctionId;
+
+    let built = FunctionId::from_bytes([0x5a; 32]);
+    for (package, ty) in [
+        ("date.ecma", "invalid_date"),
+        ("url.whatwg", "url"),
+        ("regex.ecma", "reg_exp"),
+    ] {
+        let mut heap = Bench::new();
+        let (native, arguments) = match package {
+            "date.ecma" => (
+                lash_ext_date_ecma::native("date.ecma.timestamp", built).unwrap(),
+                vec![Value::Float(Float::new(f64::NAN))],
+            ),
+            "url.whatwg" => (
+                lash_ext_url_whatwg::native("url.whatwg.parse", built).unwrap(),
+                vec![
+                    heap.arena_mut().text("https://example.test/?a=1"),
+                    Value::Absent,
+                ],
+            ),
+            _ => (
+                lash_ext_regex_ecma::native(
+                    "regex.ecma.compile_check",
+                    &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(1)),
+                    built,
+                )
+                .unwrap(),
+                vec![heap.arena_mut().text("a"), heap.arena_mut().text("")],
+            ),
+        };
+        let value = heap
+            .call(
+                native.as_ref(),
+                &arguments,
+                u64::MAX,
+                &mut WorkCounter::new(None),
+            )
+            .answer
+            .expect("native constructor");
+        let Datum::Record(fields) = heap.datum(&value).expect("record data") else {
+            panic!("branded record")
+        };
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(name, _)| name == "__lash_brand")
+                .map(|(_, value)| value),
+            Some(&Datum::Tuple(vec![
+                Datum::Text(package.into()),
+                Datum::Text(ty.into())
+            ]))
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(name, _)| name == "__lash_built")
+                .map(|(_, value)| value),
+            Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
+                built.as_bytes().to_vec()
+            )))
+        );
+        if package == "regex.ecma" {
+            assert_eq!(
+                fields.len(),
+                5,
+                "one brand, its constructor and the three matching fields"
+            );
+        }
+    }
 }
 
 pub(super) fn agrees(source: &str) {

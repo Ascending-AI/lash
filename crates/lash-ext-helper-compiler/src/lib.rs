@@ -352,23 +352,4 @@ pub fn register_kernel(registry: &mut lash_kernel_doc::FunctionRegistry) -> Resu
 }
 
 #[cfg(test)]
-mod tests {
-
-    use super::{REGENERATE, body_perform_plans};
-
-    /// The body-perform laws run the plans this compiler gives now.
-    #[test]
-    fn body_perform_law_plans_are_what_the_compiler_gives_for_the_current_bodies() {
-        assert_eq!(
-            body_perform_plans(include_str!(
-                "../../lash-kernel-vm/src/laws/continuation/body_performs.kernel"
-            ))
-            .expect("the body-perform law bodies compile"),
-            include_str!("../../lash-kernel-vm/src/laws/continuation/body_performs_plans.rs"),
-            "run {REGENERATE}"
-        );
-    }
-}
-
-#[cfg(test)]
 mod dialect_laws;

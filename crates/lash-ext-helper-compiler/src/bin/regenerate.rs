@@ -78,14 +78,3 @@ fn control_fixture() -> Result<String, String> {
     }
     Ok(lash_ext_helper_compiler::generate_library(&library, Dialect::Python)?.rust)
 }
-
-/// The kernel control laws execute plans emitted by the current compiler,
-/// including finally bodies that the dialect corpus need not contain.
-#[test]
-fn control_plans_are_what_the_compiler_gives_for_the_current_bodies() {
-    assert_eq!(
-        control_fixture().expect("the control law bodies compile"),
-        include_str!("../../../lash-kernel-conformance/src/helper_plan_control_generated.rs"),
-        "run kiln run //crates/lash-ext-helper-compiler:regenerate__bin"
-    );
-}

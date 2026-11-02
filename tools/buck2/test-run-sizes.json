@@ -1135,24 +1135,6 @@
     "peak_bytes": 258306048,
     "samples": 21
   },
-  "//crates/lash-ext-py-core:plans__test": {
-    "cpu_count": 2,
-    "mean_cores": 1.86,
-    "memory_kb": 262144,
-    "p95_cores": 1.99,
-    "p99_peak_bytes": 59895808,
-    "peak_bytes": 59895808,
-    "samples": 6
-  },
-  "//crates/lash-ext-py-core:test_batch": {
-    "cpu_count": 2,
-    "mean_cores": 1.83,
-    "memory_kb": 262144,
-    "p95_cores": 1.98,
-    "p99_peak_bytes": 59924480,
-    "peak_bytes": 59924480,
-    "samples": 7
-  },
   "//crates/lash-ext-py-helpers:lash-ext-py-helpers__unit_test": {
     "cpu_count": 1,
     "mean_cores": 0.0,
@@ -1169,15 +1151,6 @@
     "p95_cores": 1.25,
     "p99_peak_bytes": 13721600,
     "peak_bytes": 13721600,
-    "samples": 7
-  },
-  "//crates/lash-ext-ts-core:test_batch": {
-    "cpu_count": 2,
-    "mean_cores": 1.8,
-    "memory_kb": 262144,
-    "p95_cores": 1.91,
-    "p99_peak_bytes": 132878336,
-    "peak_bytes": 132878336,
     "samples": 7
   },
   "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers__unit_test": {

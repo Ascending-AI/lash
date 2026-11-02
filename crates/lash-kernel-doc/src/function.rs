@@ -328,17 +328,10 @@ impl Formula {
     }
 }
 
-#[cfg(test)]
-std::thread_local! {
-    pub(crate) static IDENTITY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 impl FunctionDefinition {
     /// The function's identity (`K-ID-002`): the digest of its canonical
     /// bytes, its logical token body (`K-ID-003`).
     pub fn identity(&self) -> FunctionId {
-        #[cfg(test)]
-        IDENTITY_CALLS.with(|calls| calls.set(calls.get() + 1));
         FunctionId::from_bytes(logical_digest(&encode_body(self)))
     }
 

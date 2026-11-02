@@ -15,44 +15,6 @@ use crate::{
 
 use super::testsupport::{Bench, Fixture, fresh};
 
-/// BRAND-ONE: package values carry one canonical (package, type) brand.
-#[test]
-fn brand_one_regex_constructor_uses_the_canonical_package_type() {
-    let result = run(
-        &Arc::new(Engine::new(1)),
-        Operation::CompileCheck,
-        Limit::Stated,
-        &|heap| vec![heap.text("a"), heap.text("")],
-    );
-    let Datum::Record(fields) = result.outcome.unwrap() else {
-        panic!("compile_check must return a regex record");
-    };
-    assert_eq!(
-        fields
-            .iter()
-            .find(|(name, _)| name == "__lash_brand")
-            .map(|(_, value)| value),
-        Some(&Datum::Tuple(vec![
-            Datum::Text("regex.ecma".into()),
-            Datum::Text("reg_exp".into()),
-        ])),
-    );
-    assert_eq!(
-        fields
-            .iter()
-            .find(|(name, _)| name == "__lash_built")
-            .map(|(_, value)| value),
-        Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
-            super::testsupport::built().as_bytes().to_vec()
-        ))),
-    );
-    assert_eq!(
-        fields.len(),
-        5,
-        "one brand, its constructor and the three matching fields"
-    );
-}
-
 #[derive(Debug, PartialEq)]
 enum Failure {
     Raised(lash_kernel_doc::ErrorDatum),

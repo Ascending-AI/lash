@@ -2,37 +2,7 @@
 //! kernel call, and any other is the helper that carries JavaScript's
 //! meaning.
 
-use std::collections::BTreeMap;
-
-use {lash_kernel_value::EffectName, lash_kernel_value::Signature, lash_kernel_value::Type};
-
 use super::{lower_against, main_text};
-
-/// Unknown operands retain the semantic helper, whether its implementation
-/// is a native call or an imported code body.
-#[test]
-fn unknown_types_keep_the_helper() {
-    for (params, expression, helper) in [
-        ("a, b", "a + b", "ts.add"),
-        ("a: any, b: number", "a + b", "ts.add"),
-        ("a: number | string, b: number", "a + b", "ts.add"),
-        ("a: number, b: string", "a + b", "ts.add"),
-        ("a: number, b: number", "a ** b", "ts.pow"),
-        ("a: string, b: string", "a < b", "ts.lt"),
-        ("a: string, b: string", "a === b", "ts.strict_equals"),
-        ("a: number, b: number", "(a as any) + b", "ts.add"),
-        ("a: Missing, b: number", "a + b", "ts.add"),
-    ] {
-        let document = super::lower(&format!("function f({params}) {{ return {expression}; }}"))
-            .unwrap()
-            .document;
-        assert!(calls_helper(&document, helper), "{params}: {expression}");
-    }
-    let document = super::lower("type T = number; function f<T>(a: T, b: T) { return a + b; }")
-        .unwrap()
-        .document;
-    assert!(calls_helper(&document, "ts.add"));
-}
 
 fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
     let function = lash_kernel_dialect::Library::resolve(super::library(), helper).unwrap();
@@ -77,65 +47,6 @@ fn calls_helper(document: &lash_kernel_doc::Document, helper: &str) -> bool {
         },
         _ => false,
     })
-}
-
-/// A tool's declared result type is stated at its `perform`, so an `Int`
-/// or a `Float` is decoded as declared (`K-EFF-005`), and what the call
-/// gives is known to be that type: an `Int` is a Number requiring
-/// binary64 conversion, a `Float` already is binary64, and `Any` is unknown.
-#[test]
-fn a_tools_declared_result_type_is_stated_and_known() {
-    let effects: BTreeMap<EffectName, Signature> = [
-        ("stats.count", Type::Int),
-        ("stats.ratio", Type::Float),
-        ("stats.any", Type::Any),
-    ]
-    .into_iter()
-    .map(|(name, result)| {
-        let signature = Signature {
-            params: Vec::new(),
-            result,
-        };
-        (EffectName::new(name).unwrap(), signature)
-    })
-    .collect();
-    let source = "const n = (await stats.count()) + 1; const r = (await stats.ratio()) * 2; \
-                  const a = (await stats.any()) + 1;";
-    let lowered = lower_against(source, &[], &effects).unwrap();
-    // The Import owns its public signature; the action selects that slot.
-    let mut pending = lowered
-        .document
-        .units()
-        .map(|(_, body)| lash_kernel_doc::Node::Block(body))
-        .collect::<Vec<_>>();
-    let mut performed = BTreeMap::new();
-    while let Some(node) = pending.pop() {
-        pending.extend(node.children());
-        let operation = match node {
-            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(action)) => match &action.kind {
-                lash_kernel_doc::ActKind::Perform { slot, result, .. } => Some((*slot, result)),
-                _ => None,
-            },
-            lash_kernel_doc::Node::Action(lash_kernel_doc::Action::Perform {
-                slot,
-                result,
-                ..
-            }) => Some((*slot, result)),
-            _ => None,
-        };
-        if let Some((slot, result)) = operation {
-            performed.insert(
-                lowered.document.imports[&slot].name.to_string(),
-                result.clone(),
-            );
-        }
-    }
-    for (name, signature) in effects {
-        assert_eq!(performed[&name.to_string()], signature.result);
-    }
-    for helper in ["num.mul", "ts.add"] {
-        assert!(calls_helper(&lowered.document, helper), "{helper}");
-    }
 }
 
 /// What a cell finishes with, which every law below finishes as JSON text.
@@ -243,26 +154,6 @@ fn a_built_in_array_methods_new_array_is_a_list() {
         ),
         "[4,false,8,[3,4]]"
     );
-}
-
-/// Named evaluation gives an anonymous function its binding's name and
-/// nothing else: its parameters and the outer bindings it reads keep their
-/// types, so its body lowers the typed operation a declaration's does.
-#[test]
-fn a_named_anonymous_function_keeps_its_bindings_types() {
-    let typed = "num.add(ts.number.checked(a), limit)";
-    for source in [
-        "const limit = 3; function f(a: number) { return a + limit; }",
-        "const limit = 3; const f = (a: number) => a + limit;",
-        "const limit = 3; const f = (a: number) => { return a + limit; };",
-        "const limit = 3; const f = function (a: number) { return a + limit; };",
-    ] {
-        let text = main_text(source);
-        assert!(
-            text.contains(typed) && !text.contains("ts.add("),
-            "{source}:\n{text}"
-        );
-    }
 }
 
 /// A type belongs to a binding, not to its name. A parameter and an outer

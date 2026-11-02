@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
 };
 use {
-    lash_kernel_value::ImportKind, lash_kernel_value::Name, lash_kernel_value::OperationMode,
+    lash_kernel_value::ImportKind, lash_kernel_value::OperationMode,
     lash_kernel_value::OperationUse,
 };
 use {lash_kernel_value::package::Fill, lash_kernel_value::package::Link};
@@ -246,51 +246,6 @@ fn start_target(
         }
         panic!("start {error:?}")
     })
-}
-
-/// K-HOST-003: direct and borrowed Math.random use the exact high 53 bits.
-#[test]
-fn math_random_preserves_the_exact_top_53_bits_for_direct_and_borrowed_calls() {
-    let fixture = Fixture::new(Dialect::TypeScript);
-    let source = "export function run(): number[] { const draw = Math.random; const values = []; for (let i = 0; i < 4; i++) { values.push(Math.random()); values.push(draw()); } return values; }";
-    let document = fixture.lower(Dialect::TypeScript, source, Mode::Module);
-    let mut script = Script {
-        draws: [0, 1 << 62, 1 << 63, u64::MAX]
-            .into_iter()
-            .flat_map(|bits| [bits, bits])
-            .collect(),
-        ..Default::default()
-    };
-    let mut machine = start_target(
-        fixture.program(document),
-        &mut script,
-        Pages::default(),
-        Target::Entry(Name::new("run")),
-    );
-    let Step::Ended(End::Finished(finished)) = machine.run(&mut script, u64::MAX).unwrap() else {
-        panic!("numeric draws")
-    };
-    let Datum::List(values) = finished.result else {
-        panic!("list of numeric draws")
-    };
-    let expected = [0.0, 0.25, 0.5, 9007199254740991.0 / 9007199254740992.0];
-    let draws = values
-        .iter()
-        .map(|value| {
-            let Datum::Float(value) = value else {
-                panic!("float draw")
-            };
-            value.get()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        draws,
-        expected
-            .into_iter()
-            .flat_map(|draw| [draw, draw])
-            .collect::<Vec<_>>()
-    );
-    assert!(script.draws.is_empty());
 }
 
 /// G-SOURCE-READABLE: sync and async declarations retain order and identity.

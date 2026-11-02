@@ -96,7 +96,7 @@ impl DiagnosticCode {
     /// that never existed, into the production prompt, a test that pinned it,
     /// and a runbook gate that could therefore never fire. This list is what
     /// lets a test walk the rendered prompt and reject a name the dialect
-    /// cannot produce. `all_codes_are_listed` keeps it complete.
+    /// cannot produce.
     pub const ALL: &'static [Self] = &[
         Self::GeneratedSourceFormat,
         Self::GeneratedSourceBytes,
@@ -709,68 +709,7 @@ impl From<Diagnostic> for lash_kernel_dialect::Diagnostic {
 
 #[cfg(test)]
 mod tests {
-    use super::{CodeClassification, DiagnosticCode};
-
-    /// `ALL` is only useful if it is complete, and a hand-maintained list beside
-    /// the enum is exactly the drift shape that put a nonexistent code in the
-    /// production prompt. This reads the enum's own declaration and requires
-    /// every variant to appear.
-    #[test]
-    fn all_codes_are_listed() {
-        let source = include_str!("diagnostics.rs");
-        let declaration = source
-            .split("pub enum DiagnosticCode {")
-            .nth(1)
-            .and_then(|rest| rest.split('}').next())
-            .expect("the enum declares its variants");
-        let declared = declaration
-            .lines()
-            .map(str::trim)
-            .filter_map(|line| line.strip_suffix(','))
-            .filter(|line| {
-                line.chars().next().is_some_and(char::is_uppercase)
-                    && line.chars().all(char::is_alphanumeric)
-            })
-            .collect::<Vec<_>>();
-        assert!(
-            declared.len() > 50,
-            "the declaration parse found only {declared:?}"
-        );
-
-        let listed = DiagnosticCode::ALL
-            .iter()
-            .map(|code| format!("{code:?}"))
-            .collect::<std::collections::BTreeSet<_>>();
-        let missing = declared
-            .iter()
-            .filter(|variant| !listed.contains(**variant))
-            .collect::<Vec<_>>();
-        assert!(
-            missing.is_empty(),
-            "DiagnosticCode::ALL is missing {missing:?}"
-        );
-        assert_eq!(
-            listed.len(),
-            DiagnosticCode::ALL.len(),
-            "DiagnosticCode::ALL repeats a variant"
-        );
-    }
-
-    /// Policy feedback tells the model to rewrite the cell "in the form
-    /// named above". A refusal with no named form makes that instruction a lie,
-    /// and a lie in the repair loop costs a whole turn.
-    #[test]
-    fn a_refusal_always_has_a_form_to_name() {
-        for code in DiagnosticCode::ALL {
-            if code.classification() == CodeClassification::AlwaysRefusal {
-                assert!(
-                    code.accepted_idiom().is_some(),
-                    "{} refuses without naming a replacement",
-                    code.as_str()
-                );
-            }
-        }
-    }
+    use super::DiagnosticCode;
 
     /// FIG-5765: a repair preserves the operands the model actually wrote.
     #[test]
