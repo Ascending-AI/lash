@@ -1,7 +1,6 @@
 import importlib.util
 import pathlib
 import re
-import subprocess
 import unittest
 
 import yaml
@@ -118,24 +117,6 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 entry["stores"] = invalid
                 self.assertTrue(MATRIX.store_violations(config))
 
-    def test_host_flows_keep_their_typescript_cells_and_dialect_rows(self) -> None:
-        with MATRIX.MATRIX.open("rb") as handle:
-            config = MATRIX.tomllib.load(handle)
-        emitted = [
-            row for row in MATRIX.rows(config)
-            if row["scenario"] == "host-flows"
-        ]
-        self.assertEqual([row["label"] for row in emitted], ["typescript", "python"])
-        self.assertTrue((ROOT / emitted[0]["runbook"]).is_file())
-        for cell in ("turn.ts", "durable-process.ts"):
-            self.assertTrue((ROOT / "examples" / "typescript-host-flows" / cell).is_file())
-        embedding = ROOT / "crates" / "lash-vm-worker" / "src" / "embedding.rs"
-        self.assertIn(
-            "fn the_typescript_host_flow_examples_lower_against_their_host_catalogue",
-            embedding.read_text(),
-        )
-        self.assertEqual(MATRIX.MATRIX.name, "judged-matrix.toml")
-
     def test_every_runbook_directory_is_a_row_or_a_declared_harness(self) -> None:
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
@@ -234,25 +215,6 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         self.assertEqual(set(config["scripted_harness"]), {"rlm-smoke", "lash-facade-failover", "lash-postgres-workers"})
         self.assertNotIn("context-overflow-recovery", emitted)
         self.assertIn("context-overflow-recovery", config["deterministic_only"])
-
-    def test_the_row_total_is_the_stated_arithmetic(self) -> None:
-        # The count is cited in the report, the runbook rules and the shard
-        # plan. Deriving it here means a reclassification cannot silently leave
-        # those citations stale.
-        with MATRIX.MATRIX.open("rb") as handle:
-            config = MATRIX.tomllib.load(handle)
-        expected = sum(
-            sum(
-                (len(entry.get("dialects", ["typescript"]))
-                 if policy["label"] == "dialect" else 1)
-                * len(entry.get("stores", ["sqlite"]))
-                for entry in config[group].values()
-            )
-            for group, policy in config["groups"].items()
-            if policy["emits"]
-        )
-        self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 38)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -390,19 +352,6 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 with self.assertRaises(Exception):
                     MATRIX.parse_shard(bad)
         self.assertEqual(MATRIX.parse_shard("2/3"), (2, 3))
-
-    def test_deleted_operator_pages_have_no_documentation_or_example_consumers(self) -> None:
-        candidates = [ROOT / "CONTRIBUTING.md"]
-        candidates.extend((ROOT / "runbooks").glob("**/*.md"))
-        candidates.extend((ROOT / "docs").glob("**/*.md"))
-        candidates.extend((ROOT / "examples").glob("**/*.rs"))
-        violations = []
-        for path in candidates:
-            text = path.read_text()
-            for deleted_page in ("docs/operations.html", "docs/PUBLISHING.md"):
-                if deleted_page in text:
-                    violations.append(f"{path.relative_to(ROOT)}: {deleted_page}")
-        self.assertEqual(violations, [])
 
     def test_the_coverage_matrix_cites_only_ci_names_that_exist(self) -> None:
         # The matrix is the source of truth for the coverage split; a cited

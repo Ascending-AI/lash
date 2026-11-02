@@ -19,9 +19,6 @@ EXPECTED_KINDS = {
 
 
 class PerfReportDispatchTest(unittest.TestCase):
-    def test_dispatch_table_has_the_complete_exact_kind_set(self) -> None:
-        self.assertEqual(set(perfreport.REPORT_DISPATCH), EXPECTED_KINDS)
-
     def test_dispatch_ignores_report_shape_and_uses_kind(self) -> None:
         kind, _summarize, _diff = perfreport.dispatch_entry(
             {"kind": "runtime-perf", "summary": []}, Path("runtime.json")

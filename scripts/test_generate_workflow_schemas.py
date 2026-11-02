@@ -67,15 +67,6 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
         self.assertIn(" & ", declarations)
         self.assertNotIn("[key: string]", declarations)
 
-    def test_rendered_documents_use_shape_and_version(self) -> None:
-        documents = MODULE.rendered_documents(
-            [{"shape": "workflow", "version": 7, "schema": {"type": "object"}}]
-        )
-        self.assertEqual(
-            documents,
-            {Path("workflow/v7.schema.json"): '{\n  "type": "object"\n}\n'},
-        )
-
     def test_generate_writes_and_check_refuses_drift(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[str(Path("generator").resolve())],

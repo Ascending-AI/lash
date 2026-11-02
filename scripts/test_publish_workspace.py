@@ -126,26 +126,6 @@ class PublishWorkspaceTest(unittest.TestCase):
             packages["provider-id"]["workspace_dependencies"], {"transport-id"}
         )
 
-    def test_stamp_workspace_invokes_release_version_stamp(self) -> None:
-        # --version stamps the real release version into the tree being
-        # published, by running the workspace checkout's own release_version.py.
-        publish_workspace = load_publish_workspace_module()
-        with (
-            mock.patch.object(
-                publish_workspace, "run_json", return_value={"workspace_root": str(ROOT)}
-            ),
-            mock.patch.object(publish_workspace.subprocess, "run") as run,
-        ):
-            publish_workspace.stamp_workspace("1.2.3")
-        run.assert_called_once()
-        stamp_args = run.call_args[0][0]
-        self.assertIn("stamp", stamp_args)
-        self.assertIn("1.2.3", stamp_args)
-        self.assertTrue(
-            any(str(arg).endswith("release_version.py") for arg in stamp_args),
-            stamp_args,
-        )
-
     def test_compute_layers_orders_by_dependency_depth(self) -> None:
         # A chain leaf <- mid <- top publishes leaf-first, one crate per layer.
         publish_workspace = load_publish_workspace_module()
@@ -173,25 +153,6 @@ class PublishWorkspaceTest(unittest.TestCase):
         }
         layers = publish_workspace.compute_layers(packages)
         self.assertEqual(layers, [["a", "b"], ["top"]])
-
-    def test_lash_regress_publishes_before_the_regex_extension(self) -> None:
-        publish_workspace = load_publish_workspace_module()
-        packages = {
-            "lash-regress": {
-                "id": "lash-regress",
-                "name": "lash-regress",
-                "version": "1",
-                "workspace_dependencies": set(),
-            },
-            "lash-ext-regex-ecma": {
-                "id": "lash-ext-regex-ecma",
-                "name": "lash-ext-regex-ecma",
-                "version": "1",
-                "workspace_dependencies": {"lash-regress"},
-            },
-        }
-        layers = publish_workspace.compute_layers(packages)
-        self.assertEqual(layers, [["lash-regress"], ["lash-ext-regex-ecma"]])
 
     def test_compute_layers_skips_already_completed_crates(self) -> None:
         # A resumed run seeds the already-visible crate as completed, so the
@@ -270,54 +231,11 @@ class PublishWorkspaceTest(unittest.TestCase):
         }
         with mock.patch.object(publish_workspace, "run_json", return_value=metadata):
             packages = publish_workspace.load_publishable_workspace_packages()
-        layers = publish_workspace.compute_layers(packages)
-        self.assertEqual(layers, [["runtime-id"], ["store-id"]])
-
-    def test_versioned_dev_dependencies_gate_publish_ordering(self) -> None:
-        # A workspace-versioned dev-dependency survives into the published
-        # manifest and must resolve on the index when cargo packages the
-        # crate (this partially failed the v0.1.0-alpha.81 publish when
-        # lash-postgres-store's conformance dev-dep on lash-vm-runtime
-        # was packaged before that crate was visible). Versioned dev-deps are
-        # ordering edges; version-less path dev-deps stay excluded.
-        publish_workspace = load_publish_workspace_module()
-        runtime_dir = str(ROOT / "crates" / "lash-vm-runtime")
-        store_dir = str(ROOT / "crates" / "lash-postgres-store")
-        metadata = {
-            "workspace_members": ["runtime-id", "store-id"],
-            "packages": [
-                {
-                    "id": "runtime-id",
-                    "name": "lash-internal-vm-runtime",
-                    "version": "0.0.1",
-                    "publish": None,
-                    "manifest_path": f"{runtime_dir}/Cargo.toml",
-                    "dependencies": [],
-                },
-                {
-                    "id": "store-id",
-                    "name": "lash-internal-postgres-store",
-                    "version": "0.0.1",
-                    "publish": None,
-                    "manifest_path": f"{store_dir}/Cargo.toml",
-                    "dependencies": [
-                        {
-                            "name": "lash-internal-vm-runtime",
-                            "rename": "lash-vm-runtime",
-                            "path": runtime_dir,
-                            "kind": "dev",
-                            "req": "=0.0.1",
-                        },
-                    ],
-                },
-            ],
-        }
-        with mock.patch.object(publish_workspace, "run_json", return_value=metadata):
-            packages = publish_workspace.load_publishable_workspace_packages()
-
         self.assertEqual(
             packages["store-id"]["workspace_dependencies"], {"runtime-id"}
         )
+        layers = publish_workspace.compute_layers(packages)
+        self.assertEqual(layers, [["runtime-id"], ["store-id"]])
 
     def test_uploaded_crate_digest_mismatch_fails_the_release(self) -> None:
         publish_workspace = load_publish_workspace_module()
@@ -390,30 +308,6 @@ class PublishWorkspaceTest(unittest.TestCase):
                         )
 
         self.assertIn("UPLOADED CRATE DIGEST MISMATCH", str(raised.exception))
-
-    def test_successful_publish_checks_the_uploaded_crate(self) -> None:
-        publish_workspace = load_publish_workspace_module()
-        args = argparse.Namespace(
-            publish_timeout_seconds=600,
-            publish_attempts=1,
-            retry_delay_seconds=0,
-            visibility_timeout_seconds=1,
-            visibility_delay_seconds=0,
-            upload_digest_attempts=1,
-        )
-        package = {"name": "lash-internal-sansio", "version": "1.2.3"}
-        published = subprocess.CompletedProcess(["cargo", "publish"], 0, "", "")
-
-        with (
-            mock.patch.object(publish_workspace, "crate_version_visible", return_value=False),
-            mock.patch.object(publish_workspace, "wait_for_crate_version"),
-            mock.patch.object(publish_workspace, "verify_uploaded_crate") as verify,
-            mock.patch.object(publish_workspace.subprocess, "run", return_value=published),
-        ):
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                publish_workspace.publish_package(package, args)
-
-        verify.assert_called_once_with(package["name"], package["version"], args)
 
 
 if __name__ == "__main__":

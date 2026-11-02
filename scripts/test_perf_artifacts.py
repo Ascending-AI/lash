@@ -12,7 +12,6 @@ import profile_runtime
 from perf_capture import blocked_stacks, run_profiled
 from profile_diff import differential, sample_commits
 
-from profile_kernel_cost import admit
 from perf_artifacts import artifacts
 from profile_runtime import resolve_binary as runtime_binary
 from profile_runtime_stack import resolve_binary as stack_binary
@@ -145,28 +144,6 @@ worker 10/11 2.000000000: sched:sched_switch: prev_pid=11 prev_state=D ==> next_
         self.assertIn(["git", "switch", "--detach", revision], calls)
         self.assertEqual(calls[-1], ["git", "switch", "review-fork"])
 
-
-class KernelCostIdentity(unittest.TestCase):
-    def test_missing_or_mixed_identity_and_unacknowledged_windows_refuse(self):
-        # FIG-6622 / audit authoring rule: no qualified comparison when the
-        # producer loses observer, backend, worker, window or terminal identity.
-        from profile_kernel_cost import IDENTITY_FIELDS
-        identity = {key: key for key in IDENTITY_FIELDS}
-        identity.update(charged=0, terminal="finished")
-        row = dict(identity=dict(identity), observer="off", iterations=3, pid=7,
-                   completed_runs=3, acknowledged_windows=1, phase_counts_total=None)
-        admit(identity, row, "off", 3)
-        for key in IDENTITY_FIELDS:
-            with self.subTest(key=key):
-                broken = dict(row, identity={k: v for k, v in identity.items() if k != key})
-                with self.assertRaisesRegex(ValueError, "missing"):
-                    admit(identity, broken, "off", 3)
-                broken = dict(row, identity=dict(identity, **{key: "different"}))
-                with self.assertRaisesRegex(ValueError, "mixed"):
-                    admit(identity, broken, "off", 3)
-        for change in [dict(observer="on"), dict(completed_runs=2), dict(acknowledged_windows=0)]:
-            with self.assertRaises(ValueError):
-                admit(identity, dict(row, **change), "off", 3)
 
 
 

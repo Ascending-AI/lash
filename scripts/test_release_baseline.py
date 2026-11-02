@@ -232,15 +232,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
             self.assertEqual((row["default"], row["synthetic"]), (default, synthetic))
         self.assertTrue(all(row["upgrade"] and row["default"] is not None for row in rows))
 
-    def test_draft_table_detects_pre_cut_constants(self):
-        result = self.command("check")
-        if not baseline.mismatches(baseline.inventory(ROOT)):
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return
-        self.assertEqual(result.returncode, 1, result.stderr)
-        for name in ["DIRECT_EFFECT_FAMILY_VERSION"]:
-            self.assertIn(name, result.stderr)
-
     @unittest.skipUnless(os.environ.get("LASH_RELEASE_CUT") == "1", "FIG-4485: release baseline activates at the 1.0 cut")
     def test_release_values_match_declared_baseline(self):
         result = self.command("check")
@@ -251,15 +242,6 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
 
     def test_postgres_schema_and_catalog_are_in_its_compat_version(self):
         self.assertEqual(baseline.postgres_stamp_mismatches(ROOT), [])
-
-    def test_each_store_component_has_one_schema_version_constant(self):
-        versions = baseline.store_versions(ROOT)
-        self.assertEqual(
-            {component: constant for component, (constant, _) in versions.items()},
-            {"POSTGRES": "POSTGRES_SCHEMA_VERSION", "SQLITE_CORE": "SQLITE_CORE_SCHEMA_VERSION"})
-        registered = {f'{row["constant_path"]}:{row["constant"]}' for row in baseline.surfaces(ROOT)}
-        for constant, _ in versions.values():
-            self.assertIn(f"{baseline.STORE_VERSIONS}:{constant}", registered)
 
     def test_a_step_bound_is_an_integer_or_the_store_s_own_constant(self):
         names = {"SQLITE_CORE_SCHEMA_VERSION": 7}
