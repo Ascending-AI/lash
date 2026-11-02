@@ -206,6 +206,12 @@ impl Holding {
     /// Whether an edge names a provisional ledger key, which a projection
     /// rekeys to a durable id.
     pub fn has_provisional_edges(&self, access: &Access<'_>) -> Result<bool, HeapFault> {
+        if let links::Links::Many(index) = &self.links {
+            return Ok(index
+                .hot_rows()
+                .iter()
+                .any(|(_, edge)| provisional(edge.target)));
+        }
         let mut found = false;
         self.each_edge(access, &mut |edge| {
             found |= provisional(edge.target);
@@ -220,6 +226,43 @@ impl Holding {
         rekeyed: &std::collections::HashMap<EntityId, EntityId>,
         access: &Access<'_>,
     ) -> Result<Option<Self>, HeapFault> {
+        if let links::Links::Many(index) = &self.links {
+            let mut moves = Vec::new();
+            for (_, edge) in index.hot_rows() {
+                if let Identity::Object(entity) = edge.target
+                    && let Some(durable) = rekeyed.get(&entity)
+                {
+                    moves.push((
+                        edge.target,
+                        Edge {
+                            target: Identity::Object(*durable),
+                            count: edge.count,
+                        },
+                    ));
+                }
+            }
+            if moves.is_empty() {
+                return Ok(None);
+            }
+            let mut next = index.as_ref().clone();
+            for (from, _) in &moves {
+                next.remove(&identity_key(*from), access)?;
+            }
+            for (_, mut edge) in moves {
+                let key = identity_key(edge.target);
+                if let Some(previous) = next.get(&key, access)? {
+                    edge.count = edge
+                        .count
+                        .checked_add(previous.count)
+                        .ok_or_else(|| invalid("edge count overflow"))?;
+                }
+                next.write(key, edge, access)?;
+            }
+            return Ok(Some(Self {
+                bytes: self.bytes,
+                links: links::Links::Many(Rc::new(next)),
+            }));
+        }
         let mut moved = false;
         let mut batch = links::EdgeBatch::default();
         self.each_edge(access, &mut |edge| {
