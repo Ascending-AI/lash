@@ -956,7 +956,6 @@ body {
 function ts.strict_equals(left: Any, right: Any) -> Bool
 kernel 1
 charge 8
-native
 body {
   let a = invoke ts.receiver(left)
   let b = invoke ts.receiver(right)

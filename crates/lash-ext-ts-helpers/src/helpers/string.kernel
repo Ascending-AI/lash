@@ -848,7 +848,6 @@ function ts.string.fromCharCode(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(args), deep(result))
-native
 body {
   let units = []
   for value in args metered 2 {

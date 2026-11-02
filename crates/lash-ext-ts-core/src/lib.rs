@@ -135,8 +135,6 @@ natives!(name, kernel;
             preserve: name.ends_with("URI"),
         }),
         "ts.string.toUpperCase" => Arc::new(strings::Uppercase),
-        "ts.string.fromCharCode" => Arc::new(strings::FromCharCode),
-        "ts.strict_equals" => Arc::new(strings::StrictEquals),
         "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
         "ts.sub" => Arc::new(Subtract {
