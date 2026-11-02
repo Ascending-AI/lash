@@ -829,7 +829,7 @@ fn persistent_assignment_publication() {
     use crate::compile::room::{self, Phase, Point, publication::*};
     use lash_kernel_doc::{TaskId, Value};
     use lash_kernel_state::kernel_internals::logical::{
-        JournalEvent, Owner as Root, Program, PublicationValue, RootValue,
+        Owner as Root, PublicationValue, RootValue,
     };
     use lash_kernel_value::{Name, sites::Site};
     use std::sync::Arc;
@@ -987,84 +987,68 @@ fn persistent_assignment_publication() {
                 start,
             )
             .unwrap();
-        let make = || {
-            Program::new(vec![JournalEvent {
-                inputs: if replacing {
-                    vec![operand, session]
-                } else {
-                    vec![operand]
-                },
-                outputs: vec![(session, PublicationValue::Existing(operand))],
-                ..Default::default()
-            }])
-        };
+        let event = ExactEvent::compile(&source, interval, Successor::Normal).unwrap();
         let allowance = crate::admission::Allowance {
             occurrences: vec![],
             before: 0,
-            units: 1,
+            units: 0,
             close: None,
-            strict: true,
-            depth: 1,
+            strict: false,
+            depth: 0,
             safe_point: 7,
         };
-        let mut charged = 0;
+        let mut charged = 7;
         let mut counters = crate::machine::tasks::Occurrences::for_source_law(0);
         let facts = resources(&mut charged, &mut counters)
             .facts(&allowance)
             .unwrap();
-        let evaluated = frontier
-            .evaluate_interval(
-                interval.clone(),
-                &mut Execution(replacing),
-                &ledger,
-                &arena,
-                heap,
-                make(),
-                next.clone(),
-                allowance.clone(),
-                facts,
-            )
-            .unwrap_or_else(|error| {
-                panic!("persistent session transfer replacing={replacing}: {error:?}")
-            });
-        let accepted = evaluated
-            .admit_interval(
+        let bound = event
+            .bind(
                 &frontier,
                 &ledger,
                 &arena,
+                heap,
+                &mut Execution(replacing),
+                ExactRoots {
+                    inputs: if replacing {
+                        vec![operand, session]
+                    } else {
+                        vec![operand]
+                    },
+                    outputs: vec![(session, PublicationValue::Existing(operand))],
+                    ..Default::default()
+                },
+                next,
+                allowance,
+                facts,
+            )
+            .unwrap_or_else(|error| {
+                panic!("persistent exact transfer replacing={replacing}: {error:?}")
+            });
+        let prepared = bound
+            .prepare(&frontier, &ledger, arena.registration().unwrap(), heap)
+            .unwrap();
+        let accepted = prepared
+            .admit(
+                &frontier,
+                &ledger,
                 resources(&mut charged, &mut counters),
-                &allowance,
                 before,
             )
             .unwrap()
             .unwrap();
-        let prepared = accepted
-            .prepare_publication(
-                &frontier,
-                &ledger,
-                arena.registration().unwrap(),
-                heap,
-                make(),
-                interval.exit(),
-                &next,
-            )
-            .unwrap();
         drop(ledger);
-        let committed = prepared
-            .publish(
+        accepted
+            .publish_event(
                 &mut frontier,
                 &mut ledger_store.borrow_mut(),
-                |_, members| assert!(members.is_empty(), "session write is not a cell edit"),
+                |_, members| {
+                    assert!(members.is_empty(), "session write is not a cell edit");
+                },
             )
             .unwrap();
-        committed
-            .materializations
-            .publish(&mut ledger_store.borrow_mut(), |entities| {
-                assert!(entities.is_empty())
-            })
-            .unwrap();
         let ledger = ledger_store.borrow();
-        assert_eq!(charged, 1);
+        assert_eq!(charged, 7, "the stream already paid the session close");
         assert_eq!(
             ledger.balance().unwrap().total().unwrap(),
             before - if replacing { 17 } else { 0 }
@@ -1078,6 +1062,23 @@ fn persistent_assignment_publication() {
             17
         );
         assert!(ledger.holding(operand, heap.pages()).unwrap().is_none());
+    }
+    let source = "main { let saved = [7] set saved = [saved, saved] for ignored in [0, 1] { set saved = saved } let active = true while active { set saved = saved set active = false } return saved }";
+    for record in [false, true] {
+        for slice in [3, u64::MAX] {
+            super::super::layout::packet_modes(
+                source,
+                super::super::embedder::ROOMY,
+                slice,
+                slice != u64::MAX,
+                record,
+            );
+            let sessions = crate::machine::islands::witness::session_publications();
+            assert!(
+                sessions >= 2,
+                "both persistent writes must use exact source boundaries: {sessions}, tape={record}, slice={slice}"
+            );
+        }
     }
 }
 

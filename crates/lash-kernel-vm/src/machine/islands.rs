@@ -51,7 +51,7 @@ mod heap;
 mod native;
 use execute::source;
 #[cfg(test)]
-pub(crate) use execute::take_certified_statements;
+pub(crate) use execute::{take_certified_statements, take_composed_statements};
 mod observing;
 mod scheduling;
 use observing::{Projection, StatementFact, Watching};

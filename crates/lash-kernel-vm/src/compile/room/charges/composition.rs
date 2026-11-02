@@ -184,3 +184,79 @@ impl<'a> crate::admission::SourceResources<'a> {
         self.admit_interval(&facts, &need, request)
     }
 }
+
+/// A complete statement may contain one verified call and its original caller
+/// continuation. Both source schedules retain their canonical close identities.
+pub(crate) enum StatementDebt<'a> {
+    Scalar(ChargeDebt<'a>),
+    Call {
+        call: ComposedDebt<'a>,
+        suffix: ChargeDebt<'a>,
+    },
+}
+impl StatementDebt<'_> {
+    pub(crate) fn units(&self) -> Option<u64> {
+        match self {
+            Self::Scalar(debt) => Some(debt.units()),
+            Self::Call { call, suffix } => call.units().checked_add(suffix.units()),
+        }
+    }
+    pub(crate) fn matches(
+        &self,
+        source: &Arc<Source>,
+        first: &Point,
+        through: &Point,
+        call_point: Option<&Point>,
+        callee: Option<&Arc<Source>>,
+    ) -> bool {
+        match self {
+            Self::Scalar(debt) => {
+                call_point.is_none() && callee.is_none() && debt.matches(source, first, through)
+            }
+            Self::Call { call, suffix } => {
+                call_point.is_some_and(|at| {
+                    call.caller.matches(source, first, at)
+                        && source
+                            .next_after_commit(&at.site)
+                            .ok()
+                            .is_some_and(|next| suffix.matches(source, &next, through))
+                }) && callee.is_some_and(|source| Arc::ptr_eq(source, &call.program.callee))
+            }
+        }
+    }
+    pub(crate) fn record(&self, tape: &crate::observe::ChargeTape) {
+        match self {
+            Self::Scalar(debt) => debt.record(tape),
+            Self::Call { call, suffix } => {
+                call.record(tape);
+                suffix.record(tape);
+            }
+        }
+    }
+}
+impl<'a> crate::admission::SourceResources<'a> {
+    pub(crate) fn admit_statement<C>(
+        self,
+        debt: &StatementDebt<'_>,
+        occurrences: &[usize],
+        depth: u64,
+        request: C,
+    ) -> Result<Option<crate::admission::SourceAccepted<'a, C>>, doc::heap::HeapFault> {
+        let Some(units) = debt.units() else {
+            return Ok(None);
+        };
+        let need = crate::admission::Allowance {
+            occurrences: occurrences.to_vec(),
+            before: 0,
+            units,
+            close: None,
+            strict: true,
+            depth,
+            safe_point: self.safe_point,
+        };
+        let Some(facts) = self.facts(&need) else {
+            return Ok(None);
+        };
+        self.admit_interval(&facts, &need, request)
+    }
+}

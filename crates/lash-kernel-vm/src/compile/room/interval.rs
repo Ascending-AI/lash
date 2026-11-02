@@ -1,6 +1,7 @@
 //! A selected source path compiled once into indexed logical algebra. Selection
 //! validation walks source control only on a cache miss, never per execution.
 use super::*;
+mod continuation;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Selection {
@@ -10,6 +11,7 @@ pub(crate) enum Selection {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct Key {
     event: bool,
+    call: bool,
     join: Option<Site>,
     at: Site,
     bounds: Option<(Point, Point)>,
@@ -360,6 +362,7 @@ impl Source {
         .collect();
         let key = Key {
             event: true,
+            call: false,
             join: None,
             at: at.site.clone(),
             bounds: Some((at.clone(), end)),
@@ -497,6 +500,7 @@ impl Source {
         }
         let key = Key {
             event: false,
+            call: false,
             join: None,
             at: from.site.clone(),
             bounds: Some((from.clone(), through.clone())),
@@ -649,6 +653,7 @@ impl Source {
         .into();
         let key = from.map(|from| Key {
             event: true,
+            call: false,
             join: Some(from.clone()),
             at: at.site.clone(),
             bounds: None,
@@ -732,6 +737,7 @@ impl Source {
         }
         let key = Key {
             event: false,
+            call: false,
             join: None,
             at: at.clone(),
             bounds: None,

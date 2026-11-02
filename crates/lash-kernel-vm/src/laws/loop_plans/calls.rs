@@ -30,7 +30,10 @@ pub(super) fn pure_calls() {
                 "other(a: Any, b: Any)",
                 "let product = flat.rem(b, a) return product"
             ),
-            definition("caller()", "return flat.add(5, invoke multiply(3, 4))")
+            definition(
+                "caller()",
+                "let answer = flat.add(5, invoke multiply(3, 4)) return answer"
+            )
         );
         let run = Embedder::with(
             &text,
@@ -61,8 +64,8 @@ pub(super) fn pure_calls() {
             .find(|plan| {
                 let source = &exe.code(plan.code).source_room;
                 source.params.is_empty()
-                    && source.body.len() == 1
-                    && matches!(source.body[0], lash_kernel_doc::Stmt::Return { .. })
+                    && source.body.len() == 2
+                    && matches!(source.body[0], lash_kernel_doc::Stmt::Let { .. })
             })
             .unwrap();
         let statement = caller.body.statements[0].id;
@@ -216,6 +219,129 @@ pub(super) fn pure_calls() {
         assert_eq!(bound.peak(), Cost::FRAME + 6 * (Cost::REFERENCE + 1));
         assert_eq!(bound.delta(), 2 * i128::from(Cost::REFERENCE + 1));
         assert_eq!(bound.depth(), 1);
+        let mut parent = call.at().site.clone();
+        parent.path.pop();
+        let native_at = Point {
+            site: parent,
+            phase: Phase::Commit,
+        };
+        let through = Point {
+            site: stmt.site.clone(),
+            phase: Phase::Commit,
+        };
+        let route = [&native_at, &through].map(|at| Selection::Event {
+            at: at.clone(),
+            exit: ExitKind::Normal,
+        });
+        let suffix = source
+            .compile_scalar_region(call.compile_continuation(&exe, &through, &route).unwrap())
+            .unwrap();
+        let mut suffix_values = vec![Value::Null; suffix.fact_count()];
+        let mut saved = None;
+        for (slot, fact) in suffix.entries() {
+            let value = bound
+                .continuation_values()
+                .find_map(|(candidate, value)| (candidate == slot).then_some(value))
+                .unwrap();
+            suffix_values[fact.index()] = value;
+            if value.same(&Value::Int(5)) {
+                saved = Some(fact);
+            }
+        }
+        for (_, fact) in suffix.results() {
+            suffix_values[fact.index()] = Value::Int(8);
+        }
+        let native_id = suffix
+            .interval()
+            .events()
+            .find(|event| event.point == native_at)
+            .unwrap()
+            .peak
+            .measures()
+            .find_map(|measure| match measure {
+                crate::compile::room::Measure::CallPeak {
+                    callee: crate::compile::room::CallSource::Native(id),
+                    ..
+                } => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let lib = exe.library_lib(&native_id).unwrap();
+        let crate::compile::LibRun::Native { native, .. } = &exe.lib(lib).run else {
+            panic!("native")
+        };
+        let contract = native
+            .resource_contract(lash_kernel_doc::Args::new(
+                &[Value::Int(5), Value::Int(3)],
+                arena.objects(),
+                &arena.semantics(),
+            ))
+            .unwrap()
+            .unwrap();
+        let native_rooms = [crate::compile::room::CheckedRoom::native(
+            exe.lib(lib).specialization.function,
+            &contract,
+        )
+        .unwrap()];
+        let mut wrong_values = suffix_values.clone();
+        wrong_values[saved.unwrap().index()] = Value::Int(6);
+        let wrong = call
+            .bind(
+                &exe,
+                call.callee(),
+                &ledger,
+                &mut arena,
+                heap,
+                &bound_caller,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            suffix
+                .continue_call(
+                    wrong,
+                    &ledger,
+                    &mut arena,
+                    heap,
+                    &invocation,
+                    &activation,
+                    ScalarRegionValues {
+                        values: &wrong_values,
+                        calls: &native_rooms
+                    }
+                )
+                .unwrap()
+                .is_none(),
+            "a same-price restored caller operand must authenticate against the saved call role"
+        );
+        let actual = call
+            .bind(
+                &exe,
+                call.callee(),
+                &ledger,
+                &mut arena,
+                heap,
+                &bound_caller,
+            )
+            .unwrap()
+            .unwrap();
+        let continued = suffix
+            .continue_call(
+                actual,
+                &ledger,
+                &mut arena,
+                heap,
+                &invocation,
+                &activation,
+                ScalarRegionValues {
+                    values: &suffix_values,
+                    calls: &native_rooms,
+                },
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(continued.peak(), 166);
+        drop(continued);
         let debt = bound.debt().unwrap();
         // Caller statement plus five expression nodes, then the two body
         // statements and four expression nodes, then 3+2+2+2 native units.

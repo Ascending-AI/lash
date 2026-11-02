@@ -1,4 +1,5 @@
 //! Call-owned frame entry preserves source operands and continuations.
+mod composed;
 
 const SOURCE_SHARED_ENTRY: &str = "let makers = (call maker(3, 9), call maker(4)) let first = makers[0] let second = makers[1] return (apply first(), apply second())";
 use super::*;
@@ -84,18 +85,18 @@ fn observe_source_or_register(
     cold_slices: bool,
     mode: Mode,
 ) -> Observed {
-    struct Context<'a>(&'a str, Layout, u64, Bounds, bool);
+    struct Context<'a>(&'a str, Layout, u64, Bounds, bool, Mode);
     impl Drop for Context<'_> {
         fn drop(&mut self) {
             if std::thread::panicking() {
                 eprintln!(
-                    "call observation: source={}, layout={:?}, slice={}, bounds={:?}, taped={}",
-                    self.0, self.1, self.2, self.3, self.4
+                    "call observation: source={}, layout={:?}, slice={}, bounds={:?}, taped={}, mode={:?}",
+                    self.0, self.1, self.2, self.3, self.4, self.5
                 );
             }
         }
     }
-    let _context = Context(source, layout, slice, bounds, taped);
+    let _context = Context(source, layout, slice, bounds, taped, mode);
     crate::machine::islands::witness::begin();
     let prepared = CALL_LIBRARIES.with_borrow_mut(|libraries| {
         libraries
@@ -843,6 +844,7 @@ fn direct_call_entry_agrees() {
         );
         format!("definition {}\n", serde_json::to_string(&function).unwrap())
     };
+    composed::entry(&definition);
     let definitions = format!(
         "{}{}{}{}{}",
         definition("literal(x: Any)", "return 1"),

@@ -1341,7 +1341,7 @@ fn capture_scopes_agree() {
     }
 }
 
-fn packet_modes(
+pub(super) fn packet_modes(
     source: &str,
     bounds: Bounds,
     slice: u64,

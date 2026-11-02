@@ -2,8 +2,8 @@
 //! interior operand lifetimes have no runtime journal or owner-map entries.
 use crate::compile::room::{
     self, ExitKind, Phase, Point, Selection,
-    charges::ChargeProgram,
-    placement::{BindingPlacement, DenseActivation},
+    charges::{ChargeProgram, composition::StatementDebt},
+    placement::BindingPlacement,
     publication::CompiledExit,
     region::{ScalarRegion, ScalarRegionValues},
 };
@@ -23,6 +23,14 @@ use std::sync::Arc;
 #[path = "resource/expression.rs"]
 mod expression;
 use expression::{Expression, NativeValues};
+#[path = "resource/call.rs"]
+mod call;
+use call::CallPlan;
+
+enum Evaluation {
+    Scalar(Expression),
+    Call(Box<CallPlan>),
+}
 
 pub(crate) struct CertifiedStatement {
     executable: u64,
@@ -31,20 +39,18 @@ pub(crate) struct CertifiedStatement {
     pub(in crate::machine::islands) source_pc: u32,
     pub(in crate::machine::islands) target: u32,
     placement: Arc<BindingPlacement>,
-    expression: Expression,
+    evaluation: Evaluation,
     through: Point,
     region: ScalarRegion,
     pub(in crate::machine::islands) exit: CompiledExit,
     pub(in crate::machine::islands) charges: ChargeProgram,
 }
 
-pub(in crate::machine::islands) struct EvaluatedStatement<'a, 'v> {
-    pub(in crate::machine::islands) activation: DenseActivation<'v>,
-    pub(in crate::machine::islands) values: Vec<Value>,
+pub(in crate::machine::islands) struct EvaluatedStatement<'a> {
     pub(in crate::machine::islands) result: Value,
-    calls: Vec<room::CheckedRoom>,
-    formulas: Vec<NativeValues>,
-    pub(in crate::machine::islands) certificate: &'a CertifiedStatement,
+    pub(in crate::machine::islands) bound: room::region::BoundScalarRegion<'a>,
+    pub(in crate::machine::islands) debt: StatementDebt<'a>,
+    pub(in crate::machine::islands) composed: bool,
 }
 
 impl CertifiedStatement {
@@ -73,26 +79,35 @@ impl CertifiedStatement {
         if !parsed.spent() {
             return None;
         }
-        let mut expression = Expression::compile(exe, stream, &placement, &value)?;
-        let read = expression.first().clone();
         let source = placement.source();
         let through = Point {
             site: statement.site.clone(),
             phase: Phase::Commit,
         };
-        let route: Vec<_> = expression
-            .points()
-            .chain(std::iter::once(&through))
-            .map(|at| Selection::Event {
-                at: at.clone(),
-                exit: ExitKind::Normal,
-            })
-            .collect();
-        let interval = source
-            .compile_between(&read, &through, &route, route.len())
-            .ok()?;
-        let region = source.compile_scalar_region(interval).ok()?;
-        expression.bind_facts(exe, &region)?;
+        let (evaluation, region, charges, exit) = if let Some(mut expression) =
+            Expression::compile(exe, stream, &placement, &value)
+        {
+            let route: Vec<_> = expression
+                .points()
+                .chain(std::iter::once(&through))
+                .map(|at| Selection::Event {
+                    at: at.clone(),
+                    exit: ExitKind::Normal,
+                })
+                .collect();
+            let interval = source
+                .compile_between(expression.first(), &through, &route, route.len())
+                .ok()?;
+            let region = source.compile_scalar_region(interval).ok()?;
+            expression.bind_facts(exe, &region)?;
+            let exit = CompiledExit::scalar(exe, &region).ok()?;
+            let charges = ChargeProgram::compile(exe, placement.code(), id, statement.ops).ok()?;
+            (Evaluation::Scalar(expression), region, charges, exit)
+        } else {
+            let (call, region, charges, exit) =
+                CallPlan::compile(exe, &placement, id, &value, &through)?;
+            (Evaluation::Call(Box::new(call)), region, charges, exit)
+        };
         let output = region
             .interval()
             .events()
@@ -126,8 +141,6 @@ impl CertifiedStatement {
         if placement.physical(slot) != Some(target) {
             return None;
         }
-        let exit = CompiledExit::scalar(exe, &region).ok()?;
-        let charges = ChargeProgram::compile(exe, placement.code(), id, statement.ops).ok()?;
         let certificate = Self {
             executable: exe.local(),
             id,
@@ -135,7 +148,7 @@ impl CertifiedStatement {
             source_pc: statement.ops.start,
             target,
             placement,
-            expression,
+            evaluation,
             through,
             region,
             exit,
@@ -161,18 +174,21 @@ impl CertifiedStatement {
         {
             return Err(room::Refused::Source);
         }
-        self.expression.verify(stream, &self.placement)
+        match &self.evaluation {
+            Evaluation::Scalar(expression) => expression.verify(stream, &self.placement),
+            Evaluation::Call(call) => call.verify(stream, &self.placement),
+        }
     }
 
-    pub(in crate::machine::islands) fn evaluate<'a, 'v>(
+    pub(in crate::machine::islands) fn evaluate<'a>(
         &'a self,
         exe: &Executable,
-        (code, slots): (compile::CodeId, &'v [SlotState]),
+        (code, slots): (compile::CodeId, &[SlotState]),
         invocation: &Invocation,
         ledger: &Ledger,
         heap: &PagedHeap,
         arena: &mut Arena,
-    ) -> Result<Option<EvaluatedStatement<'a, 'v>>, HeapFault> {
+    ) -> Result<Option<EvaluatedStatement<'a>>, HeapFault> {
         if exe.local() != self.executable {
             return Ok(None);
         }
@@ -182,68 +198,85 @@ impl CertifiedStatement {
         else {
             return Ok(None);
         };
-        let mut values = vec![Value::Null; self.region.fact_count()];
-        for (slot, fact) in self.region.entries() {
-            let Some(value) = activation.value(slot).filter(|value| scalar(*value)) else {
-                return Ok(None);
-            };
-            values[fact.index()] = value;
+        if let Evaluation::Call(call) = &self.evaluation {
+            return call.evaluate(
+                exe,
+                &activation,
+                slots,
+                invocation,
+                ledger,
+                arena,
+                heap,
+                &self.region,
+                &self.charges,
+            );
         }
-        let Some(evaluated) = self
-            .expression
-            .evaluate(exe, slots, arena, heap, &mut values)?
-        else {
+        let Evaluation::Scalar(expression) = &self.evaluation else {
+            unreachable!()
+        };
+        let mut values = entry_values(&self.region, &activation)?;
+        if values.len() != self.region.fact_count() {
+            return Ok(None);
+        }
+        let Some(evaluated) = expression.evaluate(exe, slots, arena, heap, &mut values)? else {
             return Ok(None);
         };
-        Ok(Some(EvaluatedStatement {
-            activation,
-            values,
-            result: evaluated.result,
-            calls: evaluated.calls,
-            formulas: evaluated.formulas,
-            certificate: self,
-        }))
-    }
-}
-
-impl<'a> EvaluatedStatement<'a, '_> {
-    pub(in crate::machine::islands) fn debt(&self) -> Option<room::charges::ChargeDebt<'a>> {
-        let values = self
-            .certificate
-            .charges
-            .formulas()
-            .map(|(at, function, count)| {
-                let native = self
-                    .formulas
-                    .iter()
-                    .find(|native| native.at == *at && native.function == function)?;
-                (native.arguments.len() == count).then_some(room::charges::FormulaValues {
-                    arguments: &native.arguments,
-                    result: native.result,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?;
-        self.certificate.charges.bind(&values)
-    }
-    pub(in crate::machine::islands) fn bind(
-        &self,
-        invocation: &Invocation,
-        ledger: &Ledger,
-        arena: &mut Arena,
-        heap: &PagedHeap,
-    ) -> Result<Option<room::region::BoundScalarRegion<'a>>, HeapFault> {
-        self.certificate.region.bind_activation(
+        let Some(debt) = bind_debt(&self.charges, &evaluated.formulas) else {
+            return Ok(None);
+        };
+        let Some(bound) = self.region.bind_activation(
             ledger,
             arena,
             heap,
             invocation,
-            &self.activation,
+            &activation,
             ScalarRegionValues {
-                values: &self.values,
-                calls: &self.calls,
+                values: &values,
+                calls: &evaluated.calls,
             },
-        )
+        )?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(EvaluatedStatement {
+            result: evaluated.result,
+            bound,
+            debt: StatementDebt::Scalar(debt),
+            composed: false,
+        }))
     }
+}
+
+fn entry_values(
+    region: &ScalarRegion,
+    activation: &room::placement::DenseActivation,
+) -> Result<Vec<Value>, HeapFault> {
+    let mut values = vec![Value::Null; region.fact_count()];
+    for (slot, fact) in region.entries() {
+        let Some(value) = activation.value(slot).filter(|value| scalar(*value)) else {
+            return Ok(vec![]);
+        };
+        values[fact.index()] = value;
+    }
+    Ok(values)
+}
+fn bind_debt<'a>(
+    charges: &'a ChargeProgram,
+    formulas: &[NativeValues],
+) -> Option<room::charges::ChargeDebt<'a>> {
+    let values = charges
+        .formulas()
+        .map(|(at, function, count)| {
+            let native = formulas
+                .iter()
+                .find(|native| native.at == *at && native.function == function)?;
+            (native.arguments.len() == count).then_some(room::charges::FormulaValues {
+                arguments: &native.arguments,
+                result: native.result,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    charges.bind(&values)
 }
 
 fn scalar(value: Value) -> bool {

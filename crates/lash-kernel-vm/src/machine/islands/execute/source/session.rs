@@ -1,11 +1,12 @@
 //! Session writes transfer the actual RHS occurrence into its durable owner.
 use super::*;
-use crate::admission::Allowance;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program, PublicationValue as PV};
+use crate::admission::{Allowance, SourceResources};
+use crate::machine::source_publication::{Admission, Context};
+use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
-    publication::{Occurrence, Position as SourcePosition},
+    publication::{ExactRoots, Occurrence, Position as SourcePosition, Successor},
 };
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -15,7 +16,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         site: &sites::Publish,
         value: Value,
     ) -> Result<Option<bool>, HeapFault> {
-        if self.tape.is_some() || self.projection().is_some() {
+        if self.projection().is_some() {
             return Ok(None);
         }
         let Some(binding) = self.stream.names.get(site.name as usize).cloned() else {
@@ -65,7 +66,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(None);
         };
-        self.source_bindings(frame)?;
         let activation = frame
             .state
             .source
@@ -177,13 +177,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             depth: 0,
             safe_point: self.charged,
         };
-        let make = || {
-            Program::new(vec![JournalEvent {
-                inputs: inputs.clone(),
-                outputs: vec![(output, PV::Existing(input))],
-                ..Default::default()
-            }])
-        };
         drop(ledger);
         let storage = self.session.prepare_write(&binding, value)?;
         if !self
@@ -199,9 +192,37 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     resource: doc::heap::HostResource::StagingBytes,
                 })?;
         }
-        let published = self.publish_source_prepared(
-            frame.state.callee,
-            activation,
+        let document = self
+            .exe
+            .instances
+            .get(&frame.state.callee.link)
+            .ok_or_else(|| malformed("session source has no defining document"))?;
+        let kernel = doc::KernelVersion::of(document.kernel())
+            .ok_or_else(|| malformed("session source kernel is unsupported"))?;
+        let safe_point = self.charged;
+        let published = Context {
+            admission: Admission::Envelope(self.memory_bound),
+            source,
+            link: frame.state.callee.link,
+            kernel,
+            logical: &self.logical,
+            heap: self.heap,
+            arena: self.arena,
+            session: self.session,
+            resources: SourceResources {
+                charged: &mut self.charged,
+                counters: self.counters,
+                bound: self.bound,
+                slice: self.slice_end,
+                depth: (self.base + u64::from(self.depth)).saturating_sub(1),
+                limit: self.call_depth,
+                safe_point,
+            },
+            logical_memory: self.logical_memory,
+        }
+        .publish_event(
+            &activation.invocation,
+            &mut activation.frontier,
             publication::Prefix {
                 interval,
                 facts,
@@ -209,13 +230,22 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 next,
                 allowance,
             },
-            make,
-            publication::Reserve(|_: &mut Arena| Ok(Some(storage))),
+            ExactRoots {
+                inputs,
+                outputs: vec![(output, PV::Existing(input))],
+                ..Default::default()
+            },
+            Successor::Normal,
+            storage,
             |_, session, edits, storage| {
                 debug_assert!(edits.is_empty());
                 storage.publish(session);
             },
-        )?;
+        )
+        .map_err(|halt| match halt {
+            crate::machine::Halt::Heap(error) => *error,
+            _ => malformed("an accepted session envelope ended the run"),
+        })?;
         if published {
             match self
                 .scratch

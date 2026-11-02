@@ -18,7 +18,7 @@ mod call;
 mod dispatch;
 mod resource;
 #[cfg(test)]
-pub(crate) use resource::take_certified_statements;
+pub(crate) use resource::{take_certified_statements, take_composed_statements};
 mod merge;
 mod numeric;
 mod pending;

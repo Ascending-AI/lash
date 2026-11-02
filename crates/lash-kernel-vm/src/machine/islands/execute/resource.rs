@@ -6,10 +6,15 @@ use crate::admission::SourceResources;
 use crate::compile::room::publication::Occurrence;
 
 #[cfg(test)]
-thread_local! { static CERTIFIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+thread_local! { static COMPOSED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; static CERTIFIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
 pub(crate) fn take_certified_statements() -> u64 {
     CERTIFIED.with(|count| count.replace(0))
+}
+
+#[cfg(test)]
+pub(crate) fn take_composed_statements() -> u64 {
+    COMPOSED.with(|count| count.replace(0))
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
@@ -61,17 +66,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         else {
             return Err(miss(self));
         };
-        let result = evaluated.result;
-        let Some(debt) = evaluated.debt() else {
-            return Err(miss(self));
-        };
-        let Some(bound) = evaluated
-            .bind(&invocation, &ledger, self.arena, self.heap)
-            .map_err(|error| self.halt(error.into()))?
-        else {
-            return Err(miss(self));
-        };
-        drop(evaluated);
+        let super::super::compiled::resource::EvaluatedStatement {
+            result,
+            bound,
+            debt,
+            composed,
+        } = evaluated;
         let callee = frame.state.callee;
         let source = &self.exe.code(callee.plan.code).source_room;
         let document = self
@@ -167,6 +167,12 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             debt.record(tape);
         }
         witnessed!(Scalar, Commit);
+        #[cfg(test)]
+        if composed {
+            COMPOSED.with(|count| count.set(count.get().saturating_add(1)));
+        }
+        #[cfg(not(test))]
+        let _ = composed;
         #[cfg(test)]
         CERTIFIED.with(|count| count.set(count.get().saturating_add(1)));
         #[cfg(any(test, feature = "perf-witness"))]

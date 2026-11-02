@@ -1,7 +1,7 @@
 //! Compiled exits settle roots, source continuation and shared charges once.
 use super::*;
 use crate::compile::room::{
-    charges::ChargeDebt,
+    charges::composition::StatementDebt,
     region::{BoundScalarRegion, ScalarRegion},
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
@@ -16,6 +16,7 @@ pub(crate) struct CompiledExit {
     unpaid: Point,
     recovery: [u8; 32],
     depth: u64,
+    call: Option<Point>,
 }
 
 impl CompiledExit {
@@ -57,7 +58,24 @@ impl CompiledExit {
             unpaid,
             recovery: logical_digest(&encoding.into_bytes()),
             depth,
+            call: None,
         })
+    }
+    pub(crate) fn composed(
+        exe: &crate::compile::Executable,
+        region: &ScalarRegion,
+        first: Point,
+        call: &super::super::region::calls::VerifiedCall,
+    ) -> Result<Self, Refused> {
+        let mut exit = Self::scalar(exe, region)?;
+        if exit.interval.events().next().map(|event| &event.point)
+            != exit.source.next_after_commit(&call.at().site).ok().as_ref()
+        {
+            return Err(Refused::Source);
+        }
+        exit.first = first;
+        exit.call = Some(call.at().clone());
+        Ok(exit)
     }
     pub(crate) fn start(&self, occurrence: Occurrence) -> Position {
         Position {
@@ -86,7 +104,7 @@ impl Frontier {
         &self,
         bound: BoundScalarRegion<'_>,
         exit: &CompiledExit,
-        debt: &ChargeDebt<'_>,
+        debt: &StatementDebt<'_>,
         resources: SourceResources<'r>,
         ledger: &Ledger,
         registration: Registration<'a>,
@@ -98,7 +116,13 @@ impl Frontier {
             || !Arc::ptr_eq(bound.region().interval(), &exit.interval)
             || self.position.unpaid.as_ref() != Some(&exit.first)
             || self.position.occurrence.invocation != bound.invocation().id()
-            || !debt.matches(&exit.source, &exit.first, &exit.through)
+            || !debt.matches(
+                &exit.source,
+                &exit.first,
+                &exit.through,
+                exit.call.as_ref(),
+                bound.composed_source(),
+            )
         {
             return Ok(None);
         }
@@ -108,18 +132,18 @@ impl Frontier {
             recovery: exit.recovery,
             occurrence: self.position.occurrence.clone(),
         };
+        let occurrences = bound.occurrences().to_vec();
+        let depth = bound.depth().max(exit.depth);
         let Some(transaction) = bound.prepare_boundary(ledger, registration, heap)? else {
             return Ok(None);
         };
         if transaction.peak() > memory_bound {
             return Ok(None);
         }
-        let safe_point = resources.safe_point;
-        resources.admit_region(
+        resources.admit_statement(
             debt,
-            &[],
-            exit.depth,
-            safe_point,
+            &occurrences,
+            depth,
             PreparedRegion {
                 frontier: std::rc::Rc::clone(&self.identity),
                 revision: self.revision,

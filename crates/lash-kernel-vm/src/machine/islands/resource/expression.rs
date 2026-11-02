@@ -5,6 +5,7 @@ use crate::compile::{LibId, LibRun};
 use room::region::{ScalarFact, ScalarRegion};
 
 enum Operation {
+    Guest,
     Literal(Value),
     Binding(u32),
     Native { lib: LibId, inputs: Box<[usize]> },
@@ -21,6 +22,8 @@ struct Result {
 
 pub(super) struct Expression {
     results: Box<[Result]>,
+    registers: Arc<[u32]>,
+    offset: usize,
 }
 
 pub(super) struct NativeValues {
@@ -32,6 +35,7 @@ pub(super) struct NativeValues {
 
 pub(super) struct Evaluated {
     pub(super) result: Value,
+    pub(super) values: Vec<Value>,
     pub(super) calls: Vec<room::CheckedRoom>,
     pub(super) formulas: Vec<NativeValues>,
 }
@@ -43,17 +47,27 @@ impl Expression {
         placement: &BindingPlacement,
         expr: &expr::Expr,
     ) -> Option<Self> {
+        Self::compile_inner(exe, stream, placement, expr, false)
+    }
+    fn compile_inner(
+        exe: &Executable,
+        stream: &Stream,
+        placement: &BindingPlacement,
+        expr: &expr::Expr,
+        allow_call: bool,
+    ) -> Option<Self> {
         fn add(
             results: &mut Vec<Result>,
             exe: &Executable,
             stream: &Stream,
             placement: &BindingPlacement,
             expr: &expr::Expr,
+            allow_call: bool,
         ) -> Option<usize> {
             if let expr::Kind::Pin(inner) = &expr.kind {
-                return add(results, exe, stream, placement, inner);
+                return add(results, exe, stream, placement, inner, allow_call);
             }
-            let at = Point {
+            let mut at = Point {
                 site: stream
                     .source_sites
                     .get(expr.pc as usize)?
@@ -62,6 +76,18 @@ impl Expression {
                 phase: Phase::Commit,
             };
             let operation = match &expr.kind {
+                expr::Kind::Call {
+                    callee: expr::Callee::Declared(_),
+                    args,
+                    ..
+                } if allow_call => {
+                    for arg in args.iter() {
+                        add(results, exe, stream, placement, arg, allow_call)?;
+                    }
+                    at.phase = Phase::Enter;
+                    Operation::Guest
+                }
+
                 expr::Kind::Const(value) if scalar(*value) => {
                     placement.verify_literal(&at, *value).ok()?;
                     Operation::Literal(*value)
@@ -73,6 +99,18 @@ impl Expression {
                 } if placement.unshared(local.at) => {
                     placement.verify_read(&at, local.at).ok()?;
                     Operation::Binding(local.at)
+                }
+                expr::Kind::Operator { lib, args, .. }
+                    if allow_call && matches!(exe.lib(*lib).run, LibRun::Body(_)) =>
+                {
+                    for arg in args.iter() {
+                        add(results, exe, stream, placement, arg, allow_call)?;
+                    }
+                    if matches!(stream.ops.get(expr.pc as usize), Some(Op::Nested { act, .. }) if matches!(stream.nested[act.ix()].kind, compile::NestedKind::Call(_)))
+                    {
+                        at.phase = Phase::Enter;
+                    }
+                    Operation::Guest
                 }
                 expr::Kind::Operator {
                     lib,
@@ -96,7 +134,7 @@ impl Expression {
                     }
                     let inputs = args
                         .iter()
-                        .map(|arg| add(results, exe, stream, placement, arg))
+                        .map(|arg| add(results, exe, stream, placement, arg, allow_call))
                         .collect::<Option<Box<[_]>>>()?;
                     Operation::Native { lib: *lib, inputs }
                 }
@@ -114,12 +152,57 @@ impl Expression {
             Some(index)
         }
         let mut results = Vec::new();
-        add(&mut results, exe, stream, placement, expr)?;
+        add(&mut results, exe, stream, placement, expr, allow_call)?;
+        let registers = results
+            .iter()
+            .map(|result| result.reg)
+            .collect::<Arc<[_]>>();
         Some(Self {
             results: results.into(),
+            registers,
+            offset: 0,
         })
     }
 
+    pub(super) fn split_call(
+        exe: &Executable,
+        stream: &Stream,
+        placement: &BindingPlacement,
+        expr: &expr::Expr,
+    ) -> Option<(Self, u32, Self)> {
+        let expression = Self::compile_inner(exe, stream, placement, expr, true)?;
+        expression.verify(stream, placement).ok()?;
+        let mut results = expression.results.into_vec();
+        let at = results
+            .iter()
+            .position(|result| matches!(result.operation, Operation::Guest))?;
+        if results
+            .iter()
+            .skip(at + 1)
+            .any(|result| matches!(result.operation, Operation::Guest))
+        {
+            return None;
+        }
+        let after = results.split_off(at + 1);
+        let call = results.pop()?;
+        let registers = expression.registers;
+        Some((
+            Self {
+                results: results.into(),
+                registers: Arc::clone(&registers),
+                offset: 0,
+            },
+            call.pc,
+            Self {
+                results: after.into(),
+                registers,
+                offset: at + 1,
+            },
+        ))
+    }
+    pub(super) fn empty(&self) -> bool {
+        self.results.is_empty()
+    }
     pub(super) fn first(&self) -> &Point {
         &self.results[0].at
     }
@@ -166,6 +249,7 @@ impl Expression {
                 return Err(room::Refused::Source);
             }
             match &result.operation {
+                Operation::Guest => {}
                 Operation::Literal(value) => placement.verify_literal(&result.at, *value)?,
                 Operation::Binding(at) => placement.verify_read(&result.at, *at)?,
                 Operation::Native { lib, inputs } => {
@@ -177,7 +261,7 @@ impl Expression {
                     }
                     let registers = stream.ops[result.pc as usize].reads();
                     if inputs.iter().zip(registers).any(|(input, register)| {
-                        *input >= index || self.results[*input].reg != register.0
+                        *input >= index + self.offset || self.registers[*input] != register.0
                     }) {
                         return Err(room::Refused::Source);
                     }
@@ -195,11 +279,23 @@ impl Expression {
         heap: &PagedHeap,
         facts: &mut [Value],
     ) -> std::result::Result<Option<Evaluated>, HeapFault> {
-        let mut values = Vec::with_capacity(self.results.len());
+        self.evaluate_from(exe, slots, arena, heap, facts, &[])
+    }
+    pub(super) fn evaluate_from(
+        &self,
+        exe: &Executable,
+        slots: &[SlotState],
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        facts: &mut [Value],
+        initial: &[Value],
+    ) -> std::result::Result<Option<Evaluated>, HeapFault> {
+        let mut values = initial.to_vec();
         let mut calls = Vec::new();
         let mut formulas = Vec::new();
         for result in &self.results {
             let value = match &result.operation {
+                Operation::Guest => return Ok(None),
                 Operation::Literal(value) => *value,
                 Operation::Binding(at) => match slots.get(*at as usize) {
                     Some(SlotState::Value(value)) if scalar(*value) => *value,
@@ -282,6 +378,7 @@ impl Expression {
         }
         Ok(values.last().copied().map(|result| Evaluated {
             result,
+            values: values.clone(),
             calls,
             formulas,
         }))

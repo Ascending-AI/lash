@@ -5,6 +5,8 @@
 use super::*;
 #[path = "calls.rs"]
 pub(crate) mod calls;
+#[path = "region/continuation.rs"]
+mod continuation;
 use lash_kernel_doc::{TaskId, Value};
 use lash_kernel_state::{
     arena::{Arena, Registration},
@@ -589,6 +591,7 @@ pub(crate) struct BoundScalarRegion<'a> {
     values: Vec<Value>,
     peak: u64,
     delta: i128,
+    transfer: Option<continuation::Transfer>,
 }
 impl ScalarRegion {
     fn branch_guards(&self, recovery: &[Recovery]) -> Result<Vec<(ScalarFact, bool)>, Refused> {
@@ -922,20 +925,7 @@ impl ScalarRegion {
         {
             return Ok(None);
         }
-        if values.values.len() != self.facts
-            || values.calls.len() != self.calls.len()
-            || values.values.iter().any(|value| {
-                !matches!(
-                    value,
-                    Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent
-                )
-            })
-        {
-            return Ok(None);
-        }
-        if self.guards.iter().any(|(fact, taken)| {
-            !matches!(values.values.get(fact.0), Some(Value::Bool(actual)) if actual == taken)
-        }) {
+        if values.values.len() != self.facts || values.calls.len() != self.calls.len() {
             return Ok(None);
         }
         let mut prices = vec![0_i128; self.prices];
@@ -965,6 +955,36 @@ impl ScalarRegion {
                 return Ok(None);
             }
         }
+        self.valuate(ledger, arena, heap, invocation, values, prices)
+    }
+    fn valuate<'a>(
+        &'a self,
+        ledger: &Ledger,
+        arena: &mut Arena,
+        heap: &PagedHeap,
+        invocation: &logical::Invocation,
+        values: ScalarRegionValues<'_>,
+        mut prices: Vec<i128>,
+    ) -> Result<Option<BoundScalarRegion<'a>>, doc::heap::HeapFault> {
+        if values.values.len() != self.facts
+            || values.calls.len() != self.calls.len()
+            || values.values.iter().any(|value| {
+                !matches!(
+                    value,
+                    Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null | Value::Absent
+                )
+            })
+        {
+            return Ok(None);
+        }
+        if self.guards.iter().any(|(fact, taken)| {
+            !matches!(values.values.get(fact.0), Some(Value::Bool(actual)) if actual == taken)
+        }) {
+            return Ok(None);
+        }
+        let price = |value: &Value, arena: &mut Arena| -> Result<u64, doc::heap::HeapFault> {
+            Ok(Holding::from_native(arena, heap.pages(), value)?.bytes())
+        };
         for result in &self.results {
             let value = &values.values[result.live.fact.0];
             let expected = match result.origin {
@@ -1004,6 +1024,7 @@ impl ScalarRegion {
             values: values.values.to_vec(),
             peak,
             delta,
+            transfer: None,
         }))
     }
 }
@@ -1028,30 +1049,42 @@ impl BoundScalarRegion<'_> {
         if !ledger.is_current(&self.stamp) {
             return Ok(None);
         }
-        let inputs: Vec<_> = self
-            .region
-            .entries
+        let default_inputs;
+        let default_outputs;
+        let (inputs, outputs) = if let Some(transfer) = &self.transfer {
+            (&transfer.inputs, &transfer.outputs)
+        } else {
+            default_inputs = self.region.entries.iter().map(|entry| entry.slot).collect();
+            default_outputs = self
+                .region
+                .survivors
+                .iter()
+                .map(|(slot, live)| (*slot, self.values[live.fact.0], live.entry))
+                .collect();
+            (&default_inputs, &default_outputs)
+        };
+        let inputs: Vec<_> = inputs
             .iter()
-            .map(|entry| self.invocation.owner(entry.slot))
+            .map(|slot| self.invocation.owner(*slot))
             .collect();
-        let outputs: Vec<_> = self
-            .region
-            .survivors
+        let outputs: Vec<_> = outputs
             .iter()
-            .map(|(slot, live)| {
+            .map(|(slot, value, entry)| {
                 (
                     self.invocation.owner(*slot),
-                    live.entry.map_or_else(
-                        || RootValue::Value(&self.values[live.fact.0]),
-                        |entry| RootValue::Existing(self.invocation.owner(entry)),
-                    ),
+                    entry.map_or(RootValue::Value(value), |entry| {
+                        RootValue::Existing(self.invocation.owner(entry))
+                    }),
                 )
             })
             .collect();
         // Preparing authenticates result holdings through the canonical source
         // projection. No naked retained-byte delta authorizes this transfer.
         let before = ledger.balance()?.total()?;
-        let prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
+        let mut prepared = ledger.prepare_source_boundary(registration, heap, &inputs, &outputs)?;
+        if let Some(transfer) = self.transfer {
+            prepared = prepared.complete_invocations(transfer.reservation, 1, heap.pages())?;
+        }
         let after = prepared.balance()?.total()?;
         if i128::from(after) - i128::from(before) != self.delta {
             return Ok(None);

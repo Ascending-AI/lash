@@ -1,10 +1,10 @@
 //! Precise session writes install their prepared binding under source acceptance.
 use super::*;
-use crate::compile::room::publication::Occurrence;
+use crate::compile::room::publication::{ExactRoots, Occurrence, Successor};
 use crate::compile::room::{ExitKind, Measure, Owner as Selector, Phase, Point};
 use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Owner, PublicationValue};
+use lash_kernel_state::kernel_internals::logical::{Owner, PublicationValue};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
 impl KernelMachine {
@@ -182,7 +182,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_event(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -210,14 +210,13 @@ impl KernelMachine {
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    outputs: vec![(output, PublicationValue::Existing(input))],
-                    ..Default::default()
-                }])
+            ExactRoots {
+                inputs,
+                outputs: vec![(output, PublicationValue::Existing(input))],
+                ..Default::default()
             },
-            Reserve(|_: &mut Arena| Ok(Some((bank, storage)))),
+            Successor::Normal,
+            (bank, storage),
             |_, session, edits, (bank, storage)| {
                 debug_assert!(edits.is_empty());
                 storage.publish(session);
