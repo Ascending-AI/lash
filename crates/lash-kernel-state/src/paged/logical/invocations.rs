@@ -20,6 +20,14 @@ pub struct InvocationRange {
     end: u64,
 }
 impl InvocationRange {
+    /// Authenticate a scope's task, ledger and unconsumed reservation once.
+    pub fn is_current(&self, ledger: &Ledger, caller: &Invocation) -> bool {
+        ledger.is_current(&self.stamp)
+            && Rc::ptr_eq(&self.stamp.identity, &caller.ledger)
+            && self.task == caller.task
+            && self.first == ledger.state.next_invocation
+    }
+
     pub fn len(&self) -> u64 {
         self.end - self.first
     }

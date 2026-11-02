@@ -190,7 +190,7 @@ pub(super) fn pure_calls() {
             "the genuine unpaid head must own the entire composed debt"
         );
         let before = ledger.prospective_invocation(TaskId::MAIN).id();
-        let wrong = exe
+        let wrong_code = exe
             .islands
             .plans
             .iter()
@@ -198,7 +198,7 @@ pub(super) fn pure_calls() {
             .unwrap()
             .code;
         let wrong_callee_rejected = call
-            .bind(&exe, wrong, &ledger, &mut arena, heap, &bound_caller)
+            .bind(&exe, wrong_code, &ledger, &mut arena, heap, &bound_caller)
             .unwrap()
             .is_none();
         let bound = call
@@ -342,6 +342,7 @@ pub(super) fn pure_calls() {
             .unwrap();
         assert_eq!(continued.peak(), 166);
         drop(continued);
+        let call_occurrences = bound.occurrences().to_vec();
         let debt = bound.debt().unwrap();
         // Caller statement plus five expression nodes, then the two body
         // statements and four expression nodes, then 3+2+2+2 native units.
@@ -449,6 +450,163 @@ pub(super) fn pure_calls() {
             .unwrap()
             .is_none(),
             "stale caller facts cannot authorize the next call"
+        );
+        // One loop range names every accepted call; abandoned candidates and
+        // unused capacity consume no identities or source ownership edits.
+        let activation = placement
+            .capture(caller.code, &invocation, &ledger, heap, &physical)
+            .unwrap()
+            .unwrap();
+        let roles: Vec<_> = points
+            .iter()
+            .map(|at| {
+                let owner = source
+                    .owner_slots()
+                    .unwrap()
+                    .root(
+                        &crate::compile::room::Owner::Operand(at.site.clone()),
+                        TaskId::MAIN,
+                        invocation.id(),
+                    )
+                    .unwrap();
+                let lash_kernel_state::kernel_internals::logical::Owner::Value { slot, .. } = owner
+                else {
+                    panic!("caller operand");
+                };
+                let fact = region.results().find(|(point, _)| *point == at).unwrap().1;
+                (slot, values[fact.index()])
+            })
+            .collect();
+        assert!(
+            call.scope_roles()
+                .all(|slot| roles.iter().any(|(actual, _)| *actual == slot))
+        );
+        let start = ledger.prospective_invocation(TaskId::MAIN).id();
+        let foreign = Ledger::fresh()
+            .reserve_invocations(TaskId::MAIN, 4)
+            .unwrap();
+        assert!(
+            call.bind_scope(
+                &exe,
+                call.callee(),
+                &ledger,
+                &invocation,
+                &activation,
+                foreign
+            )
+            .is_none(),
+            "a foreign range cannot authorize this loop"
+        );
+        let reservation = ledger.reserve_invocations(TaskId::MAIN, 4).unwrap();
+        let mut scope = call
+            .bind_scope(
+                &exe,
+                call.callee(),
+                &ledger,
+                &invocation,
+                &activation,
+                reservation,
+            )
+            .unwrap();
+        assert!(
+            call.evaluate_scoped(&exe, wrong_code, &scope, 0, &arena, &roles)
+                .unwrap()
+                .is_none(),
+            "the resolved callee stays exact inside a scope"
+        );
+        let future = call
+            .evaluate_scoped(&exe, call.callee(), &scope, 1, &arena, &roles)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            scope.complete(future),
+            Err(Refused::Source),
+            "completion cannot skip an invocation offset"
+        );
+        assert_eq!(scope.completed(), 0);
+        assert!(
+            call.evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles[1..])
+                .unwrap()
+                .is_none(),
+            "saved caller roles cannot disappear inside a loop"
+        );
+        let occurrence = Occurrence {
+            task: TaskId::MAIN,
+            invocation: invocation.id(),
+            loops: vec![],
+            action: None,
+        };
+        for offset in 0..2 {
+            let candidate = call
+                .evaluate_scoped(&exe, call.callee(), &scope, offset, &arena, &roles)
+                .unwrap()
+                .unwrap();
+            assert!(candidate.result().same(&Value::Int(3)));
+            assert_eq!(candidate.invocation().id(), start + offset);
+            assert_eq!(candidate.peak(), Cost::FRAME + 3 * (Cost::REFERENCE + 1));
+            assert_eq!(candidate.delta(), -i128::from(Cost::REFERENCE + 1));
+            assert_eq!(candidate.depth(), 1);
+            assert_eq!(candidate.occurrences(), call_occurrences);
+            assert_eq!(candidate.debt().unwrap().units(), 21);
+            let recovery = candidate
+                .recovery_after(&after, occurrence.clone())
+                .unwrap();
+            assert!(recovery[1].position.unpaid.is_none());
+            assert_eq!(recovery[1].position.occurrence.invocation, start + offset);
+            assert!(
+                recovery[0]
+                    .roles
+                    .iter()
+                    .any(|(_, value)| value.same(&Value::Int(5)))
+            );
+            let duplicate = call
+                .evaluate_scoped(&exe, call.callee(), &scope, offset, &arena, &roles)
+                .unwrap()
+                .unwrap();
+            scope.complete(candidate).unwrap();
+            assert_eq!(
+                scope.complete(duplicate),
+                Err(Refused::Source),
+                "a candidate cannot complete the same reserved invocation twice"
+            );
+        }
+        let abandoned = call
+            .evaluate_scoped(&exe, call.callee(), &scope, 2, &arena, &roles)
+            .unwrap()
+            .unwrap();
+        drop(abandoned);
+        assert_eq!(scope.completed(), 2);
+        let (reservation, completed) = scope.finish().unwrap();
+        let prepared = ledger
+            .prepare_ownership(&mut arena, heap.pages(), &[], &[])
+            .unwrap()
+            .complete_invocations(reservation, completed, heap.pages())
+            .unwrap();
+        ledger
+            .commit(prepared.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        assert_eq!(
+            ledger.prospective_invocation(TaskId::MAIN).id(),
+            start + 2,
+            "only the admitted range prefix is consumed"
+        );
+        let stale = ledger.reserve_invocations(TaskId::MAIN, 4).unwrap();
+        ledger.handoff().unwrap();
+        let activation = placement
+            .capture(caller.code, &invocation, &ledger, heap, &physical)
+            .unwrap()
+            .unwrap();
+        assert!(
+            call.bind_scope(
+                &exe,
+                call.callee(),
+                &ledger,
+                &invocation,
+                &activation,
+                stale
+            )
+            .is_none(),
+            "an old range cannot survive a source handoff"
         );
         call.understate_frame_for_law();
         let frame_rejected = call.verify(&exe) == Err(Refused::Peak);

@@ -2,6 +2,12 @@
 //! not a second frame executor, and every cold role keeps its defining Source.
 #[path = "calls/binding.rs"]
 mod binding;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "loop lane wires the scope call API next")
+)]
+#[path = "calls/scope.rs"]
+pub(crate) mod scope;
 use super::super::charges::{
     FormulaValues,
     composition::{ComposedCharges, ComposedDebt},
@@ -15,7 +21,7 @@ use lash_kernel_exec::{Op, OpRange};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::{
     PagedHeap,
-    logical::{self, Holding, Ledger, Slot},
+    logical::{self, Ledger, Slot},
 };
 
 pub(in crate::compile::room) struct Resolved {
@@ -712,98 +718,22 @@ impl<'a> BoundCall<'a> {
         ledger.is_current(&self.stamp) && caller == &self.caller_invocation
     }
     pub(crate) fn debt(&self) -> Option<ComposedDebt<'a>> {
-        let caller: Vec<_> = self
-            .caller_formulas
-            .iter()
-            .map(|(arguments, result)| FormulaValues {
-                arguments,
-                result: *result,
-            })
-            .collect();
-        let body: Vec<Vec<_>> = self
-            .body_formulas
-            .iter()
-            .map(|formulas| {
-                formulas
-                    .iter()
-                    .map(|(arguments, result)| FormulaValues {
-                        arguments,
-                        result: *result,
-                    })
-                    .collect()
-            })
-            .collect();
-        self.call.charges.bind(&caller, &body)
+        bind_debt(self.call, &self.caller_formulas, &self.body_formulas)
     }
     pub(crate) fn recovery_after(
         &self,
         at: &Point,
         caller_occurrence: super::super::publication::Occurrence,
     ) -> Option<[CallRecovery; 2]> {
-        use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-        if caller_occurrence.invocation != self.caller_invocation.id()
-            || !matches!(self.caller_invocation.frame(), logical::Owner::Frame { task, .. } if task == caller_occurrence.task)
-        {
-            return None;
-        }
-        let invocation = self.reservation.invocation(0)?;
-        let index = self
-            .call
-            .region
-            .recovery
-            .iter()
-            .position(|map| &map.after == at)?;
-        let map = &self.call.region.recovery[index];
-        let digest = |at: &Point, roles: &[(Slot, Value)]| {
-            let mut encoding = TokenWriter::new();
-            encoding.seq(3);
-            encoding.text("lash.source.composed-call");
-            at.site.encode(&mut encoding);
-            encoding.seq(roles.len() as u64);
-            for (slot, _) in roles {
-                slot.encode(&mut encoding);
-            }
-            logical_digest(&encoding.into_bytes())
-        };
-        let caller = CallRecovery {
-            source: Arc::clone(&self.call.caller_source),
-            position: super::super::publication::Position {
-                at: self.call.at.clone(),
-                unpaid: Some(Point {
-                    site: self.call.at.site.clone(),
-                    phase: Phase::Restore,
-                }),
-                recovery: digest(&self.call.at, &self.caller_values),
-                occurrence: caller_occurrence.clone(),
-            },
-            roles: self.caller_values.clone(),
-        };
-        let roles: Vec<_> = map
-            .roles
-            .iter()
-            .map(|(slot, fact)| (*slot, self.values[fact.index()]))
-            .collect();
-        let callee = CallRecovery {
-            source: Arc::clone(&self.call.source),
-            position: super::super::publication::Position {
-                at: map.after.clone(),
-                unpaid: self
-                    .call
-                    .region
-                    .recovery
-                    .get(index + 1)
-                    .map(|map| map.after.clone()),
-                recovery: digest(&map.after, &roles),
-                occurrence: super::super::publication::Occurrence {
-                    task: caller_occurrence.task,
-                    invocation: invocation.id(),
-                    loops: vec![],
-                    action: None,
-                },
-            },
-            roles,
-        };
-        Some([caller, callee])
+        call_recovery(
+            self.call,
+            &self.caller_invocation,
+            &self.reservation.invocation(0)?,
+            &self.caller_values,
+            &self.values,
+            at,
+            caller_occurrence,
+        )
     }
     /// Only core's final source-authenticated BoundaryTransaction may consume
     /// this reservation. Dropping a bound call does not advance the ledger.
@@ -814,4 +744,103 @@ impl<'a> BoundCall<'a> {
     ) -> Option<logical::InvocationRange> {
         self.current(ledger, caller).then_some(self.reservation)
     }
+}
+
+fn bind_debt<'a>(
+    call: &'a VerifiedCall,
+    caller_formulas: &[(Vec<Value>, Value)],
+    body_formulas: &[Vec<(Vec<Value>, Value)>],
+) -> Option<ComposedDebt<'a>> {
+    let caller: Vec<_> = caller_formulas
+        .iter()
+        .map(|(arguments, result)| FormulaValues {
+            arguments,
+            result: *result,
+        })
+        .collect();
+    let body: Vec<Vec<_>> = body_formulas
+        .iter()
+        .map(|formulas| {
+            formulas
+                .iter()
+                .map(|(arguments, result)| FormulaValues {
+                    arguments,
+                    result: *result,
+                })
+                .collect()
+        })
+        .collect();
+    call.charges.bind(&caller, &body)
+}
+
+fn call_recovery(
+    call: &VerifiedCall,
+    caller_invocation: &logical::Invocation,
+    invocation: &logical::Invocation,
+    caller_values: &[(Slot, Value)],
+    values: &[Value],
+    at: &Point,
+    caller_occurrence: super::super::publication::Occurrence,
+) -> Option<[CallRecovery; 2]> {
+    use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
+    if caller_occurrence.invocation != caller_invocation.id()
+        || !matches!(caller_invocation.frame(), logical::Owner::Frame { task, .. } if task == caller_occurrence.task)
+    {
+        return None;
+    }
+    let index = call
+        .region
+        .recovery
+        .iter()
+        .position(|map| &map.after == at)?;
+    let map = &call.region.recovery[index];
+    let digest = |at: &Point, roles: &[(Slot, Value)]| {
+        let mut encoding = TokenWriter::new();
+        encoding.seq(3);
+        encoding.text("lash.source.composed-call");
+        at.site.encode(&mut encoding);
+        encoding.seq(roles.len() as u64);
+        for (slot, _) in roles {
+            slot.encode(&mut encoding);
+        }
+        logical_digest(&encoding.into_bytes())
+    };
+    let caller = CallRecovery {
+        source: Arc::clone(&call.caller_source),
+        position: super::super::publication::Position {
+            at: call.at.clone(),
+            unpaid: Some(Point {
+                site: call.at.site.clone(),
+                phase: Phase::Restore,
+            }),
+            recovery: digest(&call.at, caller_values),
+            occurrence: caller_occurrence.clone(),
+        },
+        roles: caller_values.to_vec(),
+    };
+    let roles: Vec<_> = map
+        .roles
+        .iter()
+        .map(|(slot, fact)| (*slot, values[fact.index()]))
+        .collect();
+    let callee = CallRecovery {
+        source: Arc::clone(&call.source),
+        position: super::super::publication::Position {
+            at: map.after.clone(),
+            unpaid: call
+                .region
+                .recovery
+                .get(index + 1)
+                .map(|map| map.after.clone()),
+            recovery: digest(&map.after, &roles),
+            occurrence: super::super::publication::Occurrence {
+                task: caller_occurrence.task,
+                invocation: invocation.id(),
+                loops: vec![],
+                action: None,
+            },
+        },
+        roles,
+    };
+    Some([caller, callee])
 }

@@ -10,17 +10,62 @@ impl VerifiedCall {
         exe: &Executable,
         ledger: &Ledger,
         arena: &mut Arena,
-        heap: &PagedHeap,
+        _heap: &PagedHeap,
         caller_invocation: &logical::Invocation,
         arguments: Vec<Value>,
         caller_values: Vec<(Slot, Value)>,
     ) -> Result<Option<BoundCall<'a>>, doc::heap::HeapFault> {
+        let Some(EvaluatedArguments {
+            result,
+            peak,
+            delta,
+            values,
+            caller_formulas,
+            body_formulas,
+            depth,
+        }) = self.evaluate_arguments(exe, arena, arguments)?
+        else {
+            return Ok(None);
+        };
+        let logical::Owner::Frame { task, .. } = caller_invocation.frame() else {
+            return Ok(None);
+        };
+        let Some(reservation) = ledger.reserve_invocations(task, 1) else {
+            return Ok(None);
+        };
+        Ok(Some(BoundCall {
+            call: self,
+            stamp: ledger.stamp(),
+            caller_invocation: caller_invocation.clone(),
+            reservation,
+            result,
+            peak,
+            delta,
+            caller_values,
+            values,
+            caller_formulas,
+            body_formulas,
+            inputs: vec![],
+            live: vec![(
+                slot(&self.caller_source, &Owner::Operand(self.at.site.clone()))
+                    .map_err(|_| doc::heap::HeapFault::Malformed("call result role".into()))?,
+                result,
+                None,
+            )],
+            depth,
+        }))
+    }
+
+    pub(super) fn evaluate_arguments(
+        &self,
+        exe: &Executable,
+        arena: &Arena,
+        arguments: Vec<Value>,
+    ) -> Result<Option<EvaluatedArguments>, doc::heap::HeapFault> {
         let mut values = vec![Value::Null; self.region.fact_count()];
         let mut prices = vec![0_i128; self.region.prices];
-        let price = |value: &Value, arena: &mut Arena| -> Result<i128, doc::heap::HeapFault> {
-            Ok(i128::from(
-                Holding::from_native(arena, heap.pages(), value)?.bytes(),
-            ))
+        let price = |value: &Value, arena: &Arena| -> Result<i128, doc::heap::HeapFault> {
+            Ok(i128::from(arena.logical_local(value)?))
         };
         let mut given = 0_i128;
         let mut padded = 0_i128;
@@ -207,32 +252,24 @@ impl VerifiedCall {
         let Some(body_formulas) = body_formulas else {
             return Ok(None);
         };
-        let logical::Owner::Frame { task, .. } = caller_invocation.frame() else {
-            return Ok(None);
-        };
-        let Some(reservation) = ledger.reserve_invocations(task, 1) else {
-            return Ok(None);
-        };
-        Ok(Some(BoundCall {
-            call: self,
-            stamp: ledger.stamp(),
-            caller_invocation: caller_invocation.clone(),
-            reservation,
+        Ok(Some(EvaluatedArguments {
             result,
             peak,
             delta,
-            caller_values,
             values,
             caller_formulas,
             body_formulas,
-            inputs: vec![],
-            live: vec![(
-                slot(&self.caller_source, &Owner::Operand(self.at.site.clone()))
-                    .map_err(|_| doc::heap::HeapFault::Malformed("call result role".into()))?,
-                result,
-                None,
-            )],
             depth,
         }))
     }
+}
+
+pub(super) struct EvaluatedArguments {
+    pub(super) result: Value,
+    pub(super) peak: u64,
+    pub(super) delta: i128,
+    pub(super) values: Vec<Value>,
+    pub(super) caller_formulas: Vec<(Vec<Value>, Value)>,
+    pub(super) body_formulas: Vec<Vec<(Vec<Value>, Value)>>,
+    pub(super) depth: u64,
 }
