@@ -146,6 +146,7 @@ impl RuntimeDrive {
             attachments,
         } = turn;
         let fresh = fresh_machine(&mut driver, window, messages)?;
+        let syncs = driver.recorded_syncs().await?;
         let RestoredTurn {
             machine,
             namespaces,
@@ -153,7 +154,7 @@ impl RuntimeDrive {
             pending,
             answered,
             row,
-        } = Box::pin(restore.restore(fresh)).await?;
+        } = Box::pin(restore.restore(fresh, &|iteration| syncs.get(&iteration).cloned())).await?;
         // The steering input the turn's checkpoints delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);

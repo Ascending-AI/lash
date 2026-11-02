@@ -101,25 +101,43 @@ impl RuntimeTurnDriver<'_> {
             )
             .await?;
         self.session.install_environment(adoption.handle.clone());
-        let handle = &adoption.handle;
-        let definitions = handle.definitions();
-        let result = crate::sansio::ExecutionEnvironmentSync {
-            tool_specs: handle.preamble().tool_specs.clone(),
-            turn_controls: definitions
-                .iter()
-                .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
-                .filter(|manifest| !manifest.declaration().controls.is_empty())
-                .map(|manifest| (manifest.tool(), manifest.declaration().controls.clone()))
-                .collect(),
-            truncated_names: definitions
-                .iter()
-                .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
-                .map(|manifest| (manifest.standard_name(), manifest.tool()))
-                .filter(|(name, operation)| name.replace("__", ".") != *operation)
-                .collect(),
-        };
+        let result = environment_sync(&adoption.handle);
         self.adopted_environment = Some(adoption);
         Ok(result)
+    }
+
+    /// The sync the turn answered in each protocol iteration its recorded
+    /// configuration holds a round for: each round's recorded environment,
+    /// projected once, as [`Self::refresh_execution_environment`] answered
+    /// it. A resumed turn's journal names its syncs by iteration.
+    pub(in crate::runtime) async fn recorded_syncs(
+        &self,
+    ) -> Result<
+        std::collections::BTreeMap<usize, crate::sansio::ExecutionEnvironmentSync>,
+        crate::runtime::durable::session::TurnError,
+    > {
+        let store = self.host.core.backend().durable().environments();
+        let mut projected = std::collections::BTreeMap::new();
+        let mut syncs = std::collections::BTreeMap::new();
+        for (iteration, round) in self.run_config.environments() {
+            let sync = match projected.get(&round.version) {
+                Some(sync) => Clone::clone(sync),
+                None => {
+                    let body =
+                        super::super::session_environment::load_body(store.as_ref(), round).await?;
+                    let handle = self.session.project_environment(&body).map_err(|error| {
+                        crate::runtime::durable::session::TurnError::Runtime(
+                            crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                        )
+                    })?;
+                    let sync = environment_sync(&handle);
+                    projected.insert(round.version.clone(), sync.clone());
+                    sync
+                }
+            };
+            syncs.insert(usize::try_from(iteration).unwrap_or(usize::MAX), sync);
+        }
+        Ok(syncs)
     }
 
     pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {
@@ -215,5 +233,28 @@ impl TurnEffectContext {
                 request,
             )
             .await
+    }
+}
+
+/// The sync a turn's machine is answered with when `handle` is the
+/// environment adopted for its protocol iteration.
+fn environment_sync(
+    handle: &crate::session::ToolCatalogHandle,
+) -> crate::sansio::ExecutionEnvironmentSync {
+    let definitions = handle.definitions();
+    crate::sansio::ExecutionEnvironmentSync {
+        tool_specs: handle.preamble().tool_specs.clone(),
+        turn_controls: definitions
+            .iter()
+            .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
+            .filter(|manifest| !manifest.declaration().controls.is_empty())
+            .map(|manifest| (manifest.tool(), manifest.declaration().controls.clone()))
+            .collect(),
+        truncated_names: definitions
+            .iter()
+            .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
+            .map(|manifest| (manifest.standard_name(), manifest.tool()))
+            .filter(|(name, operation)| name.replace("__", ".") != *operation)
+            .collect(),
     }
 }

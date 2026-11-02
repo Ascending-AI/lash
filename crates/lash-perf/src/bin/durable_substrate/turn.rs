@@ -476,7 +476,9 @@ impl TurnServices for BenchServices {
             Vec::new(),
             0,
         );
-        let restored = restore.restore(fresh).await?;
+        let restored = restore
+            .restore(fresh, &|_| Some(ExecutionEnvironmentSync::default()))
+            .await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,

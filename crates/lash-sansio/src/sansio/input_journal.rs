@@ -13,7 +13,10 @@
 //! An admitted request is recorded against the request the machine itself
 //! waits on: its envelope (without the tools when they are the machine's
 //! own) and the messages past those both share, so the journal never holds
-//! the transcript again.
+//! the transcript again. An environment sync the host answered is recorded
+//! by the protocol iteration it synced: the host records the environment it
+//! adopted for each iteration with the turn, and a replay asks it for that
+//! sync again ([`RecordedSyncs`]).
 
 use super::*;
 use lash_protocol_types::llm::types::{LlmMessage, RequestMessages, RetainedLlmRequest};
@@ -72,10 +75,13 @@ pub enum MachineInput<I> {
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(bound(serialize = "I: Serialize", deserialize = "I: DeserializeOwned"))]
 pub enum RecordedResponse<I> {
-    /// [`Response::ExecutionEnvironmentSynced`].
-    Synced {
+    /// [`Response::ExecutionEnvironmentSynced`] with a sync: the one the
+    /// host records for the machine's protocol `iteration`.
+    Synced { id: EffectId, iteration: usize },
+    /// [`Response::ExecutionEnvironmentSynced`] with a failure.
+    SyncFailed {
         id: EffectId,
-        result: Result<ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure>,
+        failure: ExecutionEnvironmentSyncFailure,
     },
     /// [`Response::LlmComplete`].
     Llm {
@@ -100,12 +106,21 @@ pub enum RecordedResponse<I> {
     },
 }
 
+/// The environment sync a journaling host answered in each protocol
+/// iteration, as it recorded it with the turn; `None` for an iteration it
+/// recorded none for.
+pub type RecordedSyncs<'a> = &'a (dyn Fn(usize) -> Option<ExecutionEnvironmentSync> + Sync);
+
 impl<I: Clone> RecordedResponse<I> {
-    pub(super) fn of(response: &Response<I>) -> Self {
+    /// `response`, answered while the machine is in protocol `iteration`.
+    pub(super) fn of(response: &Response<I>, iteration: usize) -> Self {
         match response {
-            Response::ExecutionEnvironmentSynced { id, result } => Self::Synced {
-                id: *id,
-                result: result.clone(),
+            Response::ExecutionEnvironmentSynced { id, result } => match result {
+                Ok(_) => Self::Synced { id: *id, iteration },
+                Err(failure) => Self::SyncFailed {
+                    id: *id,
+                    failure: failure.clone(),
+                },
             },
             Response::LlmComplete {
                 id,
@@ -131,9 +146,18 @@ impl<I: Clone> RecordedResponse<I> {
         }
     }
 
-    fn into_response(self) -> Response<I> {
-        match self {
-            Self::Synced { id, result } => Response::ExecutionEnvironmentSynced { id, result },
+    fn into_response(self, syncs: RecordedSyncs<'_>) -> Result<Response<I>, String> {
+        Ok(match self {
+            Self::Synced { id, iteration } => Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(syncs(iteration).ok_or_else(|| {
+                    format!("the host records no environment sync for iteration {iteration}")
+                })?),
+            },
+            Self::SyncFailed { id, failure } => Response::ExecutionEnvironmentSynced {
+                id,
+                result: Err(failure),
+            },
             Self::Llm {
                 id,
                 result,
@@ -146,7 +170,7 @@ impl<I: Clone> RecordedResponse<I> {
             Self::Tools { id, results } => Response::ToolResults { id, results },
             Self::Exec { id, result } => Response::ExecResult { id, result },
             Self::Checkpoint { id, delivery } => Response::Checkpoint { id, delivery },
-        }
+        })
     }
 }
 
@@ -386,7 +410,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     /// Apply recorded `inputs` to this machine, built the way the machine
-    /// that recorded them was, and then journal from after them. The
+    /// that recorded them was, answering their environment syncs from
+    /// `syncs`, and then journal from after them. The
     /// effect the last poll delivered is delivered again by the next poll:
     /// the host resumes waiting on it.
     ///
@@ -398,6 +423,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn replay_inputs(
         &mut self,
         inputs: impl IntoIterator<Item = MachineInput<M::IntentOutcome>>,
+        syncs: RecordedSyncs<'_>,
     ) -> Result<(), ReplayDivergence> {
         let mut journal = InputJournal::starting_at(0);
         journal.replaying = true;
@@ -418,7 +444,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     response,
                     fails_on_overflow,
                 } => {
-                    let response = response.into_response();
+                    let response = response.into_response(syncs).map_err(diverged)?;
                     let id = response.effect_id();
                     if self.state.waiting_effect() != Some(id) {
                         return Err(diverged(format!(

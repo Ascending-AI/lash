@@ -1413,8 +1413,10 @@ impl<'a> TurnRestore<'a> {
     }
 
     /// Restore the turn's machine: `machine`, built the way the turn's first
-    /// machine was, replays the inputs the turn's journal committed, and
-    /// waits on the effect it waited on when its last phase committed.
+    /// machine was, replays the inputs the turn's journal committed, with
+    /// the environment syncs the turn answered in each iteration from
+    /// `syncs`, and waits on the effect it waited on when its last phase
+    /// committed.
     ///
     /// # Errors
     ///
@@ -1423,6 +1425,7 @@ impl<'a> TurnRestore<'a> {
     pub async fn restore(
         mut self,
         mut machine: TurnMachine,
+        syncs: lash_sansio::RecordedSyncs<'_>,
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
         self.phase().await?;
@@ -1490,7 +1493,7 @@ impl<'a> TurnRestore<'a> {
         })?;
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         machine
-            .replay_inputs(inputs)
+            .replay_inputs(inputs, syncs)
             .map_err(|divergence| TurnRestoreError::Diverged {
                 run: row.run.clone(),
                 divergence,

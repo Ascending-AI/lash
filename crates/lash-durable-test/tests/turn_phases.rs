@@ -538,7 +538,9 @@ impl TurnServices for L3Services {
             Vec::new(),
             0,
         );
-        let restored = restore.restore(fresh).await?;
+        let restored = restore
+            .restore(fresh, &|_| Some(ExecutionEnvironmentSync::default()))
+            .await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
             pending: restored.pending,
@@ -1940,7 +1942,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         0,
     );
     let restored = TurnRestore::new(&cx, &row, &mut heads)
-        .restore(fresh)
+        .restore(fresh, &|_| Some(ExecutionEnvironmentSync::default()))
         .await
         .expect("the turn restores over its pinned window");
     assert_eq!(

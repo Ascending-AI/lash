@@ -1187,7 +1187,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) -> Result<(), TokenUsageOverflow> {
         let recorded = match journaled {
             Some(fails_on_overflow) if self.journaling() => Some(MachineInput::Answered {
-                response: RecordedResponse::of(&response),
+                response: RecordedResponse::of(&response, self.protocol_iteration),
                 fails_on_overflow,
             }),
             _ => None,

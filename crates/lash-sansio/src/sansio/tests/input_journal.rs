@@ -98,6 +98,15 @@ fn steering(checkpoints: usize) -> Message {
     }
 }
 
+/// The environment the host adopts in protocol `iteration`: each differs,
+/// so a replay answered with another iteration's sync reaches another state.
+fn sync_for(iteration: usize) -> ExecutionEnvironmentSync {
+    ExecutionEnvironmentSync {
+        truncated_names: [(format!("tool_{iteration}"), format!("tools.{iteration}"))].into(),
+        ..ExecutionEnvironmentSync::default()
+    }
+}
+
 fn fresh() -> TurnMachine {
     TurnMachine::new(
         test_config(Arc::new(JournalDriver)),
@@ -136,9 +145,10 @@ fn live_run() -> (Vec<MachineInput<()>>, Vec<(usize, serde_json::Value)>) {
         cut(&mut machine, &mut cuts);
         match effect {
             Effect::SyncExecutionEnvironment { id } => {
+                let sync = sync_for(machine.protocol_iteration());
                 machine.handle_response(Response::ExecutionEnvironmentSynced {
                     id,
-                    result: Ok(ExecutionEnvironmentSync::default()),
+                    result: Ok(sync),
                 });
             }
             Effect::LlmCall { id, request } => {
@@ -252,7 +262,9 @@ fn a_replayed_journal_reaches_the_recorded_state_at_every_input() {
     for (mark, expected) in cuts {
         let mut replayed = fresh();
         replayed
-            .replay_inputs(read[..mark].iter().cloned())
+            .replay_inputs(read[..mark].iter().cloned(), &|iteration| {
+                Some(sync_for(iteration))
+            })
             .unwrap_or_else(|divergence| panic!("{mark} inputs replay: {divergence}"));
         assert_eq!(
             state(&replayed),
@@ -273,7 +285,7 @@ fn a_journal_another_machine_recorded_is_refused_where_it_diverges() {
         0,
     );
     let divergence = other
-        .replay_inputs(inputs)
+        .replay_inputs(inputs, &|iteration| Some(sync_for(iteration)))
         .expect_err("a prose turn waits on no tool round");
     assert!(divergence.reason.contains("answers effect"), "{divergence}");
 }

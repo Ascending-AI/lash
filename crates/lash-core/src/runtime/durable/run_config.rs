@@ -121,6 +121,15 @@ impl RecordedRunConfig {
         }
     }
 
+    /// The round the run adopted in each protocol iteration.
+    pub(in crate::runtime) fn environments(
+        &self,
+    ) -> impl Iterator<Item = (u64, &lash_core_store::environment::RoundEnvironment)> {
+        self.environments
+            .iter()
+            .map(|(iteration, round)| (*iteration, round))
+    }
+
     pub(in crate::runtime) fn current_environment(
         &self,
     ) -> Option<&lash_core_store::environment::RoundEnvironment> {
