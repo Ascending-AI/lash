@@ -1,16 +1,3 @@
 # FIG-7589: the park-everywhere stress mode's known divergences over the corpus, a ratchet that only shrinks.
 # path	first differing field	ticket
 tests/basics/closure1.py	run	FIG-7593
-tests/basics/comprehension1.py	run	FIG-7594
-tests/basics/dict_get.py	run	FIG-7594
-tests/basics/dict_pop.py	run	FIG-7594
-tests/basics/dict_setdefault.py	run	FIG-7594
-tests/basics/int_bytes.py	run	FIG-7594
-tests/basics/int_divmod.py	run	FIG-7594
-tests/basics/list_extend.py	run	FIG-7594
-tests/basics/list_remove.py	run	FIG-7594
-tests/basics/list_slice.py	run	FIG-7594
-tests/basics/list_slice_3arg.py	run	FIG-7594
-tests/basics/list_slice_assign.py	run	FIG-7594
-tests/basics/string_partition.py	run	FIG-7594
-tests/basics/string_split.py	run	FIG-7594

@@ -790,24 +790,51 @@ impl Ledger {
         }
         Ok(())
     }
-    /// A seal saves durable ids only: a provisional key at a seal is an
-    /// object the ledger priced that no projection identified.
-    fn refuse_provisional(&self, access: &Access<'_>) -> Result<(), HeapFault> {
+    /// A seal saves durable ids only. The projection before it gave every
+    /// object a root reaches its durable id, so an entity still keyed
+    /// provisionally is garbage the ledger priced: a cycle that died
+    /// between projections, which no release can reach. It drops here
+    /// with what only it held, as normalization would drop it, and never
+    /// takes an id. A root or durable body still naming a provisional key
+    /// is an object the ledger priced that no projection identified, and
+    /// the seal refuses it.
+    fn drop_provisional(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
         let state = &self.state;
-        let mut found = false;
         for tree in [&state.owners, &state.execution, &state.ended] {
             for (_, row) in tree.hot_rows() {
-                found |= row.value.has_provisional_edges(access)?;
+                if row.value.has_provisional_edges(access)? {
+                    return Err(invalid("a provisional ledger key reached a seal"));
+                }
             }
         }
+        let mut garbage = Vec::new();
         for (key, row) in state.entities.hot_rows() {
-            found |= entity_of_key(&key)
-                .is_some_and(|entity| entity.family == FamilyId::PROVISIONAL)
-                || row.body.has_provisional_edges(access)?;
+            if entity_of_key(&key).is_some_and(|entity| entity.family == FamilyId::PROVISIONAL) {
+                garbage.push(key);
+            } else if row.body.has_provisional_edges(access)? {
+                return Err(invalid("a provisional ledger key reached a seal"));
+            }
         }
-        if found {
-            return Err(invalid("a provisional ledger key reached a seal"));
+        if garbage.is_empty() {
+            return Ok(());
         }
+        let mut edit = Edit {
+            state: self.state.clone(),
+            access,
+            zero: VecDeque::new(),
+            fresh: Vec::new(),
+        };
+        let mut removed = Vec::new();
+        for key in garbage {
+            if let Some(row) = edit.state.entities.remove(&key, access)? {
+                removed.push(row.body);
+            }
+        }
+        for body in removed {
+            edit.release(&body, true)?;
+        }
+        edit.release_zero(true)?;
+        self.state = edit.state;
         Ok(())
     }
     pub fn seal(
@@ -838,7 +865,7 @@ impl Ledger {
         if self.state.execution.live_members(access)? != 0 {
             return Err(invalid("transient source owners at seal"));
         }
-        self.refuse_provisional(access)?;
+        self.drop_provisional(access)?;
         let mut state = self.state.clone();
         if !state.owners.seal(access, work)?
             || !state.execution.seal(access, work)?
