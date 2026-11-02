@@ -8,6 +8,7 @@
 
 mod charges;
 mod interval;
+mod placement;
 mod publication;
 
 use super::embedder::{Embedder, Setup};
@@ -606,6 +607,7 @@ fn source_room_peak_bounds_follow_source_lifetimes() {
     use crate::compile::room::{Balance, Phase, Refused};
     room_shared_binding_growth();
     room_unpooled_immutable_growth();
+    placement::binding_values();
     scalar_region_lifetimes();
     charges::compiled_charges();
     interval::member_read_suffix();

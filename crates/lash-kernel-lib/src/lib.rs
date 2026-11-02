@@ -65,7 +65,10 @@ mod corpus_tests;
 mod prepared_tests;
 
 mod collections;
-pub use collections::{CollectionError, implement_collections, register_collections};
+pub use collections::{
+    CollectionError, MergePosition, SortComparison, SortContinuation, implement_collections,
+    register_collections,
+};
 
 /// A pure native constructor selected by a build's identity table. The
 /// definition catalogues remain the sole inventory of implemented functions.

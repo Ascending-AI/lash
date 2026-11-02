@@ -99,20 +99,8 @@ impl ChargeProgram {
     ) -> Result<Self, Refused> {
         let source = Arc::clone(&exe.code(code).source_room);
         source.verify()?;
-        let (stream, stmt, _) = exe.statement(statement);
-        if exe.stmt_at(code, &stmt.site) != Some(statement)
-            || !(range == stmt.ops
-                || matches!(stmt.form, compile::Form::While { test, .. } if range == test))
-            || !stream.verify_holding_sites(&source, range, stmt.regs)
-        {
-            return Err(Refused::Source);
-        }
         let (closes, formulas) = derive(exe, code, statement, range)?;
-        let first = source.first_event(&if range == stmt.ops {
-            stmt.site.clone()
-        } else {
-            stmt.site.child(0)
-        })?;
+        let first = first(exe, code, statement, range)?;
         let through = closes.last().ok_or(Refused::Exit)?.at.clone();
         let fixed = closes
             .iter()
@@ -146,7 +134,9 @@ impl ChargeProgram {
             return Err(Refused::Source);
         }
         let (closes, formulas) = derive(exe, code, self.statement, self.range)?;
-        if closes != *self.closes
+        if first(exe, code, self.statement, self.range)? != self.first
+            || closes.last().map(|close| &close.at) != Some(&self.through)
+            || closes != *self.closes
             || formulas.len() != self.formulas.len()
             || formulas
                 .iter()
@@ -181,20 +171,49 @@ impl ChargeProgram {
     /// Exact canonical formulas retain their own saturating arithmetic. The
     /// sum across source charge events is checked, as the shared meter is.
     pub(crate) fn bind(&self, values: &[FormulaValues<'_>]) -> Option<ChargeDebt<'_>> {
+        self.bind_measured(values, |_, _, _| None)
+    }
+
+    /// Read only the measurements demanded by the canonical formula. Prepared
+    /// storage supplies measurements of detached results and resident inputs,
+    /// never a fee total. Immediate facts always come from the actual values.
+    pub(crate) fn bind_measured(
+        &self,
+        values: &[FormulaValues<'_>],
+        mut measure: impl FnMut(usize, compile::Source, doc::Measure) -> Option<u64>,
+    ) -> Option<ChargeDebt<'_>> {
         if values.len() != self.formulas.len() {
             return None;
         }
         let mut units = self.fixed;
         let mut measured = Vec::with_capacity(values.len());
-        for (formula, values) in self.formulas.iter().zip(values) {
+        for (index, (formula, values)) in self.formulas.iter().zip(values).enumerate() {
             if values.arguments.len() != formula.arguments {
                 return None;
             }
-            let fee = formula.plan.immediate(
-                values.arguments,
-                compile::Fresh::default(),
-                &values.result,
-            )?;
+            let mut complete = true;
+            let fee = formula.plan.evaluate(|source, kind| {
+                let value = match source {
+                    compile::Source::Arg(at) => values.arguments.get(at),
+                    compile::Source::Result => Some(&values.result),
+                    compile::Source::Nothing => None,
+                };
+                let Some(value) = value else {
+                    return 0;
+                };
+                let amount = crate::data::immediate_measure(value, kind)
+                    .or_else(|| measure(index, source, kind));
+                match amount {
+                    Some(amount) => amount,
+                    None => {
+                        complete = false;
+                        0
+                    }
+                }
+            });
+            if !complete {
+                return None;
+            }
             units = units.checked_add(fee)?;
             measured.push(fee);
         }
@@ -227,6 +246,75 @@ fn point(site: &Site, op: Op) -> Point {
     }
 }
 
+/// A prefix may begin only at the original unpaid charge fence and end at
+/// a complete close. It cannot enter midway through an unpaid region.
+fn canonical_span(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+) -> Result<OpRange, Refused> {
+    let (stream, stmt, _) = exe.statement(statement);
+    let body = exe.code(code);
+    let canonical = match stmt.form {
+        compile::Form::While { test, .. }
+            if range.start >= test.start && range.end() <= test.end() =>
+        {
+            test
+        }
+        _ => stmt.ops,
+    };
+    let closes = |pc: u32| {
+        stream
+            .ops
+            .get(pc as usize)
+            .is_some_and(|op| !op.kind().in_region() && !matches!(op, Op::Region { .. }))
+    };
+    if exe.stmt_at(code, &stmt.site) != Some(statement)
+        || range.len == 0
+        || range.start.checked_add(range.len).is_none()
+        || range.start < canonical.start
+        || range.end() > canonical.end()
+        || (range.start != canonical.start && !closes(range.start - 1))
+        || !closes(range.end() - 1)
+        || !stream.verify_holding_sites(&body.source_room, canonical, stmt.regs)
+    {
+        return Err(Refused::Source);
+    }
+    Ok(canonical)
+}
+
+fn first(
+    exe: &Executable,
+    code: compile::CodeId,
+    statement: compile::StmtId,
+    range: OpRange,
+) -> Result<Point, Refused> {
+    let canonical = canonical_span(exe, code, statement, range)?;
+    let (stream, stmt, _) = exe.statement(statement);
+    let source = &exe.code(code).source_room;
+    if range.start == canonical.start {
+        return source.first_event(&if canonical == stmt.ops {
+            stmt.site.clone()
+        } else {
+            stmt.site.child(0)
+        });
+    }
+    for pc in range.start..range.end() {
+        let op = stream.ops[pc as usize];
+        if matches!(op, Op::Region { .. } | Op::Pin { .. }) {
+            continue;
+        }
+        let site = stream
+            .source_sites
+            .get(pc as usize)
+            .and_then(Option::as_deref)
+            .ok_or(Refused::Source)?;
+        return Ok(point(site, op));
+    }
+    Err(Refused::Path)
+}
+
 /// This reads the original stream, not the optimizer's expression tree. Region
 /// identity, head, event ordering and total are checked by the canonical table.
 fn derive(
@@ -236,17 +324,19 @@ fn derive(
     range: OpRange,
 ) -> Result<(Vec<Close>, Vec<Formula>), Refused> {
     let (stream, stmt, _) = exe.statement(statement);
+    let canonical = canonical_span(exe, code, statement, range)?;
     let code = exe.code(code);
     let mut closes = Vec::new();
     let mut formulas = Vec::new();
     let mut open = Vec::new();
     let mut tape = Vec::new();
-    if range == stmt.ops && code.charged {
+    if canonical == stmt.ops && range.start == stmt.ops.start && code.charged {
         tape.push(TapeEvent::Fixed(Weight::Units(
             doc::plan::FormCharge::Statement.measurement().0,
         )));
     }
-    if matches!(stmt.form, compile::Form::While { test, .. } if range == test) {
+    if matches!(stmt.form, compile::Form::While { test, .. } if canonical == test && range.start == test.start)
+    {
         // The source's canonical loop-test event is outside its expression
         // region. Formula-metered helpers retain their declared loop meter.
         let kernel = match code.source_room.owner {

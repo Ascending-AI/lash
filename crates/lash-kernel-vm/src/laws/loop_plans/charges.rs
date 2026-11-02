@@ -1,7 +1,7 @@
 use super::*;
 use crate::compile::room::charges::{ChargeProgram, FormulaValues};
 use lash_kernel_doc::Value;
-use lash_kernel_exec::Weight;
+use lash_kernel_exec::{Op, OpRange, Weight};
 
 /// Charge totals alone cannot authenticate the source's ordered closes. The
 /// same compiled formula and zero/nonzero measurements serve tape and quiet
@@ -63,6 +63,137 @@ pub(super) fn compiled_charges() {
             },
         ];
         let debt = charges.bind(&values).unwrap();
+        assert_eq!(
+            charges
+                .bind_measured(&values, |_, _, _| {
+                    panic!("immediate values must not trust a storage-supplied size")
+                })
+                .unwrap()
+                .units(),
+            23
+        );
+        let (stream, _, _) = exe.statement(statement);
+        let close = (stmt.ops.start..stmt.ops.end())
+            .find(|pc| {
+                matches!(
+                    stream.ops[*pc as usize],
+                    Op::Call { .. } | Op::Operator { .. } | Op::Nested { .. }
+                )
+            })
+            .unwrap()
+            + 1;
+        let prefix = ChargeProgram::compile(
+            &exe,
+            body.code,
+            statement,
+            OpRange {
+                start: stmt.ops.start,
+                len: close - stmt.ops.start,
+            },
+        )
+        .unwrap();
+        let suffix = ChargeProgram::compile(
+            &exe,
+            body.code,
+            statement,
+            OpRange {
+                start: close,
+                len: stmt.ops.end() - close,
+            },
+        )
+        .unwrap();
+        let final_call = (stmt.ops.start..stmt.ops.end())
+            .rfind(|pc| {
+                matches!(
+                    stream.ops[*pc as usize],
+                    Op::Call { .. } | Op::Operator { .. } | Op::Nested { .. }
+                )
+            })
+            .unwrap()
+            + 1;
+        let write = ChargeProgram::compile(
+            &exe,
+            body.code,
+            statement,
+            OpRange {
+                start: final_call,
+                len: stmt.ops.end() - final_call,
+            },
+        )
+        .unwrap();
+        let at = crate::compile::room::Point {
+            site: stmt.site.clone(),
+            phase: crate::compile::room::Phase::Commit,
+        };
+        assert!(
+            write
+                .bind(&[])
+                .unwrap()
+                .matches(&exe.code(body.code).source_room, &at, &at),
+            "a physical pin cannot turn a completed native into an unpaid source event"
+        );
+        let prefix_debt = prefix.bind(&values[..1]).unwrap();
+        let suffix_debt = suffix.bind(&values[1..]).unwrap();
+        assert_eq!(
+            prefix_debt.units() + suffix_debt.units(),
+            debt.units(),
+            "an unpaid suffix never repays the statement or completed native"
+        );
+        let split_tape = crate::observe::ChargeTape::new();
+        prefix_debt.record(&split_tape);
+        suffix_debt.record(&split_tape);
+        let complete_tape = crate::observe::ChargeTape::new();
+        debt.record(&complete_tape);
+        assert_eq!(split_tape.steps(), complete_tape.steps());
+        let read = (stmt.ops.start..close)
+            .find(|pc| matches!(stream.ops[*pc as usize], Op::Const { .. }))
+            .unwrap();
+        assert!(
+            ChargeProgram::compile(
+                &exe,
+                body.code,
+                statement,
+                OpRange {
+                    start: read + 1,
+                    len: stmt.ops.end() - read - 1
+                }
+            )
+            .is_err(),
+            "a suffix cannot drop an unpaid source read"
+        );
+        let mut arena = lash_kernel_state::arena::Arena::new();
+        let long = arena.text(&"a".repeat(64));
+        let pair = [long, long];
+        let detached = [
+            FormulaValues {
+                arguments: &pair,
+                result: long,
+            },
+            FormulaValues {
+                arguments: &pair,
+                result: long,
+            },
+        ];
+        assert!(charges.bind(&detached).is_none());
+        let mut demanded = Vec::new();
+        let measured = charges
+            .bind_measured(&detached, |index, source, measure| {
+                demanded.push((index, source, measure));
+                // Actual UTF-8 bytes plus the canonical size sentinel.
+                (measure == lash_kernel_doc::Measure::Size).then_some(65)
+            })
+            .unwrap();
+        assert_eq!(measured.units(), 6 + 2 * (3 + 3 * 65));
+        assert_eq!(demanded.len(), 6);
+        assert!(
+            charges
+                .bind_measured(&detached, |_, source, _| {
+                    (source != crate::compile::Source::Result).then_some(65)
+                })
+                .is_none(),
+            "a missing detached result measure cannot become zero"
+        );
+
         // One statement, five expression nodes, and the native formulas
         // 3+2+2+2 and 3+1+2+2. These prices come from this law's declarations.
         assert_eq!(debt.units(), 23);

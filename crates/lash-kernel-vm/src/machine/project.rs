@@ -157,46 +157,6 @@ pub(crate) fn project(
     project_in(arena, pages, value)
 }
 
-/// The page form a journal describes `value` by: what it reaches named by
-/// ledger keys, so no projection point is implied and nothing is kept as an
-/// immutable's page form.
-pub(in crate::machine) fn project_ledger(
-    arena: &mut Arena,
-    pages: &Access<'_>,
-    value: &Value,
-) -> Result<PageValue, HeapFault> {
-    project_in(&mut LedgerKeys(arena), pages, value)
-}
-
-struct LedgerKeys<'a>(&'a mut Arena);
-impl ProjectionArena for LedgerKeys<'_> {
-    fn projection_body(
-        &mut self,
-        handle: ArenaHandle,
-    ) -> Result<&Body, lash_kernel_doc::NativeError> {
-        Arena::body(self.0, handle)
-    }
-    fn projection_identify(
-        &mut self,
-        handle: ArenaHandle,
-    ) -> Result<EntityId, lash_kernel_doc::NativeError> {
-        Arena::ledger_key(self.0, handle)
-    }
-    fn projection_page(
-        &mut self,
-        handle: ArenaHandle,
-    ) -> Result<Option<PageValue>, lash_kernel_doc::NativeError> {
-        Ok(self.0.facts(handle)?.page.get().cloned())
-    }
-    fn projection_keep_page(
-        &mut self,
-        _: ArenaHandle,
-        _: PageValue,
-    ) -> Result<(), lash_kernel_doc::NativeError> {
-        Ok(())
-    }
-}
-
 /// Project the exclusive prepared graph without publishing any guest body.
 pub(in crate::machine) fn project_prepared(
     arena: &mut lash_kernel_state::arena::PreparedInstallation<'_>,

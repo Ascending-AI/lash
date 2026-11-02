@@ -25,7 +25,7 @@ enum Input {
     Binding(u32),
 }
 
-pub(in crate::machine::islands) struct CertifiedStatement {
+pub(crate) struct CertifiedStatement {
     pub(in crate::machine::islands) id: StmtId,
     pub(in crate::machine::islands) index: usize,
     pub(in crate::machine::islands) source_pc: u32,

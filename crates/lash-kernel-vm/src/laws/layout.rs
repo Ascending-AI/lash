@@ -781,10 +781,12 @@ fn scalar_layouts_agree() {
     );
     crate::machine::islands::take_certified_statements();
     packet_modes(&prefix, super::embedder::ROOMY, u64::MAX, false, false);
+    let certified = crate::machine::islands::take_certified_statements();
     assert!(
-        crate::machine::islands::take_certified_statements() > 0,
+        certified > 0,
         "literal/copy prefixes must publish through the compiled certificate"
     );
+    println!("compiled scalar prefixes published: {certified}");
     for slice in [1, 2, 3, 7] {
         packet_modes(&prefix, super::embedder::ROOMY, slice, true, true);
     }

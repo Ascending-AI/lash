@@ -407,7 +407,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
 
     /// The read's runtime loop occurrence: an entered body counts its
     /// started iteration, a header read the one before it.
-    pub(in crate::machine::islands) fn source_loops(
+    pub(in crate::machine::islands::execute) fn source_loops(
         &self,
         controls: &[Position],
     ) -> Vec<(lash_kernel_value::sites::Site, u64)> {

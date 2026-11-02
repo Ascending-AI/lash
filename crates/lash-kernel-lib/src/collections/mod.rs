@@ -2,6 +2,7 @@
 mod bodies;
 mod copy;
 mod native;
+pub use native::sort::{Comparison as SortComparison, Merge as SortContinuation, MergePosition};
 #[cfg(test)]
 mod tests;
 
