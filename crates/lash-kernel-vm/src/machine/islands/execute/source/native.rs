@@ -2,7 +2,7 @@
 use super::*;
 use crate::admission::Allowance;
 use crate::machine::source_publication::native_storage;
-use lash_kernel_state::kernel_internals::logical::{JournalEvent, Program, RootValue};
+use lash_kernel_state::kernel_internals::logical::RootValue;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Measure, Phase as SourcePhase, Point,
@@ -21,7 +21,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         self.publish_native_answer(frame, site, args, false, None)
     }
 
-    /// Prepared operators use the same source event and journal as native calls.
+    /// Prepared operators use the same exact source boundary as native calls.
     /// Their canonical entry computes a value and price before either publishes.
     pub(in crate::machine::islands::execute) fn publish_prepared_value(
         &mut self,
@@ -85,6 +85,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(statement) = frame.state.statement else {
             return Ok(ValuePublication::Unavailable);
         };
+        let statement_id = statement;
         let (stream, statement, _) = self.exe.statement(statement);
         let Some(at) = stream
             .source_sites
@@ -94,6 +95,15 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             return Ok(ValuePublication::Unavailable);
         };
         let source = &self.exe.code(frame.state.callee.plan.code).source_room;
+        let Ok(charges) = room::charges::ChargeProgram::native_packet(
+            self.exe,
+            frame.state.callee.plan.code,
+            statement_id,
+            site.pc,
+            self.accounting.then_some(site.close).flatten(),
+        ) else {
+            return Ok(ValuePublication::Unavailable);
+        };
         if !self.source_operand_transfer(frame, stream, site.pc, at) {
             return Ok(ValuePublication::Unavailable);
         }
@@ -110,6 +120,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if registers.len() != args.len() {
             return Ok(ValuePublication::Unavailable);
         }
+        let operands = registers
+            .iter()
+            .map(|reg| frame.regs[reg.0 as usize])
+            .collect();
         let mut arguments = args.to_vec();
         arguments.resize(function.arity, Value::Absent);
         // Check the complete source consumer before evaluating a prepared
@@ -328,21 +342,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 0
             },
             close: self.accounting.then_some(site.close).flatten(),
-            strict: false,
+            strict: true,
             depth: match site.depth {
                 Depth::None => 0,
                 Depth::Operation(extra) if extra <= 1 => 1,
                 Depth::Operation(extra) | Depth::Template(extra) => u64::from(extra) + 1,
             },
             safe_point: self.charged,
-        };
-        let scratch_events = native_storage::scratch_events(output, &contract)?;
-        let make = || {
-            Program::new(vec![JournalEvent {
-                inputs: inputs.clone(),
-                scratch: scratch_events.clone(),
-                ..Default::default()
-            }])
         };
         drop(ledger);
         let prefix = publication::Prefix {
@@ -358,7 +364,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 .saturating_sub(self.arena.held())
                 .saturating_sub(self.transient)
         });
-        let prepare = native_storage::NativeStorage {
+        let recipe = native_storage::NativeStorage {
             contract: contract.clone(),
             function,
             args: arguments,
@@ -373,18 +379,27 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             known: answer.map(|(value, _)| (value, 0)),
         };
         let result = &mut frame.regs[site.reg as usize];
-        let published = self.publish_source_prepared(
+        let published = self.publish_source_boundary(
             frame.state.callee,
             activation,
             prefix,
-            make,
-            prepare,
-            |arena, _, edits, storage| {
+            native_storage::SourceNative {
+                recipe,
+                charges: &charges,
+                inputs,
+                operands,
+            },
+            |arena, _, edits, prepared| {
+                let native_storage::NativePublication { storage, .. } = prepared;
                 debug_assert!(edits.is_empty());
                 *result = storage.value();
                 storage.publish(arena);
             },
         )?;
+        #[cfg(test)]
+        if published {
+            native_storage::published(true, &contract, args.len() < function.arity);
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             if prepared {

@@ -12,6 +12,20 @@ impl KernelMachine {
         let LibRun::Native { native, .. } = &function.run else {
             panic!("installed native")
         };
+        let code = self.exe.main.unwrap();
+        let statement = self.exe.block(self.exe.code(code).body).stmts[0];
+        let (stream, stmt, _) = self.exe.statement(statement);
+        let pc = (stmt.ops.start..stmt.ops.end())
+            .find(|pc| {
+                matches!(
+                    stream.ops[*pc as usize],
+                    lash_kernel_exec::Op::Call { .. } | lash_kernel_exec::Op::Operator { .. }
+                )
+            })
+            .unwrap();
+        let charges =
+            room::charges::ChargeProgram::native_completion(&self.exe, code, statement, pc)
+                .unwrap();
         let ledger = Rc::new(RefCell::new(Ledger::fresh()));
         let mut arena = Arena::new();
         let owner = |index| Owner::Value {
@@ -69,7 +83,7 @@ impl KernelMachine {
         wrong.known = Some((doc::Value::Int(8), 0));
         assert!(
             wrong
-                .prepare_boundary(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(0)])
                 .unwrap()
                 .is_none(),
             "same-price native result must match its canonical prepared entry"
@@ -77,7 +91,7 @@ impl KernelMachine {
         let mut exact = recipe(0, contract(0, &arena));
         exact.known = Some((doc::Value::Int(7), 0));
         let exact = exact
-            .prepare_boundary(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(0)])
             .unwrap()
             .unwrap();
         assert!(matches!(exact.storage.value(), doc::Value::Int(7)));
@@ -85,7 +99,7 @@ impl KernelMachine {
         let mut scratch = recipe(6, contract(6, &arena));
         scratch.known = Some((doc::Value::Int(7), 0));
         let scratch = scratch
-            .prepare_boundary(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(0)])
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -102,25 +116,25 @@ impl KernelMachine {
         // must leave both the ledger and the physical nursery untouched.
         assert!(
             recipe(2, contract(2, &arena))
-                .prepare_boundary(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(0)])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(3, contract(3, &arena))
-                .prepare_boundary(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(0)])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(4, contract(0, &arena))
-                .prepare_boundary(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(0)])
                 .unwrap()
                 .is_none()
         );
         assert!(
             recipe(5, contract(5, &arena))
-                .prepare_boundary(&mut arena, &[owner(0)])
+                .prepare_for_law(&mut arena, &[owner(0)])
                 .unwrap()
                 .is_none()
         );
@@ -128,11 +142,11 @@ impl KernelMachine {
         assert_eq!(arena.next_provisional(), identity);
         assert_eq!(arena.allocations(), allocations);
         let scalar = recipe(0, contract(0, &arena))
-            .prepare_boundary(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(0)])
             .unwrap()
             .expect("scalar native ran");
         assert!(matches!(scalar.storage.value(), doc::Value::Int(7)));
-        assert_eq!(scalar.storage.units(), 4);
+        assert_eq!(native_units(&charges, &scalar.storage), 4);
         assert_eq!(scalar.transaction.peak(), 17);
         drop(scalar);
         // The graph call's actual nonzero input has a one-byte magnitude.
@@ -174,12 +188,12 @@ impl KernelMachine {
             transaction,
             storage,
         } = recipe(1, phases.clone())
-            .prepare_boundary(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(0)])
             .unwrap()
             .expect("actual native boundary executed");
         assert_eq!(transaction.peak(), peak);
         assert_eq!(storage.work(), 2);
-        assert_eq!(storage.units(), 6);
+        assert_eq!(native_units(&charges, &storage), 6);
         assert!(matches!(
             storage.formula_values().arguments,
             [doc::Value::Int(1)]
@@ -196,7 +210,7 @@ impl KernelMachine {
             transaction,
             storage,
         } = recipe(1, phases)
-            .prepare_boundary(&mut arena, &[owner(0)])
+            .prepare_for_law(&mut arena, &[owner(0)])
             .unwrap()
             .expect("retry runs canonical native");
         let value = storage.value();
@@ -371,7 +385,7 @@ impl KernelMachine {
             let facts = external_resources(&mut charged, &mut counters, u64::MAX)
                 .facts(&prefix.allowance)
                 .unwrap();
-            let prepared = recipe().prepare_boundary_with(&mut arena, &[], |arena, storage, page, entities| {
+            let prepared = recipe().prepare_boundary(&mut arena, &[], |arena, storage, page, entities| {
                 use room::publication::{ExactRoots, ExternalFacts};
                 storage.bind_facts(&mut prefix.facts)?;
                 let debt = charges.bind_measured(&[storage.formula_values()], |_, source, measure| storage.measure(source, measure)).unwrap();
@@ -428,8 +442,8 @@ impl KernelMachine {
             .expect("certified external native prepared");
             assert_eq!(prepared.peak(), expected_peak);
             units = charges
-                .bind_measured(&[storage.0.formula_values()], |_, source, measure| {
-                    storage.0.measure(source, measure)
+                .bind_measured(&[storage.storage.formula_values()], |_, source, measure| {
+                    storage.storage.measure(source, measure)
                 })
                 .unwrap()
                 .units();
@@ -452,7 +466,7 @@ impl KernelMachine {
             assert_eq!(frontier.position(), &start);
         }
         assert!(units > 0);
-        let (prepared, (storage, _)) = {
+        let (prepared, prepared_native) = {
             let prefix = prefix();
             let facts = external_resources(&mut charged, &mut counters, units)
                 .facts(&prefix.allowance)
@@ -477,6 +491,7 @@ impl KernelMachine {
         }
         .unwrap()
         .expect("actual external native certificate");
+        let native_storage::NativePublication { storage, .. } = prepared_native;
         assert!(
             storage.formula_values().arguments.is_empty(),
             "omitted optional arguments are padded only for execution"
@@ -537,4 +552,28 @@ fn external_resources<'a>(
         limit: 10,
         safe_point: 0,
     }
+}
+
+impl NativeStorage<'_> {
+    fn prepare_for_law<'a>(
+        self,
+        arena: &'a mut Arena,
+        inputs: &[Owner],
+    ) -> Result<Option<NativeBoundary<'a>>, HeapFault> {
+        Ok(self
+            .prepare_boundary(arena, inputs, |_, _, _, _| Ok(Some(())))?
+            .map(|(boundary, ())| boundary))
+    }
+}
+
+fn native_units(
+    charges: &room::charges::ChargeProgram,
+    storage: &native_storage::PreparedNative,
+) -> u64 {
+    charges
+        .bind_measured(&[storage.formula_values()], |_, source, measure| {
+            storage.measure(source, measure)
+        })
+        .unwrap()
+        .units()
 }

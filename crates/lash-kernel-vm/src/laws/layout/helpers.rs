@@ -816,6 +816,7 @@ fn helper_frames_agree() {
     external
         .machine
         .assert_external_native_boundary_law(external.library.ids["resident.optional"]);
+    native_boundaries_agree();
     use super::ExecutionMode as Mode;
     use crate::machine::islands::witness::{self, Exit, Family};
     use crate::perf_witness::execution::{self, Owner};
@@ -1343,5 +1344,137 @@ fn shared_parameters_claim_the_entry_nursery() {
             > 0,
         "shared parameters must claim nursery room before their call commits: {:?}",
         actual.2
+    );
+}
+
+/// Native exact acceptance binds real operands and preserves paid closes,
+/// optional padding, graph/scratch peaks and durable cold source handoffs.
+fn native_boundaries_agree() {
+    use super::ExecutionMode;
+    const SOURCE: &str = "main { let xs = resident.optional() let ys = resident.boundary(1) let n = list.len(xs) let value = resident.boundary(0) return (value, n, list.get(ys, 0)) }";
+    let observe = |mode, layout, cold, taped, bounds| {
+        let mut run = Embedder::with(
+            SOURCE,
+            Setup {
+                probes: Some(helper_probes),
+                layout,
+                bounds,
+                slice: if cold { 31 } else { u64::MAX },
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        if taped {
+            run.machine.record_charges(tape.clone());
+        }
+        run.machine.take_native_publications();
+        let mut counts = [0; 5];
+        let end = loop {
+            match mode {
+                ExecutionMode::Source => run.machine.force_source_execution(),
+                ExecutionMode::Generic => run.machine.force_generic_packets(),
+                ExecutionMode::Specialized => {}
+            }
+            let step = run.run();
+            for (total, value) in counts
+                .iter_mut()
+                .zip(run.machine.take_native_publications())
+            {
+                *total += value;
+            }
+            match step {
+                Step::Ended(end) => break end,
+                Step::Slice => {
+                    if cold {
+                        run.reopen(layout, true);
+                        if taped {
+                            run.machine.record_charges(tape.clone());
+                        }
+                    }
+                }
+                Step::Parked(_) => panic!("native boundary fixture cannot park"),
+            }
+        };
+        (
+            (
+                end,
+                run.machine.meters().charged,
+                lash_kernel_exec::Weight::expand(tape.steps()),
+            ),
+            counts,
+        )
+    };
+    let roomy = super::super::embedder::ROOMY;
+    let (reference, source_counts) = observe(ExecutionMode::Source, Layout(0), false, false, roomy);
+    assert_eq!(
+        result(reference.0.clone()),
+        Datum::Tuple(vec![int(7), int(2), int(7)])
+    );
+    assert!(
+        source_counts[0] > 0 && source_counts[2..].iter().all(|count| *count > 0),
+        "precise certified native graph, scratch and optional paths must execute: {source_counts:?}"
+    );
+    for layout in [Layout(0), Layout(2), Layout(0x5eed)] {
+        for cold in [false, true] {
+            for mode in [
+                ExecutionMode::Source,
+                ExecutionMode::Generic,
+                ExecutionMode::Specialized,
+            ] {
+                let (actual, counts) = observe(mode, layout, cold, false, roomy);
+                assert_eq!(
+                    actual, reference,
+                    "native boundary {mode:?}, {layout:?}, cold={cold}"
+                );
+                if matches!(mode, ExecutionMode::Source) {
+                    assert!(
+                        counts[0] > 0 && counts[2..].iter().all(|count| *count > 0),
+                        "cold/precise native certificates must execute: {counts:?}"
+                    );
+                } else if !cold {
+                    assert!(
+                        counts[1] > 0 && counts[2] > 0,
+                        "packet native certificates must actually execute: {counts:?}"
+                    );
+                }
+            }
+            let taped = observe(ExecutionMode::Source, layout, cold, true, roomy).0;
+            for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+                assert_eq!(
+                    observe(mode, layout, cold, true, roomy).0,
+                    taped,
+                    "native canonical cold charge tape"
+                );
+            }
+        }
+    }
+    let exact_charge = reference.1.unwrap();
+    for charge_limit in [0, 3, 7, exact_charge - 1, exact_charge] {
+        let bounds = Bounds {
+            charge_limit,
+            ..roomy
+        };
+        let exact = observe(ExecutionMode::Source, Layout(0), false, true, bounds).0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(mode, Layout(2), true, true, bounds).0,
+                exact,
+                "native first charge refusal at {charge_limit}"
+            );
+        }
+    }
+    for memory in [128, 229, 230, 256, 512] {
+        let bounds = Bounds { memory, ..roomy };
+        let exact = observe(ExecutionMode::Source, Layout(0), false, true, bounds).0;
+        for mode in [ExecutionMode::Generic, ExecutionMode::Specialized] {
+            assert_eq!(
+                observe(mode, Layout(2), true, true, bounds).0,
+                exact,
+                "native normalized first memory refusal at {memory}"
+            );
+        }
+    }
+    println!(
+        "certified native runtime publications: precise {source_counts:?}; packet, graph, scratch, optional and cold witnesses checked"
     );
 }

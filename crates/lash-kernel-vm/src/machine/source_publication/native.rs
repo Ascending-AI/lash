@@ -3,68 +3,9 @@ use super::native_storage;
 use super::*;
 use crate::compile::room::{ExitKind, Measure, Phase, Point, publication::Occurrence};
 use crate::compile::{LibId, LibRun};
-use crate::machine::{Halt, KernelMachine, fault, registers::PreparedOutput, stream::Running};
+use crate::machine::{Halt, KernelMachine, fault, stream::Running};
 use lash_kernel_exec::Op;
-use lash_kernel_state::kernel_internals::logical::{Holding, JournalEvent};
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
-
-struct NativeResult<'bank, 'recipe> {
-    bank: PreparedOutput<'bank>,
-    recipe: native_storage::NativeStorage<'recipe>,
-    heap: &'recipe PagedHeap,
-}
-struct PreparedNativeResult<'bank> {
-    bank: PreparedOutput<'bank>,
-    storage: native_storage::PreparedNative,
-    holding: Holding,
-}
-impl<'bank> StoragePreparation for NativeResult<'bank, '_> {
-    type Prepared = PreparedNativeResult<'bank>;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let Some(PreparedStorage {
-            registration,
-            storage,
-            actual,
-        }) = self.recipe.prepare(arena, actual)?
-        else {
-            return Ok(None);
-        };
-        let [event] = actual.events() else {
-            return Err(malformed("precise native lost its prepared event"));
-        };
-        let [(_, lash_kernel_state::kernel_internals::logical::PublicationValue::Page(page))] =
-            event.outputs.as_slice()
-        else {
-            return Err(malformed(
-                "precise native lost its canonical projected output",
-            ));
-        };
-        let holding = Holding::from_page(self.heap.pages(), page)?;
-        Ok(Some(PreparedStorage {
-            registration,
-            storage: PreparedNativeResult {
-                bank: self.bank,
-                storage,
-                holding,
-            },
-            actual,
-        }))
-    }
-    fn allowance(prepared: &Self::Prepared, allowance: &mut Allowance) {
-        <native_storage::NativeStorage<'_> as StoragePreparation>::allowance(
-            &prepared.storage,
-            allowance,
-        );
-    }
-    fn facts(prepared: &Self::Prepared, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        <native_storage::NativeStorage<'_> as StoragePreparation>::facts(&prepared.storage, facts)
-    }
-}
 
 impl KernelMachine {
     pub(in crate::machine) fn publish_source_native(
@@ -93,13 +34,14 @@ impl KernelMachine {
         let Some(Some(site)) = running.stream.source_sites.get(pc as usize) else {
             return Ok(false);
         };
-        let (source, link, loops) = {
+        let (source, code, link, loops) = {
             let frame = self.frame(running.task)?;
             let Some(loops) = source_loops(frame, running.exe)? else {
                 return Ok(false);
             };
             (
                 Arc::clone(&running.exe.code(frame.code).source_room),
+                frame.code,
                 frame.link,
                 loops,
             )
@@ -114,6 +56,11 @@ impl KernelMachine {
         let Ok(interval) = source.compile_event(&at, ExitKind::Normal) else {
             return Ok(false);
         };
+        let Ok(charges) =
+            room::charges::ChargeProgram::native_completion(running.exe, code, running.id, pc)
+        else {
+            return Ok(false);
+        };
         self.logical_flush()?;
         let physical_room =
             (self.bounds.memory_meter != crate::MemoryMeter::Off).then(|| self.capacity_headroom());
@@ -122,7 +69,8 @@ impl KernelMachine {
         };
         let output = bank.owner();
         let inputs = bank.owners();
-        let mut values = bank.values();
+        let operands = bank.values();
+        let mut values = operands.clone();
         values.resize(function.arity, doc::Value::Absent);
         let contract = {
             let arena = self.arena.borrow();
@@ -159,7 +107,6 @@ impl KernelMachine {
             .ledger()
             .borrow()
             .release_cost(&inputs, self.heap.pages())?;
-        let scratch_events = native_storage::scratch_events(output, &contract)?;
         let active = self
             .tasks
             .get_mut(running.task.0 as usize)?
@@ -285,7 +232,7 @@ impl KernelMachine {
             },
             logical_memory: &self.logical_memory,
         }
-        .publish(
+        .publish_external(
             roots.invocation(),
             &mut frame.source_frontier,
             Prefix {
@@ -318,34 +265,24 @@ impl KernelMachine {
                     before: 0,
                     units: 0,
                     close: None,
-                    strict: false,
+                    strict: true,
                     depth: u64::from(function.operation()),
                     safe_point,
                 },
             },
-            || {
-                Program::new(vec![JournalEvent {
-                    inputs: inputs.clone(),
-                    scratch: scratch_events.clone(),
-                    ..Default::default()
-                }])
-            },
-            NativeResult {
-                bank,
-                recipe,
-                heap: &self.heap,
-            },
+            native_storage::SourceNative { recipe, charges: &charges, inputs, operands },
             |arena, _, edits, prepared| {
                 debug_assert!(edits.is_empty());
-                let value = prepared.storage.value();
+                let native_storage::NativePublication { storage, holding, units } = prepared;
+                let value = storage.value();
                 completion = Some((
-                    prepared.storage.units(),
-                    prepared.storage.work(),
-                    prepared.storage.known(),
-                    prepared.storage.allocated_immutable(),
+                    units,
+                    storage.work(),
+                    storage.known(),
+                    storage.allocated_immutable(),
                 ));
-                prepared.storage.publish(arena);
-                prepared.bank.publish(value, prepared.holding);
+                storage.publish(arena);
+                bank.publish(value, holding);
             },
         )
         // Exact source admission is the only memory authority: a native
@@ -363,6 +300,8 @@ impl KernelMachine {
         })?;
         drop(arena);
         if published {
+            #[cfg(test)]
+            native_storage::published(false, &contract, (args.len as usize) < function.arity);
             let (units, work, known, allocated) =
                 completion.ok_or_else(|| malformed("native publication has no completion"))?;
             #[cfg(any(test, feature = "testing"))]

@@ -75,6 +75,9 @@ impl Context<'_> {
             Admission::Exact(mut memory) => {
                 if memory.exceeded(prepared.peak()) {
                     prepared = prepared.collect(&ledger, self.heap)?;
+                    if memory.exceeded(prepared.peak()) {
+                        return Ok(false);
+                    }
                 }
                 memory.admit(prepared.peak())?
             }

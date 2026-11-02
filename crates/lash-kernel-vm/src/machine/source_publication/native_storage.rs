@@ -26,7 +26,6 @@ pub(in crate::machine) struct NativeStorage<'a> {
 }
 pub(in crate::machine) struct PreparedNative {
     pub(in crate::machine) value: Value,
-    pub(in crate::machine) units: u64,
     pub(in crate::machine) work: u64,
     pub(in crate::machine) known: bool,
     pub(in crate::machine) batch: PreparedBatch,
@@ -43,52 +42,6 @@ pub(in crate::machine) struct PreparedNative {
     release: Box<[room::Owner]>,
     released: u64,
 }
-impl StoragePreparation for NativeStorage<'_> {
-    type Prepared = PreparedNative;
-    const MATERIALIZES: bool = true;
-    fn prepare<'a>(
-        self,
-        arena: &'a mut Arena,
-        actual: Program,
-    ) -> Result<Option<PreparedStorage<'a, Self::Prepared>>, HeapFault> {
-        let [event] = actual.events() else {
-            return Ok(None);
-        };
-        if !event.outputs.is_empty()
-            || !event.entities.is_empty()
-            || event.frame.is_some()
-            || event.member.is_some()
-        {
-            return Ok(None);
-        }
-        let Some(detached) = self.prepare_storage(arena, &event.inputs)? else {
-            return Ok(None);
-        };
-        let DetachedNative {
-            registration,
-            storage,
-            page,
-            entities,
-        } = detached;
-        let mut event = event.clone();
-        event.native = Some(storage.contract().clone());
-        event.outputs.push((storage.output, PV::Page(page)));
-        event.entities = entities;
-        Ok(Some(PreparedStorage {
-            registration,
-            storage,
-            actual: Program::new(vec![event]),
-        }))
-    }
-    fn allowance(storage: &PreparedNative, allowance: &mut Allowance) {
-        allowance.units = storage.units;
-        allowance.depth = allowance.depth.max(u64::from(storage.depth));
-    }
-    fn facts(storage: &PreparedNative, facts: &mut LeafExecution) -> Result<(), HeapFault> {
-        storage.bind_facts(facts)
-    }
-}
-
 struct DetachedNative<'a> {
     registration: Registration<'a>,
     storage: PreparedNative,
@@ -111,11 +64,13 @@ pub(in crate::machine) struct SourceNative<'a> {
     pub(in crate::machine) inputs: Vec<Owner>,
     pub(in crate::machine) operands: Vec<Value>,
 }
+pub(in crate::machine) struct NativePublication {
+    pub(in crate::machine) storage: PreparedNative,
+    pub(in crate::machine) holding: lash_kernel_state::kernel_internals::logical::Holding,
+    pub(in crate::machine) units: u64,
+}
 impl BoundaryPreparation for SourceNative<'_> {
-    type Prepared = (
-        PreparedNative,
-        lash_kernel_state::kernel_internals::logical::Holding,
-    );
+    type Prepared = NativePublication;
     fn prepare<'a>(
         self,
         arena: &'a mut Arena,
@@ -135,8 +90,8 @@ impl BoundaryPreparation for SourceNative<'_> {
                 transaction,
                 storage,
             },
-            (bound, holding),
-        )) = self.recipe.prepare_boundary_with(
+            (bound, holding, units),
+        )) = self.recipe.prepare_boundary(
             arena,
             &self.inputs,
             |arena, storage, page, entities| {
@@ -158,8 +113,12 @@ impl BoundaryPreparation for SourceNative<'_> {
                 }) else {
                     return Ok(None);
                 };
-                prefix.allowance.units = debt.units();
-                prefix.allowance.depth = prefix.allowance.depth.max(storage.depth());
+                if let Some(canonical) = debt.native_allowance(prefix.allowance.safe_point) {
+                    prefix.allowance = canonical;
+                    prefix.allowance.depth = prefix.allowance.depth.max(storage.depth());
+                } else {
+                    prefix.allowance.units = debt.units();
+                }
                 let scratch = scratch_events(storage.output, storage.contract())?;
                 let Ok(bound) = event.bind_external(
                     frontier,
@@ -191,14 +150,21 @@ impl BoundaryPreparation for SourceNative<'_> {
                     heap.pages(),
                     page,
                 )?;
-                Ok(Some((bound, holding)))
+                Ok(Some((bound, holding, debt.units())))
             },
         )?
         else {
             return Ok(None);
         };
         match bound.finish_external(frontier, ledger, transaction) {
-            Ok(prepared) => Ok(Some((prepared, (storage, holding)))),
+            Ok(prepared) => Ok(Some((
+                prepared,
+                NativePublication {
+                    storage,
+                    holding,
+                    units,
+                },
+            ))),
             Err(PublicationError::Miss(_)) => Ok(None),
             Err(PublicationError::Heap(error)) => Err(error),
         }
@@ -206,19 +172,9 @@ impl BoundaryPreparation for SourceNative<'_> {
 }
 
 impl NativeStorage<'_> {
-    pub(in crate::machine) fn prepare_boundary<'a>(
-        self,
-        arena: &'a mut Arena,
-        inputs: &[Owner],
-    ) -> Result<Option<NativeBoundary<'a>>, HeapFault> {
-        Ok(self
-            .prepare_boundary_with(arena, inputs, |_, _, _, _| Ok(Some(())))?
-            .map(|(boundary, ())| boundary))
-    }
-
     /// Bind source facts before the transaction takes registration's arena
     /// borrow. Returning None abandons storage and all provisional identities.
-    pub(in crate::machine) fn prepare_boundary_with<'a, C>(
+    pub(in crate::machine) fn prepare_boundary<'a, C>(
         self,
         arena: &'a mut Arena,
         inputs: &[Owner],
@@ -452,19 +408,6 @@ impl NativeStorage<'_> {
             };
             measurements.push((source, measure, measured));
         }
-        let units = if self.charging {
-            let Some(units) = crate::machine::islands::cx::measured_prepared_formula(
-                &installation,
-                &self.function.charge,
-                &self.args,
-                &value,
-            ) else {
-                return Ok(None);
-            };
-            units
-        } else {
-            0
-        };
         let mut entities = Vec::new();
         for (handle, entity) in handles.into_iter().zip(identities) {
             let body = installation.collection(handle).map_err(native_fault)?;
@@ -485,7 +428,7 @@ impl NativeStorage<'_> {
             &page,
         )?;
         // Authenticate the result against its input-evaluated contract before
-        // either the old source consumer or the region consumer can publish.
+        // exact source acceptance can publish the detached storage.
         let actual = PV::Page(page.clone());
         let owners = entities
             .iter()
@@ -512,10 +455,9 @@ impl NativeStorage<'_> {
                 arguments: self.args,
                 given: inputs.len(),
                 measurements,
-                units,
                 work,
                 known: self.known.is_some(),
-                depth: depth.max(u32::from(self.function.operation())),
+                depth,
                 at: self.at,
                 release: self.release,
                 released,
@@ -592,9 +534,6 @@ impl PreparedNative {
     }
     pub(in crate::machine) fn value(&self) -> Value {
         self.value
-    }
-    pub(in crate::machine) fn units(&self) -> u64 {
-        self.units
     }
     pub(in crate::machine) fn work(&self) -> u64 {
         self.work
@@ -720,4 +659,38 @@ pub(in crate::machine) fn scratch_events(
         owner: owner(index),
     }));
     Ok(events)
+}
+
+#[cfg(test)]
+thread_local! { static NATIVE_PUBLICATIONS: Cell<[u64; 5]> = const { Cell::new([0; 5]) }; }
+#[cfg(test)]
+pub(in crate::machine) fn published(
+    packet: bool,
+    contract: &doc::NativeResourceContract,
+    optional: bool,
+) {
+    NATIVE_PUBLICATIONS.with(|counts| {
+        let mut next = counts.get();
+        next[usize::from(packet)] += 1;
+        next[2] += u64::from(
+            contract
+                .events
+                .iter()
+                .any(|event| matches!(event, doc::NativeResourceEvent::Entity { .. })),
+        );
+        next[3] += u64::from(
+            contract
+                .events
+                .iter()
+                .any(|event| matches!(event, doc::NativeResourceEvent::Scratch { .. })),
+        );
+        next[4] += u64::from(optional);
+        counts.set(next);
+    });
+}
+#[cfg(test)]
+impl crate::machine::KernelMachine {
+    pub(crate) fn take_native_publications(&self) -> [u64; 5] {
+        NATIVE_PUBLICATIONS.with(|counts| counts.replace([0; 5]))
+    }
 }

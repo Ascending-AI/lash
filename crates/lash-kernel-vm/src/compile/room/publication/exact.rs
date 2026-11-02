@@ -151,8 +151,18 @@ impl ExactEvent {
         external: ExternalFacts<'_>,
         debt: &crate::compile::room::charges::ChargeDebt<'_>,
     ) -> Result<BoundEvent, Refused> {
-        if !debt.matches(&self.source, &self.at, &self.at)
-            || allowance.units != debt.units()
+        if !debt.matches(&self.source, &self.at, &self.at) {
+            return Err(Refused::Source);
+        }
+        if let Some(mut canonical) = debt.native_allowance(allowance.safe_point) {
+            if allowance.depth < canonical.depth {
+                return Err(Refused::Source);
+            }
+            canonical.depth = allowance.depth;
+            if allowance != canonical {
+                return Err(Refused::Source);
+            }
+        } else if allowance.units != debt.units()
             || !allowance.strict
             || allowance.before != 0
             || allowance.close.is_some()
