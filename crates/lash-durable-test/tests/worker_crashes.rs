@@ -720,7 +720,8 @@ async fn a_worker_killed_from_outside_across_a_held_tool_call_reruns_the_cell_on
 async fn a_cell_whose_worker_is_lost_from_outside_on_every_run_is_refused_without_blaming_the_cell(
     tier: Tier,
 ) {
-    let config = lash::vm::WorkerService::default().config().clone();
+    let mut config = lash::vm::WorkerService::default().config().clone();
+    config.tuning.slice = 1_000;
     let attempts = usize::try_from(config.deadlines.max_attempts).expect("a small count");
     let receipts = lash::vm::WorkerService::new(config).with_worker_receipts();
     // The worker of the run checked out last, and the calls made on it. A
