@@ -854,8 +854,7 @@ impl CompiledInterval {
         let owner = event.output.as_ref()?;
         let local = |amount: &Amount| {
             amount.fixed == 0
-                && amount.terms.len() == 1
-                && amount.terms.get(&Measure::Local(owner.clone())) == Some(&1)
+                && matches!(amount.terms.as_slice(), [(Measure::Local(at), 1)] if at == owner)
         };
         (matches!(owner, Owner::Operand(site) if *site == event.point.site)
             && event.point.site != source.site
