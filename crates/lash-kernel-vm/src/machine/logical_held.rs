@@ -118,20 +118,23 @@ impl KernelMachine {
         self.regs.source_entry_roots(self.logical.clone());
         self.logical_flush()
     }
+    /// Opens the statement's source bank at `pc`. Gives whether it adopted
+    /// a returned call's accepted resumption there rather than projecting
+    /// the bank afresh.
     pub(super) fn source_begin(
         &mut self,
         task: lash_kernel_doc::TaskId,
         stream: &Stream,
         stmt: &Stmt,
         pc: u32,
-    ) -> Result<(), super::Halt> {
+    ) -> Result<bool, super::Halt> {
         let invocation = self.frame(task)?.invocation;
         let store = self.logical.ledger();
         if self
             .regs
             .begin_source_resume(task, invocation, &stmt.site, pc, &store.borrow())?
         {
-            return Ok(());
+            return Ok(true);
         }
         let exe = std::sync::Arc::clone(&self.exe);
         self.logical_flush_controls(task, &exe)?;
@@ -150,7 +153,7 @@ impl KernelMachine {
         };
         self.regs.source_begin(stream, stmt, pc, &projection)?;
         self.logical_flush()?;
-        Ok(())
+        Ok(false)
     }
     pub(super) fn source_complete_joins(
         &mut self,

@@ -113,8 +113,19 @@ impl KernelMachine {
             let Some(expected) = running.stmt.source_roles_at(running.stream, pc) else {
                 return Ok(None);
             };
+            // The bank at the call op, before the joins it carries: those
+            // publish once the statement runs on from the call.
+            let joins = running
+                .stream
+                .source_joins
+                .get(&(pc - 1))
+                .map_or(&[][..], Vec::as_slice);
             if expected.len() != saved.len()
                 || expected.iter().any(|(reg, site)| {
+                    let site = joins
+                        .iter()
+                        .find(|join| join.value == *reg && join.to == *site)
+                        .map_or(site, |join| &join.from);
                     !saved
                         .iter()
                         .any(|(actual, at, _)| actual == reg && at == site)

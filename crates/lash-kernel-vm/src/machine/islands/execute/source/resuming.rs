@@ -71,9 +71,18 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         let Some(projected) = statement.source_roles_at(stream, resume) else {
             return Ok(false);
         };
+        // The bank at the call op, before the joins it carries.
+        let joins = stream
+            .source_joins
+            .get(&(resume - 1))
+            .map_or(&[][..], Vec::as_slice);
         if site.reg != entry.dst.0
             || projected.len() != entry.roles.len() + 1
             || projected.iter().any(|(reg, at)| {
+                let at = joins
+                    .iter()
+                    .find(|join| join.value == *reg && join.to == *at)
+                    .map_or(at, |join| &join.from);
                 !((*reg == entry.dst && at.as_ref() == &entry.site)
                     || entry
                         .roles

@@ -164,8 +164,16 @@ impl KernelMachine {
         mut pc: usize,
     ) -> Eval<Ran> {
         self.regs.statement(running.stmt.regs);
-        self.source_begin(running.task, running.stream, running.stmt, pc as u32)?;
         let ops = running.stream.ops.as_slice();
+        if self.source_begin(running.task, running.stream, running.stmt, pc as u32)?
+            && let Some(call) = pc.checked_sub(1)
+            && matches!(ops.get(call), Some(Op::Nested { .. }))
+        {
+            // The returned call's value landed under its own site; the joins
+            // its op carries move it to the expression it completes, as an
+            // inline call's completion does.
+            self.source_complete_joins(running, call as u32)?;
+        }
         let task = running.task;
         loop {
             let source_pc = pc as u32;
