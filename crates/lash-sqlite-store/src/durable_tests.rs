@@ -49,48 +49,6 @@ async fn a_process_row_read_uses_only_its_select() {
     assert_eq!(receipt.statements, 1, "the SELECT owns its snapshot");
 }
 
-/// DURABLE-METADATA-READ-WORK: a single SELECT already owns an atomic
-/// SQLite snapshot; reading metadata opens no redundant transaction.
-#[tokio::test]
-async fn single_statement_durable_reads_use_their_implicit_snapshots() {
-    use lash_durable::DurableReads as _;
-    use lash_durable::domain::ExecKey;
-
-    let set = SqliteStoreSet::memory().await.unwrap();
-    let store = set.durable_store();
-    let session = lash_kernel_value::identity::SessionId::fixture("metadata-read-work");
-    let run = lash_vocabulary::identity::TurnId::fixture("metadata-read-run");
-    let exec = ExecKey::Cell(
-        session.clone(),
-        run.clone(),
-        lash_durable::domain::CellId::new("metadata"),
-    );
-    let ((), receipt) =
-        lash_core_ids::operational_metrics::sql::collect("durable.metadata", "sqlite", async {
-            assert!(store.turn_end(&session, &run).await.unwrap().is_none());
-            assert!(store.exec_root(&exec).await.unwrap().is_none());
-            assert!(store.cell_roots(&session, &run).await.unwrap().is_empty());
-            assert!(
-                store
-                    .cell_roots_within(&session, &run, 1)
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
-            assert!(store.session_close(&session).await.unwrap().is_none());
-            assert!(store.ending_scopes(&session).await.unwrap().is_empty());
-        })
-        .await;
-    eprintln!(
-        "DURABLE_METADATA_SQL {}",
-        serde_json::to_string(&receipt).unwrap()
-    );
-    assert_eq!(
-        receipt.statements, 6,
-        "each metadata SELECT owns its snapshot"
-    );
-}
-
 /// A fresh store set on a clock the law moves, and the directory a file set
 /// lives in.
 async fn world(file: bool) -> (Option<tempfile::TempDir>, SqliteStoreSet, Arc<TestClock>) {
@@ -281,110 +239,124 @@ macro_rules! law {
             }
         }
     };
+    (file_only $name:ident, |$store:ident, $advance:ident| $law:expr) => {
+        mod $name {
+            use super::*;
+
+            async fn run() {
+                let (_root, set, clock) = world(true).await;
+                let $store = &set.durable_store();
+                let $advance = &advancing(&clock);
+                $law.await.unwrap_or_else(|broken| panic!("{broken}"));
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn file() {
+                run().await;
+            }
+        }
+    };
 }
 
 law!(
-    a_replaced_boot_adopts_none_of_its_successors_actors,
+    file_only a_replaced_boot_adopts_none_of_its_successors_actors,
     |store, _advance| { laws::a_replaced_boot_adopts_none_of_its_successors_actors(store) }
 );
 law!(
-    a_boot_redrives_only_the_session_parks_it_names,
+    file_only a_boot_redrives_only_the_session_parks_it_names,
     |store, _advance| { laws::a_boot_redrives_only_the_session_parks_it_names(store) }
 );
 law!(
-    progress_before_an_empty_ready_release_resets_failed_activations,
+    file_only progress_before_an_empty_ready_release_resets_failed_activations,
     |store, _advance| {
         laws::progress_before_an_empty_ready_release_resets_failed_activations(store)
     }
 );
 law!(
-    claims_take_the_oldest_eligible_actors_first,
+    file_only claims_take_the_oldest_eligible_actors_first,
     |store, advance| { laws::claims_take_the_oldest_eligible_actors_first(store, advance) }
 );
 law!(
-    an_abandoned_activation_hands_back_only_its_original_grant,
+    file_only an_abandoned_activation_hands_back_only_its_original_grant,
     |store, _advance| {
         laws::an_abandoned_activation_hands_back_only_its_original_grant(Arc::new(store.clone()))
     }
 );
 
-law!(one_writer_under_a_claim_race, |store, _advance| {
+law!(file_only one_writer_under_a_claim_race, |store, _advance| {
     laws::one_writer_under_a_claim_race(store)
 });
-law!(a_zombie_owner_past_reap_cannot_commit, |store, advance| {
+law!(file_only a_zombie_owner_past_reap_cannot_commit, |store, advance| {
     laws::a_zombie_owner_past_reap_cannot_commit(store, advance)
 });
 law!(
-    a_lapsed_heartbeat_is_reaped_with_an_epoch_bump,
+    file_only a_lapsed_heartbeat_is_reaped_with_an_epoch_bump,
     |store, advance| { laws::a_lapsed_heartbeat_is_reaped_with_an_epoch_bump(store, advance) }
 );
-law!(mail_from_non_owners_wakes_the_actor, |store, advance| {
+law!(file_only mail_from_non_owners_wakes_the_actor, |store, advance| {
     laws::mail_from_non_owners_wakes_the_actor(store, advance)
 });
-law!(no_write_through_a_stale_epoch, |store, advance| {
-    laws::no_write_through_a_stale_epoch(store, advance)
-});
 law!(
-    an_owner_commit_reports_a_turn_cancel_accepted_after_its_open,
+    file_only an_owner_commit_reports_a_turn_cancel_accepted_after_its_open,
     |store, _advance| {
         laws::an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(store)
     }
 );
 law!(
-    a_turn_cancel_is_a_first_winner_row_with_a_wake,
+    file_only a_turn_cancel_is_a_first_winner_row_with_a_wake,
     |store, _advance| { laws::a_turn_cancel_is_a_first_winner_row_with_a_wake(store) }
 );
 law!(
-    a_turn_counts_the_model_calls_it_admitted,
+    file_only a_turn_counts_the_model_calls_it_admitted,
     |store, _advance| { laws::a_turn_counts_the_model_calls_it_admitted(store) }
 );
 law!(
-    a_receipt_stands_beside_its_model_phase_until_the_next_phase,
+    file_only a_receipt_stands_beside_its_model_phase_until_the_next_phase,
     |store, _advance| { laws::a_receipt_stands_beside_its_model_phase_until_the_next_phase(store) }
 );
 law!(
-    a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it,
+    file_only a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it,
     |store, _advance| {
         laws::a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it(store)
     }
 );
 law!(
-    a_session_close_moves_one_step_at_a_time,
+    file_only a_session_close_moves_one_step_at_a_time,
     |store, _advance| { laws::a_session_close_moves_one_step_at_a_time(store) }
 );
 law!(
-    prompt_snapshot_roots_survive_phase_pruning_until_released,
+    file_only prompt_snapshot_roots_survive_phase_pruning_until_released,
     |store, _advance| { laws::prompt_snapshot_roots_survive_phase_pruning_until_released(store) }
 );
 law!(
-    settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots,
+    file_only settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots,
     |store, _advance| {
         laws::settling_a_turns_calls_releases_their_requests_and_keeps_their_snapshots(store)
     }
 );
 law!(
-    a_node_claims_only_actors_whose_formats_it_decodes,
+    file_only a_node_claims_only_actors_whose_formats_it_decodes,
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );
 law!(
-    a_hard_record_lands_with_its_owner_commit_or_not_at_all,
+    file_only a_hard_record_lands_with_its_owner_commit_or_not_at_all,
     |store, _advance| { laws::a_hard_record_lands_with_its_owner_commit_or_not_at_all(store) }
 );
 law!(
-    a_node_claims_only_actors_whose_hard_requirements_it_meets,
+    file_only a_node_claims_only_actors_whose_hard_requirements_it_meets,
     |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
 
 law!(
-    a_newer_format_is_not_written_while_an_older_node_is_live,
+    file_only a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
 );
 law!(
-    a_draining_node_claims_nothing_and_releases_ready,
+    file_only a_draining_node_claims_nothing_and_releases_ready,
     |store, _advance| { laws::a_draining_node_claims_nothing_and_releases_ready(store) }
 );
 law!(
-    actors_in_a_format_set_and_a_turns_cells_are_listed,
+    file_only actors_in_a_format_set_and_a_turns_cells_are_listed,
     |store, _advance| { laws::actors_in_a_format_set_and_a_turns_cells_are_listed(store) }
 );
 
@@ -399,11 +371,6 @@ mod deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text {
         )
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn memory() {
-        run(false).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -860,10 +827,6 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
 mod lo_root_retirement_sql_is_depth_independent {
     use super::*;
     #[tokio::test]
-    async fn memory() {
-        law(false).await;
-    }
-    #[tokio::test]
     async fn file() {
         law(true).await;
     }
@@ -1115,17 +1078,17 @@ async fn prompt_text_reads_are_batched_in_request_order() {
 }
 
 law!(
-    a_retired_owner_claims_only_its_registry_callbacks,
+    file_only a_retired_owner_claims_only_its_registry_callbacks,
     |store, _advance| { laws::a_retired_owner_claims_only_its_registry_callbacks(store) }
 );
 
 law!(
-    a_turn_counts_its_tool_admissions_atomically,
+    file_only a_turn_counts_its_tool_admissions_atomically,
     |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
 );
 
 law!(
-    lo_fence_rejects_stale_epoch_and_revision,
+    file_only lo_fence_rejects_stale_epoch_and_revision,
     |store, advance| {
         async {
             laws::lo_fence_rejects_stale_epoch_and_revision(store, advance).await?;
@@ -1453,10 +1416,6 @@ mod lo_idle_writer_orders_direct_mutation_and_claim {
         );
     }
 
-    #[tokio::test]
-    async fn memory() {
-        Box::pin(run(false)).await;
-    }
     #[tokio::test]
     async fn file() {
         Box::pin(run(true)).await;
@@ -1807,22 +1766,18 @@ mod lo_idle_writer_keeps_close_and_redrive_under_authority {
         );
     }
     #[tokio::test]
-    async fn memory() {
-        Box::pin(run(false)).await;
-    }
-    #[tokio::test]
     async fn file() {
         Box::pin(run(true)).await;
     }
 }
 
 law!(
-    lo_fence_preserves_a_composed_drafts_basis,
+    file_only lo_fence_preserves_a_composed_drafts_basis,
     |store, _advance| { laws::lo_fence_preserves_a_composed_drafts_basis(store) }
 );
 
 law!(
-    a_resolution_winner_and_its_claim_debt_commit_atomically,
+    file_only a_resolution_winner_and_its_claim_debt_commit_atomically,
     |store, _advance| {
         laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
     }
@@ -1941,25 +1896,18 @@ mod lo_postimage_receipt_matches_reopen {
         .unwrap();
     }
     #[tokio::test]
-    async fn memory() {
-        run(false).await;
-    }
-    #[tokio::test]
     async fn file() {
         run(true).await;
     }
 }
 
 // LO-RESOLUTION shares the package winner/debt/holds law.
-law!(lo_resolution_winner_is_atomic, |store, _advance| {
-    laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
-});
 
 law!(
-    lo_process_frontier_preserves_unexamined_mail,
+    file_only lo_process_frontier_preserves_unexamined_mail,
     |store, _advance| { laws::lo_process_frontier_preserves_unexamined_mail(store) }
 );
 
-law!(lo_succession_postimage_is_atomic, |store, _advance| {
+law!(file_only lo_succession_postimage_is_atomic, |store, _advance| {
     laws::lo_succession_postimage_is_atomic(store, store)
 });

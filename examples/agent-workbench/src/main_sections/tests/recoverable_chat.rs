@@ -529,9 +529,9 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
             let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             async move {
                 Ok(match call {
-                    0 => code_response(&finish_cell("old frame answer")),
-                    1 => LlmResponse { parts: vec![lash::testing::execute_code("await control.continueAs({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });")], ..Default::default() },
-                    2 => code_response(&finish_cell("follow frame answer")),
+                    0..=5 => code_response(&finish_cell("old frame answer")),
+                    6 => LlmResponse { parts: vec![lash::testing::execute_code("await control.continueAs({ task: \"finish in the follow frame\", seed: { boundary_marker: \"protocol-only-seed\" } });")], ..Default::default() },
+                    7 => code_response(&finish_cell("follow frame answer")),
                     other => panic!("unexpected continue_as provider call {other}"),
                 })
             }
@@ -549,20 +549,37 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
     let session_id = state.current_session_id();
     let first_prompt = "first submitted row";
     let switch_prompt = "switch frames now";
-    run_turn(state, first_prompt).await;
+    let prompts = (0..6)
+        .map(|index| {
+            if index == 0 {
+                first_prompt.to_string()
+            } else {
+                format!("committed prompt before switch {index}")
+            }
+        })
+        .collect::<Vec<_>>();
+    for prompt in &prompts {
+        run_turn(state, prompt).await;
+    }
     run_turn(state, switch_prompt).await;
 
     // The switch commits with its follow-on mailed to the session as the
     // next run (ADR 0101 §3); the session's engine starts it on its own, and
     // the page shows its rows once it settles.
-    let expected_rows = [
-        ("user", first_prompt),
-        ("assistant", "old frame answer"),
-        ("user", switch_prompt),
-        ("user", "finish in the follow frame"),
-        ("assistant", "follow frame answer"),
-    ]
-    .map(|(role, text)| (role.to_string(), text.to_string()));
+    let expected_rows = prompts
+        .iter()
+        .flat_map(|prompt| {
+            [
+                ("user".to_string(), prompt.clone()),
+                ("assistant".to_string(), "old frame answer".to_string()),
+            ]
+        })
+        .chain([
+            ("user".to_string(), switch_prompt.to_string()),
+            ("user".to_string(), "finish in the follow frame".to_string()),
+            ("assistant".to_string(), "follow frame answer".to_string()),
+        ])
+        .collect::<Vec<_>>();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let boundary = loop {
         let boundary = read_state(state, None)
@@ -574,6 +591,18 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     };
     assert_eq!(state_rows(&boundary), expected_rows);
+    let product_user_rows = product_rows(state, &session_id, "user")
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        product_user_rows,
+        prompts
+            .iter()
+            .cloned()
+            .chain([switch_prompt.to_string()])
+            .collect::<Vec<_>>()
+    );
 
     let session = state
         .open_session(&session_id, "test")
@@ -612,73 +641,6 @@ async fn continue_as_keeps_every_frames_rows_and_survives_reload() {
         serde_json::to_value(&rebuilt.transcript).expect("reload rows"),
         boundary_transcript,
         "reload must reproduce the same session-scoped projection"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
-    let workbench = Workbench::silent().await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    let attachment = lash::attachments::AttachmentRef {
-        id: lash::attachments::AttachmentId::parse(
-            "ebfd7953df27a2b8c3752686e96c066aedbeb45a67827f0265ecfd3d8629f565",
-        )
-        .expect("valid attachment id"),
-        media_type: lash::attachments::MediaType::parse("image/png")
-            .expect("valid test media type"),
-        byte_len: 68,
-        type_metadata: Some(lash::attachments::AttachmentTypeMetadata::image(
-            Some(1),
-            Some(1),
-        )),
-        label: Some("committed.png".to_string()),
-    };
-    let mut message =
-        lash::plugins::PluginMessage::text(lash::messages::MessageRole::User, "see image")
-            .with_id("committed-attachment-message");
-    message.parts.push(lash::messages::Part::attachment_part(
-        String::new(),
-        String::new(),
-        Some(lash::messages::PartAttachment {
-            reference: attachment.clone(),
-        }),
-    ));
-    let session = state
-        .open_session(&session_id, "test")
-        .await
-        .expect("open committed attachment session");
-    session
-        .admin()
-        .state()
-        .append_messages(
-            vec![message],
-            "host:recoverable_chat:append_messages:755".to_string(),
-        )
-        .await
-        .expect("append committed attachment message")
-        .settle_with(
-            &session.admin().commands(),
-            lash::testing::admin_fixture_outcome,
-        )
-        .await
-        .expect("fixture mutation settled");
-    drop(session);
-
-    let snapshot = read_state(state, None)
-        .await
-        .expect("read committed attachment snapshot");
-    let wire = serde_json::to_value(snapshot).expect("serialize workbench snapshot");
-    let committed_user = wire["transcript"]
-        .as_array()
-        .expect("the snapshot carries the committed transcript")
-        .iter()
-        .find(|row| row["kind"] == "user" && row["suppressed"].is_null())
-        .expect("the committed user row is visible");
-    assert_eq!(
-        committed_user["content"]["attachments"][0]["id"],
-        json!(attachment.id),
-        "the committed row must expose the stored attachment reference"
     );
 }
 

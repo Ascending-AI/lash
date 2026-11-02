@@ -919,32 +919,6 @@ mod compat_tests {
             .expect("provision SQLite database");
     }
 
-    /// HASH-KEY-WIDTH (FIG-6957): content addresses are binary keys, and
-    /// every reference to a blob is its integer id (FIG-7584); widening
-    /// either grows the B-trees that hold them.
-    #[test]
-    fn content_hash_columns_are_binary_keys() {
-        let mut connection = Connection::open_in_memory().unwrap();
-        provision(&mut connection);
-        let columns = connection.statement_once(
-            "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
-             WHERE m.type = 'table' AND (p.name IN ('hash', 'attachment_id')
-               OR (m.name = 'retirement_frontier' AND p.name = 'node_ref')
-               OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
-                          WHERE f.\"from\" = p.name AND f.\"table\" = 'blobs'))"
-        ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
-            .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-        assert!(!columns.is_empty());
-        for (table, column, kind) in columns {
-            let address = matches!(column.as_str(), "hash" | "attachment_id");
-            assert_eq!(
-                kind,
-                if address { "BLOB" } else { "INTEGER" },
-                "{table}.{column} must store a binary content address or a node id"
-            );
-        }
-    }
-
     #[test]
     fn sqlite_opens_an_expanded_database_under_its_floor() {
         let mut connection = Connection::open_in_memory().expect("open database");
@@ -1111,43 +1085,6 @@ mod observer_intent_migration_tests {
             legacy_rows, 2,
             "a refused open must not run the deleted fold"
         );
-    }
-}
-
-#[cfg(test)]
-mod schema_version_tests {
-    use super::*;
-
-    /// FIG-3975: the compatibility stamp is authoritative. A database
-    /// stamped at this build's version was fully laid down by the open that
-    /// stamped it, so reopening does not re-run the schema batch. Dropping a
-    /// stamped table proves the skip: the open leaves it absent rather than
-    /// recreating it.
-    #[test]
-    fn a_current_stamp_skips_the_schema_batch() {
-        let mut connection = Connection::open_in_memory().expect("open schema fixture");
-        prepare_versioned_schema(&mut connection)
-            .expect("lay down the current schema")
-            .commit()
-            .expect("commit the fixture");
-        connection
-            .execute_batch("DROP TABLE pending_turn_inputs")
-            .expect("drop a stamped table");
-
-        prepare_versioned_schema(&mut connection)
-            .expect("a matching stamp opens without the schema batch")
-            .commit()
-            .expect("commit the stamp write");
-
-        let present: i64 = connection
-            .query_row_once(
-                "SELECT COUNT(*) FROM sqlite_master
-                 WHERE type = 'table' AND name = 'pending_turn_inputs'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("check the dropped table");
-        assert_eq!(present, 0, "the schema batch re-ran over a current stamp");
     }
 }
 

@@ -62,9 +62,11 @@ use crate::support::store_sqlx_error;
 mod admission;
 mod executor;
 pub(crate) use executor::HeldTexts;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 mod generator;
-#[cfg(test)]
+#[cfg(feature = "testing")]
+pub(crate) use generator::owner_commit_artifact;
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use generator::retire_graph;
 mod claim_facts;
 pub(crate) mod environment;

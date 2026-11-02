@@ -33,3 +33,8 @@ lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-
 [dev-dependencies]
 ruff_python_ast.workspace = true
 ruff_python_parser.workspace = true
+
+[[bin]]
+name = "regenerate"
+path = "src/bin/regenerate.rs"
+test = false

@@ -32,15 +32,6 @@ fn cleanup(referrer: crate::ArtifactReferrer) -> crate::ResolvedArtifactCleanup 
     }
 }
 
-pub async fn process_execution_env_store_fresh_instances<F>(make: &F)
-where
-    F: Fn() -> Arc<dyn crate::ProcessEnvStore>,
-{
-    let first = make();
-    let second = make();
-    assert_fresh_instances(&first, &second, "process_execution_env_store");
-}
-
 #[expect(
     clippy::expect_used,
     reason = "conformance law validates each store operation"

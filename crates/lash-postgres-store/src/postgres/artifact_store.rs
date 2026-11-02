@@ -105,7 +105,7 @@ pub(crate) use local_end::{
     EndArguments as LocalEndArguments, failure as end_local_failure, validate as validate_local_end,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use local_end::function_ddl as local_end_function_ddl;
 
 #[path = "artifact_store/tool_material.rs"]

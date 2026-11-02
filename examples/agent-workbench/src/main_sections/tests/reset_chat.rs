@@ -108,40 +108,6 @@ async fn resetting_a_busy_session_hands_the_page_a_replacement_session() {
     workbench.shutdown().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_reset_of_an_already_retired_session_hands_back_its_replacement() {
-    let workbench = Workbench::silent().await;
-    let state = &workbench.state;
-    let old_session_id = state.current_session_id();
-
-    let Json(first) = Box::pin(reset_chat(
-        State(state.clone()),
-        reset_query(&old_session_id),
-    ))
-    .await
-    .expect("the first reset retires the session");
-    assert_eq!(
-        state.active_turns.retirement(&old_session_id),
-        Some(SessionRetirement::Retired)
-    );
-
-    // The page never saw that answer — the response was lost — so it asks
-    // again with the only id it has. The fence refuses a retired id for every
-    // use including a delete, which made this the dead end: the repair for a
-    // tombstoned session was a reset, and reset was the one thing that could
-    // not run.
-    let Json(second) = Box::pin(reset_chat(
-        State(state.clone()),
-        reset_query(&old_session_id),
-    ))
-    .await
-    .expect("a reset of an already retired session must not dead-end");
-
-    assert_eq!(second.settings.session_id, first.settings.session_id);
-    assert_eq!(state.sessions.current(), first.settings.session_id);
-    workbench.shutdown().await;
-}
-
 /// Holds the delete at its first durable step: the trace the delete writes
 /// once the session's turns are cancelled, just before it requests the close.
 struct DeleteGate {

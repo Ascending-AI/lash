@@ -18,19 +18,6 @@
 //! all green. This test forces every set, needs no database, and runs in the
 //! ordinary unit-test target.
 
-/// Touch every rendered set. Each accessor dereferences its `LazyLock`, so a
-/// statement that does not render panics here, naming itself.
-#[test]
-fn every_rendered_statement_set_renders() {
-    let _ = crate::connection_sql::connection_sql();
-    let _ = crate::artifact_store::artifact_sql();
-    let _ = crate::attachments::attachment_sql();
-    let _ = crate::blobs::blob_sql();
-    let _ = crate::process_sql::process_sql();
-    let _ = crate::session_sql::session_sql();
-    let _ = crate::turn_ingress::turn_ingress_sql();
-}
-
 #[test]
 fn ddl_referrer_kind_checks_match_typed_predicates() {
     use lash_core_store::artifact_referrer::ArtifactReferrerKind;

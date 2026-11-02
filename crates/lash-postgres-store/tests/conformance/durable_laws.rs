@@ -165,7 +165,8 @@ lash_conformance::process_prune_session_store_tests!({
 mod runtime_persistence {
     use super::*;
 
-    lash_conformance::runtime_persistence_reopenable_tests!({
+    lash_conformance::__runtime_persistence_register! {
+            reopenable {
         let Some((database_fixture, storage)) = storage().await else {
             return;
         };
@@ -219,5 +220,130 @@ mod runtime_persistence {
                 lease_clock.advance(ms)
             }),
         )
-    });
+    };
+            stores [
+            (commit_increments_head_and_round_trips_agent_frames, "root"),
+            (receipt_replay_rehydrates_recorded_node_clocks_and_ids, "root"),
+
+            (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
+            (commit_rejects_carried_nondefault_node_budget, "root"),
+            (commit_rejects_carried_nondefault_byte_budget, "root"),
+            (commit_rejects_turn_result_bytes_over_budget, "root"),
+
+            (checkpoint_restore_rejects_turn_index_without_increment_headroom, "root"),
+            (checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows, "root"),
+
+            (session_read_loads_persisted_history, "branchy"),
+            (session_plugin_config_round_trips_through_the_committed_head, "session-plugin-config"),
+
+            (head_and_window_reads_agree_for_each_named_session, "read-agreement"),
+            (observer_settlement_requires_admission, "root"),
+            (observer_settlement_preserves_creation_facts, "root"),
+            (attachment_writes_keep_independent_referrers, "root"),
+            (attachment_acquisition_preserves_receiving_referrer, "root"),
+            (append_request_receipt_replays_after_head_advance, "root"),
+            (append_request_receipt_rejects_changed_content, "root"),
+            (append_request_exact_hash_rejects_changed_ancestor, "root"),
+            (append_request_receipt_rejects_corrupt_node_count, "root"),
+            (semantic_boundary_receipt_replays_after_head_advance, "root"),
+            (semantic_boundary_receipt_rejects_changed_content, "root"),
+            (semantic_boundary_receipt_rejects_mislabeled_identity, "root"),
+            (concurrent_same_append_operation_applies_exactly_once, "root"),
+            (legacy_append_receipt_keeps_exact_hash_semantics, "root"),
+            (append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics, "root"),
+            (append_receipt_and_graph_append_are_atomic, "root"),
+            (fresh_append_receipt_enforces_ancestor_precondition, "root"),
+            (commit_rejects_non_derived_append_node_ids, "root"),
+            (append_rejects_duplicate_batch_node_ids, "root"),
+            (append_rejects_existing_node_id_collision, "root"),
+
+            (committed_leaf_is_derived_from_the_terminal_appended_node, "root"),
+            (preserve_head_commit_reports_the_resident_leaf, "root"),
+
+            (commit_rejects_leaf_without_frame_open_ancestor, "missing-frame-run"),
+            (queued_work_source_keys_are_idempotent_and_list_ordered, "queued-work-source-keys"),
+            (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
+            (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
+            (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
+            (delete_then_enqueue_never_reuses_ingress_sequences, "root"),
+            (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
+            (pending_turn_input_duplicate_input_id, "root"),
+            (run_specs_join_the_submission_digest_and_intern_once, "run-specs"),
+            (run_spec_bytes_are_reclaimed_once_no_unsettled_input_names_them, "run-spec-reclaim"),
+            (a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order, "turn-input-batches"),
+            (a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest, "turn-input-batch-retries"),
+            (a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch, "turn-input-batch-refusals"),
+            (a_changed_resubmission_is_a_typed_conflict_for_every_kind, "ingress-content-conflict"),
+
+            (a_settled_command_resubmitted_under_its_key_is_not_a_new_command, "ingress-command-resubmission"),
+            ]
+            hosted_stores [
+            ]
+            store_refs [
+            ]
+            factories [
+                (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
+            (plugin_state_boundary, "plugin-state"),
+            ]
+            timed_stores [
+            ]
+            timed_factories [
+            ]
+        }
+
+    lash_conformance::runtime_persistence_reopenable_tests!(@reopen_laws {
+        let Some((database_fixture, storage)) = storage().await else {
+            return;
+        };
+        // One reset per law: a law that opens several sessions (the factory
+        // laws) admits each through `make`, and the catalog must keep them all.
+        reset(storage.pool()).await;
+        let (attachments, host_stores) = pg_law_stores(&storage);
+        let effect_host = durable_host(&host_stores);
+        drop(storage);
+        let database_url = database_fixture.url().to_owned();
+        let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
+        let lease_clock = Arc::clone(&clock);
+        (
+            (database_fixture, attachments),
+            move |session_id: &str| {
+                let effect_host = effect_host.clone();
+                let database_url = database_url.clone();
+                let clock = Arc::clone(&clock);
+                let request = root_session_request(session_id);
+                sync_await(async move {
+                    let open_storage = lash_postgres_store::testing::connect(&database_url)
+                        .await
+                        .expect("open first Postgres conformance pool");
+                    let reopen_storage = lash_postgres_store::testing::connect(&database_url)
+                        .await
+                        .expect("open independent Postgres conformance pool");
+                    let open_factory = open_storage
+                        .session_store_factory()
+                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>)
+                        .with_lease_clock_for_testing(
+                            Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>
+                        );
+                    let reopen_factory = reopen_storage
+                        .session_store_factory()
+                        .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>)
+                        .with_lease_clock_for_testing(
+                            clock as Arc<dyn lash_core_ids::clock::Clock>,
+                        );
+                    open_factory
+                        .admit_session(&request)
+                        .await
+                        .expect("admit Postgres conformance session");
+                    ReopenableRuntimeStore {
+                        open: Arc::new(open_factory) as Arc<dyn RuntimeStore>,
+                        reopen: Arc::new(reopen_factory) as Arc<dyn RuntimeStore>,
+                        effect_host,
+                    }
+                })
+            },
+            lash_conformance::RuntimePersistenceLeaseTiming::controlled(move |ms| {
+                lease_clock.advance(ms)
+            }),
+        )
+    }; [(reopen_mint_identity, "pending-turn-input-multi-store-mint"), (gc_blobs, "gc-blobs"), (append_receipt_reopen, "root")]);
 }

@@ -129,26 +129,6 @@ async fn the_install_mode_provisions_exactly_the_committed_shape() {
     pool.close().await;
 }
 
-#[tokio::test]
-#[ignore = "regenerates crates/lash/postgres-live-replay-schema-shape.txt"]
-async fn regenerate_live_replay_schema_shape() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-    let database = IsolatedDatabase::create(&required_database_url()).await;
-    let schema = fresh_schema();
-    host_provision(database.url(), &schema).await;
-    let pool = PgPool::connect(database.url()).await.expect("pool");
-    let report = PostgresLiveReplayStore::verify_schema(&pool, &schema)
-        .await
-        .expect("read the provisioned catalog");
-    pool.close().await;
-    std::fs::write(
-        std::path::Path::new(&root).join("crates/lash/postgres-live-replay-schema-shape.txt"),
-        report.found_shape(),
-    )
-    .expect("rewrite the shape artifact");
-}
-
 /// A host provisions the schema with the artifact; the store then connects
 /// in `verify_only` mode under a role that cannot run DDL at all, and
 /// serves.

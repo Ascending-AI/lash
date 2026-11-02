@@ -720,6 +720,24 @@ ${RENEW_FUNCTION}$;
     )
 }
 
+/// Replace the generated owner commit in the published DDL.
+pub(crate) fn owner_commit_artifact() -> Result<String, &'static str> {
+    let schema = crate::schema::SCHEMA_DDL;
+    let begin = "-- BEGIN GENERATED lash_owner_commit\n";
+    let end = "-- END GENERATED lash_owner_commit\n";
+    let start = schema
+        .find(begin)
+        .ok_or("missing generated-function start")?
+        + begin.len();
+    let end = schema.find(end).ok_or("missing generated-function end")?;
+    Ok(format!(
+        "{}{}{}",
+        &schema[..start],
+        function_ddl(),
+        &schema[end..]
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     // Test tooling: reading and regenerating the committed artifact is
@@ -749,18 +767,7 @@ mod tests {
         assert!(
             schema == with_block(schema, &super::function_ddl()),
             "schema.sql's lash_owner_commit is stale: regenerate it with \
-             LASH_REGENERATE=1 and the ignored regenerate_owner_commit test"
+             python3 scripts/regenerate-postgres-artifact.py schema.sql"
         );
-    }
-
-    #[test]
-    #[ignore = "regenerates lash_owner_commit in crates/lash-postgres-store/schema.sql"]
-    fn regenerate_owner_commit() {
-        assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-        let root = std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace");
-        let path = std::path::PathBuf::from(root).join("crates/lash-postgres-store/schema.sql");
-        let schema = std::fs::read_to_string(&path).expect("read schema.sql");
-        std::fs::write(&path, with_block(&schema, &super::function_ddl()))
-            .expect("rewrite schema.sql");
     }
 }

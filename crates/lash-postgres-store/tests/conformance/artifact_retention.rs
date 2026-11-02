@@ -37,7 +37,7 @@ lash_conformance::tool_material_tests!({
     })
 });
 
-lash_conformance::artifact_referrer_tests!({
+lash_conformance::artifact_referrer_tests!(@catalogue {
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres artifact-referrer conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -87,4 +87,12 @@ lash_conformance::artifact_referrer_tests!({
             }
         })
     })
-});
+}; [
+            (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
+            (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (process_env_carry_retains_exact_origin, "process-env-origin-retention"),
+            (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
+            (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
+
+            (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
+        ]);

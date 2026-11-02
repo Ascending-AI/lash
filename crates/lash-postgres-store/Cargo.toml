@@ -125,3 +125,13 @@ name = "schema_artifact_generator"
 path = "src/bin/schema_artifact_generator.rs"
 required-features = ["testing"]
 test = false
+
+[[example]]
+name = "replay_schema_generator"
+path = "examples/replay_schema_generator.rs"
+required-features = ["testing"]
+
+[[example]]
+name = "live_replay_bench"
+path = "examples/live_replay_bench.rs"
+required-features = ["testing"]

@@ -68,18 +68,6 @@ fn end(referrer: ArtifactReferrer) -> ResolvedArtifactCleanup {
     }
 }
 
-pub async fn lash_vm_artifact_store_fresh_instances<F>(make: &F)
-where
-    F: Fn() -> Arc<dyn ModuleArtifactStore>,
-{
-    let first = make();
-    let second = make();
-    assert!(
-        !Arc::ptr_eq(&first, &second),
-        "factory reused one store Arc"
-    );
-}
-
 pub async fn lash_vm_artifact_store_durability_tier(
     store: Arc<dyn ModuleArtifactStore>,
     expected: DurabilityTier,

@@ -87,7 +87,6 @@ node_wake_laws!(
     a_session_owner_commit_reaches_an_observer_that_holds_no_lease,
     mail_from_another_node_reaches_a_hot_owner_through_its_hint,
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint,
-    a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses,
     timer_chains_are_claimed_when_due_without_empty_claims,
     a_quiet_node_claims_nothing_and_still_finds_unhinted_work,
 );

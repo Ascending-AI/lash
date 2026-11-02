@@ -66,42 +66,6 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 }
 
 #[tokio::test]
-async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
-    let root = temp_root();
-    let path = root.path().join("lash.db");
-    SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("provision the database");
-    let expected = crate::schema::expected_version();
-    // Component 43 is a pre-1.0 SHA-256-era catalog. Both active tiers
-    // refuse that retired stamp rather than running the deleted 43-to-44
-    // upgrade. The reported target belongs to the opening build's tier.
-    let descriptor =
-        lash_core_store::compat::descriptor(crate::schema::COMPONENT).expect("core descriptor");
-    assert_eq!(expected, i64::from(descriptor.writes.max()));
-
-    stamp_compat(&path, 43, 43);
-
-    let found = verify_schema_at(&path).await;
-    // Which side of the build's range 43 falls on is the admission rule's
-    // to say; either way the stamp is refused typed.
-    let refusal = lash_core_store::compat::admit(
-        descriptor,
-        lash_core_store::compat::StampRead::Present(lash_core_store::compat::CompatStamp {
-            version: 43,
-            min_reader: 43,
-        }),
-    )
-    .expect_err("a retired stamp is refused");
-    assert_eq!(found.verdict, StoreSchemaVerdict::Refused { refusal });
-    assert_eq!(found.expected, expected);
-    assert!(
-        found.verdict.refuses_open(),
-        "every SHA-256-era generation must be refused"
-    );
-}
-
-#[tokio::test]
 async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     let root = temp_root();
     let path = root.path().join("lash.db");

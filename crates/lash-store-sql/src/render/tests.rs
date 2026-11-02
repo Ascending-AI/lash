@@ -303,6 +303,17 @@ fn a_table_position_naming_an_unowned_relation_is_refused() {
         .is_err(),
         "the `(` that follows a column list must not read as a function call"
     );
+    assert_eq!(
+        render(
+            "UPDATE session_head SET turn_id = ?1",
+            Dialect::postgres(),
+            TABLES
+        ),
+        Err(RenderError::UnknownTable {
+            name: "session_head".to_string(),
+            at: 7
+        })
+    );
 }
 
 #[test]
@@ -406,24 +417,6 @@ fn an_upserts_do_update_is_an_action_clause_not_a_table_position() {
         "INSERT INTO lash_await_event_waits (key_id, scope_json)
          VALUES ($1, $2)
          ON CONFLICT (key_id) DO UPDATE SET scope_json = excluded.scope_json"
-    );
-}
-
-#[test]
-fn a_statement_heading_update_still_demands_a_table_it_owns() {
-    // The `DO` guard is the only thing that relaxes `UPDATE`, and it reaches
-    // exactly one token: a plain `UPDATE` over an unowned table is still the
-    // startup failure it was.
-    assert_eq!(
-        render(
-            "UPDATE session_head SET turn_id = ?1",
-            Dialect::postgres(),
-            TABLES
-        ),
-        Err(RenderError::UnknownTable {
-            name: "session_head".to_string(),
-            at: 7,
-        })
     );
 }
 

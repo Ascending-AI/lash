@@ -147,66 +147,6 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     workbench.shutdown().await;
 }
 
-/// The user rows committed before a switch stay on the page after it: the
-/// rendered transcript keeps every committed user row and the follow frame's
-/// task, and the product lane keeps every row the workbench sent.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcript() {
-    let data_dir = tempfile::tempdir().expect("product events tempdir");
-    let mut cells = (0..6)
-        .map(|index| finish_cell(&format!("answer before switch {index}")))
-        .collect::<Vec<_>>();
-    cells.push(continue_as_cell(
-        "continue in the next frame",
-        "protocol-only",
-    ));
-    cells.push(finish_cell("switched frame answer"));
-    let workbench = Workbench::builder(scripted_cells_provider(cells))
-        .event_tx(
-            SessionEventRegistry::persistent(data_dir.path().join("product-events.json"), 16)
-                .expect("open the persistent product event registry"),
-        )
-        .build()
-        .await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    for index in 0..6 {
-        run_turn(state, &format!("committed prompt before switch {index}")).await;
-    }
-    run_turn(state, "switch frames now").await;
-    let boundary = await_snapshot(state, "the switched frame's answer", |snapshot| {
-        shows_reply(snapshot, "switched frame answer")
-    })
-    .await;
-
-    // Six pre-switch rows, the switch request, and the task that opened the
-    // follow frame (FIG-3143). The workbench sent all but the task, which
-    // exists only as a committed row: a read never writes it into the
-    // product lane.
-    let expected = (0..6)
-        .map(|index| format!("committed prompt before switch {index}"))
-        .chain([
-            "switch frames now".to_string(),
-            "continue in the next frame".to_string(),
-        ])
-        .collect::<Vec<_>>();
-    assert_eq!(
-        user_rows(&boundary),
-        expected,
-        "committed user rows stay in the rendered transcript"
-    );
-    let product_user_rows = product_rows(state, &session_id, "user")
-        .into_iter()
-        .map(|(_, text)| text)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        product_user_rows,
-        expected[..7].to_vec(),
-        "the product lane keeps every row the workbench sent"
-    );
-    workbench.shutdown().await;
-}
-
 /// The workbench need not win a race to keep what the operator sent. A
 /// rebuild that sees a settled turn before the runtime's committed copy of
 /// its input is readable must not retire the submitted row: `continue_as`
@@ -275,42 +215,6 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
             .len(),
         expected.len(),
         "each send is shown once"
-    );
-    workbench.shutdown().await;
-}
-
-/// The dev provider's transcript-projection scenario, which switches frames
-/// once: the page shows the question and the follow frame's task, the one
-/// reply, and the executed cell.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn canonical_transcript_scenario_survives_a_frame_switch() {
-    let workbench = Workbench::builder(
-        crate::failure_provider::DevProviderScenario::TranscriptProjection.provider(),
-    )
-    .build()
-    .await;
-    let state = &workbench.state;
-    run_turn(state, "canonical initial question").await;
-    let snapshot = await_snapshot(state, "the follow frame's reply", |snapshot| {
-        shows_reply(snapshot, "canonical follow-frame reply")
-    })
-    .await;
-    assert_eq!(
-        user_rows(&snapshot),
-        ["canonical initial question", "canonical follow-frame task"]
-    );
-    let replies = snapshot
-        .transcript
-        .iter()
-        .filter(|row| row.provenance.is_turn_reply)
-        .map(|row| row.content.text.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(replies, ["canonical follow-frame reply"]);
-    assert!(
-        snapshot
-            .transcript
-            .iter()
-            .any(|row| row.kind == crate::ChatRowKind::CodeBlock)
     );
     workbench.shutdown().await;
 }

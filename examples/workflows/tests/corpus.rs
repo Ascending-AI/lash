@@ -26,6 +26,25 @@ fn corpus_tool_signatures() -> anyhow::Result<
 fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let outputs = workflow_corpus::render(root)?;
+    for extension in ["ts", "py"] {
+        anyhow::ensure!(
+            outputs
+                .keys()
+                .any(|name| name.ends_with(&format!("/printed.{extension}"))),
+            "no {extension} corpus document printed"
+        );
+        for kind in ["printed", "source-map", "cell-1"] {
+            let suffix = if kind == "printed" {
+                String::new()
+            } else {
+                ".txt".to_string()
+            };
+            anyhow::ensure!(
+                outputs.contains_key(&format!("capturing-cell/{kind}.{extension}{suffix}")),
+                "capturing-cell {extension} {kind} witness is missing"
+            );
+        }
+    }
     for (relative, expected) in outputs {
         let path = root.join(&relative);
         let actual = std::fs::read_to_string(&path).map_err(|error| {
@@ -367,81 +386,6 @@ fn typescript_terminal_operations_read_back_by_import_identity() -> anyhow::Resu
 #[test]
 fn python_terminal_operations_read_back_by_import_identity() -> anyhow::Result<()> {
     terminal_operation_roundtrip(lash_kernel_doc::SourceLanguage::Python)
-}
-
-/// FIG-7135: an escaped closure keeps its captured list's read and later mutation.
-#[test]
-fn typescript_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
-    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
-    let signatures = corpus_tool_signatures()?;
-    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
-    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
-    let lowered = lash_dialect_typescript::lower(
-        include_str!("../capturing-cell/source.ts"),
-        &environment,
-        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
-    )?;
-    let printed = lash_dialect_typescript::print(
-        &lowered.document,
-        Some(&lowered.captions),
-        embedding.library(),
-        lash_kernel_dialect::PrintOptions {
-            source_map: true,
-            ..Default::default()
-        },
-    )?;
-    let (read, captions) = lash_dialect_typescript::read(
-        &printed.source,
-        &lowered.document,
-        embedding.library(),
-        Default::default(),
-        None,
-    )?;
-    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
-    assert_eq!(captions, lowered.captions);
-    printed
-        .source_map
-        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
-        .validate(&read, &printed.source)?;
-    Ok(())
-}
-
-/// FIG-7135: recover the typed operation input and indexed mutation in the
-/// capturing cell without changing its document, captions or mapped sites.
-#[test]
-fn python_capturing_cell_prints_and_reads_identically() -> anyhow::Result<()> {
-    let embedding = lash_vm_worker::built_embedding(&Default::default())?;
-    let signatures = corpus_tool_signatures()?;
-    let namespaces = workflow_corpus::corpus_namespaces(&signatures, &Default::default())?;
-    let environment = lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
-    let lowered = lash_dialect_python::lower(
-        include_str!("../capturing-cell/source.py"),
-        &environment,
-        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
-    )?;
-    let printed = lash_dialect_python::print(
-        &lowered.document,
-        Some(&lowered.captions),
-        embedding.library(),
-        lash_kernel_dialect::PrintOptions {
-            source_map: true,
-            ..Default::default()
-        },
-    )?;
-    let (read, captions) = lash_dialect_python::read(
-        &printed.source,
-        &lowered.document,
-        embedding.library(),
-        Default::default(),
-        None,
-    )?;
-    assert_eq!(read.canonical_bytes(), lowered.document.canonical_bytes());
-    assert_eq!(captions, lowered.captions);
-    printed
-        .source_map
-        .ok_or_else(|| anyhow::anyhow!("requested map is absent"))?
-        .validate(&read, &printed.source)?;
-    Ok(())
 }
 
 /// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
@@ -1097,31 +1041,6 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         }
     }
     assert!(failures.is_empty(), "SHAPE: {}", failures.join("\n"));
-}
-
-#[test]
-#[ignore = "regenerates examples/workflows"]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the opt-in recorder writes readable outputs in its supplied workspace"
-)]
-fn regenerate_readable_workflow_outputs() -> anyhow::Result<()> {
-    anyhow::ensure!(
-        std::env::var("LASH_REGENERATE").as_deref() == Ok("1"),
-        "set LASH_REGENERATE=1 to regenerate readable workflow outputs"
-    );
-    let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY")
-        .ok_or_else(|| anyhow::anyhow!("regeneration requires BUILD_WORKSPACE_DIRECTORY"))?;
-    let root = std::path::PathBuf::from(workspace).join("examples/workflows");
-    for (relative, text) in workflow_corpus::render(&root)? {
-        let path = root.join(relative);
-        std::fs::create_dir_all(
-            path.parent()
-                .ok_or_else(|| anyhow::anyhow!("output parent"))?,
-        )?;
-        std::fs::write(path, text)?;
-    }
-    Ok(())
 }
 
 /// FIG-7514: authored waits are canvas steps, so removing one must print and re-lower.

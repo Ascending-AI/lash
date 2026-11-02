@@ -28,8 +28,6 @@ use lash_core::{
 use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
 
-#[path = "live_replay/bench.rs"]
-mod bench;
 #[path = "live_replay/schema.rs"]
 mod schema;
 

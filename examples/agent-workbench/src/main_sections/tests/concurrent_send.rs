@@ -205,6 +205,15 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     .expect("delete the non-current session");
 
     assert_ne!(replacement.settings.session_id, retired_session_id);
+    assert_eq!(
+        state
+            .sessions
+            .entry(&replacement.settings.session_id)
+            .expect("replacement keeps the retired slot")
+            .name,
+        retired_session_id
+    );
+    assert!(state.sessions.entry(&retired_session_id).is_none());
     assert_eq!(state.current_session_id(), selected_session_id);
     assert_eq!(
         serde_json::to_value(state.messages_snapshot()).expect("serialize messages after delete"),

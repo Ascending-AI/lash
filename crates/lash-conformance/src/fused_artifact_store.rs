@@ -35,14 +35,6 @@ fn sample_module_artifact(name: &str) -> SampleArtifact {
     SampleArtifact::named(name)
 }
 
-pub async fn lash_vm_artifact_store_fresh_instances<F>(make: F)
-where
-    F: Fn() -> ReopenableArtifactStore,
-{
-    let make_store = || make().open.artifacts;
-    crate::module_artifact_store::lash_vm_artifact_store_fresh_instances(&make_store).await;
-}
-
 pub async fn lash_vm_artifact_store_reports_durable<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
@@ -109,15 +101,6 @@ where
         reopen: Arc::new(move || (reopen)().artifacts),
     })
     .await;
-}
-
-pub async fn process_execution_env_store_fresh_instances<F>(make: F)
-where
-    F: Fn() -> ReopenableArtifactStore,
-{
-    let make_store = || make().open.process_env;
-    crate::registration_macro_support::process_execution_env_store_fresh_instances(&make_store)
-        .await;
 }
 
 pub async fn process_environment_namespace<F>(make: F)

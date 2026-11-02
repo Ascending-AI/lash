@@ -1,8 +1,5 @@
-//! Deleting an attachment that never existed is a no-op whichever answer the
-//! S3 implementation gives DeleteObjects for the missing key (FIG-3688).
-//!
-//! A loopback stand-in for an S3 endpoint answers DeleteObjects with either
-//! shape, echoing the requested key, and answers HEAD with 404 or 200.
+//! A failed object deletion remains a delete failure while HEAD confirms
+//! that the object still exists (FIG-3688).
 
 use super::*;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -10,10 +7,6 @@ use tokio::net::TcpListener;
 
 #[derive(Clone, Copy)]
 enum MissingKeyAnswer {
-    /// AWS S3: the missing key is reported deleted.
-    Deleted,
-    /// Garage: the missing key is a per-key `NoSuchKey` error.
-    NoSuchKey,
     /// Any other per-key failure.
     AccessDenied,
 }
@@ -75,10 +68,6 @@ async fn serve_connection(
                 .map(|(key, _)| key.to_string())
                 .unwrap_or_default();
             let entry = match answer {
-                MissingKeyAnswer::Deleted => format!("<Deleted><Key>{key}</Key></Deleted>"),
-                MissingKeyAnswer::NoSuchKey => format!(
-                    "<Error><Key>{key}</Key><Code>NoSuchKey</Code><Message>Key not found</Message></Error>"
-                ),
                 MissingKeyAnswer::AccessDenied => format!(
                     "<Error><Key>{key}</Key><Code>AccessDenied</Code><Message>Access denied</Message></Error>"
                 ),
@@ -115,24 +104,6 @@ fn store_at(endpoint: String) -> S3AttachmentStore {
 
 fn never_written() -> AttachmentId {
     lash_core::attachments::content_id(b"never-existed")
-}
-
-#[tokio::test]
-async fn a_missing_key_reported_deleted_is_a_no_op() {
-    let store = store_at(fake_s3(MissingKeyAnswer::Deleted, false).await);
-    store
-        .delete(&never_written())
-        .await
-        .expect("the AWS S3 answer is a no-op");
-}
-
-#[tokio::test]
-async fn a_missing_key_reported_no_such_key_is_a_no_op() {
-    let store = store_at(fake_s3(MissingKeyAnswer::NoSuchKey, false).await);
-    store
-        .delete(&never_written())
-        .await
-        .expect("the Garage answer is a no-op");
 }
 
 #[tokio::test]

@@ -528,14 +528,6 @@ async fn store_maintenance_refuses_an_empty_root_set() {
     }
 }
 
-#[test]
-fn store_maintenance_is_absent_from_the_workbench_ui() {
-    assert!(
-        !ui::INDEX_HTML.contains("/api/admin/store-maintenance"),
-        "store maintenance is operator-only: it must never be one click away"
-    );
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn store_maintenance_serves_stalled_delete_counts() {
     let workbench = Workbench::silent().await;

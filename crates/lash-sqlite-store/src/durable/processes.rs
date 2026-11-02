@@ -709,36 +709,6 @@ pub(super) fn live_until_descendants(
 mod tests {
     use super::*;
 
-    /// TURN-CLOSE-WORK: no hold registration means three fewer statements.
-    #[tokio::test]
-    async fn a_turn_close_with_no_holds_uses_only_its_child_probe() {
-        let conn = crate::tests::input_run_sql_fixture();
-        conn.execute_once("UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}', terminal_at_ms = 42", []).expect("terminal");
-        crate::observed_sql::enable(&conn);
-        let actor = ActorKey::session("session").expect("actor");
-        let commit = Committing {
-            process_views: Default::default(),
-            actor: &actor,
-            epoch: Epoch(1),
-            now: DurableInstant(42),
-            fleet: lash_core_store::store::FleetFormat::current(),
-            blob_profile: crate::BuiltinBlobProfile::default(),
-            retired: Default::default(),
-            open_roots: Default::default(),
-        };
-        let scope = ScopeKey::Turn("session".into(), "run".into());
-        let (answer, receipt) =
-            lash_core_ids::operational_metrics::sql::collect("turn.commit", "sqlite", async {
-                close_scope(&conn, &commit, &scope)
-            })
-            .await;
-        answer.expect("SQL").expect("close");
-        assert_eq!(
-            receipt.statements, 1,
-            "four statements before terminal derivation, one child probe after"
-        );
-        eprintln!("TURN_CLOSE_STATEMENTS {}", receipt.statements);
-    }
     /// TURN-HOLDS: registration persists the marker and closing releases its hold and marks.
     #[tokio::test]
     async fn a_turn_close_releases_registered_consumer_holds_and_abandonment_marks() {

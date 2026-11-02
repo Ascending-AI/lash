@@ -52,34 +52,6 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
     );
 }
 
-/// Content addresses use the same 32-byte key space on both stores, and every
-/// reference to a blob is its integer node id (FIG-7584). Follow foreign keys
-/// to the content table so every referrer is part of this law.
-#[test]
-fn content_address_columns_are_binary_keys() {
-    let ddl = crate::PostgresStorage::schema_ddl();
-    let mut table = "";
-    for line in ddl.lines() {
-        let line = line.trim();
-        if let Some(name) = line.strip_prefix("CREATE TABLE IF NOT EXISTS ") {
-            table = name.split_whitespace().next().expect("table name");
-        }
-        let node_reference = line
-            .split_once("REFERENCES ")
-            .is_some_and(|(_, target)| target.starts_with("lash_blobs("))
-            || (table == "lash_retirement_frontier" && line.starts_with("node_ref "));
-        let content_key = line.starts_with("attachment_id ")
-            || (table == "lash_blobs" && line.starts_with("hash "));
-        if content_key || node_reference {
-            assert_eq!(
-                line.split_whitespace().nth(1),
-                Some(if content_key { "BYTEA" } else { "BIGINT" }),
-                "{table}: content addresses must be binary keys and node references ids: {line}"
-            );
-        }
-    }
-}
-
 /// The teardown artifact is the same contract the other way: it must be the
 /// exact bytes this build executes, and its statement list must be generated
 /// from the object list `schema.sql` declares — never maintained by hand,

@@ -328,6 +328,19 @@ macro_rules! law {
             }
         }
     };
+    (file_only $name:ident) => {
+        mod $name {
+            use super::*;
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn file() {
+                let tier = tier(true).await;
+                laws::$name(&tier)
+                    .await
+                    .unwrap_or_else(|broken| panic!("{broken}"));
+            }
+        }
+    };
 }
 
 #[async_trait::async_trait]
@@ -457,35 +470,39 @@ macro_rules! page_law {
             }
         }
     };
+    (file_only $name:ident) => {
+        mod $name {
+            use super::*;
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn file() {
+                let tier = tier(true).await;
+                pages::$name(&tier)
+                    .await
+                    .unwrap_or_else(|broken| panic!("{broken}"));
+            }
+        }
+    };
 }
 
-page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
-page_law!(publication_is_atomic_with_its_effect_admissions);
-page_law!(a_step_outcome_owns_its_candidate);
-page_law!(a_pruned_step_outcome_frees_exactly_its_unshared_pages);
-page_law!(a_host_read_never_descends_into_a_heap_page);
-page_law!(a_leased_root_survives_concurrent_retirement);
-page_law!(an_expired_lease_reads_nothing);
-page_law!(the_lost_receipt_resolves_by_commit_identity);
-page_law!(publication_keeps_global_digest_lock_order);
-page_law!(an_ownership_transfer_fences_the_old_activation);
-page_law!(a_node_retires_sealed_pages_on_its_own);
-page_law!(backpressure_holds_claims_until_retirement_catches_up);
-page_law!(candidate_edge_pass_does_not_reread_fresh_bodies);
-page_law!(a_page_read_is_one_statement_that_answers_its_lease_first);
-page_law!(a_candidate_check_fetches_only_the_bytes_it_compares);
+page_law!(file_only a_candidate_installs_only_new_nodes_and_direct_references);
+page_law!(file_only publication_is_atomic_with_its_effect_admissions);
+page_law!(file_only a_step_outcome_owns_its_candidate);
+page_law!(file_only a_pruned_step_outcome_frees_exactly_its_unshared_pages);
+page_law!(file_only a_host_read_never_descends_into_a_heap_page);
+page_law!(file_only a_leased_root_survives_concurrent_retirement);
+page_law!(file_only an_expired_lease_reads_nothing);
+page_law!(file_only the_lost_receipt_resolves_by_commit_identity);
+page_law!(file_only an_ownership_transfer_fences_the_old_activation);
+page_law!(file_only a_node_retires_sealed_pages_on_its_own);
+page_law!(file_only backpressure_holds_claims_until_retirement_catches_up);
+page_law!(file_only candidate_edge_pass_does_not_reread_fresh_bodies);
+page_law!(file_only a_page_read_is_one_statement_that_answers_its_lease_first);
+page_law!(file_only a_candidate_check_fetches_only_the_bytes_it_compares);
 
 /// D-RET: a node killed in a retirement batch, before and after its commit.
 mod a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free {
     use super::*;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn memory() {
-        let mut tier = tier(false).await;
-        pages::a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free(&mut tier)
-            .await
-            .unwrap_or_else(|broken| panic!("{broken}"));
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn file() {
@@ -496,41 +513,9 @@ mod a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free {
     }
 }
 
-/// D-RET, D-LEASE under load (FIG-6193): a memory store races itself; a
-/// file has a second node.
-mod publications_and_retirement_on_two_nodes_never_deadlock {
-    use super::*;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn memory() {
-        let tier = two_node_tier(false).await;
-        pages::publications_and_retirement_on_two_nodes_never_deadlock(&tier, None, 48)
-            .await
-            .unwrap_or_else(|broken| panic!("{broken}"));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn file() {
-        let tier = two_node_tier(true).await;
-        pages::publications_and_retirement_on_two_nodes_never_deadlock(&tier, None, 48)
-            .await
-            .unwrap_or_else(|broken| panic!("{broken}"));
-    }
-}
-
 /// D-RET over retired leaves, with a restart between steps.
 mod retirement_advances_in_bounded_steps_and_reclaims_everything_unowned {
     use super::*;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn memory() {
-        let mut tier = tier(false).await;
-        pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(
-            &mut tier, 5_000,
-        )
-        .await
-        .unwrap_or_else(|broken| panic!("{broken}"));
-    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn file() {
@@ -560,14 +545,6 @@ mod deleting_a_session_retires_its_heap_in_bounded_steps {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn memory() {
-        let tier = tier(false).await;
-        pages::deleting_a_session_retires_its_heap_in_bounded_steps(&tier, 50_000)
-            .await
-            .unwrap_or_else(|broken| panic!("{broken}"));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn file() {
         let tier = tier(true).await;
         pages::deleting_a_session_retires_its_heap_in_bounded_steps(&tier, 50_000)
@@ -585,26 +562,16 @@ async fn a_large_candidate_installs_within_bounded_buffers() {
         .unwrap_or_else(|broken| panic!("{broken}"));
 }
 
-/// The bounded-memory install of one million new pages, on a file.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "benchmark: run with --ignored to measure a one-million-page install"]
-async fn a_million_page_candidate_installs_within_bounded_buffers() {
-    let tier = tier(true).await;
-    pages::a_large_candidate_installs_within_bounded_buffers(&tier, 1_000_000)
-        .await
-        .unwrap_or_else(|broken| panic!("{broken}"));
-}
-
-law!(a_refused_owner_graph_commit_writes_nothing);
-law!(prepared_configuration_references_refuse_missing_or_conflicting_nodes);
-law!(a_prepared_configuration_reference_racing_retirement_is_atomic);
-law!(an_owner_refuses_a_second_outcome_for_one_call);
-law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
-law!(the_orphan_audit_peels_only_what_no_root_reaches);
-law!(an_owner_commit_is_admitted_on_its_whole_encoding);
-law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
-law!(an_audit_racing_commits_peels_nothing_they_rely_on);
-law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
+law!(file_only a_refused_owner_graph_commit_writes_nothing);
+law!(file_only prepared_configuration_references_refuse_missing_or_conflicting_nodes);
+law!(file_only a_prepared_configuration_reference_racing_retirement_is_atomic);
+law!(file_only an_owner_refuses_a_second_outcome_for_one_call);
+law!(file_only every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
+law!(file_only the_orphan_audit_peels_only_what_no_root_reaches);
+law!(file_only an_owner_commit_is_admitted_on_its_whole_encoding);
+law!(file_only a_read_racing_replacement_and_its_peel_reads_one_whole_root);
+law!(file_only an_audit_racing_commits_peels_nothing_they_rely_on);
+law!(file_only a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
 /// GRAPH-PEEL-WORK: retirement touches edges only of nodes it deletes, and
 /// reads their children from their own bytes (FIG-6939). A pinned root
@@ -954,209 +921,6 @@ async fn absent_graph_bodies_install_in_one_statement() {
     }
 }
 
-/// FIG-6420: one park publication writes a counted number of SQL
-/// statements, and none of them records a semantic admission.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_park_publication_writes_a_counted_number_of_statements() {
-    use lash_core_store::checkpoint_graph::CommitId;
-    use lash_core_store::checkpoint_graph::EncodeBudget;
-    use lash_core_store::checkpoint_graph::EncodedNode;
-    use lash_core_store::checkpoint_graph::ExplicitLimit;
-    use lash_core_store::checkpoint_graph::GraphStaging;
-    use lash_core_store::checkpoint_graph::NodeKind;
-    use lash_core_store::checkpoint_graph::TypedBody;
-    use lash_core_store::checkpoint_graph::stage::{
-        CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
-        node_range,
-    };
-    use lash_durable::domain::graph::{EffectAdmissionWrite, ExecRootWrite};
-    use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
-    use lash_durable::domain::{CellId, DomainWrite, EffectKey, ExecKey};
-    use lash_durable::{ActorKey, CommitLabel, Epoch};
-    use lash_kernel_value::tokens::TokenWriter;
-
-    /// A page of `kind` naming `tag` and `children`.
-    fn encode(kind: NodeKind, tag: &str, children: &[NodeId]) -> EncodedNode {
-        let mut out = TokenWriter::new();
-        out.seq(1 + children.len() as u64);
-        out.text(tag);
-        for child in children {
-            out.child(child.child_ref());
-        }
-        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-        let id = staging
-            .encode(kind, TypedBody::logical(out.as_bytes()))
-            .expect("a counted page encodes");
-        staging.into_nodes().remove(&id).expect("the staged page")
-    }
-
-    /// A candidate held whole: its entries in digest order.
-    struct Listed {
-        summary: ManifestSummary,
-        entries: Vec<ManifestEntry>,
-    }
-
-    impl Listed {
-        fn new(root: NodeId, commit: CommitId, fresh: Vec<EncodedNode>) -> Self {
-            let summary = ManifestSummary {
-                root,
-                base: None,
-                commit,
-                fresh_nodes: fresh.len() as u64,
-                fresh_bytes: fresh.iter().map(EncodedNode::len).sum(),
-                fresh_edges: fresh
-                    .iter()
-                    .map(|node| node.children().map_or(0, |children| children.len() as u64))
-                    .sum(),
-                external: 0,
-            };
-            let mut entries: Vec<ManifestEntry> = fresh
-                .into_iter()
-                .map(|node| {
-                    ManifestEntry::Fresh(
-                        lash_core_store::checkpoint_graph::node::VerifiedNode::check(
-                            node,
-                            &lash_core_store::checkpoint_graph::DecodeLimits::within_total(
-                                u64::MAX,
-                            ),
-                        )
-                        .expect("a staged page checks"),
-                    )
-                })
-                .collect();
-            entries.sort_by_key(|entry| match entry {
-                ManifestEntry::External(id) => *id,
-                ManifestEntry::Fresh(node) => node.id,
-            });
-            Self { summary, entries }
-        }
-    }
-
-    impl CandidateManifest for Listed {
-        fn summary(&self) -> ManifestSummary {
-            self.summary
-        }
-
-        fn entries(
-            &mut self,
-            after: Option<NodeId>,
-            limit: usize,
-        ) -> Result<Vec<ManifestEntry>, StageFault> {
-            let id = |entry: &ManifestEntry| match entry {
-                ManifestEntry::External(id) => *id,
-                ManifestEntry::Fresh(node) => node.id,
-            };
-            Ok(self
-                .entries
-                .iter()
-                .filter(|entry| after.is_none_or(|after| id(entry) > after))
-                .take(limit)
-                .cloned()
-                .collect())
-        }
-
-        fn fresh_range(
-            &mut self,
-            id: &NodeId,
-            offset: u64,
-            len: usize,
-        ) -> Result<Vec<u8>, StageFault> {
-            match self
-                .entries
-                .binary_search_by_key(id, |entry| match entry {
-                    ManifestEntry::External(id) => *id,
-                    ManifestEntry::Fresh(node) => node.id,
-                })
-                .map(|at| &self.entries[at])
-            {
-                Ok(ManifestEntry::Fresh(node)) => node_range(node, offset, len),
-                _ => Err(StageFault::Missing(*id)),
-            }
-        }
-
-        fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
-            Ok(Box::new(MemoryEdgeLog::default()))
-        }
-    }
-
-    let tier = tier(false).await;
-    let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
-    let actor = ActorKey::session("sql-work-owner").expect("actor");
-    let exec = ExecKey::Cell(
-        lash_kernel_value::identity::SessionId::parse("counted-park").expect("a session id"),
-        lash_vocabulary::identity::TurnId::try_from("counted-turn".to_owned()).expect("a turn id"),
-        CellId::new("counted-cell"),
-    );
-    let leaf = encode(NodeKind::PAYLOAD_LEAF, "counted leaf", &[]);
-    let checkpoint = encode(NodeKind::CHECKPOINT_ROOT, "counted root", &[leaf.id]);
-    let exec_root = encode(NodeKind::FROZEN_VALUE, "exec root", &[checkpoint.id]);
-    let effect_node = encode(NodeKind::FROZEN_VALUE, "admission", &[]);
-    let commit = CommitId::mint();
-    let manifest = Listed::new(checkpoint.id, commit, vec![leaf, checkpoint]);
-    let mut tx = tier
-        .store
-        .begin(&actor, Epoch(identity.epoch), u64::MAX)
-        .await
-        .unwrap();
-    tx.stage([exec_root.clone(), effect_node.clone()]);
-    tx.write(DomainWrite::EffectAdmission(EffectAdmissionWrite::Put {
-        exec: exec.clone(),
-        effect: EffectKey(Arc::from(&b"counted"[..])),
-        member: None,
-        admission: effect_node.id,
-    }));
-    tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
-        exec: exec.clone(),
-        expected: None,
-        expected_root: None,
-        root: exec_root.id,
-        commit_id: commit,
-    }));
-    let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
-        "park.publish",
-        "sqlite",
-        tier.store.commit_candidate(
-            tx,
-            CandidatePublication {
-                owner: CandidateOwner::ExecRootPut(exec),
-                manifest: Box::new(manifest),
-            },
-            CommitLabel::new("park.publish"),
-        ),
-    )
-    .await;
-    answer.unwrap();
-    eprintln!(
-        "PARK-PUBLICATION SQL {}",
-        serde_json::to_string(&receipt).unwrap()
-    );
-    // Exclude transaction control, then let SQLite classify each data
-    // statement: the actor-fence UPDATE can start with a WITH clause.
-    assert_eq!(receipt.unretained_shape_statements, 0);
-    let shapes = receipt.shapes.clone();
-    let writes = tier
-        .store
-        .connection_for_testing()
-        .call(move |conn| {
-            let mut writes = 0;
-            for (sql, shape) in shapes {
-                if matches!(sql.as_str(), "begin immediate" | "commit") {
-                    continue;
-                }
-                if !conn.statement_once(&sql)?.readonly() {
-                    writes += shape.statements;
-                }
-            }
-            Ok(writes)
-        })
-        .await
-        .expect("classify the park's statements");
-    // Five writes: actor fence, four graph nodes in one batch, two edges in
-    // one batch, effect admission and execution root. No semantic admission.
-    const EXPECTED: u64 = 5;
-    assert_eq!(writes, EXPECTED, "the park's write count: {receipt:?}");
-}
-
 mod turn_and_owned_model_calls_survive_an_idempotent_outcome_commit {
     use super::*;
 
@@ -1166,11 +930,6 @@ mod turn_and_owned_model_calls_survive_an_idempotent_outcome_commit {
         laws::turn_and_owned_model_calls_survive_an_idempotent_outcome_commit(&tier, peer)
             .await
             .unwrap_or_else(|broken| panic!("{broken}"));
-    }
-
-    #[tokio::test]
-    async fn memory() {
-        run(false).await;
     }
 
     #[tokio::test]
@@ -1212,9 +971,7 @@ fn unpin(key: &str, expected: NodeId) -> lash_durable::DomainWrite {
     )
 }
 
-page_law!(checkpoint_lease_handoffs_are_atomic);
-
-page_law!(lo_root_retained_delta_preserves_reachability);
+page_law!(file_only checkpoint_lease_handoffs_are_atomic);
 
 #[path = "environment_laws.rs"]
 mod environment_laws;

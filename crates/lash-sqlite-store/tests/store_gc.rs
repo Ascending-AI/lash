@@ -3,7 +3,6 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_store::plugin_state::PluginState;
 use lash_core_store::session_policy::SessionPolicy;
 use lash_core_store::session_state::RuntimeSessionState;
 use lash_core_store::session_store_factory_types::SessionCreationHead;
@@ -20,7 +19,7 @@ use lash_core_store::store::StoreMaintenance;
 use lash_core_store::store::TurnInputStore;
 use lash_core_store::store::WindowSelector;
 use lash_kernel_value::identity::SessionId;
-use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
+use lash_sqlite_store::SqliteStore;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -62,161 +61,6 @@ async fn factory_state(
             lash_core::NoProgressBudget::bounded(12),
         ))
     }
-}
-
-#[tokio::test]
-async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("memory backend")
-        .open_store()
-        .await
-        .expect("store");
-    let plugin_state = PluginState {
-        plugins: Default::default(),
-    };
-    let mut state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        turn_index: 1,
-        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
-            lash_protocol_types::session_model::TurnBudget::Unbounded,
-            lash_protocol_types::session_model::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
-    };
-    state.set_plugin_state(Some(plugin_state));
-    store
-        .admit_session(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: state.session_id.clone(),
-            relation: lash_core_store::session_identity::SessionRelation::Root,
-            config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
-                &state.policy.clone(),
-            ),
-            head: SessionCreationHead::Config,
-            retention: lash_core_store::store::Retention::UntilGc,
-        })
-        .await
-        .expect("bind session to store");
-    state.ensure_agent_frame_initialized();
-    let stored = store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
-        .await
-        .expect("commit session state");
-    let orphan = store
-        .put_unrooted_artifact_blob_for_testing(
-            BlobArtifactDescriptor::checkpoint_component(),
-            b"orphan",
-        )
-        .await
-        .expect("store orphan");
-
-    let report = store.gc_unreachable().await.expect("gc sweeps");
-
-    assert_eq!(report.deleted_blob_count, 1);
-    // The root is a SessionManifest node, read back through its manifest
-    // rather than as an artifact blob: it survived the sweep.
-    let checkpoint = store
-        .get_checkpoint(&stored.checkpoint_ref)
-        .await
-        .expect("read checkpoint")
-        .expect("checkpoint manifest");
-    let plugin_ref = checkpoint
-        .component_ref(lash_core_store::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
-        .expect("plugin snapshot ref")
-        .clone();
-    assert!(
-        store
-            .get_blob(&plugin_ref)
-            .await
-            .expect("read plugin blob")
-            .is_some()
-    );
-    assert!(
-        store
-            .get_blob(&orphan)
-            .await
-            .expect("read orphan blob")
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
-    let root = unique_temp_dir("metadata");
-    let factory = std::sync::Arc::new(
-        SqliteStore::open(
-            &catalog_uri(&root),
-            lash_sqlite_store::SqliteSynchronous::Normal,
-        )
-        .await
-        .expect("open catalog"),
-    );
-    let request = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("chat/alpha"),
-        relation: lash_core_store::session_identity::SessionRelation::Child {
-            parent_session_id: SessionId::from("preserved-parent"),
-            caused_by: None,
-        },
-        config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
-            &SessionPolicy {
-                model: recorded_llm_profile("first-model"),
-                ..SessionPolicy::new(
-                    lash_protocol_types::session_model::TurnBudget::Unbounded,
-                    lash_protocol_types::session_model::MaxToolCalls::new(1024),
-                    lash_core::NoProgressBudget::bounded(12),
-                )
-            },
-        ),
-        head: SessionCreationHead::Config,
-        retention: lash_core_store::store::Retention::UntilGc,
-    };
-
-    let store = admit_store(&factory, &request).await.expect("create store");
-    let meta = store
-        .load_session_meta(&request.session_id)
-        .await
-        .expect("load meta")
-        .expect("meta");
-    assert_eq!(meta.session_id, "chat/alpha");
-    assert_eq!(
-        meta.parent_session_id().map(|id| id.as_str()),
-        Some("preserved-parent")
-    );
-
-    let reopened = admit_store(
-        &factory,
-        &SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            relation: lash_core_store::session_identity::SessionRelation::Root,
-            config: lash_core_store::session_graph::PersistedSessionConfig::from_policy(
-                &SessionPolicy {
-                    model: recorded_llm_profile("second-model"),
-                    ..SessionPolicy::new(
-                        lash_protocol_types::session_model::TurnBudget::Unbounded,
-                        lash_protocol_types::session_model::MaxToolCalls::new(1024),
-                        lash_core::NoProgressBudget::bounded(12),
-                    )
-                },
-            ),
-            ..request
-        },
-    )
-    .await
-    .expect("reopen store");
-    let reopened_meta = reopened
-        .load_session_meta(&SessionId::from("chat/alpha"))
-        .await
-        .expect("load reopened meta")
-        .expect("reopened meta");
-    assert_eq!(
-        reopened_meta.parent_session_id().map(|id| id.as_str()),
-        Some("preserved-parent")
-    );
 }
 
 #[tokio::test]

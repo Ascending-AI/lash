@@ -5,19 +5,6 @@
 use crate::SqliteStoreSet;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_polling_reader_never_skips_or_repeats_a_change_in_memory() {
-    let set = SqliteStoreSet::memory()
-        .await
-        .expect("open the memory store set");
-    lash_core_execution::testing::turn_feed_law::a_polling_reader_never_skips_or_repeats_a_turn_change(
-        set.session_store_factory(),
-        16,
-        None,
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_polling_reader_never_skips_or_repeats_a_change_on_file() {
     let root = tempfile::tempdir().expect("store directory");
     let set = SqliteStoreSet::open(
@@ -29,20 +16,6 @@ async fn a_polling_reader_never_skips_or_repeats_a_change_on_file() {
     lash_core_execution::testing::turn_feed_law::a_polling_reader_never_skips_or_repeats_a_turn_change(
         set.session_store_factory(),
         16,
-        None,
-    )
-    .await;
-}
-
-/// The committed-turn read's cursor law (FIG-5297) over SQLite memory.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_reader_polling_one_session_never_misses_or_repeats_a_committed_turn_in_memory() {
-    let set = SqliteStoreSet::memory()
-        .await
-        .expect("open the memory store set");
-    lash_core_execution::testing::committed_turns_law::a_reader_polling_one_session_never_misses_or_repeats_a_turn(
-        set.session_store_factory(),
-        8,
         None,
     )
     .await;

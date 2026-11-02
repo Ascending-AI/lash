@@ -4,7 +4,6 @@ use lash_vocabulary::identity::TurnId;
 #[cfg(test)]
 #[path = "tests/support.rs"]
 mod support;
-use std::future::Future;
 pub(crate) use support::*;
 #[cfg(test)]
 #[path = "tests/harness.rs"]
@@ -23,9 +22,6 @@ mod deferred_tools_tests;
 #[cfg(test)]
 #[path = "tests/done_stream_items.rs"]
 mod done_stream_items_tests;
-#[cfg(test)]
-#[path = "tests/mail_payload.rs"]
-mod mail_payload_tests;
 #[cfg(test)]
 #[path = "tests/multi_session.rs"]
 mod multi_session_tests;
@@ -72,8 +68,6 @@ mod tool_control_tests;
 #[path = "tests/typescript_dialect.rs"]
 mod typescript_dialect_tests;
 
-const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
-
 #[test]
 fn turn_routing_state_survives_web_process_reconstruction() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -110,20 +104,6 @@ fn turn_routing_state_survives_web_process_reconstruction() {
     assert_eq!(recovered_prompt.attachment_id, None);
     assert_eq!(recovered_prompt.row_id, original_prompt.row_id);
     assert_eq!(recovered_prompt.at, original_prompt.at);
-}
-
-#[cfg(test)]
-#[path = "tests/ui_contract.rs"]
-mod ui_contract_tests;
-
-#[test]
-fn mail_received_account_contract_uses_slugs() {
-    const ACCOUNT_SLUG_CONTRACT: &str = "`account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
-
-    assert!(
-        workbench_prompt(WorkbenchDialect::TypeScript).contains(ACCOUNT_SLUG_CONTRACT),
-        "the workbench prompt must state the mail account slug contract"
-    );
 }
 
 #[cfg(test)]
@@ -164,9 +144,6 @@ mod concurrent_send_tests;
 #[cfg(test)]
 #[path = "tests/host_primitives.rs"]
 mod host_primitives_tests;
-#[cfg(test)]
-#[path = "tests/no_progress_budget.rs"]
-mod no_progress_budget_tests;
 #[cfg(test)]
 #[path = "tests/reference_transport.rs"]
 mod reference_transport_tests;

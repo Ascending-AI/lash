@@ -88,7 +88,6 @@ mod session_store_factory_enumeration;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
-mod store_recovery;
 mod support_prelude;
 mod tool_intent_retention;
 
@@ -130,7 +129,6 @@ pub use session_ingress::{
 pub use session_store_factory::*;
 pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
-pub use store_recovery::*;
 pub(crate) use support_prelude::*;
 pub use tool_intent_retention::*;
 

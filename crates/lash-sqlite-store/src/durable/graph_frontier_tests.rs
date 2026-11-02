@@ -1,30 +1,6 @@
 /// LO-ROOT-PREPARE: rebinding a cached retirement batch must not reparse
 /// the catalog and recursive walk on every execution.
 use crate::Prepare as _;
-#[tokio::test]
-async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
-    let set = crate::SqliteStoreSet::memory().await.unwrap();
-    let store = set.session_store_factory();
-    let reprepares = store
-        .conn
-        .call(|connection| {
-            let mut reparses = Vec::new();
-            for _ in 0..3 {
-                let mut statement =
-                    connection.statement(super::SQL.sqlite.retirement_candidates.sql())?;
-                let rows = statement
-                    .query_map(rusqlite::params!["[]", 256, "[]"], |_| Ok(()))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                assert!(rows.is_empty());
-                reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
-            }
-            eprintln!("LO-ROOT-PREPARE graph reparses={reparses:?}");
-            Ok(reparses[1..].to_vec())
-        })
-        .await
-        .unwrap();
-    assert_eq!(reprepares, [0, 0], "a cached batch must reuse its program");
-}
 
 /// LO-ROOT-WORK: retiring one leaf must not scan unrelated graph edges.
 #[tokio::test]

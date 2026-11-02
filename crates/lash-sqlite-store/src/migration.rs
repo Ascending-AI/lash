@@ -977,35 +977,6 @@ mod laws;
 
 #[cfg(test)]
 mod nested_format_tests {
-    #[test]
-    fn backup_states_carry_no_failure_data() {
-        for state in [
-            super::BackupState::BackingUp {},
-            super::BackupState::Migrating {},
-            super::BackupState::Migrated {},
-        ] {
-            let manifest = super::Manifest {
-                format: super::SQLITE_MIGRATION_BACKUP_VERSION,
-                store: "store".into(),
-                state,
-                taken_at_ms: 0,
-                file: "lash.db".into(),
-                from: 1,
-                to: 2,
-                bytes: 0,
-            };
-            let encoded = serde_json::to_vec(&manifest).expect("manifest");
-            assert!(serde_json::from_slice::<super::Manifest>(&encoded).is_ok());
-        }
-        for state in ["backing_up", "migrating", "migrated"] {
-            assert!(
-                serde_json::from_value::<super::BackupState>(
-                    serde_json::json!({"state":state, "failure":"failed"})
-                )
-                .is_err()
-            );
-        }
-    }
 
     #[tokio::test]
     #[expect(

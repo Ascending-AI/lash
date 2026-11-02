@@ -110,7 +110,7 @@ pub(crate) fn validate(answer: serde_json::Value) -> Result<(), StoreError> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn function_ddl() -> String {
     // Static SQL, generated together with the owner function. No stored
     // cleanup body changes; the typed gate key replaces the text pattern.

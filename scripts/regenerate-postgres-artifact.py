@@ -12,7 +12,7 @@ LABEL = "//crates/lash-postgres-store:schema_artifact_generator__bin"
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("artifact", nargs="+", choices=("teardown.sql", "schema-shape.txt"))
+    parser.add_argument("artifact", nargs="+", choices=("schema.sql", "teardown.sql", "schema-shape.txt"))
     args = parser.parse_args()
     report = ROOT / ".buck2/postgres-artifact-build.json"
     subprocess.run(["kiln", "build", LABEL, "--materializations", "final",

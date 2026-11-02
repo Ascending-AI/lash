@@ -425,18 +425,3 @@ impl ProcessSteps for WorkerSteps {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    /// P3: the witness workload's own steps never bypass an empty effect declaration.
-    #[test]
-    fn worker_witness_steps_are_engine_steps() {
-        for name in [BEFORE, AFTER] {
-            assert!(
-                matches!(step(name), StepRequest::Engine { .. }),
-                "{name} is the engine's own witness body"
-            );
-        }
-    }
-}

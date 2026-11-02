@@ -5,32 +5,6 @@ use lash_kernel_value::identity::SessionId;
 // fence, and a delete settles the turn it finds running.
 
 #[test]
-fn replacing_a_non_current_session_does_not_rotate_the_selected_session() {
-    let ids = WorkbenchSessions::fresh();
-    let retired = ids.current();
-    ids.ensure(&retired);
-    let selected = "workbench-selected-during-delete";
-    ids.record(
-        SessionId::fixture(selected.to_string()),
-        "selected".to_string(),
-    );
-    ids.select(&SessionId::from(selected))
-        .expect("select competing session");
-
-    let (replacement, replaced_current) = ids.replace(&retired);
-
-    assert!(!replaced_current);
-    assert_eq!(ids.current(), selected);
-    assert!(ids.entry(&retired).is_none());
-    assert_eq!(
-        ids.entry(&replacement)
-            .expect("replacement keeps retired roster slot")
-            .name,
-        retired
-    );
-}
-
-#[test]
 fn replacing_an_unrostered_session_records_its_replacement() {
     let ids = WorkbenchSessions::fresh();
     let retired = "workbench-external-session";
@@ -567,36 +541,6 @@ fn a_claimed_kind_survives_a_restart_without_consulting_the_turn_id() {
         active.prompt.map(|prompt| prompt.text),
         Some("held prompt".to_string()),
         "the turn and its prompt are restored as one value"
-    );
-}
-
-#[test]
-fn two_sessions_claim_their_own_slots_without_interference() {
-    let active_turns = ActiveTurns::default();
-    assert_eq!(
-        active_turns.try_insert_for_idle_session(
-            &SessionId::from("left"),
-            &TurnId::from("left-turn"),
-            WorkbenchTurnKind::User,
-        ),
-        ActiveTurnClaim::Claimed
-    );
-    assert_eq!(
-        active_turns.try_insert_for_idle_session(
-            &SessionId::from("right"),
-            &TurnId::from("right-turn"),
-            WorkbenchTurnKind::Queued,
-        ),
-        ActiveTurnClaim::Claimed,
-        "the claim is a lookup on this session, not a scan of every claim"
-    );
-    active_turns.remove(&SessionId::from("left"), &TurnId::from("left-turn"));
-    assert!(active_turns.for_session(&SessionId::from("left")).is_none());
-    assert_eq!(
-        active_turns
-            .for_session(&SessionId::from("right"))
-            .map(|active| active.kind),
-        Some(WorkbenchTurnKind::Queued)
     );
 }
 

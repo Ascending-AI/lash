@@ -56,8 +56,6 @@ mod observed_sql;
 #[cfg(feature = "perf-witness")]
 pub mod write_observer;
 
-#[cfg(test)]
-mod rendered_statement_sets_tests;
 mod session_deletion;
 
 use std::path::Path;

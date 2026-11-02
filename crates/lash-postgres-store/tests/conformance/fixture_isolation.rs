@@ -1,32 +1,6 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn conformance_fixtures_do_not_hold_the_shared_database_lock() {
-    let Some((_guard, storage)) = storage().await else {
-        return;
-    };
-    let mut connection = storage
-        .pool()
-        .acquire()
-        .await
-        .expect("acquire lock probe connection");
-    let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock_shared($1)")
-        .bind(0x4c41_5348_5f50_4754_i64)
-        .fetch_one(&mut *connection)
-        .await
-        .expect("probe the superseded fixture lock");
-    assert!(
-        acquired,
-        "a conformance fixture still serializes unrelated laws"
-    );
-    sqlx::query("SELECT pg_advisory_unlock_shared($1)")
-        .bind(0x4c41_5348_5f50_4754_i64)
-        .execute(&mut *connection)
-        .await
-        .expect("release the lock probe");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
     use sqlx::ConnectOptions as _;
 

@@ -48,7 +48,7 @@ pub(crate) fn retirement_mechanics() -> Vec<&'static str> {
 /// Render the one-call form from the graph collector's own statements.
 /// Environment ownership needs the explicit typed bridge; that case refuses
 /// the fast call before deleting anything, as its installer does.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn retirement_function_ddl() -> String {
     let pg = &SQL.postgres;
     let inline = super::super::generator::inline_statement;

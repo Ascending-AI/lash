@@ -40,9 +40,23 @@ def discover(repo: Path) -> list[dict]:
              artifact=name, output=f"crates/lash-postgres-store/{name}",
              source="crates/lash-postgres-store/src/bin/schema_artifact_generator.rs",
              environment={})
-        for name in ("teardown.sql", "schema-shape.txt")
+        for name in ("schema.sql", "teardown.sql", "schema-shape.txt")
         if (repo / "crates/lash-postgres-store/src/bin/schema_artifact_generator.rs").is_file()
     ]
+    generators.extend(
+        dict(target="//crates/lash-postgres-store:replay_schema_generator__example",
+             tool="scripts/regenerate-store-test-artifact.py", artifact=name,
+             output=f"crates/lash/{name}",
+             source="crates/lash-postgres-store/examples/replay_schema_generator.rs",
+             environment={})
+        for name in ("postgres-live-replay-schema-shape.txt", "postgres-process-replay-schema-shape.txt")
+        if (repo / "crates/lash-postgres-store/examples/replay_schema_generator.rs").is_file()
+    )
+    if (repo / "examples/workflows/src/bin/regenerate.rs").is_file():
+        generators.append(dict(target="//examples/workflows:regenerate__bin",
+                               tool="scripts/regenerate-store-test-artifact.py", artifact="workflows",
+                               output="examples/workflows", source="examples/workflows/src/bin/regenerate.rs",
+                               environment={}))
     visited = set()
 
     def file(path, modules, target, module_dir):

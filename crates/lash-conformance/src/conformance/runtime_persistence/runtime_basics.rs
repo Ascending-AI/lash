@@ -122,7 +122,12 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimeStore>) {
+pub async fn concurrent_head_revision_cas_applies_exactly_once<F>(make: F, label: &str)
+where
+    F: Fn(&str) -> ReopenableRuntimeStore,
+{
+    let factory = make(label);
+    let store = factory.open;
     let session_id = "concurrent-head-cas";
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
@@ -150,7 +155,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
 
     let barrier = Arc::new(tokio::sync::Barrier::new(3));
     let left_store = Arc::clone(&store);
-    let right_store = Arc::clone(&store);
+    let right_store = factory.reopen;
     let left_barrier = Arc::clone(&barrier);
     let right_barrier = Arc::clone(&barrier);
     let left_commit = make_commit("cas-left");

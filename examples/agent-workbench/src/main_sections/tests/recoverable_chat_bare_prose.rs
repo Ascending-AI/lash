@@ -166,36 +166,6 @@ async fn chat_finish_requires_text_session_wide_and_prose_still_ends_a_turn() {
     workbench.shutdown().await;
 }
 
-/// A bare-prose reply ends the turn as its assistant message and leaves one
-/// committed reply, which the settled page renders once.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
-    const REPLY: &str = "bare prose answer";
-    let workbench = Workbench::replying(REPLY).await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    let turn_id = run_turn(state, "answer in prose").await;
-
-    let report = run_report(state, &session_id, &turn_id).await;
-    assert!(
-        matches!(
-            &report,
-            lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
-                if text == REPLY
-        ),
-        "a bare prose reply ends the turn as its message: {:?}",
-        report
-    );
-    assert_eq!(
-        committed_replies(state, &session_id, &turn_id).await,
-        vec![REPLY.to_string()],
-        "one committed reply for the turn"
-    );
-    let (replies, _) = settled_rows(state).await;
-    assert_eq!(replies, vec![REPLY.to_string()], "the page renders it once");
-    workbench.shutdown().await;
-}
-
 /// The same termination with reasoning attached: the RLM protocol commits
 /// the reasoned answer itself and the runtime mints no copy of its own, so
 /// that message is the reply's only durable copy. It renders once, and the
@@ -204,42 +174,62 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
 async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     const REPLY: &str = "FIG-1406 reasoned prose answer";
     const REASONING: &str = "FIG-1406 private deliberation";
-    let (provider, _) = counted_provider(|_| reasoned_response(REASONING, REPLY));
-    let workbench = Workbench::builder(provider).build().await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    let turn_id = run_turn(state, "answer in prose, thinking first").await;
+    for reasoned in [false, true] {
+        let (provider, _) = counted_provider(move |_| {
+            if reasoned {
+                reasoned_response(REASONING, REPLY)
+            } else {
+                text_response(REPLY)
+            }
+        });
+        let workbench = Workbench::builder(provider).build().await;
+        let state = &workbench.state;
+        let session_id = state.current_session_id();
+        let turn_id = run_turn(state, "answer in prose, thinking first").await;
 
-    let report = run_report(state, &session_id, &turn_id).await;
-    assert!(
-        matches!(
-            &report,
-            lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
-                if text == REPLY
-        ),
-        "{:?}",
-        report
-    );
-    let committed = state
-        .open_session(&session_id, "test")
-        .await
-        .expect("open the session")
-        .read_view()
-        .messages()
-        .iter()
-        .filter(|message| {
-            message_role(message) == "assistant" && message_text(message).contains(REPLY)
-        })
-        .count();
-    assert_eq!(committed, 1, "the reasoned reply commits once");
-    let (replies, reasoning) = settled_rows(state).await;
-    assert_eq!(replies, vec![REPLY.to_string()]);
-    assert!(
-        !replies.iter().any(|reply| reply.contains(REASONING)),
-        "reasoning stays out of the chat rows: {replies:?}"
-    );
-    assert_eq!(reasoning, vec![REASONING.to_string()]);
-    workbench.shutdown().await;
+        let report = run_report(state, &session_id, &turn_id).await;
+        assert!(
+            matches!(
+                &report,
+                lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
+                    if text == REPLY
+            ),
+            "{:?}",
+            report
+        );
+        let committed = state
+            .open_session(&session_id, "test")
+            .await
+            .expect("open the session")
+            .read_view()
+            .messages()
+            .iter()
+            .filter(|message| {
+                message_role(message) == "assistant" && message_text(message).contains(REPLY)
+            })
+            .count();
+        assert_eq!(committed, 1, "the reasoned reply commits once");
+        assert_eq!(
+            committed_replies(state, &session_id, &turn_id).await,
+            vec![REPLY.to_string()],
+            "one committed turn reply"
+        );
+        let (replies, reasoning) = settled_rows(state).await;
+        assert_eq!(replies, vec![REPLY.to_string()]);
+        assert!(
+            !replies.iter().any(|reply| reply.contains(REASONING)),
+            "reasoning stays out of the chat rows: {replies:?}"
+        );
+        assert_eq!(
+            reasoning,
+            if reasoned {
+                vec![REASONING.to_string()]
+            } else {
+                Vec::<String>::new()
+            }
+        );
+        workbench.shutdown().await;
+    }
 }
 
 /// The protocol prose a turn commits before its answer stays out of the

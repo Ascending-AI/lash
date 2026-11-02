@@ -1,9 +1,13 @@
 //! A small measured benchmark: simulated streaming runs publish one frame
 //! every 50 ms on replica A while a subscriber per run follows it on
 //! replica B. It reports publish-to-deliver latency and what the database
-//! spent. Run it with `--ignored`; it asserts nothing about speed. It is a
+//! spent. Run the `live_replay_bench` example; it asserts nothing about speed. It is a
 //! closed-loop service diagnostic, not an offered-load measurement.
 
+#![expect(
+    clippy::expect_used,
+    reason = "the diagnostic fixture must provision its database and observations"
+)]
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -13,7 +17,80 @@ use lash_kernel_value::identity::SessionId;
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
 use sqlx::Row as _;
 
-use super::{connect, fresh_schema, label, next_item, subscribed, text};
+use lash::postgres::{PostgresEndpoints, PostgresHostConfig, PostgresLiveReplayStore};
+use lash_core::{
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    SessionObservationEvent, SessionObservationEventPayload, TurnActivity, TurnActivityId,
+    TurnEvent,
+};
+use lash_protocol_types::llm::types::{StreamBlockEvent, StreamBlockKind};
+/// Connect a store from synchronous code, as the law factories are.
+fn connect(url: &str, config: PostgresHostConfig) -> Arc<dyn LiveReplayStore> {
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::block_in_place(|| {
+        handle.block_on(async {
+            Arc::new(
+                PostgresLiveReplayStore::connect(&endpoints(url), &config)
+                    .await
+                    .expect("connect the PostgreSQL live replay store"),
+            ) as Arc<dyn LiveReplayStore>
+        })
+    })
+}
+
+fn fresh_schema() -> String {
+    format!("live_replay_{}", uuid::Uuid::new_v4().simple())
+}
+
+fn label(event: &SessionObservationEvent) -> String {
+    match &event.payload {
+        SessionObservationEventPayload::TurnActivity(TurnActivity {
+            event:
+                TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    text,
+                    ..
+                }),
+            ..
+        }) => text.to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// The next item of a live replay subscription.
+async fn next_item(
+    subscription: &mut LiveReplaySubscription,
+) -> Option<Result<Arc<SessionObservationEvent>, LiveReplayStoreError>> {
+    use lash::observe::Stream as _;
+    std::future::poll_fn(|cx| std::pin::Pin::new(&mut *subscription).poll_next(cx)).await
+}
+
+fn subscribed(
+    outcome: Result<LiveReplaySubscribeOutcome, LiveReplayStoreError>,
+) -> LiveReplaySubscription {
+    match outcome.expect("subscribe") {
+        LiveReplaySubscribeOutcome::Subscribed(subscription) => subscription,
+        LiveReplaySubscribeOutcome::Gap(reason) => {
+            panic!("expected a subscription, got {reason:?}")
+        }
+    }
+}
+
+fn text(id: &str, text: &str) -> SessionObservationEventPayload {
+    SessionObservationEventPayload::TurnActivity(TurnActivity {
+        id: TurnActivityId::new(id),
+        correlation_id: TurnActivityId::new("text:0"),
+        event: TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+            kind: StreamBlockKind::AssistantText,
+            text: text.into(),
+            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+        }),
+    })
+}
+
+fn endpoints(url: &str) -> PostgresEndpoints {
+    PostgresEndpoints::from_url(url).expect("the database URL parses")
+}
 
 /// Streaming runs (`LIVE_REPLAY_BENCH_RUNS`, default 100), the frame
 /// interval each publishes at, and how long they stream.
@@ -84,9 +161,8 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
     sorted[index.min(sorted.len() - 1)]
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "benchmark: run with --ignored to measure publish-to-deliver latency"]
-async fn streaming_runs_publish_to_deliver() {
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+async fn main() {
     let database = IsolatedDatabase::create(&required_database_url()).await;
     // Both replicas run the production defaults.
     let production = lash::postgres::PostgresHostConfig {

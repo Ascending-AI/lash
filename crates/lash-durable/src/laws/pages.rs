@@ -639,6 +639,39 @@ pub async fn a_candidate_installs_only_new_nodes_and_direct_references(
         tier.stored().await == before && tier.catalog().await == roots,
         "a refused candidate left rows behind"
     );
+    // A root naming a digest that was installed and then dropped refuses
+    // the whole delta the same way: the store never resurrects it.
+    let edges = tier.edge_rows().await;
+    let mut fresh = BTreeMap::new();
+    let remembered = page(
+        &mut fresh,
+        NodeKind::CHECKPOINT_ROOT,
+        "remembered missing",
+        &[damaged],
+    );
+    let refused_candidate = Candidate {
+        root: remembered,
+        fresh,
+    };
+    let refused = refusal(
+        publish(
+            tier,
+            &owner,
+            &simple(&exec, Some((2, second_exec))),
+            Box::new(refused_candidate.manifest(Some(exec_root(second_root).id), CommitId::mint())),
+        )
+        .await,
+    );
+    ensure!(
+        refused == Some(GraphRefusal::MissingNode(damaged)),
+        "a resurrected digest answered {refused:?}"
+    );
+    ensure!(
+        tier.stored().await == before
+            && tier.catalog().await == roots
+            && tier.edge_rows().await == edges,
+        "a refused delta partially published"
+    );
     Ok(())
 }
 
@@ -807,11 +840,24 @@ pub async fn a_leased_root_survives_concurrent_retirement(tier: &dyn PageTier) -
         })
         .collect();
     let keyed = page(&mut fresh, NodeKind::KEYED_LEAF, "leased keyed", &gone);
+    // A repeated-child diamond rides the same retained graph.
+    let left = page(
+        &mut fresh,
+        NodeKind::KEYED_INDEX,
+        "leased diamond left",
+        &[shared, shared],
+    );
+    let right = page(
+        &mut fresh,
+        NodeKind::KEYED_INDEX,
+        "leased diamond right",
+        &[shared],
+    );
     let first_root = page(
         &mut fresh,
         NodeKind::CHECKPOINT_ROOT,
         "leased first",
-        &[shared, keyed],
+        &[shared, keyed, left, right],
     );
     let first = Candidate {
         root: first_root,
@@ -878,7 +924,10 @@ pub async fn a_leased_root_survives_concurrent_retirement(tier: &dyn PageTier) -
     store.release_root_lease(lease.id).await?;
     drain(store, 2).await?;
     let stored = tier.stored().await;
-    for page in gone.iter().chain([&keyed, &first_root, &first_exec]) {
+    for page in gone
+        .iter()
+        .chain([&keyed, &left, &right, &first_root, &first_exec])
+    {
         ensure!(!stored.contains(page), "{page} outlived its last owner");
     }
     for page in [shared, added, second_root, exec_root(second_root).id] {

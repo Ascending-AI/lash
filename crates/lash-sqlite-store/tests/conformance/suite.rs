@@ -1,17 +1,10 @@
-//! The SQLite conformance suite, registered once per substrate (ADR 0102).
-//!
-//! `conformance.rs` and `conformance_memory.rs` each mount this module under a
-//! `SUBSTRATE`: every fixture opens its databases through a [`TestBackend`]
-//! on that substrate, so the same laws hold a file backend and a named
-//! in-memory one to one standard. Laws that need a database file by nature —
-//! pre-seeded legacy schemas, path spellings, a second OS process, WAL
-//! snapshot reads — live in `conformance.rs` alone.
+//! The common SQLite law corpus, registered on the named memory backend.
+//! File-specific reopen and WAL registrations live in `file_suite.rs`.
 // No live_replay_tests!: live replay is an in-process cache, not SQLite-backed storage.
 // No queued-lane resolver macro: engine pacing belongs to the durable engine, not a persistence store.
 
 use lash_kernel_value::identity::SessionId;
 use lash_protocol_types::sync::MutexExt;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use lash_conformance::{
@@ -62,99 +55,7 @@ mod tool_intent_retention;
 
 include!("append_identity.rs");
 
-/// A fixture flavor [`Retained`] opens from synchronous code.
-trait BlockingFixture: Clone {
-    fn open_on(substrate: Substrate) -> Self;
-}
-
-impl BlockingFixture for TestBackend {
-    fn open_on(substrate: Substrate) -> Self {
-        Self::blocking(substrate)
-    }
-}
-
-/// Backends a fixture opened and must keep alive for its whole law.
-#[derive(Clone)]
-struct Retained<B = TestBackend>(Arc<Mutex<Vec<B>>>);
-
-impl<B> Default for Retained<B> {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(Vec::new())))
-    }
-}
-
-impl<B: Clone> Retained<B> {
-    fn keep(&self, backend: &B) {
-        self.0.lock_recover().push(backend.clone());
-    }
-}
-
-impl<B: BlockingFixture> Retained<B> {
-    /// A fresh backend, kept alive with the fixture.
-    fn open_blocking(&self) -> B {
-        let backend = B::open_on(SUBSTRATE);
-        self.keep(&backend);
-        backend
-    }
-}
-
-/// One backend per scenario name: a law that asks twice for the same
-/// scenario is reopening the store it wrote, so it gets a fresh store on the
-/// same backend.
-#[derive(Clone)]
-struct ScenarioBackends {
-    clock: Arc<dyn lash_core_ids::clock::Clock>,
-    by_scenario: Arc<Mutex<HashMap<String, TestBackend>>>,
-}
-
-impl ScenarioBackends {
-    fn new(clock: Arc<dyn lash_core_ids::clock::Clock>) -> Self {
-        Self {
-            clock,
-            by_scenario: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn store(&self, scenario: &str) -> Arc<dyn RuntimeStore> {
-        self.concrete_store(scenario) as Arc<dyn RuntimeStore>
-    }
-
-    /// The scenario's store as its concrete type, for laws that also reach
-    /// its test-support seams.
-    fn concrete_store(&self, scenario: &str) -> Arc<lash_sqlite_store::SqliteStore> {
-        let existing = self.by_scenario.lock_recover().get(scenario).cloned();
-        let backend = existing.unwrap_or_else(|| {
-            let clock = Arc::clone(&self.clock);
-            let backend =
-                sync_await(async move { TestBackend::open_with_clock(SUBSTRATE, clock).await });
-            self.by_scenario
-                .lock_recover()
-                .entry(scenario.to_string())
-                .or_insert(backend)
-                .clone()
-        });
-        let reopened = sync_await(async move { backend.reopen().await });
-        reopened.blocking_store()
-    }
-}
-
-fn root_session_request(
-    session_id: &str,
-) -> lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
-    lash_core_store::session_store_factory_types::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::fixture(session_id),
-        relation: lash_core_store::session_identity::SessionRelation::Root,
-        config: lash_core_store::session_graph::PersistedSessionConfig::new(
-            lash_protocol_types::session_model::TurnBudget::Unbounded,
-            lash_protocol_types::session_model::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ),
-        head: lash_core_store::session_store_factory_types::SessionCreationHead::Config,
-        retention: lash_core_store::store::Retention::UntilGc,
-    }
-}
+include!("suite_fixture.rs");
 
 /// A published head must name a retained revision, including at transaction end.
 #[tokio::test]
@@ -670,19 +571,6 @@ lash_conformance::session_graph_append_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
-});
-
-lash_conformance::store_recovery_tests!({
-    let clock = Arc::new(lash_core_ids::test_clock::TestClock::new(10_000));
-    let scenarios =
-        ScenarioBackends::new(Arc::clone(&clock) as Arc<dyn lash_core_ids::clock::Clock>);
-    (
-        (),
-        move |scenario: &str| scenarios.store(scenario),
-        lash_conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {
-            clock.advance(duration_ms)
-        }),
-    )
 });
 
 lash_conformance::checkpoint_component_reopen_tests!({

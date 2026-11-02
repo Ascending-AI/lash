@@ -74,11 +74,6 @@ impl Workbench {
         }
     }
 
-    /// A workbench whose provider answers every call with `reply`.
-    pub(crate) async fn replying(reply: &'static str) -> Self {
-        Self::builder(replying_provider(reply)).build().await
-    }
-
     /// A workbench whose provider supplies the same native program on each call.
     pub(crate) async fn executing(code: &'static str) -> Self {
         Self::builder(replying_code_provider(code)).build().await

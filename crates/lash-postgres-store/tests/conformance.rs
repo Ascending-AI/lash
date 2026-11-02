@@ -54,8 +54,6 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
 
 #[path = "conformance/artifact_races.rs"]
 mod artifact_races;
-#[path = "conformance/attachment_catalog.rs"]
-mod attachment_catalog;
 #[path = "conformance/attachment_recovery.rs"]
 mod attachment_recovery;
 #[path = "conformance/durable_laws.rs"]
@@ -218,28 +216,6 @@ async fn postgres_graph_node_primary_key_is_global_when_configured() {
     assert_eq!(definition, "PRIMARY KEY (node_id)");
 }
 
-lash_conformance::store_recovery_tests!({
-    let Some((database_fixture, storage)) = storage().await else {
-        eprintln!("skipping Postgres store-recovery laws: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_fixture.url().to_owned();
-    (
-        database_fixture,
-        move |_session_id: &str| {
-            let database_url = database_url.clone();
-            let storage = sync_await(async move {
-                lash_postgres_store::testing::connect(&database_url)
-                    .await
-                    .expect("construct fresh Postgres store-recovery pool")
-            });
-            Arc::new(storage.store()) as Arc<dyn RuntimeStore>
-        },
-        lash_conformance::StoreRecoveryLeaseTiming::Realtime,
-    )
-});
-
 lash_conformance::checkpoint_component_reopen_tests!({
     let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
@@ -365,7 +341,7 @@ lash_conformance::append_receipt_rewrite_tests!({
     )
 });
 
-lash_conformance::artifact_store_reopenable_tests!({
+lash_conformance::artifact_store_reopenable_tests!(@catalogue {
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres artifact-store conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -415,7 +391,24 @@ lash_conformance::artifact_store_reopenable_tests!({
             }
         })
     })
-});
+}; [
+
+            (lash_vm_last_referrer_reclaims_module, "lash-vm-artifact-last-referrer"),
+            (lash_vm_abandoned_start_reclaims_module, "lash-vm-artifact-abandoned-start"),
+            (lash_vm_carry_preserves_module, "lash-vm-artifact-carry"),
+            (lash_vm_batch_holds_all_or_nothing, "lash-vm-artifact-batch"),
+            (lash_vm_ended_referrer_fences_late_publication, "lash-vm-artifact-referrer-fence"),
+            (lash_vm_hostile_module_references_are_rejected, "lash-vm-artifact-hostile-reference"),
+            (lash_vm_artifact_survives_reopen, "lash-vm-artifact-reopen"),
+            (process_environment_namespace, "process-env-hostile-reference"),
+            (process_env_last_referrer_reclaims_bytes, "process-env-last-referrer"),
+            (process_env_carry_precedes_reclamation, "process-env-carry"),
+            (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
+            (process_env_survives_reopen, "process-env-reopen"),
+            (artifact_store_cross_namespace_isolation, "artifact-store-cross-namespace"),
+            (turn_prelude_reads_back_by_digest, "turn-prelude-read-by-digest"),
+            (turn_prelude_is_released_with_its_journal, "turn-prelude-journal-release"),
+        ]);
 
 #[path = "conformance/artifact_retention.rs"]
 mod artifact_retention;
@@ -436,7 +429,7 @@ impl lash_conformance::StoreMaintenanceFaultInjector for PostgresBreakRootCatalo
     }
 }
 
-lash_conformance::store_maintenance_tests!({
+lash_conformance::store_maintenance_tests!(@catalogue {
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres maintenance-outcome conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -459,7 +452,18 @@ lash_conformance::store_maintenance_tests!({
         },
         move || make_bytes(),
     )
-});
+};
+            sync [
+
+            ]
+            async [
+                (idle_store_reports_witnessed_nothing_to_do, "maintenance-idle"),
+
+            ]
+            bytes [
+                (empty_root_set_refusal_returns_its_partial_report, "maintenance-refusal"),
+            ]
+        );
 
 lash_conformance::store_maintenance_fault_tests!({
     let Some((database_fixture, storage)) = storage().await else {
@@ -484,7 +488,7 @@ lash_conformance::store_maintenance_fault_tests!({
     )
 });
 
-lash_conformance::fresh_session_admission_tests!({
+lash_conformance::fresh_session_admission_tests!(@catalogue {
     let Some((_database_fixture, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres fresh-admission conformance: LASH_POSTGRES_DATABASE_URL is not set"
@@ -495,7 +499,9 @@ lash_conformance::fresh_session_admission_tests!({
     (_database_fixture, move |_session_id: &str| {
         Arc::new(storage.store()) as Arc<dyn RuntimeStore>
     })
-});
+}; [
+
+        ]);
 
 lash_conformance::observer_intent_tests!({
     let Some((database_fixture, storage)) = storage().await else {
@@ -691,7 +697,8 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
 
 // The catalogue's ordinary laws use concurrent handles. The cold-reopen
 // law below opens its reader only after the writes have committed.
-lash_conformance::process_registry_tests!(@catalogue reopenable {
+lash_conformance::__process_registry_register! {
+            reopenable {
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres process conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
@@ -712,7 +719,69 @@ lash_conformance::process_registry_tests!(@catalogue reopenable {
             ReopenableProcessRegistry { open, reopen }
         })
     })
-});
+};
+            probe [
+
+            ]
+            conformance [
+                (process_registry_registration_contract, "process-registry-registration"),
+                (process_namespace, "process-namespace"),
+                (process_event_append_arms_are_ordered, "process-event-append-arms"),
+                (a_failed_observer_transfer_leaves_no_partial_mutation, "observer-transfer-rollback"),
+            ]
+            cancellation [
+                (process_registry_cancellation_contract, "process-registry-cancellation"),
+            ]
+            registry [
+                (live_reference_summary_tracks_non_terminal_reference_counts, "live-reference-summary"),
+                (registration_and_observers_are_atomic, "registration-observers"),
+                (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
+                (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
+                (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
+                (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
+                (an_unstamped_cancelled_terminal_replay_coalesces, "unstamped-cancelled-terminal-replay"),
+
+                (process_roster_pages_match_status_sets_and_definition, "list-filters"),
+                (process_registry_pagination, "pagination"),
+                (non_terminal_process_pages_visit_every_row_across_the_page_bound, "bounded-pagination"),
+                (process_event_pages_reject_out_of_range_sequences, "process-event-page-sql-cursor-range"),
+                (waiting_processes_remain_in_the_non_terminal_scan, "waiting-non-terminal-scan"),
+                (process_roster_pages_match_enriched_filters, "enriched-filters"),
+                (process_roster_pages_bound_retired_rows_without_hiding_live_rows, "retired-bounds"),
+                (process_roster_pages_match_scope_frame_and_cancel_filters, "until-scope-cancel-filters"),
+                (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
+                (session_delete_preserves_process_bytes, "session-delete-bytes"),
+                (record_fold_and_retention_hold_for_every_registry_writer, "registry-writer-fold-retention"),
+                (work_wait_seam_covers_unknown_pruned_and_backend_owned_processes, "work-wait-matrix"),
+                (tombstones_make_pruned_processes_distinguishable, "tombstones"),
+                (a_start_key_after_prune_starts_a_new_process, "start-key-after-prune"),
+                (watched_process_registry_start_key_after_prune_starts_a_new_process, "watched-start-key-after-prune"),
+                (lifecycle_transition_refusals_are_backend_invariant, "transition-refusals"),
+                (lifecycle_event_timestamps_follow_the_registry_clock, "lifecycle-clock"),
+                (terminal_retention_ignores_later_observer_facts, "terminal-retention-clock"),
+                (a_resume_event_cannot_return_an_ended_process_to_running, "resume-after-terminal"),
+                (external_ref_is_written_compare_and_set_by_segment_ordinal, "external-ref-compare-and-set"),
+                (process_external_metadata_is_host_owned, "external-metadata-host-owned"),
+                (a_start_key_reports_created_then_existing_and_is_trusted, "start-key-disposition"),
+                (a_host_start_key_is_global_and_fences_its_originator, "host-start-key-global"),
+                (a_start_key_conflict_names_no_retained_process, "start-key-conflict-content-free"),
+                (a_host_start_key_after_prune_starts_new_for_any_originator, "host-start-key-after-prune"),
+                (scope_replay_cancel_and_trace_ignore_environment_rebinding, "scope-environment-rebinding"),
+
+                (keyless_starts_are_always_new, "keyless-starts"),
+                (concurrent_starts_under_one_key_register_one_process, "concurrent-start-key"),
+                (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
+                (parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
+                (a_completion_authority_commits_and_records_its_evidence, "completion-authority-granted"),
+                (terminal_completion_replay_keeps_original_authority_and_writes_nothing, "terminal-completion-authority-replay"),
+                (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
+                (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
+                (consumer_hold_prevents_destructive_prune_until_settlement, "consumer-hold-retention"),
+                (later_segment_recovery_refuses_without_terminal_mutation, "later-segment-recovery"),
+                (process_prune_scoped_by_originator, "scoped-prune"),
+                (process_prune_batch_tombstones, "batch-prune"),
+            ]
+        }
 
 /// Committed records, their event folds, observers and conserved counts
 /// survive reopening through a post-write pool with the original closed.
@@ -1066,7 +1135,7 @@ mod session_history {
     }
 }
 
-lash_conformance::attachment_referrer_tests!({
+lash_conformance::attachment_referrer_tests!(@laws {
     let Some((database_fixture, storage)) = storage().await else {
         return;
     };
@@ -1096,9 +1165,21 @@ lash_conformance::attachment_referrer_tests!({
         insert_edge,
     };
     ((database_fixture, bytes_root), handles)
-});
+}; [
+        ended_process_record_refuses_attachment_writes_and_acquisitions,
+        upload_staging_identities_are_distinct_guarded_and_fenced_independently,
+        commit_and_enqueue_acquire_session_edges_all_or_nothing,
+        retained_output_is_held_by_its_execution_until_a_commit_names_it,
+        attachment_prefix_pin_keeps_the_session_edge_until_unpin,
+        session_referrer_waits_for_graph_retirement,
+        condemnation_needs_no_edge_and_no_pending_write,
+        skipped_attachment_referrer_kind_cannot_authorize_delete,
+        truncated_attachment_root_page_cannot_authorize_delete,
+        attachment_root_sources_partition_start_inputs,
+        complete_attachment_roots_cover_every_kind_and_exhaust_pages,
+    ]);
 
-lash_conformance::checkpoint_profile_tests!({
+lash_conformance::checkpoint_profile_tests!(@law {
     let Some((guard, storage)) = storage().await else {
         eprintln!(
             "PENDING: PostgreSQL identity profile conformance needs LASH_POSTGRES_DATABASE_URL"
@@ -1111,7 +1192,7 @@ lash_conformance::checkpoint_profile_tests!({
         Arc::new(storage.store()),
     ];
     (guard, stores)
-});
+}; checkpoint_profile_change_preserves_refs_budget_and_atomic_root_leaves);
 
 lash_conformance::process_prune_start_staging_tests!({
     let Some((database_fixture, storage)) = storage().await else {

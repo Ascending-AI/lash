@@ -127,7 +127,7 @@ pub(crate) static EXECUTOR_SQL: LazyLock<ExecutorStatements> =
 
 /// How long a recorded answer is kept: far past the reconciliation of a
 /// lost call, which reads it within its operation's retries.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(super) const LATCH_HORIZON_MS: i64 = 900_000;
 
 /// How many prompt texts a storage remembers it holds.

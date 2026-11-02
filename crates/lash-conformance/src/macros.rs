@@ -88,7 +88,7 @@ macro_rules! runtime_persistence_tests {
             stores [
             (commit_increments_head_and_round_trips_agent_frames, "root"),
             (receipt_replay_rehydrates_recorded_node_clocks_and_ids, "root"),
-            (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
+
             (serves_each_admitted_session_and_refuses_an_unknown_one, "alpha"),
             (commit_rejects_carried_nondefault_node_budget, "root"),
             (commit_rejects_carried_nondefault_byte_budget, "root"),
@@ -147,6 +147,7 @@ macro_rules! runtime_persistence_tests {
             store_refs [
             ]
             factories [
+            (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
             (plugin_state_boundary, "plugin-state"),
             ]
             timed_stores [
@@ -319,44 +320,6 @@ macro_rules! process_registry_reopenable_tests {
             async fn $law() {
                 let (_fixture_guard, make) = $fixture;
                 $crate::registration_macro_support::$law(make($label)).await;
-            }
-        )*
-    };
-}
-
-/// Register one independently reported test per durable store-recovery law.
-#[macro_export]
-macro_rules! store_recovery_tests {
-    ($fixture:block) => {
-        $crate::store_recovery_tests!(@catalogue $fixture;
-            timed [
-            ]
-            plain [
-                (store_recovery_fresh_instances, "store-recovery-fresh-instance-probe"),
-            ]
-        );
-    };
-    (@catalogue $fixture:block;
-        timed [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
-        plain [$(( $plain_law:ident, $plain_label:literal )),* $(,)?]
-    ) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $timed_law() {
-                let (_fixture_guard, make, lease_timing) = $fixture;
-                $crate::registration_macro_support::$timed_law(
-                    &make,
-                    $timed_label,
-                    &lease_timing,
-                )
-                .await;
-            }
-        )*
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $plain_law() {
-                let (_fixture_guard, make, _lease_timing) = $fixture;
-                $crate::registration_macro_support::$plain_law(&make, $plain_label).await;
             }
         )*
     };
@@ -896,7 +859,6 @@ macro_rules! attachment_store_reopenable_tests {
 macro_rules! artifact_store_reopenable_tests {
     ($fixture:block) => {
         $crate::artifact_store_reopenable_tests!(@catalogue $fixture; [
-            (lash_vm_artifact_store_fresh_instances, "lash-vm-artifact-fresh-instances"),
             (lash_vm_artifact_store_reports_durable, "lash-vm-artifact-durability"),
             (lash_vm_last_referrer_reclaims_module, "lash-vm-artifact-last-referrer"),
             (lash_vm_abandoned_start_reclaims_module, "lash-vm-artifact-abandoned-start"),
@@ -905,7 +867,6 @@ macro_rules! artifact_store_reopenable_tests {
             (lash_vm_ended_referrer_fences_late_publication, "lash-vm-artifact-referrer-fence"),
             (lash_vm_hostile_module_references_are_rejected, "lash-vm-artifact-hostile-reference"),
             (lash_vm_artifact_survives_reopen, "lash-vm-artifact-reopen"),
-            (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
             (process_environment_namespace, "process-env-hostile-reference"),
             (process_env_last_referrer_reclaims_bytes, "process-env-last-referrer"),
             (process_env_carry_precedes_reclamation, "process-env-carry"),

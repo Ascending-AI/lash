@@ -1011,3 +1011,11 @@ pub fn teardown_artifact() -> String {
 pub async fn schema_shape_artifact(database_url: &str) -> String {
     crate::schema_shape::artifacts::schema_shape_artifact(database_url).await
 }
+
+/// Generate the published schema with this build's owner-commit statements.
+///
+/// # Errors
+/// Returns an error when the published DDL lacks its generated-block markers.
+pub fn owner_commit_artifact() -> Result<String, &'static str> {
+    crate::durable::owner_commit_artifact()
+}

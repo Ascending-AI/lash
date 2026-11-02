@@ -1,10 +1,7 @@
 //! Runs the shared conformance suites against SQLite file backends.
 //!
-//! The suite proper lives in `conformance/suite.rs` and is registered twice
-//! (ADR 0102): here over file store sets, and in `conformance_memory.rs` over
-//! named memory store sets. What else stays here needs a database file by
-//! nature: a legacy schema seeded before the first open, a path spelling, a
-//! second OS process, or a WAL snapshot read.
+//! Shared laws run on the named memory backend in `conformance_memory.rs`.
+//! This target retains file-specific reopen, WAL and startup witnesses.
 
 #![expect(
     clippy::expect_used,
@@ -26,11 +23,19 @@ use lash_sqlite_store::SqliteProcessRegistry;
 
 #[path = "conformance/backend_fixture.rs"]
 mod backend_fixture;
-#[path = "blob_probe.rs"]
-mod blob_probe;
-#[path = "conformance/session_history.rs"]
-mod session_history;
-#[path = "conformance/suite.rs"]
+mod session_history {
+    use crate::SUBSTRATE;
+    use crate::backend_fixture::TestBackend;
+    use lash_core_execution::store::ConformanceDeployment;
+    use std::sync::Arc;
+    async fn catalog() -> (TestBackend, Arc<dyn ConformanceDeployment>) {
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let store = backend.store().await as Arc<dyn ConformanceDeployment>;
+        (backend, store)
+    }
+    include!("conformance/file_session_history.rs");
+}
+#[path = "conformance/file_suite.rs"]
 mod suite;
 
 const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::File;

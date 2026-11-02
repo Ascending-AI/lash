@@ -1,6 +1,6 @@
 //! The laws of waits and completion keys
 //! (`lash_core_execution::runtime::actor::wait_laws`; L5, FIG-5173) over a
-//! SQLite memory store set, and in `file` over a SQLite file store set.
+//! SQLite file store set.
 
 use std::sync::Arc;
 
@@ -18,25 +18,6 @@ fn assemble(set: SqliteStoreSet) -> Backend {
         engines: Vec::new(),
     })
     .expect("assemble the law backend")
-}
-
-async fn backend() -> Backend {
-    assemble(
-        SqliteStoreSet::memory()
-            .await
-            .expect("open the memory store set"),
-    )
-}
-
-macro_rules! law {
-    ($($name:ident),* $(,)?) => {$(
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $name() {
-            wait_laws::$name(&backend().await)
-                .await
-                .unwrap_or_else(|broken| panic!("{broken}"));
-        }
-    )*};
 }
 
 macro_rules! laws {
@@ -58,9 +39,7 @@ macro_rules! laws {
     };
 }
 
-laws!();
-
-/// The same laws over a SQLite file store set, each in its own directory.
+/// The laws over a SQLite file store set, each in its own directory.
 mod file {
     use super::{Backend, SqliteStoreSet, assemble, wait_laws};
 

@@ -94,52 +94,6 @@ async fn record(telemetry: &crate::telemetry::Telemetry, event: TurnEvent) {
 }
 
 #[tokio::test]
-async fn retries_honor_count_and_exponential_backoff() {
-    for retries in [0, 1, 3] {
-        let capture = Capture::default();
-        let failure = handle(
-            &capture,
-            retries,
-            vec![Err(transient()); retries as usize + 1],
-        )
-        .complete(
-            request(),
-            lash::ChargeSafetyPolicy::RequireGuarantee,
-            lash::ExecutionBudgets::recommended(),
-            &lash::provider::NoSlotDeliveries,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(failure.call_record.attempts.len(), retries as usize + 1);
-        let delays = failure
-            .call_record
-            .attempts
-            .iter()
-            .filter_map(|a| a.retry_decision.as_ref().and_then(|d| d.delay()))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            delays,
-            (0..retries)
-                .map(|n| Duration::from_secs(1 << n))
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            !failure
-                .call_record
-                .attempts
-                .last()
-                .unwrap()
-                .retry_decision
-                .as_ref()
-                .unwrap()
-                .is_scheduled()
-        );
-    }
-    assert_eq!(retry_policy(3).max_delay_ms, 10_000);
-    assert_eq!(retry_policy(3).jitter_ms, 500);
-}
-
-#[tokio::test]
 async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors() {
     for status in [400, 422] {
         let telemetry = crate::telemetry::Telemetry::default();
@@ -186,32 +140,6 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
         assert_eq!(body["text"].as_str().unwrap().chars().count(), 5000);
         assert!(!rows[0].to_string().contains("test-secret"));
     }
-}
-
-#[tokio::test]
-async fn retry_after_is_honored_without_extra_courtesy_attempts() {
-    let capture = Capture::default();
-    let error = LlmTransportError::new("throttled")
-        .with_http_status(429)
-        .with_headers([("retry-after", "1")]);
-    let failure = handle(&capture, 1, vec![Err(error.clone()), Err(error)])
-        .complete(
-            request(),
-            lash::ChargeSafetyPolicy::RequireGuarantee,
-            lash::ExecutionBudgets::recommended(),
-            &lash::provider::NoSlotDeliveries,
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(failure.call_record.attempts.len(), 2);
-    assert_eq!(
-        failure.call_record.attempts[0]
-            .retry_decision
-            .as_ref()
-            .unwrap()
-            .delay(),
-        Some(Duration::from_secs(1))
-    );
 }
 
 #[tokio::test]

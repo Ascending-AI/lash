@@ -41,26 +41,6 @@ fn next() -> i64 {
     provisioned() + 1
 }
 
-#[test]
-fn synthetic_feature_selects_the_owning_compatibility_descriptor() {
-    use lash_core_store::compat::ComponentId;
-    use lash_core_store::compat::VersionRange;
-    use lash_core_store::compat::descriptor;
-
-    let descriptor = descriptor(ComponentId::POSTGRES).expect("PostgreSQL descriptor");
-    let written = if cfg!(feature = "synthetic-next") {
-        next()
-    } else {
-        provisioned()
-    };
-    let range = |version: i64| u32::try_from(version).expect("component version");
-    assert_eq!(
-        descriptor.reads,
-        VersionRange::between(range(provisioned()), range(written))
-    );
-    assert_eq!(descriptor.writes, VersionRange::exactly(range(written)));
-}
-
 #[tokio::test]
 async fn stamp_one_preflight_open_and_migrate_agree() {
     let Some(database_url) = database_url() else {

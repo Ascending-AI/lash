@@ -7,12 +7,13 @@
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact = match std::env::args().nth(1).as_deref() {
+        Some("schema.sql") => lash_postgres_store::testing::owner_commit_artifact()?,
         Some("teardown.sql") => lash_postgres_store::testing::teardown_artifact(),
         Some("schema-shape.txt") => {
             let url = lash_postgres_store::testing::required_database_url();
             lash_postgres_store::testing::schema_shape_artifact(&url).await
         }
-        _ => return Err("expected teardown.sql or schema-shape.txt".into()),
+        _ => return Err("expected schema.sql, teardown.sql or schema-shape.txt".into()),
     };
     print!("{artifact}");
     Ok(())

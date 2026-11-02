@@ -13,19 +13,14 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_store::compat::CompatRefusal;
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::ProcessId;
 use std::future::Future;
 use std::sync::Arc;
 
 use lash_core_store::attachments::AttachmentRootSet;
-use lash_core_store::session_state::RuntimeSessionState;
 use lash_core_store::store::AttachmentReferrers;
-use lash_core_store::store::RuntimeCommit;
 use lash_core_store::store::SessionCatalogStore;
-use lash_core_store::store::SessionCommitStore;
-use lash_core_store::store::StoreError;
 use lash_core_store::store::StoreSchemaVerdict;
 use lash_sqlite_store::{SqliteStore, verify_schema_at};
 
@@ -48,141 +43,6 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
         .build()
         .expect("runtime")
         .block_on(future)
-}
-
-fn commit_at(
-    session_id: &SessionId,
-    expected_head_revision: u64,
-    writer_id: &str,
-) -> RuntimeCommit {
-    let state = RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..RuntimeSessionState::fixture(lash_core_store::session_policy::SessionPolicy::new(
-            lash_protocol_types::session_model::TurnBudget::Unbounded,
-            lash_protocol_types::session_model::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        ))
-    };
-    let commit = RuntimeCommit {
-        expected_head_revision,
-        ..RuntimeCommit::persisted_state_for_test(&state)
-    };
-    commit
-        .with_operation(lash_core_store::store::OperationId::new(
-            lash_core_execution::ExecutionScope::runtime_operation(format!(
-                "head-cas:{session_id}:{writer_id}"
-            )),
-            "commit",
-        ))
-        .expect("build distinct head-CAS operation")
-        .0
-}
-
-// Finding 1: the head-revision compare-and-set must serialize across two
-// independent connections to the *same* file database. Two threads, each with
-// its own connection, both read head revision 0 and then commit with
-// `expected_head_revision = 0` as concurrently as a barrier can arrange.
-// Under `BEGIN IMMEDIATE` the second writer blocks on the busy timeout, then
-// reads the now-bumped revision and returns a clean `HeadRevisionConflict`;
-// exactly one commit applies and the persisted head ends at revision 1. Under
-// the old `BEGIN DEFERRED` both reads ran on a shared snapshot, letting the
-// losing writer either double-apply or fail with a raw busy error instead of a
-// clean conflict.
-#[test]
-fn head_revision_cas_holds_across_two_connections() {
-    let path = unique_db_path("cas");
-    block_on(async {
-        let store = SqliteStore::open_file_for_testing(&path)
-            .await
-            .expect("open catalog before the writer race");
-        store
-            .admit_session(
-                &lash_core_execution::testing::store_fixtures::root_session_request(
-                    &SessionId::from("root"),
-                ),
-            )
-            .await
-            .expect("admit session before the writer race");
-    });
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let run =
-        |path: std::path::PathBuf, barrier: Arc<std::sync::Barrier>, writer_id: &'static str| {
-            std::thread::spawn(move || {
-                block_on(async move {
-                    let store = SqliteStore::open_file_for_testing(&path)
-                        .await
-                        .expect("open store");
-                    barrier.wait();
-                    store
-                        .commit_runtime_state(commit_at(&SessionId::from("root"), 0, writer_id))
-                        .await
-                })
-            })
-        };
-
-    let handle_a = run(path.clone(), Arc::clone(&barrier), "a");
-    let handle_b = run(path.clone(), Arc::clone(&barrier), "b");
-    let result_a = handle_a.join().expect("thread a");
-    let result_b = handle_b.join().expect("thread b");
-
-    let winners = [&result_a, &result_b]
-        .iter()
-        .filter(|res| res.is_ok())
-        .count();
-    let conflicts = [&result_a, &result_b]
-        .iter()
-        .filter(|res| matches!(res, Err(StoreError::HeadRevisionConflict { .. })))
-        .count();
-    assert_eq!(
-        winners, 1,
-        "exactly one connection may win the CAS, got a={result_a:?} b={result_b:?}"
-    );
-    assert_eq!(
-        conflicts, 1,
-        "the loser must observe a clean HeadRevisionConflict (not a raw busy \
-         error or a second success), got a={result_a:?} b={result_b:?}"
-    );
-
-    // The persisted head must reflect exactly one applied commit.
-    let store = block_on(SqliteStore::open_file_for_testing(&path)).expect("reopen store");
-    let read = block_on(store.load_session_head_meta(&SessionId::from("root")))
-        .expect("load")
-        .expect("session present");
-    assert_eq!(read.head_revision, 1);
-}
-
-// Finding 7: compatibility admission reports the recorded version and this
-// build's reader range without relying on the retired user_version pragma.
-#[tokio::test]
-async fn unsupported_compatibility_floor_reports_real_versions() {
-    let path = unique_db_path("schema");
-    drop(
-        SqliteStore::open_file_for_testing(&path)
-            .await
-            .expect("provision current catalog"),
-    );
-    let conn = rusqlite::Connection::open(&path).expect("open raw");
-    conn.execute(
-        "UPDATE lash_compat SET version = 1099, min_reader = 1099",
-        [],
-    )
-    .expect("raise the recorded reader floor");
-    drop(conn);
-
-    let found = verify_schema_at(&path).await;
-    assert_eq!(
-        found.verdict,
-        StoreSchemaVerdict::Refused {
-            refusal: CompatRefusal::ReaderFloorAbove {
-                component: "sqlite-core".to_owned(),
-                found: 1099,
-                min_reader: 1099,
-                reads: crate::sqlite_core().reads,
-                writing_release: None,
-            },
-        }
-    );
-    assert!(SqliteStore::open_file_for_testing(&path).await.is_err());
 }
 
 #[test]

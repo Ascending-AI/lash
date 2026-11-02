@@ -75,7 +75,7 @@ use super::{Committing, PostgresDurableStore, Tx, integer, node_ref, sqlx_failur
 
 mod reclaim;
 pub(super) use reclaim::peel_set;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(super) use reclaim::retirement_function_ddl;
 pub(crate) use reclaim::{audit_page, graph_counts, peel};
 pub(super) use reclaim::{reclaim, retirement_mechanics};

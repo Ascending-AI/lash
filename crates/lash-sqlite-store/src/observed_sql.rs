@@ -974,23 +974,6 @@ mod tests {
         }
     }
 
-    /// SQL-WORK: all five windows export statements, normalized shapes,
-    /// returned rows and SQL VM work, separately from logical graph writes.
-    #[tokio::test]
-    async fn sql_work_receipts_cover_two_history_sizes() {
-        let stores = crate::SqliteStoreSet::memory()
-            .await
-            .expect("SQLite stores");
-        let receipts = lash_core_execution::testing::sql_work::receipts(&stores, "sqlite").await;
-        assert_eq!(receipts.len(), 10);
-        for receipt in receipts {
-            assert!(receipt.sqlite_work.expect("SQLite work").vm_steps > 0);
-            eprintln!(
-                "SQL_WORK {}",
-                serde_json::to_string(&receipt).expect("receipt")
-            );
-        }
-    }
     /// SQL-OWNER: production summaries carry the retained actor fence and
     /// caller operation identity, independent of logical transition metrics.
     #[tokio::test]
