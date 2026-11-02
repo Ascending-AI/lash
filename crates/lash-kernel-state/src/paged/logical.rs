@@ -696,6 +696,7 @@ impl Ledger {
         }
         self.state.roots_mut(owner).write(key, row, access)?;
         self.revision = revision;
+        // The owner holds what no runtime event published to it.
         self.published.expire(Written::Owners(vec![owner]));
         Ok(true)
     }

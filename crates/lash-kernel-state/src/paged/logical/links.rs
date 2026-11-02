@@ -80,18 +80,17 @@ impl EdgeBatch {
     }
 }
 impl Links {
+    /// Packed edges no seal wrote become hot rows of the index, as every
+    /// unsealed row is: a rekey and the seal's provisional check read only
+    /// hot rows, so a provisional edge kept in the base would outlive the
+    /// projection that gave its object a durable id.
     fn unpack(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
         if let Self::Packed { edges, .. } = self {
-            let rows = edges
-                .iter()
-                .map(|edge| {
-                    (
-                        crate::paged::tree::Key::from(identity_key(edge.target).as_slice()),
-                        edge.clone(),
-                    )
-                })
-                .collect();
-            *self = Self::Many(Rc::new(Tree::from_rows(rows, access)?));
+            let mut index = Tree::new(false);
+            for edge in edges.iter() {
+                index.write(identity_key(edge.target), edge.clone(), access)?;
+            }
+            *self = Self::Many(Rc::new(index));
         }
         Ok(())
     }
