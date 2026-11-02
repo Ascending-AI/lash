@@ -27,53 +27,48 @@ struct Inputs {
 }
 
 impl Input {
-    fn read(self, frame: &Values<'_, '_>, values: &Inputs) -> Option<Value> {
+    fn bind(self, frame: &Values<'_, '_>) -> Option<Self> {
+        match self {
+            Self::Invariant(at) => frame.value(at).map(Self::Literal),
+            _ => Some(self),
+        }
+    }
+
+    #[inline(always)]
+    fn read(self, values: &Inputs) -> Option<Value> {
         match self {
             Self::Counter => Some(values.counter),
             Self::Previous => Some(values.previous),
             Self::Accumulator => Some(values.accumulator),
             Self::Literal(value) => Some(value),
-            Self::Invariant(at) => frame.value(at),
+            Self::Invariant(_) => None,
         }
     }
 }
 
+struct ScalarRun<'e> {
+    pair: lash_kernel_doc::scalar::Pair,
+    table: Option<&'e crate::compile::ScalarTable>,
+}
+
+impl<'e> ScalarRun<'e> {
+    fn of(scalar: &Scalar, exe: &'e Executable, charged: bool) -> Option<Self> {
+        Some(Self {
+            pair: scalar.site.pair(exe)?,
+            table: charged.then(|| scalar.site.table(exe)),
+        })
+    }
+
+    #[inline(always)]
+    fn binary(&self, args: [Value; 2]) -> Option<(Value, u64)> {
+        let (value, units) =
+            super::super::compiled::typed_table(&self.pair, args[0], args[1], self.table)?;
+        Some((value, units?))
+    }
+}
+
 impl Scalar {
-    fn arguments_fit(&self, exe: &Executable, args: &[Value]) -> bool {
-        !self.site.checked
-            || exe
-                .lib(self.site.lib)
-                .header
-                .signature
-                .params
-                .iter()
-                .zip(args)
-                .all(|(param, value)| crate::compile::import_result_fits(&param.ty, *value))
-    }
-
-    fn result_fits(&self, exe: &Executable, value: Value) -> bool {
-        !self.site.checked
-            || crate::compile::import_result_fits(
-                &exe.lib(self.site.lib).header.signature.result,
-                value,
-            )
-    }
-
-    fn binary(&self, exe: &Executable, args: [Value; 2], charged: bool) -> Option<(Value, u64)> {
-        if !self.arguments_fit(exe, &args) {
-            return None;
-        }
-        let (value, units) = super::super::compiled::typed(
-            &self.site,
-            &self.site.pair(exe)?,
-            args[0],
-            args[1],
-            charged,
-            exe,
-        )?;
-        self.result_fits(exe, value).then_some((value, units?))
-    }
-
+    #[inline(always)]
     fn unary(&self, exe: &Executable, value: Value, charged: bool) -> Option<(Value, u64)> {
         let (answer, units) = super::super::compiled::unary(&self.site, value, exe)?;
         matches!(
@@ -84,26 +79,33 @@ impl Scalar {
     }
 }
 
-impl Binary {
-    fn value(
-        &self,
-        exe: &Executable,
+struct BinaryRun<'e> {
+    scalar: ScalarRun<'e>,
+    inputs: [Input; 2],
+}
+
+impl<'e> BinaryRun<'e> {
+    fn of(
+        binary: &Binary,
+        exe: &'e Executable,
         frame: &Values<'_, '_>,
-        inputs: &Inputs,
         charged: bool,
-    ) -> Option<(Value, u64)> {
-        self.scalar.binary(
-            exe,
-            [
-                self.inputs[0].read(frame, inputs)?,
-                self.inputs[1].read(frame, inputs)?,
-            ],
-            charged,
-        )
+    ) -> Option<Self> {
+        Some(Self {
+            scalar: ScalarRun::of(&binary.scalar, exe, charged)?,
+            inputs: [binary.inputs[0].bind(frame)?, binary.inputs[1].bind(frame)?],
+        })
+    }
+
+    #[inline(always)]
+    fn value(&self, inputs: &Inputs) -> Option<(Value, u64)> {
+        self.scalar
+            .binary([self.inputs[0].read(inputs)?, self.inputs[1].read(inputs)?])
     }
 }
 
 impl Copy {
+    #[inline(always)]
     fn value(&self, exe: &Executable, value: Value, charged: bool) -> Option<(Value, u64)> {
         self.unary
             .as_ref()
@@ -112,6 +114,7 @@ impl Copy {
 }
 
 impl Charge {
+    #[inline(always)]
     fn units(&self, formulas: &[u64]) -> Option<u64> {
         formulas
             .iter()
@@ -159,13 +162,28 @@ impl Repeat {
                 return (0, 0);
             }
         }
+        let test = BinaryRun::of(&self.test, exe, frame, self.charged);
+        let update = BinaryRun::of(&self.update.operation, exe, frame, self.charged);
+        let fold = self
+            .reduction
+            .as_ref()
+            .and_then(|reduce| ScalarRun::of(&reduce.fold, exe, self.charged));
+        let scale = self
+            .reduction
+            .as_ref()
+            .and_then(|reduce| reduce.scale.as_ref())
+            .and_then(|scale| BinaryRun::of(scale, exe, frame, self.charged));
+        let term = self
+            .reduction
+            .as_ref()
+            .and_then(|reduce| reduce.term.bind(frame));
+        let mut counter_value = frame.value(self.update.at);
         let (mut iterations, mut units) = (0u64, 0u64);
         loop {
             if budget.admit(units).is_none() {
                 stop!(Prefix);
             }
-            let Some(counter @ (Value::Int(_) | Value::Float(_))) = frame.value(self.update.at)
-            else {
+            let Some(counter @ (Value::Int(_) | Value::Float(_))) = counter_value else {
                 stop!(Guard);
             };
             let mut inputs = Inputs {
@@ -173,7 +191,7 @@ impl Repeat {
                 previous: counter,
                 accumulator: Value::Null,
             };
-            let Some((test, test_fee)) = self.test.value(exe, frame, &inputs, self.charged) else {
+            let Some((test, test_fee)) = test.as_ref().and_then(|test| test.value(&inputs)) else {
                 stop!(Guard);
             };
             match test {
@@ -209,15 +227,16 @@ impl Repeat {
                     };
                     inputs.accumulator = accumulator;
                     let (term, scale_fee) = match &reduce.scale {
-                        Some(scale) => {
-                            let Some(answer) = scale.value(exe, frame, &inputs, self.charged)
+                        Some(_) => {
+                            let Some(answer) =
+                                scale.as_ref().and_then(|scale| scale.value(&inputs))
                             else {
                                 stop!(Guard);
                             };
                             answer
                         }
                         None => {
-                            let Some(term) = reduce.term.read(frame, &inputs) else {
+                            let Some(term) = term.and_then(|term| term.read(&inputs)) else {
                                 stop!(Guard);
                             };
                             (term, 0)
@@ -228,7 +247,7 @@ impl Repeat {
                     } else {
                         [accumulator, term]
                     };
-                    let Some((value, fold_fee)) = reduce.fold.binary(exe, args, self.charged)
+                    let Some((value, fold_fee)) = fold.as_ref().and_then(|fold| fold.binary(args))
                     else {
                         stop!(Guard);
                     };
@@ -249,10 +268,8 @@ impl Repeat {
                 }
                 None => None,
             };
-            let Some((next @ (Value::Int(_) | Value::Float(_)), update_fee)) = self
-                .update
-                .operation
-                .value(exe, frame, &inputs, self.charged)
+            let Some((next @ (Value::Int(_) | Value::Float(_)), update_fee)) =
+                update.as_ref().and_then(|update| update.value(&inputs))
             else {
                 stop!(Guard);
             };
@@ -302,6 +319,7 @@ impl Repeat {
                 frame.assign(reduce.at, value);
             }
             frame.assign(self.update.at, next);
+            counter_value = Some(next);
             if let (Some(copy), Some((value, _))) = (&self.after, after)
                 && copy.keep
             {

@@ -625,32 +625,29 @@ pub(super) fn typed(
     charging: bool,
     exe: &Executable,
 ) -> Option<(Value, Option<u64>)> {
+    typed_table(pair, x, y, charging.then(|| site.table(exe)))
+}
+
+#[inline(always)]
+pub(super) fn typed_table(
+    pair: &lash_kernel_doc::scalar::Pair,
+    x: Value,
+    y: Value,
+    table: Option<&ScalarTable>,
+) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
     match (x, y) {
         (Value::Float(p), Value::Float(q)) => pair
             .floats
             .and_then(|op| scalar::floats(op, p, q))
-            .map(|value| {
-                (
-                    value,
-                    if charging {
-                        site.table(exe).units(0)
-                    } else {
-                        Some(0)
-                    },
-                )
-            }),
+            .map(|value| (value, table.map_or(Some(0), |table| table.units(0)))),
         (Value::Int(p), Value::Int(q)) => {
             pair.ints
                 .and_then(|op| scalar::ints(op, p, q))
                 .map(|value| {
                     (
                         value,
-                        if charging {
-                            site.table(exe).units(super::sizes(&[x, y], &value))
-                        } else {
-                            Some(0)
-                        },
+                        table.map_or(Some(0), |table| table.units(super::sizes(&[x, y], &value))),
                     )
                 })
         }
