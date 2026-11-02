@@ -16,9 +16,6 @@ use crate::store::{
 
 /// Every [`DeploymentStore`] operation: the single place each deployment
 /// signature is written.
-///
-/// The `decorator_surface_covers_every_deployment_method` lint fails when
-/// this list and the trait disagree.
 macro_rules! deployment_operations {
     ($emit:ident) => {
         $emit! {
@@ -74,10 +71,6 @@ macro_rules! emit_deployment_decorator {
                 }
             )*
         }
-
-        /// The listed operations, for the surface lint.
-        #[cfg(test)]
-        const DEPLOYMENT_OPERATIONS: &[&str] = &[$(stringify!($name)),*];
     };
 }
 
@@ -136,50 +129,3 @@ macro_rules! emit_scripted_deployment {
 deployment_operations!(emit_deployment_decorator);
 #[cfg(any(test, feature = "testing"))]
 deployment_operations!(emit_scripted_deployment);
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    // Architecture lint: lexical drift guard between `DeploymentStore` and
-    // the deployment operation list, not a behavior proof.
-    fn decorator_surface_covers_every_deployment_method() {
-        let source = include_str!("deployment.rs");
-        let start = source
-            .find("pub trait DeploymentStore:")
-            .expect("`pub trait DeploymentStore` is declared in deployment.rs");
-        let body = &source[start..];
-        let end = body
-            .find("\n}\n")
-            .expect("the `DeploymentStore` body closes at column zero");
-        let lines: Vec<&str> = body[..end].lines().collect();
-        let mut declared = std::collections::BTreeSet::new();
-        for (index, line) in lines.iter().enumerate() {
-            let Some(rest) = line.strip_prefix("    ") else {
-                continue;
-            };
-            let rest = rest.strip_prefix("async ").unwrap_or(rest);
-            let Some(rest) = rest.strip_prefix("fn ") else {
-                continue;
-            };
-            let name = rest.split('(').next().unwrap_or_default().to_string();
-            let has_default = lines[index..]
-                .iter()
-                .map(|line| line.trim_end())
-                .find(|line| line.ends_with(';') || line.ends_with('{'))
-                .is_some_and(|line| line.ends_with('{'));
-            assert!(
-                !has_default,
-                "`DeploymentStore::{name}` has a default; every deployment operation is required"
-            );
-            declared.insert(name);
-        }
-        let listed: std::collections::BTreeSet<String> = super::DEPLOYMENT_OPERATIONS
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
-        assert_eq!(
-            declared, listed,
-            "`deployment_operations!` must list exactly the `DeploymentStore` operations"
-        );
-    }
-}

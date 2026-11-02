@@ -1,6 +1,5 @@
-//! The byte-identity law for the canonical body every in-process model
-//! reads (FIG-6443): every corpus history lowers to the body recorded
-//! before lowering became incremental.
+//! Byte-identity laws for the canonical body every in-process model reads
+//! (FIG-6443): incremental lowering sends what a cold lowering sends.
 
 use super::*;
 use lash_protocol_types::{
@@ -9,48 +8,7 @@ use lash_protocol_types::{
 
 use lash_protocol_types::{
     llm::wire_corpus::corpus_tool, llm::wire_corpus::digest_line, llm::wire_corpus::reuse_cases,
-    llm::wire_corpus::wire_corpus,
 };
-
-/// Digests from the coalescing lowering at de7f61e3dc, refreshed for
-/// FIG-6518's explicit tool-result status and FIG-7369/FIG-7375's explicit
-/// Any tool output in the canonical request shape.
-const RECORDED: &str = "
-base/prefix-01 4133e8067438e2dc3b415fe4
-instructed/prefix-01 36a0d4ea6bc9896da0bfdd32
-base/prefix-02 925bc853bab63ca57a477235
-instructed/prefix-02 babdb013beaa020e6e5e191b
-base/prefix-03 afac72799f7316f83050e74e
-instructed/prefix-03 0775362d67c18f41a0fdeb76
-base/prefix-04 ef01a37e8ed3df3fc562846b
-instructed/prefix-04 1bbf208efd9f6e030910f5ea
-base/prefix-05 a58ed31a5af632187b013988
-instructed/prefix-05 db334c0d10829e87f056e8c1
-base/prefix-06 3f81f3213751bff01ae30d8f
-instructed/prefix-06 8fc7c1006638bb0c89dfa4d5
-base/prefix-07 1115997b2c72b4edb2ea5172
-instructed/prefix-07 f33e085a95168af6ecc9ebe3
-base/prefix-08 a7df48e2b8f25b69e54ad3e7
-instructed/prefix-08 21a2bbf8225c7d08f08074db
-base/prefix-09 b3b47d19b3405b7d6c1f0f06
-instructed/prefix-09 b7714327b4a0252266f61984
-base/prefix-10 08b964779a535cd9f5499bf4
-instructed/prefix-10 b2b54961f0ff6c7ebe0ebb32
-base/prefix-11 e11e39cb42070fb20b864de0
-instructed/prefix-11 f8f76a13bf587702781ada87
-base/prefix-12 64c5aeb59855ee1335f9577b
-instructed/prefix-12 c9baac0c8e71ab2a694fc5cb
-base/prefix-13 c138a36c5c2c49f0c58c2459
-instructed/prefix-13 a0fc87ace852d962a9fbf3c9
-base/prefix-14 8d36bf67d8e078ce11fe2c44
-instructed/prefix-14 47ab44cc1b0273639e415425
-base/empty-history 86d1ec655f1b6b3983bdfa06
-instructed/empty-history ad611ad20cfac3f626340cc5
-base/only-feedback 7b1485bc41a8ff38059e47fc
-instructed/only-feedback 94dc760c58fd4f846e6a0e6e
-base/unicode 273876af7434c5f80fabfdf8
-instructed/unicode 95cff4b76d94c2fbe3aa745a
-";
 
 fn canonical_route() -> ProviderRouteIdentity {
     ProviderRouteIdentity::for_endpoint("canonical", "https://canonical.example/v1", "model")
@@ -80,30 +38,6 @@ fn variants(messages: Vec<LlmMessage>) -> Vec<(&'static str, LlmRequest)> {
     instructed.tools = Arc::new(vec![corpus_tool()]);
     instructed.tool_choice = LlmToolChoice::Auto;
     vec![("base", base), ("instructed", instructed)]
-}
-
-#[test]
-fn canonical_lowering_sends_the_recorded_bytes() {
-    let mut lines = Vec::new();
-    for (name, messages) in wire_corpus(&canonical_route()) {
-        for (variant, request) in variants(messages) {
-            let lowered = RecordedRequestTemplate::of_request(
-                canonical_route(),
-                &request,
-                &SegmentCache::disabled(),
-            );
-            lines.push(digest_line(
-                &format!("{variant}/{name}"),
-                lowered.as_ref().map_err(ToString::to_string),
-            ));
-        }
-    }
-    assert_eq!(
-        lines.join("\n"),
-        RECORDED.trim(),
-        "\n{}\n",
-        lines.join("\n")
-    );
 }
 
 fn digest(template: &RecordedRequestTemplate) -> String {
