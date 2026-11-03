@@ -3,12 +3,17 @@ use super::*;
 use crate::machine::islands::witness::Counts;
 
 pub(super) fn runtime(collect: &impl Fn(Counts)) {
+    native::runtime();
     // K-EVAL-008 / K-EFF-008: actual helper bodies keep their logical
     // invocations and action occurrences inside one loop publication.
     let helper = super::super::embedder::fragment(
         "function advance(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody { if flat.lt(a, b) { return flat.add(a, b) } return flat.add(a, b) }",
     );
     for (body, expected_sum) in [
+        (
+            "let i = 0 let s = 0 while flat.lt(i, 4) { set s = flat.add(s, flat.mul(i, i)) let previous = flat.identity(i) set i = invoke advance(previous, 1) } return (s, i)",
+            14,
+        ),
         (
             "let i = 0 let s = 0 while flat.lt(i, 4) { set s = flat.add(s, flat.mul(i, i)) set i = invoke advance(i, 1) } return (s, i)",
             14,
@@ -125,3 +130,6 @@ pub(super) fn runtime(collect: &impl Fn(Counts)) {
         );
     }
 }
+
+#[path = "repeated_calls/native.rs"]
+mod native;

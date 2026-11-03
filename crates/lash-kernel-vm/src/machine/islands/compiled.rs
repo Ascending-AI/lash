@@ -30,11 +30,16 @@ pub(crate) mod recurrence;
 #[cfg(test)]
 thread_local! {
     pub(crate) static LOOP_PUBLICATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    pub(crate) static LOOP_INVOCATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     pub(crate) static SUBSTITUTE_LOOP_RESULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 #[cfg(test)]
 pub(crate) fn take_loop_publications() -> u64 {
     LOOP_PUBLICATIONS.with(|count| count.replace(0))
+}
+#[cfg(test)]
+pub(crate) fn take_loop_invocations() -> u64 {
+    LOOP_INVOCATIONS.with(|count| count.replace(0))
 }
 
 #[cfg(test)]

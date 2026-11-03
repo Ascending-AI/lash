@@ -562,6 +562,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         drop(activation);
         let Run { bound, writes } = run;
         let iterations = bound.iterations();
+        #[cfg(test)]
+        let invocations = bound.calls.as_ref().map_or(0, |calls| calls.completed());
         let callee = frame.state.callee;
         let source = &self.exe.code(callee.plan.code).source_room;
         let Some(document) = self.exe.instances.get(&callee.link) else {
@@ -688,6 +690,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         {
             super::REPEATED_TEMPLATE.with(|count| count.set(count.get() + iterations));
             super::super::compiled::LOOP_PUBLICATIONS.with(|count| count.set(count.get() + 1));
+            super::super::compiled::LOOP_INVOCATIONS
+                .with(|count| count.set(count.get() + invocations));
         }
         Ok(iterations)
     }
