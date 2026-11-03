@@ -25,6 +25,8 @@ mod lifecycle;
 pub use lifecycle::{Lifecycle, SourceValue};
 use lifecycle::{Publications, Written};
 mod members;
+mod observers;
+pub use observers::ObserverExclusion;
 mod ownership;
 mod program;
 pub use program::{

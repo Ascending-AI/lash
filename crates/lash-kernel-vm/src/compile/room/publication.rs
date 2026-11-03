@@ -19,6 +19,7 @@ pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
 pub(crate) use departure::DepartureExit;
 mod exact;
+pub(crate) mod observers;
 mod region;
 mod unit;
 pub(crate) use exact::{

@@ -243,6 +243,26 @@ impl<'a> BoundaryTransaction<'a> {
         }
     }
 
+    /// Consume observer exclusion at the same revision as this canonical
+    /// member transaction. Every actual target must belong to the proof;
+    /// ordinary source and resource authentication still owns acceptance.
+    pub fn with_private_observers(mut self, proof: ObserverExclusion) -> Result<Self, HeapFault> {
+        if !proof.matches(self.dependencies.ledger()) || self.members.is_empty() {
+            return Err(invalid("private member observers changed"));
+        }
+        for edit in &self.members {
+            let entity = self
+                .registration
+                .arena()
+                .ledger_key(edit.handle)
+                .map_err(|error| invalid(&error.to_string()))?;
+            if !proof.contains(entity) {
+                return Err(invalid("private member target has another observer proof"));
+            }
+        }
+        Ok(self)
+    }
+
     /// Authenticate an external source certificate against the exact prepared
     /// entry owners and surviving values, including native/page provenance.
     /// A matching holding price alone never authenticates an output value.

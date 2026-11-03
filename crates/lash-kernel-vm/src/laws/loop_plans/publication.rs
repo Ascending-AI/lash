@@ -5,12 +5,14 @@ mod control;
 mod departure;
 mod exact;
 mod fields;
+mod observers;
 mod resume;
 mod unit;
 
 /// The source publication protocol binds recovery, ownership, charge closes
 /// and an exclusive shared admission; equal byte deltas cannot replace them.
 pub(super) fn checked_source_publication() {
+    self::observers::isolation();
     exact::events();
     departure::exits();
     resume::calls();
