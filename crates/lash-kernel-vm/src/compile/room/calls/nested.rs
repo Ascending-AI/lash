@@ -152,7 +152,7 @@ pub(super) fn resolve(
 
 enum Part {
     Scalar {
-        region: ScalarRegion,
+        region: Box<ScalarRegion>,
         natives: Box<[Native]>,
     },
     Call(usize),
@@ -289,7 +289,10 @@ impl Body {
             live.insert(*slot);
         }
         let natives = paths::natives(exe, source, &region)?;
-        Ok(Part::Scalar { region, natives })
+        Ok(Part::Scalar {
+            region: Box::new(region),
+            natives,
+        })
     }
 }
 

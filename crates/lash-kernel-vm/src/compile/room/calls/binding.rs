@@ -325,7 +325,7 @@ impl VerifiedCall {
 pub(super) struct EvaluatedArguments {
     pub(super) result: Value,
     pub(super) arguments: Vec<Value>,
-    pub(super) recovery: Vec<(Point, Vec<(Slot, Value)>)>,
+    pub(super) recovery: Vec<RecoveryState>,
     pub(super) nested: Vec<super::nested::Evaluated>,
     pub(super) peak: u64,
     pub(super) delta: i128,

@@ -995,11 +995,13 @@ impl VerifiedCall {
     }
 }
 
+type RecoveryState = (Point, Vec<(Slot, Value)>);
+
 struct CalleeValues<'a> {
     values: &'a [Value],
     path: usize,
     captures: &'a [(Slot, doc::arena::ArenaHandle)],
-    recovery: Option<&'a [(Point, Vec<(Slot, Value)>)]>,
+    recovery: Option<&'a [RecoveryState]>,
 }
 fn call_recovery(
     call: &VerifiedCall,
