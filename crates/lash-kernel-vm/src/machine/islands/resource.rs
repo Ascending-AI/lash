@@ -51,7 +51,6 @@ pub(in crate::machine::islands) struct EvaluatedStatement<'a> {
     pub(in crate::machine::islands) bound: room::region::BoundScalarRegion<'a>,
     pub(in crate::machine::islands) debt: StatementDebt<'a>,
     pub(in crate::machine::islands) composed: bool,
-    #[cfg(any(test, feature = "testing"))]
     pub(in crate::machine::islands) prepared_natives: usize,
 }
 
@@ -245,7 +244,6 @@ impl CertifiedStatement {
             bound,
             debt: StatementDebt::Scalar(debt),
             composed: false,
-            #[cfg(any(test, feature = "testing"))]
             prepared_natives: evaluated.formulas.len(),
         }))
     }

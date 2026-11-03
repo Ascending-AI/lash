@@ -71,7 +71,6 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             bound,
             debt,
             composed,
-            #[cfg(any(test, feature = "testing"))]
             prepared_natives,
         } = evaluated;
         let callee = frame.state.callee;
