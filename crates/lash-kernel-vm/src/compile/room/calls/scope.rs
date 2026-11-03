@@ -8,7 +8,9 @@ use std::{cell::Cell, rc::Rc};
 pub(crate) mod iteration;
 #[path = "scope/settlement.rs"]
 mod settlement;
+#[cfg(test)]
 pub(in crate::compile::room) use settlement::ScopedPrefixParts;
+#[cfg(test)]
 pub(crate) use settlement::{ScopedPrefix, SettledCall};
 
 pub(crate) struct CallScope<'ledger> {

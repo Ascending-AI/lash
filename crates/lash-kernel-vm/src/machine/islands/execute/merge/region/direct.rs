@@ -8,7 +8,6 @@ use std::sync::Arc;
 /// The type parameter selects a concrete kernel at compile time. There is no
 /// runtime family tag or interpreter behind the direct packet entrypoints.
 pub(in crate::machine::islands) struct CollectionSite<S> {
-    executable: u64,
     shape: S,
     exits: CollectionExits,
     inputs: Inputs,
@@ -61,7 +60,6 @@ pub(super) struct BoundInputs {
     invocation: Invocation,
     writes: Box<[(usize, Slot)]>,
     clears: Box<[(usize, Slot)]>,
-    reads: Box<[(Slot, Value)]>,
     dependencies: Dependencies,
 }
 
@@ -112,7 +110,6 @@ impl Inputs {
             return None;
         }
         let mut handles = Vec::new();
-        let mut reads = Vec::new();
         for &(physical, slot) in &self.read {
             let actual = cx.value(physical)?;
             let expected = entry.activation.value(slot)?;
@@ -120,7 +117,6 @@ impl Inputs {
                 return None;
             }
             handles.extend(actual.handle());
-            reads.push((slot, actual));
         }
         // Writes may introduce a binding in an entered source scope. Existing
         // values must still have their exact source placement, including Empty.
@@ -142,7 +138,6 @@ impl Inputs {
             invocation: entry.invocation.clone(),
             writes: self.write.clone(),
             clears: self.clear.clone(),
-            reads: reads.into(),
             dependencies: Dependencies::capture(cx.ledger, cx.arena, &handles)?,
         })
     }
@@ -199,8 +194,11 @@ impl<S> CollectionSite<S> {
         slots: &'a [SlotState],
         limits: (usize, u32),
     ) -> Option<CollectionRegion<'a>> {
-        if exe.local() != self.executable
-            || !Arc::ptr_eq(&compiled.source_room, &self.exits.source)
+        if !Arc::ptr_eq(&compiled.source_room, &self.exits.source)
+            || !Arc::ptr_eq(
+                &exe.code(self.inputs.placement.code()).source_room,
+                &self.exits.source,
+            )
             || !compiled
                 .placement
                 .as_ref()
@@ -264,7 +262,6 @@ macro_rules! site {
                 let exits = CollectionExits::compile(&step, exe, compiled)?;
                 let programs = source_programs(exe, compiled, &exits, shape.body, None)?;
                 Some(Self {
-                    executable: exe.local(),
                     shape: shape.clone(),
                     exits,
                     programs,
@@ -345,7 +342,6 @@ impl ReduceSite {
         let exits = CollectionExits::compile(&step, exe, compiled)?;
         let programs = source_programs(exe, compiled, &exits, shape.body, None)?;
         Some(Self {
-            executable: exe.local(),
             shape: shape.clone(),
             exits,
             programs,
@@ -408,12 +404,7 @@ site!(
     Merge,
     Merge,
     collection_merge,
-    |s: &Merge| s
-        .counters
-        .into_iter()
-        .chain(s.lists)
-        .chain(s.callback_binding)
-        .collect::<Vec<_>>(),
+    |s: &Merge| s.counters.into_iter().chain(s.lists).collect::<Vec<_>>(),
     |s: &Merge| s.counters[..5]
         .iter()
         .copied()
@@ -446,7 +437,6 @@ impl MergeTailSite {
         .into_iter()
         .chain(shape.lists)
         .chain(shape.items)
-        .chain(shape.callback_binding)
         .collect();
         let writes = [
             shape.counters[0],
@@ -475,7 +465,6 @@ impl MergeTailSite {
         exits.callback = None;
         let programs = source_programs(exe, compiled, &exits, shape.compared[1], Some(4))?;
         Some(Self {
-            executable: exe.local(),
             shape: MergeTail(shape.clone()),
             exits,
             inputs,
@@ -553,6 +542,7 @@ impl CollectionFacts {
     /// Final owners come only from the compiled source placement. Core must
     /// still authenticate the selected multi-event path, debt and interior peak
     /// before accepting this detached boundary.
+    #[cfg(test)]
     pub(in crate::machine::islands) fn prepare_direct_boundary<'a>(
         mut self,
         ledger: &Ledger,
@@ -641,181 +631,9 @@ impl CollectionFacts {
         self.transfer.writes = self.writes;
         Ok(Some(CollectionBoundary {
             transaction,
-            program: self.program,
             storage,
             transfer: self.transfer,
-            exit: self.exit,
-            kind: self.kind,
-            branches: self.branches,
         }))
-    }
-}
-
-/// Owned callback transfer for K's phase certificate. These are actual source
-/// values and semantic counters, not a native buffer's unwritten scratch tail.
-/// No arena view or physical PC survives guest callback entry.
-pub(in crate::machine::islands) struct CollectionCallback {
-    source: Arc<room::Source>,
-    invocation: Invocation,
-    position: room::publication::Position,
-    dependencies: Dependencies,
-    pub(in crate::machine::islands) statement: crate::compile::StmtId,
-    pub(in crate::machine::islands) target: CallbackTarget,
-    pub(in crate::machine::islands) buffers: [ArenaHandle; 2],
-    pub(in crate::machine::islands) lengths: [u64; 2],
-    pub(in crate::machine::islands) arguments: [Value; 2],
-    pub(in crate::machine::islands) before: Box<[(Slot, Value)]>,
-    pub(in crate::machine::islands) after: Box<[(Slot, Value)]>,
-    pub(in crate::machine::islands) pending: PendingComparison,
-}
-
-pub(in crate::machine::islands) enum CallbackTarget {
-    Value(Value),
-    Declared(crate::compile::CodeId),
-}
-
-pub(in crate::machine::islands) struct PendingComparison {
-    pub(in crate::machine::islands) destination: u64,
-    pub(in crate::machine::islands) left: u64,
-    pub(in crate::machine::islands) right: u64,
-    pub(in crate::machine::islands) middle: u64,
-    pub(in crate::machine::islands) end: u64,
-    pub(in crate::machine::islands) width: u64,
-    pub(in crate::machine::islands) length: u64,
-}
-
-impl MergeSite {
-    /// This shell does not execute or certify the callback. K binds its phase
-    /// proof and the common call compiler authenticates the actual callee.
-    /// The input facts must be the candidate returned by this site's prepare.
-    pub(in crate::machine::islands) fn callback(
-        &self,
-        facts: &CollectionFacts,
-        ledger: &Ledger,
-        arena: &Arena,
-    ) -> Option<CollectionCallback> {
-        let entry = facts.entry.as_ref()?;
-        let selected = self.exits.callback.as_ref()?;
-        if facts.exit.at != selected.0
-            || facts.exit.unpaid.as_ref() != Some(&selected.1)
-            || facts.transfer.continuation != CollectionContinuation::Callback
-            || !Arc::ptr_eq(&facts.source, &self.exits.source)
-            || !entry.dependencies.is_current(ledger, arena)
-            || !facts.dependencies.is_current(ledger, arena)
-        {
-            return None;
-        }
-        let read = |physical| {
-            let slot = self.inputs.read.iter().find(|(at, _)| *at == physical)?.1;
-            entry
-                .reads
-                .iter()
-                .find_map(|(at, value)| (*at == slot).then_some(*value))
-        };
-        let written = |physical| {
-            facts
-                .writes
-                .iter()
-                .find_map(|(at, value)| (*at == physical).then_some(*value))
-                .or_else(|| read(physical))
-        };
-        let number = |physical| match written(physical)? {
-            Value::Int(value) => u64::try_from(value).ok(),
-            _ => None,
-        };
-        let [Value::List(sorted), Value::List(out)] =
-            [read(self.shape.lists[0])?, read(self.shape.lists[1])?]
-        else {
-            return None;
-        };
-        if sorted == out {
-            return None;
-        }
-        let arguments = self.shape.items.map(written);
-        let [Some(first), Some(second)] = arguments else {
-            return None;
-        };
-        let pending = PendingComparison {
-            destination: number(self.shape.counters[0])?,
-            left: number(self.shape.counters[3])?,
-            right: number(self.shape.counters[4])?,
-            middle: number(self.shape.counters[2])?,
-            end: number(self.shape.counters[1])?,
-            width: number(self.shape.counters[5])?,
-            length: number(self.shape.counters[6])?,
-        };
-        if !arena.item(sorted, pending.left).ok()??.same(&first)
-            || !arena.item(sorted, pending.right).ok()??.same(&second)
-            || pending.left >= pending.middle
-            || pending.right >= pending.end
-        {
-            return None;
-        }
-        let target = match (self.shape.callback_binding, self.shape.callback_declared) {
-            (Some(at), None) => {
-                let value = read(at)?;
-                if !matches!(value, Value::Function(_) | Value::Closure(_)) {
-                    return None;
-                }
-                CallbackTarget::Value(value)
-            }
-            (None, Some(code)) => CallbackTarget::Declared(code),
-            _ => return None,
-        };
-        let after = facts
-            .writes
-            .iter()
-            .map(|(physical, value)| {
-                let slot = entry.writes.iter().find(|(at, _)| at == physical)?.1;
-                Some((slot, *value))
-            })
-            .collect::<Option<Box<_>>>()?;
-        let handles: Vec<_> = entry
-            .reads
-            .iter()
-            .map(|(_, value)| *value)
-            .chain(facts.writes.iter().map(|(_, value)| *value))
-            .filter_map(|value| value.handle())
-            .collect();
-        Some(CollectionCallback {
-            source: Arc::clone(&facts.source),
-            invocation: entry.invocation.clone(),
-            position: facts.exit.clone(),
-            dependencies: Dependencies::capture(ledger, arena, &handles)?,
-            statement: self.shape.callback_statement,
-            target,
-            buffers: [sorted, out],
-            lengths: [arena.len(sorted).ok()?, arena.len(out).ok()?],
-            arguments: [first, second],
-            before: entry.reads.clone(),
-            after,
-            pending,
-        })
-    }
-}
-
-impl CollectionCallback {
-    pub(in crate::machine::islands) fn source(&self) -> &Arc<room::Source> {
-        &self.source
-    }
-    pub(in crate::machine::islands) fn invocation(&self) -> &Invocation {
-        &self.invocation
-    }
-    pub(in crate::machine::islands) fn position(&self) -> &room::publication::Position {
-        &self.position
-    }
-    pub(in crate::machine::islands) fn current(
-        &self,
-        source: &Arc<room::Source>,
-        invocation: &Invocation,
-        position: &room::publication::Position,
-        ledger: &Ledger,
-        arena: &Arena,
-    ) -> bool {
-        Arc::ptr_eq(source, &self.source)
-            && invocation == &self.invocation
-            && position == &self.position
-            && self.dependencies.is_current(ledger, arena)
     }
 }
 

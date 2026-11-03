@@ -96,8 +96,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                         exit,
                     },
                 ) {
-                    // The source callback owns its saved roles. Core/K will
-                    // replace this handoff after CALLBACK READY, not before.
+                    // Guest callbacks retain their precise source frames and
+                    // saved roles at this handoff.
                     if facts.transfer.continuation == CollectionContinuation::Callback {
                         continue;
                     }

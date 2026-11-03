@@ -162,9 +162,6 @@ pub(crate) struct Merge {
     pub(in crate::machine::islands) body: usize,
     pub(in crate::machine::islands) compared: [usize; 2],
     pub(in crate::machine::islands) callback: usize,
-    pub(in crate::machine::islands) callback_binding: Option<usize>,
-    pub(in crate::machine::islands) callback_declared: Option<crate::compile::CodeId>,
-    pub(in crate::machine::islands) callback_statement: StmtId,
 }
 
 impl Build<'_> {
@@ -761,13 +758,12 @@ impl Build<'_> {
         };
         (local(first_argument)? == first_slot && local(second_argument)? == second_slot)
             .then_some(())?;
-        let (callback_binding, callback_declared) = match callee {
+        match callee {
             crate::compile::expr::Callee::Read(value) => {
                 let at = local(value)?;
                 (!self.shared[at as usize]).then_some(())?;
-                (Some(at as usize), None)
             }
-            crate::compile::expr::Callee::Declared(code) => (None, Some(*code)),
+            crate::compile::expr::Callee::Declared(_) => {}
         };
         let (order, _) = assigned(coerce, true)?;
         let (positive, yes, no) = branch(test)?;
@@ -831,9 +827,6 @@ impl Build<'_> {
             body: block(body.id)?,
             compared,
             callback: self.blocks[compared[1]].starts[2],
-            callback_binding,
-            callback_declared,
-            callback_statement: apply.id,
         })
     }
 

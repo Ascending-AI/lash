@@ -13,7 +13,6 @@ impl Compiled {
         exe: &Executable,
         heap: &PagedHeap,
         count: usize,
-        callback: &std::sync::Arc<lash_kernel_doc::arena::ClosureIdentity>,
     ) -> Vec<Family> {
         let mut reached = Vec::new();
         let mut cases = Vec::new();
@@ -74,8 +73,6 @@ impl Compiled {
                 let hole = arena.tuple(vec![], 128).unwrap();
                 let sorted = arena.create_list(&[hole, Value::Absent]);
                 let out = arena.create_list(&[Value::Int(3), Value::Int(7)]);
-                let callable =
-                    Value::Closure(arena.new_closure(std::sync::Arc::clone(callback), vec![]));
                 let mut slots = vec![SlotState::Value(Value::Int(0)); count];
                 let mut set = |at, value| slots[at] = SlotState::Value(value);
                 match step {
@@ -121,9 +118,6 @@ impl Compiled {
                         set(merge.order, Value::Int(if case == 0 { 1 } else { 0 }));
                         if *tail {
                             set(merge.from_right, Value::Bool(false));
-                        }
-                        if let Some(at) = merge.callback_binding {
-                            set(at, callable);
                         }
                         // These are the saved pre-callback operands. Tail must
                         // read the current list, without overwriting either.
@@ -500,7 +494,7 @@ impl Compiled {
                 (facts, stale)
             }};
         }
-        let (mut facts, stale) = match step {
+        let (facts, stale) = match step {
             CollectionCase::Append(shape) => check!(AppendSite, shape, shape.item, Value::Int(97)),
             CollectionCase::Reduce(shape) => {
                 check!(ReduceSite, shape, shape.accumulator, Value::Int(97))
@@ -528,51 +522,6 @@ impl Compiled {
                 check!(MergeSite, shape, shape.counters[5], Value::Int(2))
             }
         };
-        if let CollectionCase::Merge(shape) = step
-            && !tail
-            && facts.transfer.continuation == CollectionContinuation::Callback
-        {
-            let site = MergeSite::compile(exe, self, shape).unwrap();
-            let shell = site
-                .callback(&facts, &ledger, arena)
-                .expect("actual callback shell");
-            assert!(shell.current(&self.source_room, &invocation, &facts.exit, &ledger, arena));
-            assert!(
-                shell.arguments[0].same(
-                    &arena
-                        .item(shell.buffers[0], shell.pending.left)
-                        .unwrap()
-                        .unwrap()
-                )
-            );
-            assert!(
-                shell.arguments[1].same(
-                    &arena
-                        .item(shell.buffers[0], shell.pending.right)
-                        .unwrap()
-                        .unwrap()
-                )
-            );
-            let first = facts
-                .writes
-                .iter()
-                .position(|(at, _)| *at == shape.items[0])
-                .unwrap();
-            let second = facts
-                .writes
-                .iter()
-                .position(|(at, _)| *at == shape.items[1])
-                .unwrap();
-            let saved = facts.writes[first].1;
-            facts.writes[first].1 = facts.writes[second].1;
-            facts.writes[second].1 = saved;
-            assert!(
-                site.callback(&facts, &ledger, arena).is_none(),
-                "callback operands retain their original source order"
-            );
-            facts.writes[second].1 = facts.writes[first].1;
-            facts.writes[first].1 = saved;
-        }
         let program = facts
             .program
             .as_ref()

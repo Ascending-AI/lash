@@ -3,24 +3,21 @@
 //! Core authenticates the selected path, charges, peak and activation before
 //! admitting this transaction. None of these preparations grants acceptance.
 
-#![allow(
-    dead_code,
-    reason = "staged collection ABI awaits core packet registration"
-)]
-
 use super::*;
 use crate::compile::{Executable, LibId, room};
 use crate::machine::islands::compiled::CollectionStep;
 use lash_kernel_doc::{arena::ArenaHandle, heap::HeapFault};
 use lash_kernel_state::{
-    arena::{Arena, PreparedListWrite},
+    arena::Arena,
     kernel_internals::{
         PagedHeap,
-        logical::{
-            BoundaryTransaction, Dependencies, Invocation, Ledger, Member, MemberEdit, MemberFault,
-            Owner, RootValue,
-        },
+        logical::{Dependencies, Invocation, Ledger, Member, MemberEdit, Owner},
     },
+};
+#[cfg(test)]
+use lash_kernel_state::{
+    arena::PreparedListWrite,
+    kernel_internals::logical::{BoundaryTransaction, MemberFault, RootValue},
 };
 use std::cell::RefCell;
 
@@ -124,11 +121,13 @@ impl CollectionExits {
 /// Physical placement is recovery data only. Every ledger owner is resolved
 /// separately through the original Source's owner table and Invocation.
 pub(in crate::machine::islands) struct CollectionFacts {
+    #[cfg(test)]
     source: std::sync::Arc<room::Source>,
     writes: Vec<(usize, Value)>,
     member: Option<(ArenaHandle, u64, Value)>,
     dependencies: Dependencies,
     pub(in crate::machine::islands) exit: room::publication::Position,
+    #[cfg(test)]
     pub(in crate::machine::islands) kind: room::ExitKind,
     pub(in crate::machine::islands) transfer: CollectionTransfer,
     pub(in crate::machine::islands) branches: Vec<(lash_kernel_value::sites::Site, bool)>,
@@ -154,16 +153,14 @@ pub(in crate::machine::islands) struct CollectionTransfer {
     pub(in crate::machine::islands) pc: usize,
 }
 
+#[cfg(test)]
 pub(in crate::machine::islands) struct CollectionStorage(Option<PreparedListWrite>);
 
+#[cfg(test)]
 pub(in crate::machine::islands) struct CollectionBoundary<'a> {
     pub(in crate::machine::islands) transaction: BoundaryTransaction<'a>,
-    pub(in crate::machine::islands) program: Option<std::sync::Arc<room::CollectionProgram>>,
     pub(in crate::machine::islands) storage: CollectionStorage,
     pub(in crate::machine::islands) transfer: CollectionTransfer,
-    pub(in crate::machine::islands) exit: room::publication::Position,
-    pub(in crate::machine::islands) kind: room::ExitKind,
-    pub(in crate::machine::islands) branches: Vec<(lash_kernel_value::sites::Site, bool)>,
 }
 
 fn malformed(reason: &'static str) -> HeapFault {
@@ -287,11 +284,13 @@ impl<'a> CollectionRegion<'a> {
             return None;
         }
         Some(CollectionFacts {
+            #[cfg(test)]
             source: std::sync::Arc::clone(source),
             writes,
             member,
             dependencies: Dependencies::capture(self.ledger, self.arena, &self.handles.borrow())?,
             exit,
+            #[cfg(test)]
             kind: room::ExitKind::Normal,
             branches: self.branches.borrow().clone(),
             transfer,
@@ -330,6 +329,7 @@ impl<'a> CollectionRegion<'a> {
     }
 }
 
+#[cfg(test)]
 impl CollectionFacts {
     /// Bind survivors using a compiler-owned mapping of physical placements
     /// to source selectors. Interior temporary owners never reach this API.
@@ -417,16 +417,13 @@ impl CollectionFacts {
         self.transfer.writes = self.writes;
         Ok(Some(CollectionBoundary {
             transaction: boundary,
-            program: self.program,
             storage,
             transfer: self.transfer,
-            exit: self.exit,
-            kind: self.kind,
-            branches: self.branches,
         }))
     }
 }
 
+#[cfg(test)]
 impl CollectionStorage {
     /// Called only by common accepted source publication, under Registration.
     /// Slot and source-stack transfer follows the same successful publication.
