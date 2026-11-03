@@ -120,7 +120,9 @@ impl VerifiedIteration {
                 return Err(Refused::Source);
             }
             if start < index {
-                pieces.push(scalar_piece(exe, &source, &interval, start, index)?);
+                pieces.push(scalar_piece(
+                    exe, &source, &interval, start, index, &pieces,
+                )?);
             }
             let atoms = call.root_atoms.clone();
             pieces.push(Piece::Call {
@@ -143,7 +145,14 @@ impl VerifiedIteration {
             return Err(Refused::Source);
         }
         if start < route.len() {
-            pieces.push(scalar_piece(exe, &source, &interval, start, route.len())?);
+            pieces.push(scalar_piece(
+                exe,
+                &source,
+                &interval,
+                start,
+                route.len(),
+                &pieces,
+            )?);
         }
         let Topology {
             entries,
@@ -374,8 +383,10 @@ fn scalar_piece(
     interval: &ComposedInterval,
     start: usize,
     end: usize,
+    previous: &[Piece],
 ) -> Result<Piece, Refused> {
-    let region = source.compile_scalar_region(interval.scalar(start, end)?)?;
+    let live = topology(source, previous)?.survivors;
+    let region = source.compile_scalar_region_from(interval.scalar(start, end)?, &live)?;
     let natives = paths::natives(exe, source, &region)?;
     Ok(Piece::Scalar {
         region: Box::new(region),

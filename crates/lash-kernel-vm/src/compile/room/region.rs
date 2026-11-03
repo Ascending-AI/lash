@@ -545,6 +545,25 @@ impl Source {
         interval: Arc<CompiledInterval>,
         body: bool,
     ) -> Result<ScalarRegion, Refused> {
+        self.compile_scalar_entered(interval, body, &[])
+    }
+
+    /// Earlier verified pieces retain these roles, including scope bindings
+    /// that this suffix releases without reading.
+    pub(super) fn compile_scalar_region_from(
+        self: &Arc<Self>,
+        interval: Arc<CompiledInterval>,
+        live: &[Slot],
+    ) -> Result<ScalarRegion, Refused> {
+        self.compile_scalar_entered(interval, false, live)
+    }
+
+    fn compile_scalar_entered(
+        self: &Arc<Self>,
+        interval: Arc<CompiledInterval>,
+        body: bool,
+        live: &[Slot],
+    ) -> Result<ScalarRegion, Refused> {
         self.verify()?;
         if interval.owner() != self.owner
             || interval.defining_source() != &self.site
@@ -565,6 +584,17 @@ impl Source {
             facts: 0,
             prices: 0,
         };
+        for slot in live {
+            if !compiler
+                .slots
+                .slots
+                .keys()
+                .any(|owner| compiler.slot(owner) == Ok(*slot))
+            {
+                return Err(Refused::Source);
+            }
+            compiler.entry(*slot)?;
+        }
         if body {
             for name in &self.params {
                 let slot = compiler.slot(&Owner::Binding {

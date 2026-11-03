@@ -221,7 +221,6 @@ impl Source {
     ) -> Result<Arc<ComposedInterval>, Refused> {
         verify_calls(self, exe, code, calls)?;
         if selected.len() > 4096
-            || calls.is_empty()
             || !matches!(selected.first(), Some(Selection::Event { at, .. }) if at == from)
             || !matches!(selected.last(), Some(Selection::Event { at, .. }) if at == through)
         {

@@ -1,13 +1,14 @@
 use super::*;
 
 pub(super) fn helper_compilation() {
+    native_iteration_compilation();
     // The supplied call compiler must retain a guarded scalar helper's
     // source path before its body can be composed into a repeated region.
     for helper_body in [
         "return flat.add(a, b)",
         "if flat.lt(a, b) { return flat.add(a, b) } return flat.add(a, b)",
     ] {
-        for call_form in 0..6 {
+        for call_form in 0..7 {
             let helper = super::super::embedder::fragment(&format!(
                 "function helper(a: Any, b: Any) -> Any\nkernel 1\nmetering statements\nbody {{ {helper_body} }}"
             ));
@@ -28,10 +29,15 @@ pub(super) fn helper_compilation() {
                         "set i = flat.identity(body.plain(i, 1))"
                     }
                 }
-                _ => "set i = invoke helper(i, 1) set i = invoke helper(i, 1)",
+                5 => "set i = invoke helper(i, 1) set i = invoke helper(i, 1)",
+                _ => {
+                    "set s = flat.add(s, flat.mul(i, i)) let previous = flat.identity(i) set i = invoke helper(previous, 1)"
+                }
             };
+            let extra_binding = if call_form == 6 { "let s = 0" } else { "" };
+            let returned = if call_form == 6 { "(s, i)" } else { "i" };
             let caller = scalar_document(&format!(
-                "let i = 0 while flat.lt(i, 4) {{ {update} }} return i"
+                "let i = 0 {extra_binding} while flat.lt(i, 4) {{ {update} }} return {returned}"
             ));
             let source = format!("definition \"{helper}\"\n{caller}");
             let embedder = Embedder::with(
@@ -76,7 +82,7 @@ pub(super) fn helper_compilation() {
             let crate::compile::islands::Kind::While { body, .. } = &statement.kind else {
                 unreachable!()
             };
-            let id = body.statements[0].id;
+            let id = body.statements[if call_form == 6 { 2 } else { 0 }].id;
             let (stream, stmt, _) = exe.statement(id);
             let pc = (stmt.ops.start..stmt.ops.end())
                 .find(|pc| {
@@ -164,7 +170,7 @@ pub(super) fn helper_compilation() {
                 boundary.resume(),
                 &room::Point {
                     site: call.at().site.clone(),
-                    phase: if matches!(call_form, 2 | 5) {
+                    phase: if matches!(call_form, 2 | 5 | 6) {
                         room::Phase::Commit
                     } else {
                         room::Phase::Restore
@@ -244,7 +250,19 @@ pub(super) fn helper_compilation() {
                 .unwrap();
             let roles: Vec<_> = call
                 .scope_roles()
-                .zip([initial, Value::Int(1), Value::Int(5)])
+                .zip(
+                    [
+                        initial,
+                        Value::Int(1),
+                        if call_form == 6 {
+                            initial
+                        } else {
+                            Value::Int(5)
+                        },
+                    ]
+                    .into_iter()
+                    .chain(std::iter::repeat(initial)),
+                )
                 .collect();
             let candidate = call
                 .evaluate_scoped(&exe, call.callee(), &scope, 0, &arena, &roles)
@@ -270,10 +288,33 @@ pub(super) fn helper_compilation() {
                 .collect();
             let mut scalar_values = Vec::new();
             let mut scalar_rooms = Vec::new();
+            let binding = |name: &str| {
+                let binding = exe
+                    .code(caller.code)
+                    .slots
+                    .iter()
+                    .find(|binding| binding.name.as_str() == name)?;
+                match iteration.source().owner_slots().unwrap().root(
+                    &room::Owner::Binding {
+                        declared: binding.declared.clone(),
+                        name: binding.name.clone(),
+                    },
+                    lash_kernel_doc::TaskId::MAIN,
+                    0,
+                )? {
+                    lash_kernel_state::kernel_internals::logical::Owner::Value { slot, .. } => {
+                        Some(slot)
+                    }
+                    _ => None,
+                }
+            };
+            let previous = binding("previous");
             for (region_index, region) in iteration.scalars().enumerate() {
                 let mut values = vec![Value::Null; region.fact_count()];
                 for (slot, fact) in region.entries() {
-                    values[fact.index()] = if iteration.entries().contains(&slot) {
+                    values[fact.index()] = if previous == Some(slot) {
+                        initial
+                    } else if iteration.entries().contains(&slot) {
                         Value::Int(if call_form == 5 && region_index == 2 {
                             1
                         } else {
@@ -317,6 +358,15 @@ pub(super) fn helper_compilation() {
                             lash_kernel_doc::Literal::Int(value),
                         )) => Value::Int(value.word().unwrap()),
                         lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Variable(_)) => initial,
+                        lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call { .. })
+                            if call_form == 6
+                                && at
+                                    .site
+                                    .path
+                                    .starts_with(&exe.stmt(statement.id).site.child(1).path) =>
+                        {
+                            initial
+                        }
                         lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call {
                             args, ..
                         }) if args.len() == 2
@@ -347,13 +397,24 @@ pub(super) fn helper_compilation() {
                                 panic!("scalar native");
                             };
                             let input = if lib.arity == 2 {
-                                if event.point.site.path.starts_with(&exe.stmt(id).site.path) {
+                                if call_form == 6
+                                    && event
+                                        .point
+                                        .site
+                                        .path
+                                        .starts_with(&exe.stmt(statement.id).site.child(1).path)
+                                {
+                                    vec![initial, initial]
+                                } else if event.point.site.path.starts_with(&exe.stmt(id).site.path)
+                                {
                                     vec![Value::Int(5), Value::Int(1)]
                                 } else {
                                     vec![initial, Value::Int(4)]
                                 }
                             } else {
-                                vec![if event.point.site.path.starts_with(&call.at().site.path) {
+                                vec![if call_form == 6
+                                    || event.point.site.path.starts_with(&call.at().site.path)
+                                {
                                     initial
                                 } else {
                                     Value::Int(1)
@@ -403,9 +464,61 @@ pub(super) fn helper_compilation() {
                 1,
                 "the source assignment replaces zero by one"
             );
-            assert!(
-                matches!(effects.survivors(), [(slot, value)] if *slot == iteration.entries()[0] && value.same(&Value::Int(answer)))
-            );
+            if call_form == 6 {
+                assert_eq!(effects.survivors().len(), 2);
+                let i = binding("i").unwrap();
+                assert!(
+                    effects
+                        .survivors()
+                        .iter()
+                        .any(|(slot, value)| *slot == i && value.same(&Value::Int(answer)))
+                );
+                assert!(
+                    !effects
+                        .survivors()
+                        .iter()
+                        .any(|(slot, _)| Some(*slot) == previous),
+                    "the source body Leave must release its local copy"
+                );
+                let mut wrong = scalar_values.clone();
+                let (region_index, fact) = iteration
+                    .scalars()
+                    .enumerate()
+                    .find_map(|(index, region)| {
+                        region
+                            .entries()
+                            .find(|(slot, _)| Some(*slot) == previous)
+                            .map(|(_, fact)| (index, fact))
+                    })
+                    .expect("the suffix must authenticate the carried local binding");
+                wrong[region_index][fact.index()] = Value::Int(1);
+                let wrong_facts: Vec<_> = wrong
+                    .iter()
+                    .zip(&scalar_rooms)
+                    .map(|(values, calls)| ScalarRegionValues { values, calls })
+                    .collect();
+                assert!(
+                    iteration
+                        .measure(
+                            &exe,
+                            &arena,
+                            &ledger,
+                            &invocation,
+                            IterationValues {
+                                entry: &entry,
+                                scalars: &wrong_facts,
+                                calls: &candidates
+                            }
+                        )
+                        .unwrap()
+                        .is_none(),
+                    "a carried scope binding must keep its actual source value"
+                );
+            } else {
+                assert!(
+                    matches!(effects.survivors(), [(slot, value)] if *slot == iteration.entries()[0] && value.same(&Value::Int(answer)))
+                );
+            }
             assert_eq!(
                 effects.invocation_offsets(),
                 Some((0, if call_form == 5 { 2 } else { 1 }))
@@ -415,7 +528,11 @@ pub(super) fn helper_compilation() {
             } else {
                 38
             } + if call_form == 1 { 1 + 8 + 1 } else { 0 }
-                - if matches!(call_form, 2 | 5) { 12 } else { 0 }
+                - if matches!(call_form, 2 | 5 | 6) {
+                    12
+                } else {
+                    0
+                }
                 - if call_form == 4 && helper_body.starts_with("if") {
                     11
                 } else {
@@ -429,13 +546,20 @@ pub(super) fn helper_compilation() {
                     }
                 } else {
                     0
+                }
+                + if call_form == 6 {
+                    // Six forms and two scalar fees for the sum, followed
+                    // by three forms and the identity fee for the copy.
+                    6 + 2 * (3 + 1 + 1 + 1) + (3 + 8 + 1)
+                } else {
+                    0
                 };
             // The source interpreter supplies an independent meter oracle.
             // The control begins at the post-iteration value, so it has the
             // identical false test/return suffix and no executed iteration.
             let source_fee = |initial| {
                 let caller = scalar_document(&format!(
-                    "let i = {initial} while flat.lt(i, 1) {{ {update} }} return i"
+                    "let i = {initial} {extra_binding} while flat.lt(i, 1) {{ {update} }} return {returned}"
                 ));
                 let source = format!("definition \"{helper}\"\n{caller}");
                 let mut run = Embedder::with(
@@ -580,6 +704,180 @@ pub(super) fn helper_compilation() {
             );
         }
     }
+}
+
+fn native_iteration_compilation() {
+    use crate::compile::room::{
+        Measure,
+        region::{
+            ScalarRegionValues,
+            calls::scope::iteration::{IterationValues, VerifiedIteration},
+        },
+    };
+    use lash_kernel_doc::Value;
+    use lash_kernel_state::{
+        arena::Arena,
+        kernel_internals::logical::{Ledger, RootValue},
+    };
+    let text = scalar_document("let i = 0 while flat.lt(i, 4) { set i = flat.add(i, 1) } return i");
+    let embedder = Embedder::with(
+        &text,
+        Setup {
+            probes: Some(scalar_probes),
+            ..Setup::default()
+        },
+    );
+    let (program, _) = embedder.program(true);
+    let admitted = program
+        .library
+        .admit(&program.document, Default::default(), &program.selection)
+        .unwrap_or_else(|_| panic!("native iteration source admitted"));
+    let exe = admitted
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.functions,
+            &program.instances,
+        )
+        .unwrap_or_else(|_| panic!("native iteration executable"));
+    let caller = exe
+        .islands
+        .plans
+        .iter()
+        .find(|plan| {
+            plan.body.statements.iter().any(|statement| {
+                matches!(statement.kind, crate::compile::islands::Kind::While { .. })
+            })
+        })
+        .unwrap();
+    let statement = caller
+        .body
+        .statements
+        .iter()
+        .find(|statement| matches!(statement.kind, crate::compile::islands::Kind::While { .. }))
+        .unwrap();
+    let iteration = VerifiedIteration::compile_loop(&exe, caller.code, statement.id, &[])
+        .expect("native-only iterations must use the same verified composition authority");
+    let region = iteration.scalars().next().unwrap();
+    let mut arena = Arena::new();
+    let heap = embedder.machine.source_law_heap();
+    let mut ledger = Ledger::fresh();
+    let initial = Value::Int(0);
+    let bindings: Vec<_> = iteration
+        .entries()
+        .iter()
+        .map(|slot| (*slot, RootValue::Value(&initial)))
+        .collect();
+    let (invocation, entered) = ledger
+        .prepare_enter(
+            lash_kernel_doc::TaskId::MAIN,
+            &mut arena,
+            heap.pages(),
+            &[],
+            &bindings,
+        )
+        .unwrap();
+    ledger
+        .commit(entered.admit(u64::MAX).ok().unwrap())
+        .unwrap();
+    let body = exe.stmt(statement.id).site.child(1);
+    let mut values = vec![Value::Null; region.fact_count()];
+    for (_, fact) in region.entries() {
+        values[fact.index()] = initial;
+    }
+    for (at, fact) in region.results() {
+        let mut node = lash_kernel_doc::Node::Block(&iteration.source().body);
+        for index in &at.site.path[iteration.source().site.path.len()..] {
+            node = *node.children().get(*index as usize).unwrap();
+        }
+        values[fact.index()] = match node {
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Literal(
+                lash_kernel_doc::Literal::Int(value),
+            )) => Value::Int(value.word().unwrap()),
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Variable(_)) => initial,
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call { .. })
+                if at.site.path.starts_with(&body.path) =>
+            {
+                Value::Int(1)
+            }
+            lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Call { .. }) => Value::Bool(true),
+            _ => panic!("native iteration scalar result"),
+        };
+    }
+    let mut rooms = Vec::new();
+    for event in region.interval().events() {
+        for measure in event.peak.measures() {
+            if let Measure::CallPeak {
+                callee: crate::compile::room::CallSource::Native(function),
+                ..
+            } = measure
+            {
+                let crate::compile::LibRun::Native { native, .. } =
+                    &exe.lib(exe.library_lib(function).unwrap()).run
+                else {
+                    unreachable!()
+                };
+                let input = [
+                    initial,
+                    Value::Int(if event.point.site.path.starts_with(&body.path) {
+                        1
+                    } else {
+                        4
+                    }),
+                ];
+                let contract = native
+                    .resource_contract(lash_kernel_doc::Args::new(
+                        &input,
+                        arena.objects(),
+                        &arena.semantics(),
+                    ))
+                    .unwrap()
+                    .unwrap();
+                rooms
+                    .push(crate::compile::room::CheckedRoom::native(*function, &contract).unwrap());
+            }
+        }
+    }
+    let entry: Vec<_> = iteration
+        .entries()
+        .iter()
+        .map(|slot| (*slot, initial))
+        .collect();
+    let facts = [ScalarRegionValues {
+        values: &values,
+        calls: &rooms,
+    }];
+    let effects = iteration
+        .measure(
+            &exe,
+            &arena,
+            &ledger,
+            &invocation,
+            IterationValues {
+                entry: &entry,
+                scalars: &facts,
+                calls: &[],
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(effects.invocation_offsets(), None);
+    assert_eq!(effects.room().retained_delta, 1);
+    assert!(
+        matches!(effects.survivors(), [(slot, value)] if *slot == iteration.entries()[0] && value.same(&Value::Int(1)))
+    );
+    assert!(iteration.calls().next().is_none());
+    let ordinary = iteration
+        .source()
+        .compile_between(
+            &iteration.interval().events().next().unwrap().point,
+            &iteration.interval().events().last().unwrap().point,
+            iteration.interval().selections(),
+            4096,
+        )
+        .unwrap();
+    assert!(ordinary.events().eq(iteration.interval().events()));
 }
 
 fn body_helper_probes(
