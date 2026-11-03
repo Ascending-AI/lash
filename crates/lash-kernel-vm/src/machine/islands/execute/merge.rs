@@ -9,6 +9,14 @@ pub(super) mod region;
 #[cfg(test)]
 thread_local! { static ACCEPTED: std::cell::Cell<[u64; 7]> = const { std::cell::Cell::new([0; 7]) }; }
 #[cfg(test)]
+pub(super) fn source_publication_accepted(index: usize) {
+    ACCEPTED.with(|counts| {
+        let mut n = counts.get();
+        n[index] += 1;
+        counts.set(n);
+    });
+}
+#[cfg(test)]
 impl crate::machine::KernelMachine {
     pub(crate) fn take_collection_acceptances(&self) -> [u64; 7] {
         ACCEPTED.with(|counts| counts.replace([0; 7]))
@@ -33,12 +41,7 @@ macro_rules! collection_entry {
                 let answer = self.publish_collection(frame, packet);
                 #[cfg(test)]
                 if matches!(&answer, Some(Ok(_))) {
-                    #[cfg(test)]
-                    ACCEPTED.with(|counts| {
-                        let mut n = counts.get();
-                        n[$index] += 1;
-                        counts.set(n);
-                    });
+                    source_publication_accepted($index);
                     collection_count!($family);
                 }
                 #[cfg(any(test, feature = "testing"))]

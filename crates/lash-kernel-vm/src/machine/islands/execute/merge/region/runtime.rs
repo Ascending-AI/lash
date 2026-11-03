@@ -1,4 +1,4 @@
-//! Direct collection packets publish one authenticated source boundary.
+//! Ordinary source and grouped entries share one affine publication.
 use super::*;
 use crate::admission::SourceResources;
 use direct::{CandidateContext, CollectionCandidate, CollectionEntry, CollectionSite};
@@ -13,13 +13,13 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
     where
         CollectionSite<S>: CollectionCandidate,
     {
-        match self.try_collection(frame, packet) {
+        match self.try_source_publication(frame, packet) {
             Ok(false) => None,
             Ok(true) => Some(Ok(Next::Continue)),
             Err(error) => Some(Err(self.halt(error.into()))),
         }
     }
-    fn try_collection<S>(
+    pub(in crate::machine::islands::execute) fn try_source_publication<S>(
         &mut self,
         frame: &mut Values<'_, 'e>,
         packet: &CollectionPacket<S>,

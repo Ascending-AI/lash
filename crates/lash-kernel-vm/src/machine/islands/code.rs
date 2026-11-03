@@ -100,6 +100,7 @@ macro_rules! operations {
         #[repr(u16)]
         pub(super) enum Opcode {
             Begin,
+            SourcePublication,
             CollectionAppend,
             CollectionReduce,
             CollectionPlacement,
@@ -138,6 +139,7 @@ macro_rules! operations {
         #[derive(Default)]
         pub(super) struct Sites {
             pub(super) begin: Vec<StatementEntry>,
+            pub(super) source_publications: Vec<super::execute::source::SourcePublication>,
             pub(super) operator: Vec<sites::Operator>,
             pub(super) collection_append: Vec<CollectionPacket<CollectionAppend>>,
             pub(super) collection_reduce: Vec<CollectionPacket<Reduction>>,
@@ -522,7 +524,11 @@ pub(super) fn relocate(ops: &mut [Instruction], blocks: &mut [Block], mapping: &
 }
 
 impl Code {
-    pub(super) fn lower(ops: &mut Vec<Instruction>, blocks: &mut [Block]) -> Option<Self> {
+    pub(super) fn lower(
+        ops: &mut Vec<Instruction>,
+        blocks: &mut [Block],
+        fused: bool,
+    ) -> Option<Self> {
         let mut relocation = Vec::with_capacity(ops.len() + 1);
         let mut length = 0usize;
         for instruction in ops.iter() {
@@ -593,6 +599,18 @@ impl Code {
                         )?,
                     ),
                     _ => return None,
+                };
+                let (opcode, x) = if fused {
+                    (opcode, x)
+                } else {
+                    let source = super::execute::source::SourcePublication::new(
+                        &kernel.step,
+                        kernel.tail,
+                        x,
+                    )?;
+                    let at = u32::try_from(code.sites.source_publications.len()).ok()?;
+                    code.sites.source_publications.push(source);
+                    (Opcode::SourcePublication, at)
                 };
                 code.packets.push(Packet {
                     opcode,

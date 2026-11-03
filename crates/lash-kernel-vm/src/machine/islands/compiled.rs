@@ -546,7 +546,7 @@ impl Compiled {
         } else {
             None
         };
-        let mut code = super::code::Code::lower(&mut cx.ops, &mut cx.blocks)?;
+        let mut code = super::code::Code::lower(&mut cx.ops, &mut cx.blocks, fused)?;
         let native_suffixes = code.text_suffixes(stream)?;
         code.verify(stream).ok()?;
         code.verify_families(plan, exe).ok()?;

@@ -1,6 +1,8 @@
 //! Source activations outlive their physical packet windows.
 mod binding;
 mod calling;
+mod collection;
+pub(in crate::machine::islands) use collection::SourcePublication;
 mod closure;
 mod construction;
 mod end;

@@ -20,6 +20,14 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     return Err(self.at(site.miss));
                 }
             }
+            Opcode::SourcePublication => {
+                if let Some(answer) = self.generic_source_publication(
+                    frame,
+                    &code.sites.source_publications[packet.x as usize],
+                ) {
+                    return answer;
+                }
+            }
             Opcode::CollectionAppend => {
                 if let Some(answer) =
                     self.append_collection(frame, &code.sites.collection_append[packet.x as usize])
