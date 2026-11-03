@@ -41,7 +41,6 @@ macro_rules! witnessed {
     }};
 }
 
-pub(crate) mod admission;
 mod code;
 pub(crate) mod compiled;
 pub(crate) mod cx;

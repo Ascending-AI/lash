@@ -87,25 +87,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             "a native exit must release its scratch operands"
         );
         self.scratch.absent = cx.absent.take();
-        let events = if self.tape.is_some() {
-            let mut events = Vec::new();
-            for taken in &cx.meter.taken {
-                match taken {
-                    crate::compile::Taken::Formula(units) => {
-                        if *units != 0 {
-                            events.push(Weight::Atomic(*units));
-                        }
-                    }
-                    crate::compile::Taken::Charges(charges) => {
-                        events.extend(charges.iter().copied())
-                    } // Heap operations have no compiled source arm to expand.
-                      // Decline before publishing a write if one is encountered.
-                }
-            }
-            Some(events)
-        } else {
-            None
-        };
+        let events = self
+            .tape
+            .is_some()
+            .then(|| std::mem::take(&mut cx.meter.taken));
         // Only a body's heap paths stand where the reference pushes a frame;
         // a prepared or native answer charges its whole formula in place.
         let strict = strict && cx.body_paths;
