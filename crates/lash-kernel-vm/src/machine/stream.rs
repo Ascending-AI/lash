@@ -12,6 +12,7 @@
 #[cfg(any(test, feature = "perf-witness"))]
 use crate::perf_witness::execution;
 
+mod original;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ArenaHandle;
@@ -157,12 +158,7 @@ impl KernelMachine {
         self.run_stream(host, running, pc)
     }
 
-    fn run_stream(
-        &mut self,
-        host: &mut dyn Host,
-        running: &Running<'_>,
-        mut pc: usize,
-    ) -> Eval<Ran> {
+    fn run_stream(&mut self, host: &mut dyn Host, running: &Running<'_>, pc: usize) -> Eval<Ran> {
         self.regs.statement(running.stmt.regs);
         let ops = running.stream.ops.as_slice();
         if self.source_begin(running.task, running.stream, running.stmt, pc as u32)?
@@ -174,6 +170,18 @@ impl KernelMachine {
             // inline call's completion does.
             self.source_complete_joins(running, call as u32)?;
         }
+        self.run_stream_entered(host, running, pc)
+    }
+
+    // Also used after an authenticated original-prefix bank has been adopted.
+    // It must not clear and reacquire that bank at the same source boundary.
+    fn run_stream_entered(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        mut pc: usize,
+    ) -> Eval<Ran> {
+        let ops = running.stream.ops.as_slice();
         let task = running.task;
         loop {
             let source_pc = pc as u32;

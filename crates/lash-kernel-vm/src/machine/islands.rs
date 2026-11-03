@@ -230,6 +230,10 @@ struct Cached {
 enum RunsOn {
     Statement,
     Instruction(StmtId, u32, Vec<(u32, Value)>),
+    Original(
+        StmtId,
+        crate::compile::room::charges::AcceptedOriginalPrefix,
+    ),
     Iteration(StmtId),
     Scheduling(StmtId, u32, Vec<(u32, Value)>),
     Departure(super::Completion),

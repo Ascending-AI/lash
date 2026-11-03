@@ -40,6 +40,19 @@ pub(in crate::machine) struct Prepared {
     pub(in crate::machine) value: Value,
     pub(in crate::machine) holding: Holding,
 }
+enum BoundConstruction {
+    Ordinary(room::publication::BoundEvent),
+    Original(room::publication::OriginalBound),
+}
+enum ConstructionEvent<'a> {
+    Ordinary(room::publication::PreparedEvent<'a>),
+    Original(room::publication::OriginalPrepared<'a>),
+}
+type OriginalInput<'a> = (
+    &'a std::sync::Arc<room::charges::OriginalPrefix>,
+    &'a [Value],
+    Option<&'a room::charges::AcceptedOriginalPrefix>,
+);
 impl BoundaryPreparation for Construction<'_> {
     type Prepared = Prepared;
     fn prepare<'a>(
@@ -47,6 +60,45 @@ impl BoundaryPreparation for Construction<'_> {
         arena: &'a mut Arena,
         entry: ExternalEntry<'_>,
     ) -> Result<Option<(room::publication::PreparedEvent<'a>, Prepared)>, HeapFault> {
+        self.prepare_inner(arena, entry, None).map(|prepared| {
+            prepared.map(|(event, storage)| {
+                let ConstructionEvent::Ordinary(event) = event else {
+                    unreachable!("ordinary constructor requested")
+                };
+                (event, storage)
+            })
+        })
+    }
+}
+impl Construction<'_> {
+    /// The same detached graph and source checks, with compiler-owned original
+    /// debt and recovery roles attached before the one external transaction.
+    #[expect(
+        dead_code,
+        reason = "H packet lowering adopts this unpublished entrypoint"
+    )]
+    pub(in crate::machine) fn prepare_original<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        original: OriginalInput<'_>,
+    ) -> Result<Option<(room::publication::OriginalPrepared<'a>, Prepared)>, HeapFault> {
+        self.prepare_inner(arena, entry, Some(original))
+            .map(|prepared| {
+                prepared.map(|(event, storage)| {
+                    let ConstructionEvent::Original(event) = event else {
+                        unreachable!("original constructor requested")
+                    };
+                    (event, storage)
+                })
+            })
+    }
+    fn prepare_inner<'a>(
+        self,
+        arena: &'a mut Arena,
+        entry: ExternalEntry<'_>,
+        original: Option<OriginalInput<'_>>,
+    ) -> Result<Option<(ConstructionEvent<'a>, Prepared)>, HeapFault> {
         use room::publication::{ExactRoots, ExternalFacts};
         let ExternalEntry {
             event,
@@ -207,6 +259,23 @@ impl BoundaryPreparation for Construction<'_> {
             return Ok(None);
         };
 
+        let bound = if let Some((program, registers, previous)) = original {
+            match bound.with_original_prefix(
+                frontier,
+                ledger,
+                graph.registration.arena(),
+                heap,
+                program,
+                registers,
+                previous,
+            ) {
+                Ok(bound) => BoundConstruction::Original(bound),
+                Err(PublicationError::Miss(_)) => return Ok(None),
+                Err(PublicationError::Heap(error)) => return Err(error),
+            }
+        } else {
+            BoundConstruction::Ordinary(bound)
+        };
         let (transaction, mut storage) =
             graph.into_boundary(ledger, heap, &self.inputs, dependencies)?;
         let output = storage
@@ -216,7 +285,15 @@ impl BoundaryPreparation for Construction<'_> {
         // Each mutable body is summarized by the canonical construction owner.
         // Its source obligation was authenticated before consuming registration.
         debug_assert!(storage.members.len() <= 1);
-        match bound.finish_external(frontier, ledger, transaction) {
+        let event = match bound {
+            BoundConstruction::Ordinary(bound) => bound
+                .finish_external(frontier, ledger, transaction)
+                .map(ConstructionEvent::Ordinary),
+            BoundConstruction::Original(bound) => bound
+                .finish_external(frontier, ledger, transaction)
+                .map(ConstructionEvent::Original),
+        };
+        match event {
             Ok(prepared) => Ok(Some((
                 prepared,
                 Prepared {

@@ -699,6 +699,11 @@ impl KernelMachine {
                 self.run(host, &running, pc as usize)
                     .and_then(|ran| self.resumed(task, exe, (stmt, ran)))
             }
+            RunsOn::Original(stmt, prefix) => {
+                let running = Running::new(task, exe, stmt);
+                self.run_original_prefix(host, &running, prefix)
+                    .and_then(|ran| self.resumed(task, exe, (stmt, ran)))
+            }
             RunsOn::Departure(departure) => Ok(departure),
             RunsOn::Scheduling(stmt, pc, regs) => {
                 return self.schedule_instruction(host, task, exe, stmt, pc, regs);
@@ -772,9 +777,15 @@ impl KernelMachine {
         &mut self,
         task: TaskId,
         exe: &Executable,
-        level: Level,
+        mut level: Level,
         fresh: bool,
     ) -> Eval<Option<RunsOn>> {
+        if level.source.original.is_some() && !matches!(level.stands, Stands::Running { .. }) {
+            return Err(fault(
+                "an accepted original prefix must resume its running source statement",
+            )
+            .into());
+        }
         let mut pending = None;
         let mut action = None;
         let top = match level.stands {
@@ -784,7 +795,10 @@ impl KernelMachine {
                 None
             }
             Stands::Boundary => None,
-            Stands::Running { stmt, pc, regs } => Some(RunsOn::Instruction(stmt, pc, regs)),
+            Stands::Running { stmt, pc, regs } => Some(match level.source.original.take() {
+                Some(prefix) => RunsOn::Original(stmt, prefix),
+                None => RunsOn::Instruction(stmt, pc, regs),
+            }),
             Stands::Iteration { stmt } => Some(RunsOn::Iteration(stmt)),
             Stands::Departure(departure) => Some(RunsOn::Departure(departure)),
             Stands::Scheduling { stmt, pc, regs } => Some(RunsOn::Scheduling(stmt, pc, regs)),

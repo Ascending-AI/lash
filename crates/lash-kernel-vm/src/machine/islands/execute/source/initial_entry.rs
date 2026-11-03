@@ -166,6 +166,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 frame.source = Some(Activation {
                     invocation,
                     frontier: Some(frontier),
+                    original: None,
                     cleaning: None,
                 });
                 active = Some(frame);

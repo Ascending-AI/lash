@@ -10,7 +10,8 @@ pub struct Dependencies {
     values: Vec<ContentVersion>,
 }
 impl Dependencies {
-    pub(super) fn extend(&mut self, next: Self) -> Result<(), HeapFault> {
+    /// Combine facts captured at the same ledger identity and revision.
+    pub fn extend(&mut self, next: Self) -> Result<(), HeapFault> {
         if !Rc::ptr_eq(&self.ledger.identity, &next.ledger.identity)
             || self.ledger.revision != next.ledger.revision
         {

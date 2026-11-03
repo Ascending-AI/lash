@@ -601,6 +601,11 @@ impl Ledger {
             revision: self.revision,
         }
     }
+    /// A settled affine charge receipt may outlive root revisions, but never
+    /// its ledger. This identity check grants no root or content authority.
+    pub fn owns_stamp(&self, stamp: &Stamp) -> bool {
+        Rc::ptr_eq(&self.identity, &stamp.identity)
+    }
     pub fn is_current(&self, stamp: &Stamp) -> bool {
         Rc::ptr_eq(&self.identity, &stamp.identity) && self.revision == stamp.revision
     }

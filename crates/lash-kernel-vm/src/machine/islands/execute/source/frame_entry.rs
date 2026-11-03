@@ -320,6 +320,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 inner.source = Some(Activation {
                     invocation,
                     frontier: Some(frontier),
+                    original: None,
                     cleaning: None,
                 });
                 inner.boundary = boundary;

@@ -127,6 +127,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 .invocation(self.task, state.invocation, self.heap.pages())
                 .ok()?,
             frontier: state.source_frontier.take(),
+            original: None,
             cleaning: state.cleaning,
         });
         Some(frame)

@@ -20,7 +20,10 @@ mod departure;
 pub(crate) use departure::DepartureExit;
 mod exact;
 mod region;
-pub(crate) use exact::{ExactEvent, ExactRoots, ExternalFacts, PreparedEvent, Successor};
+pub(crate) use exact::{
+    BoundEvent, ExactEvent, ExactRoots, ExternalFacts, OriginalBound, OriginalPrepared,
+    PreparedEvent, Successor,
+};
 pub(crate) use region::CompiledExit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,15 +43,15 @@ pub(crate) struct Position {
 /// Created from the canonical source owner and runtime frame, never a code
 /// cache ordinal. Every exact-source handoff expires its dependent capabilities.
 pub(crate) struct Frontier {
-    source: Arc<Source>,
+    pub(in crate::compile::room) source: Arc<Source>,
     link: lash_kernel_value::content_ids::LinkId,
     kernel: doc::KernelVersion,
-    position: Position,
+    pub(in crate::compile::room) position: Position,
     /// A proven acquisition committed past `position` without recording its
     /// coordinate. The next checked interval must hand off to its own start.
-    proven: bool,
+    pub(in crate::compile::room) proven: bool,
     revision: u64,
-    identity: std::rc::Rc<()>,
+    pub(in crate::compile::room) identity: std::rc::Rc<()>,
 }
 struct Bound {
     source: Arc<CompiledInterval>,

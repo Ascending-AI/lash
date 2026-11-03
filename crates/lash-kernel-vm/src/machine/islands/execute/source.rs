@@ -32,6 +32,7 @@ use lash_kernel_state::kernel_internals::logical::{Invocation, Owner, SourceValu
 pub(in crate::machine::islands) struct Activation {
     pub(in crate::machine::islands) invocation: Invocation,
     pub(in crate::machine::islands) frontier: Option<Frontier>,
+    pub(in crate::machine::islands) original: Option<room::charges::AcceptedOriginalPrefix>,
     pub(in crate::machine::islands) cleaning: Option<Result<Value, Value>>,
 }
 
@@ -143,6 +144,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         Ok(Activation {
             invocation,
             frontier: None,
+            original: None,
             cleaning: None,
         })
     }

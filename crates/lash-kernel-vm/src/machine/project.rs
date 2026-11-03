@@ -158,7 +158,7 @@ pub(crate) fn project(
 }
 
 /// Project the exclusive prepared graph without publishing any guest body.
-pub(in crate::machine) fn project_prepared(
+pub(crate) fn project_prepared(
     arena: &mut lash_kernel_state::arena::PreparedInstallation<'_>,
     pages: &Access<'_>,
     value: &Value,

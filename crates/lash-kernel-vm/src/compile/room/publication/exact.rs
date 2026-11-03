@@ -3,8 +3,14 @@
 //! authorizes a substituted result or a different source transfer.
 use super::*;
 mod member;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "unpublished H original-prefix boundary API")
+)]
+mod original;
 pub(crate) use logical::PublicationValue as ExactValue;
 use logical::{BoundaryTransaction, Dependencies, Owner as RootOwner, RootValue};
+pub(crate) use original::{OriginalBound, OriginalPrepared};
 
 /// These are actual live roots, not executor-authored fees or byte deltas.
 /// Preparation consumes them directly under the canonical ledger owner.
