@@ -11,6 +11,7 @@ use lash_kernel_exec::{Op, OpRange, Weight};
 pub(super) fn compiled_charges() {
     calls::pure_calls();
     member_closes();
+    constructor_debt();
     for layout in [0, 1, 42, u64::MAX] {
         let text = super::super::layout::scalar_document(
             "let x = flat.add(0, flat.mul(2, 3)) set x = flat.add(x, 4) return x",
@@ -654,6 +655,101 @@ fn member_closes() {
             )
             .is_err(),
             "equal event coordinates cannot authenticate another close"
+        );
+    }
+}
+
+/// K-CHG-002: an interior constructor cannot consume its region's future work.
+/// Its pending identities must survive unchanged until the original close.
+fn constructor_debt() {
+    use crate::compile::expr::ConstructorPrefix;
+    for layout in [0, 2, 0x5eed] {
+        let (program, _) = Embedder::with(
+            "main { let run = fn() { let made = ([1, 2], map{1: 2}, set{1, 2}, {left: 1}, fn() { return 7 }, \"a deferred literal larger than inline text capacity\") return made } return apply run() }",
+            Setup { layout: crate::Layout(layout), ..Setup::default() },
+        ).program(true);
+        let admitted = program
+            .library
+            .admit(&program.document, Default::default(), &program.selection)
+            .unwrap_or_else(|_| panic!("constructor debt source admitted"));
+        let exe = admitted
+            .executable(
+                &program.document,
+                &program.library,
+                &program.documents,
+                &program.functions,
+                &program.instances,
+            )
+            .unwrap_or_else(|_| panic!("constructor debt source compiled"));
+        let body = exe
+            .islands
+            .plans
+            .iter()
+            .find(|plan| {
+                plan.params.is_empty()
+                    && plan.body.statements.len() == 2
+                    && exe.code(plan.code).site.unit != lash_kernel_value::sites::Unit::Main
+            })
+            .unwrap();
+        let statement = body.body.statements[0].id;
+        let (stream, stmt, _) = exe.statement(statement);
+        let complete = ChargeProgram::compile(&exe, body.code, statement, stmt.ops).unwrap();
+        let expected = crate::observe::ChargeTape::new();
+        complete.bind(&[]).unwrap().record(&expected);
+        let actual = crate::observe::ChargeTape::new();
+        let mut constructors = 0;
+        for pc in stmt.ops.start..stmt.ops.end() {
+            let Some(prefix) = ConstructorPrefix::compile(stream, stmt.ops, pc) else {
+                continue;
+            };
+            let charges =
+                ChargeProgram::constructor_packet(&exe, body.code, statement, &prefix).unwrap();
+            assert_eq!(charges.verify(&exe, body.code), Ok(()));
+            assert_eq!(
+                charges.constructor_quote(),
+                Some(crate::compile::expr::units(prefix.pending()))
+            );
+            let debt = charges.bind(&[]).unwrap();
+            assert!(debt.matches(
+                &exe.code(body.code).source_room,
+                charges.first(),
+                charges.first()
+            ));
+            assert_eq!(debt.units(), 0, "an unclosed suffix is never paid ahead");
+            let allowance = debt.native_allowance(17).unwrap();
+            assert_eq!(
+                (allowance.units, allowance.safe_point, allowance.strict),
+                (0, 17, false)
+            );
+            debt.record(&actual);
+            assert!(
+                actual.steps().is_empty(),
+                "pending work is not a paid tape prefix"
+            );
+            assert!(
+                !prefix.pending().is_empty(),
+                "the law must bind actual outstanding closes"
+            );
+            for duplicate in [false, true] {
+                let mut wrong =
+                    ChargeProgram::constructor_packet(&exe, body.code, statement, &prefix).unwrap();
+                wrong.corrupt_constructor_close_for_law(duplicate);
+                assert!(
+                    wrong.verify(&exe, body.code).is_err(),
+                    "a constructor cannot omit or duplicate an original pending close"
+                );
+            }
+            constructors += 1;
+        }
+        assert_eq!(
+            constructors, 7,
+            "all constructor/deferred-literal debt cases execute"
+        );
+        complete.bind(&[]).unwrap().record(&actual);
+        assert_eq!(
+            actual.steps(),
+            expected.steps(),
+            "the original close settles once after every constructor publication"
         );
     }
 }

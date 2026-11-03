@@ -22,8 +22,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if self.arena.any_cold() || !self.resident_room(bound) {
             return Ok(ValuePublication::Unavailable);
         }
-        self.publish_collection_construction(frame, site.pc, &site.items, site.reg, |values| {
-            match site.make {
+        self.publish_collection_construction(
+            frame,
+            site.pc,
+            &site.items,
+            site.reg,
+            &site.charges,
+            |values| match site.make {
                 Make::List => doc::NewObject::List(values),
                 Make::Set => doc::NewObject::Set(values),
                 Make::Map => doc::NewObject::Map(
@@ -35,8 +40,8 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                         .collect(),
                 ),
                 Make::Tuple => doc::NewObject::Tuple(values),
-            }
-        })
+            },
+        )
     }
 
     pub(in crate::machine::islands::execute) fn publish_record_construction(
@@ -47,9 +52,14 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         if self.arena.any_cold() || !self.resident_room(self.arena.table_bound(site.members)) {
             return Ok(ValuePublication::Unavailable);
         }
-        self.publish_collection_construction(frame, site.pc, &site.values, site.reg, |values| {
-            doc::NewObject::Record(site.names.iter().copied().zip(values).collect())
-        })
+        self.publish_collection_construction(
+            frame,
+            site.pc,
+            &site.values,
+            site.reg,
+            &site.charges,
+            |values| doc::NewObject::Record(site.names.iter().copied().zip(values).collect()),
+        )
     }
 
     fn publish_collection_construction(
@@ -58,6 +68,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         pc: u32,
         items: &[u32],
         reg: u32,
+        charges: &room::charges::ChargeProgram,
         make: impl FnOnce(Vec<Value>) -> doc::NewObject,
     ) -> Result<ValuePublication, HeapFault> {
         let Some(statement) = frame.state.statement else {
@@ -195,7 +206,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             storage::Construction {
-                charges: None,
+                charges: Some(charges),
                 value: storage::ConstructionValue::Collection(object),
                 output,
                 at: publication_at,
@@ -211,6 +222,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 *result = storage.value;
             },
         )?;
+        #[cfg(test)]
+        if published {
+            super::super::super::compiled::constructor_debt_published(0);
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             if empty_tuple {

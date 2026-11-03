@@ -99,6 +99,7 @@ fn constructors_and_capture_aliases_agree() {
                     );
                 }
                 for mode in [Mode::Generic, Mode::Specialized] {
+                    crate::machine::islands::compiled::take_constructor_debt_publications();
                     assert_eq!(
                         observe_source_or_register(
                             &text,
@@ -112,7 +113,13 @@ fn constructors_and_capture_aliases_agree() {
                         reference
                     );
                     let executed = EXECUTED.get();
+                    let debt_publications =
+                        crate::machine::islands::compiled::take_constructor_debt_publications();
                     if body == BODY && !taped && layout == Layout(0) {
+                        assert!(
+                            debt_publications.iter().all(|count| *count > 0),
+                            "canonical constructor debt must bind on actual collection/closure/literal publications: {debt_publications:?}"
+                        );
                         assert!(
                             executed.1.iter().all(|count| *count > 0)
                                 && executed.2 > 0

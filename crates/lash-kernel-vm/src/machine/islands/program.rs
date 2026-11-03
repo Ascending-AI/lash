@@ -335,6 +335,27 @@ impl<'e> Build<'e> {
         Some(())
     }
 
+    fn constructor_charges(
+        &self,
+        pc: u32,
+    ) -> Option<std::sync::Arc<crate::compile::room::charges::ChargeProgram>> {
+        let statement = self.statement?;
+        let stmt = self.exe.stmt(statement);
+        let range = match stmt.form {
+            crate::compile::Form::While { test, .. } if pc >= test.start && pc < test.end() => test,
+            _ => stmt.ops,
+        };
+        let prefix = crate::compile::expr::ConstructorPrefix::compile(self.stream, range, pc)?;
+        crate::compile::room::charges::ChargeProgram::constructor_packet(
+            self.exe,
+            self.placement.as_ref()?.code(),
+            statement,
+            &prefix,
+        )
+        .ok()
+        .map(std::sync::Arc::new)
+    }
+
     fn write_charges(
         &self,
         statement: StmtId,
@@ -949,6 +970,7 @@ impl<'e> Build<'e> {
                     dst: reg,
                     constant: *constant,
                     source: expr.read?,
+                    charges: self.constructor_charges(pc)?,
                 }));
                 self.result(reg, &[]);
             }
@@ -1383,6 +1405,7 @@ impl<'e> Build<'e> {
                 }
                 self.emit(Op::Make {
                     pc,
+                    charges: self.constructor_charges(pc)?,
                     ahead: *ahead,
                     replay_guard,
                     make: *make,
@@ -1395,8 +1418,8 @@ impl<'e> Build<'e> {
             }
             Kind::Record {
                 fields,
-                ahead,
                 values,
+                ahead,
                 miss,
             } => {
                 let names: Box<[_]> = self
@@ -1417,6 +1440,7 @@ impl<'e> Build<'e> {
                 let values: Box<[_]> = values.iter().map(|value| value.reg).collect();
                 self.emit(Op::Record {
                     pc,
+                    charges: self.constructor_charges(pc)?,
                     ahead: *ahead,
                     members: names.len(),
                     names,
@@ -1429,6 +1453,7 @@ impl<'e> Build<'e> {
             Kind::Closure { code, ahead, miss } => {
                 self.emit(Op::Closure {
                     pc,
+                    charges: self.constructor_charges(pc)?,
                     ahead: *ahead,
                     code: *code,
                     reg,

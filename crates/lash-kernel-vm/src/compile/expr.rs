@@ -222,6 +222,63 @@ impl SourceRead {
     }
 }
 
+/// An allocating operation inside an original fixed region. The region is
+/// admitted before the operation but closes only at its original source close.
+/// Keeping its identities is essential: a quote is neither paid work nor a
+/// license to bill the unexecuted suffix on an interior memory refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ConstructorPrefix {
+    pc: u32,
+    pending: Closes,
+}
+impl ConstructorPrefix {
+    pub(crate) fn compile(stream: &Stream, range: OpRange, pc: u32) -> Option<Self> {
+        if pc < range.start || pc >= range.end() {
+            return None;
+        }
+        match stream.ops.get(pc as usize)? {
+            Op::MakeList { .. }
+            | Op::MakeTuple { .. }
+            | Op::MakeMap { .. }
+            | Op::MakeSet { .. }
+            | Op::MakeRecord { .. }
+            | Op::Closure { .. } => {}
+            Op::Const { c, .. }
+                if matches!(stream.consts.get(c.ix()), Some(Constant::Deferred(_))) => {}
+            _ => return None,
+        }
+        let mut pending = Vec::new();
+        for at in range.start..pc {
+            match stream.ops[at as usize] {
+                Op::Region { region, total } => {
+                    let close = Close {
+                        region: region.0,
+                        total,
+                        head: at,
+                    };
+                    super::islands::verify_close(Some(&close), stream).ok()?;
+                    pending.push(close);
+                }
+                op if !op.kind().in_region() => pending.clear(),
+                _ => {}
+            }
+        }
+        Some(Self {
+            pc,
+            pending: pending.into(),
+        })
+    }
+    pub(crate) fn pc(&self) -> u32 {
+        self.pc
+    }
+    pub(crate) fn pending(&self) -> &[Close] {
+        &self.pending
+    }
+    pub(crate) fn unpaid(&self) -> u32 {
+        self.pending.first().map_or(self.pc, |close| close.head)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Kind {
     /// The value of a statement-root invoke (`Op::Act`), in the first

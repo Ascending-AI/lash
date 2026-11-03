@@ -1,5 +1,6 @@
 //! A packet event may still owe its original fixed region close.
 use super::*;
+pub(super) mod constructor;
 
 pub(super) fn derive(
     exe: &Executable,

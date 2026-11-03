@@ -49,14 +49,32 @@ pub(crate) fn with_substituted_loop_result<R>(run: impl FnOnce() -> R) -> R {
     run()
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CONSTRUCTOR_DEBT_PUBLICATIONS: std::cell::Cell<[u64; 3]> = const { std::cell::Cell::new([0; 3]) };
+}
+#[cfg(test)]
+pub(crate) fn take_constructor_debt_publications() -> [u64; 3] {
+    CONSTRUCTOR_DEBT_PUBLICATIONS.with(|counts| counts.replace([0; 3]))
+}
+#[cfg(test)]
+pub(in crate::machine::islands) fn constructor_debt_published(family: usize) {
+    CONSTRUCTOR_DEBT_PUBLICATIONS.with(|counts| {
+        let mut current = counts.get();
+        current[family] += 1;
+        counts.set(current);
+    });
+}
+
 /// Heap text construction and operations the source handler must answer.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum Deferred {
     Source(u32),
     Text {
         dst: u32,
         constant: lash_kernel_exec::ConstIx,
         source: crate::compile::expr::SourceRead,
+        charges: std::sync::Arc<crate::compile::room::charges::ChargeProgram>,
     },
 }
 

@@ -9,20 +9,21 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         operation: &Deferred,
     ) -> Result<Next, Stop> {
-        let (dst, constant, source) = match operation {
+        let (dst, constant, source, charges) = match operation {
             Deferred::Source(pc) => return Err(self.at(*pc)),
             Deferred::Text {
                 dst,
                 constant,
                 source,
-            } => (*dst, *constant, *source),
+                charges,
+            } => (*dst, *constant, *source, charges),
         };
         let crate::compile::Constant::Deferred(literal @ lash_kernel_doc::Literal::Text(_)) =
             &frame.state.callee.stream.consts[constant.ix()]
         else {
             unreachable!("a text instruction names a text literal");
         };
-        if !self.source_literal(frame, source, dst, literal)? {
+        if !self.source_literal(frame, source, dst, literal, charges)? {
             return Err(self.at(source.unpaid()));
         }
         Ok(Next::Continue)

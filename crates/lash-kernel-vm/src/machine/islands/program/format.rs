@@ -105,6 +105,7 @@ impl Build<'_> {
                 }
                 let Op::Make {
                     pc,
+                    charges,
                     ahead,
                     replay_guard,
                     make,
@@ -141,6 +142,7 @@ impl Build<'_> {
                 instruction.op = Op::Format(Box::new(Format {
                     parts: crate::machine::islands::code::sites::Make {
                         pc,
+                        charges,
                         ahead,
                         replay_guard,
                         make,

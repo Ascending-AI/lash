@@ -24,6 +24,14 @@ mod verify;
 use verify::Closes;
 
 macro_rules! check_field {
+    ($record:ident, $stream:ident, charges) => {
+        if !$record
+            .charges
+            .constructor_matches($record.pc, $record.miss, $record.ahead)
+        {
+            return Err(crate::compile::islands::Refused::Region { region: $record.pc });
+        }
+    };
     ($record:ident, $stream:ident, close) => {
         $record.close.verify($stream)?;
     };
@@ -154,8 +162,9 @@ macro_rules! operations {
                     record.to.verify(stream)?;
                 }
                 for operation in &self.sites.cold {
-                    if let Deferred::Text { dst, constant, source } = &operation.value
-                        && (!source.verify(stream, *dst)
+                    if let Deferred::Text { dst, constant, source, charges } = &operation.value
+                        && (!charges.constructor_matches(source.pc(), source.unpaid(), source.quote())
+                            || !source.verify(stream, *dst)
                             || !matches!(stream.ops.get(source.pc() as usize), Some(lash_kernel_exec::Op::Const { c, .. }) if c == constant)
                             || !matches!(stream.consts.get(constant.ix()), Some(crate::compile::Constant::Deferred(lash_kernel_doc::Literal::Text(_)))))
                     {
@@ -183,6 +192,10 @@ macro_rules! operations {
                             return Err(crate::compile::islands::Refused::Region { region: read.source().pc() });
                         }
                     }
+                }
+                for format in &self.sites.format {
+                    let record = &format.value.parts;
+                    check_field!(record, stream, charges);
                 }
                 self.verify_roles(stream)?;
                 self.verify_constructions(stream)
@@ -349,6 +362,7 @@ operations! {
             Make make {
                 pc: u32,
                 ahead: u64,
+                charges: std::sync::Arc<crate::compile::room::charges::ChargeProgram>,
                 replay_guard: bool,
                 make: crate::compile::expr::Make,
                 items: Box<[u32]>,
@@ -359,6 +373,7 @@ operations! {
             Record record {
                 pc: u32,
                 ahead: u64,
+                charges: std::sync::Arc<crate::compile::room::charges::ChargeProgram>,
                 names: Box<[Value]>,
                 values: Box<[u32]>,
                 reg: u32,
@@ -368,6 +383,7 @@ operations! {
             Closure closure {
                 pc: u32,
                 ahead: u64,
+                charges: std::sync::Arc<crate::compile::room::charges::ChargeProgram>,
                 code: CodeId,
                 reg: u32,
                 miss: u32,

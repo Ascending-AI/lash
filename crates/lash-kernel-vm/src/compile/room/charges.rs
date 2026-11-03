@@ -17,6 +17,7 @@ enum Coverage {
     NativeCompletion,
     NativePacket(Option<expr::Close>),
     EventPacket(Option<expr::Close>),
+    ConstructorPacket { unpaid: u32, quote: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,7 +84,7 @@ impl ChargeDebt<'_> {
     pub(crate) fn native_allowance(&self, safe_point: u64) -> Option<crate::admission::Allowance> {
         let strict = match self.program.coverage {
             Coverage::Span => return None,
-            Coverage::NativeCompletion => false,
+            Coverage::NativeCompletion | Coverage::ConstructorPacket { .. } => false,
             Coverage::NativePacket(_) | Coverage::EventPacket(_) => true,
         };
         Some(crate::admission::Allowance {
@@ -186,10 +187,18 @@ impl ChargeProgram {
             Coverage::EventPacket(close) => {
                 event_packet::derive(exe, code, self.statement, self.range, close)?
             }
+            Coverage::ConstructorPacket { unpaid, quote } => event_packet::constructor::derive(
+                exe,
+                code,
+                self.statement,
+                self.range,
+                unpaid,
+                quote,
+            )?,
         };
         let native_depth = match self.coverage {
             Coverage::Span => None,
-            Coverage::EventPacket(_) => Some(0),
+            Coverage::EventPacket(_) | Coverage::ConstructorPacket { .. } => Some(0),
             Coverage::NativeCompletion => Some(native_completion::depth(
                 exe,
                 self.statement,

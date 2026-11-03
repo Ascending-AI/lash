@@ -29,6 +29,7 @@ impl Input<'_> {
     }
 }
 struct ReadStorage<'a> {
+    charges: Option<&'a room::charges::ChargeProgram>,
     value: Input<'a>,
     link: lash_kernel_value::content_ids::LinkId,
     owner: Owner,
@@ -66,7 +67,7 @@ impl BoundaryPreparation for ReadStorage<'_> {
             Input::Native(value) => value,
             Input::Literal(literal) => {
                 return Ok(Construction {
-                    charges: None,
+                    charges: self.charges,
                     value: ConstructionValue::Literal {
                         literal,
                         link: self.link,
@@ -143,7 +144,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         reg: u32,
         value: Value,
     ) -> Result<bool, Stop> {
-        self.source_input(frame, read, reg, Input::Native(value))
+        self.source_input(frame, read, reg, Input::Native(value), None)
     }
 
     pub(in crate::machine::islands::execute) fn source_literal(
@@ -152,8 +153,9 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         read: SourceRead,
         reg: u32,
         literal: &doc::Literal,
+        charges: &room::charges::ChargeProgram,
     ) -> Result<bool, Stop> {
-        self.source_input(frame, read, reg, Input::Literal(literal))
+        self.source_input(frame, read, reg, Input::Literal(literal), Some(charges))
     }
 
     fn source_input(
@@ -162,6 +164,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         read: SourceRead,
         reg: u32,
         value: Input<'_>,
+        charges: Option<&room::charges::ChargeProgram>,
     ) -> Result<bool, Stop> {
         let Some(statement_id) = frame.state.statement else {
             return Ok(false);
@@ -195,7 +198,13 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
         }
         // The original unpaid quote is a charge guard, never a memory price.
         // On a miss source replays that exact prefix before acquiring this root.
-        if !self.fits(read.quote()) {
+        let quote = match charges {
+            Some(charges) => charges.constructor_quote().ok_or_else(|| {
+                self.halt(malformed("literal has no canonical pending charge coverage").into())
+            })?,
+            None => read.quote(),
+        };
+        if !self.fits(quote) {
             return Err(self.at(read.unpaid()));
         }
         let Some(Some(site)) = stream.source_sites.get(read.pc() as usize) else {
@@ -294,6 +303,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                     allowance,
                 },
                 ReadStorage {
+                    charges,
                     value,
                     link: frame.state.callee.link,
                     owner: output,
@@ -313,6 +323,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             .map_err(|error| self.halt(error.into()))?;
         if !published {
             return Err(self.at(read.unpaid()));
+        }
+        #[cfg(test)]
+        if charges.is_some() {
+            super::super::super::compiled::constructor_debt_published(2);
         }
         #[cfg(any(test, feature = "testing"))]
         {

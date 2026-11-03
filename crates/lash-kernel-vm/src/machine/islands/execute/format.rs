@@ -10,7 +10,12 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         site: &sites::Make,
     ) -> Result<Next, Stop> {
-        if (site.replay_guard && (!self.swift || self.tight)) || !self.fits(site.ahead) {
+        if (site.replay_guard && (!self.swift || self.tight))
+            || !site
+                .charges
+                .constructor_quote()
+                .is_some_and(|quote| self.fits(quote))
+        {
             return Err(self.at(site.miss));
         }
         let before = self.transient;
@@ -38,7 +43,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         site: &sites::Record,
     ) -> Result<Next, Stop> {
-        if !self.fits(site.ahead) {
+        if !site
+            .charges
+            .constructor_quote()
+            .is_some_and(|quote| self.fits(quote))
+        {
             return Err(self.at(site.miss));
         }
         let before = self.transient;
@@ -66,7 +75,11 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         frame: &mut Values<'_, 'e>,
         site: &sites::Closure,
     ) -> Result<Next, Stop> {
-        if !self.fits(site.ahead) {
+        if !site
+            .charges
+            .constructor_quote()
+            .is_some_and(|quote| self.fits(quote))
+        {
             return Err(self.at(site.miss));
         }
         match self

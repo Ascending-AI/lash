@@ -194,7 +194,7 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 allowance,
             },
             crate::machine::source_publication::construction::storage::Construction {
-                charges: None,
+                charges: Some(&site.charges),
                 value: crate::machine::source_publication::construction::storage::ConstructionValue::Closure {
                     identity,
                     capture_names: target.captures.iter().map(|capture| target.slots[capture.inner as usize].name.clone()).collect(),
@@ -218,6 +218,10 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
                 *result = storage.value;
             },
         )?;
+        #[cfg(test)]
+        if published {
+            super::super::super::compiled::constructor_debt_published(1);
+        }
         #[cfg(any(test, feature = "testing"))]
         if published {
             crate::machine::islands::witness::closure_constructed();
