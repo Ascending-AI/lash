@@ -1,11 +1,11 @@
 //! An island's first frame uses the same detached parameters as nested calls.
 use super::*;
 use crate::admission::{Allowance, SourceResources};
-use lash_kernel_state::kernel_internals::logical::{FrameEvent, JournalEvent, Program};
+
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     Phase, Point,
-    publication::{Occurrence, Position as SourcePosition},
+    publication::{FrameEntry, Occurrence, Position as SourcePosition},
 };
 
 impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
@@ -40,6 +40,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             .filter_map(Value::handle)
             .chain(captured.iter().map(|(_, cell)| *cell))
             .collect::<Vec<_>>();
+        let frame_entry = FrameEntry::compile(self.exe, target.plan.code)
+            .map_err(|_| malformed("initial frame descriptor failed verification"))?;
         let parameters::Parameters {
             installation,
             bindings,
@@ -99,27 +101,25 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 },
             )
             .map_err(|_| malformed("initial packet frame frontier failed authentication"))?;
-        let program = Program::new(vec![JournalEvent {
-            inputs: inputs.to_vec(),
-            outputs,
-            entities,
-            frame: Some(FrameEvent::Enter {
-                task: self.task,
-                invocation: invocation.id(),
-            }),
-            ..Default::default()
-        }]);
-        let (mut registration, batch) = installation.into_parts();
-        let evaluated = program
-            .clone()
-            .evaluate(&ledger, registration.arena())
-            .and_then(|evaluated| {
-                evaluated.bind_dependencies(&ledger, registration.arena(), &dependencies)
-            })
-            .ok_or_else(|| malformed("initial packet frame dependencies are unavailable"))?;
-        let prepared = evaluated
-            .prepare(&ledger, registration, self.heap, program)
-            .map_err(unit::member_fault)?;
+        let Some((prepared, batch)) = frame_entry.prepare(
+            source,
+            target.link,
+            &frontier,
+            &invocation,
+            &ledger,
+            installation,
+            self.heap,
+            &arguments,
+            &bindings,
+            None,
+            inputs,
+            &outputs,
+            &entities,
+            &dependencies,
+        )?
+        else {
+            return Ok(None);
+        };
         let after = prepared.balance()?.total()?;
         let safe_point = self.charged;
         let allowance = Allowance {
@@ -143,7 +143,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let facts = resources
             .facts(&allowance)
             .ok_or_else(|| malformed("initial packet frame resource facts are unavailable"))?;
-        let Some(accepted) = prepared.admit(self.memory_bound) else {
+        let Ok(accepted) = prepared.admit(self.memory_bound) else {
             return Ok(None);
         };
         let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
@@ -153,7 +153,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let slab = &mut self.scratch.slab;
         let mut active = None;
         accepted.commit(|accepted| {
-            accepted.publish_materialized(&mut store.borrow_mut(), |arena, edits, _| {
+            accepted.publish(&mut store.borrow_mut(), |arena, edits| {
                 assert!(edits.is_empty());
                 batch.publish(arena);
                 let ranges = slab.open(

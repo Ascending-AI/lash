@@ -15,7 +15,7 @@ use lash_kernel_state::{
 };
 use std::collections::BTreeSet;
 mod control;
-pub(crate) use control::{ControlExit, ControlRoots};
+pub(crate) use control::{ControlExit, ControlRoots, FrameCaller, FrameEntry};
 mod departure;
 pub(crate) use departure::DepartureExit;
 mod exact;

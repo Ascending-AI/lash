@@ -1,5 +1,6 @@
 //! K-EVAL-008: a selected child transfers its existing value at the exact join.
 use super::*;
+mod frame;
 use crate::Machine;
 use crate::admission::{Allowance, SourceResources};
 use crate::compile::room::{self, ExitKind, Phase, Point, publication::*};
@@ -9,6 +10,7 @@ use lash_kernel_value::sites::{Site, Unit};
 use std::sync::Arc;
 
 pub(super) fn joins() {
+    frame::entries();
     runtime();
     let run = Embedder::new("main { return if(true, 7, 9) }");
     let (program, _) = run.program(false);
@@ -331,6 +333,22 @@ fn runtime() {
                 Step::Parked(_) => panic!("pure control fixture cannot park"),
             }
         };
+        let precise_frames: u64 = witness::prepared_frame_entries().iter().sum();
+        let packet_frames: u64 = witness::packet_frame_entries().iter().sum();
+        if bounds.charge_limit == crate::laws::embedder::ROOMY.charge_limit
+            && bounds.memory == crate::laws::embedder::ROOMY.memory
+            && bounds.call_depth == crate::laws::embedder::ROOMY.call_depth
+            && !cold
+        {
+            assert!(
+                if precise {
+                    precise_frames > 0
+                } else {
+                    packet_frames > 0
+                },
+                "certified frame entry actually executed: precise={precise_frames}, packet={packet_frames}"
+            );
+        }
         let counts = [
             witness::call_enters(),
             witness::precise_joins().iter().sum(),

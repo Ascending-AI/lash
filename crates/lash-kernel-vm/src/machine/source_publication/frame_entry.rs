@@ -1,7 +1,10 @@
 //! Canonical frame entry is an accepted prefix before any body suffix.
 mod caller;
 use super::*;
-use crate::compile::room::{Phase, Point, publication::Occurrence};
+use crate::compile::room::{
+    Phase, Point,
+    publication::{FrameCaller, FrameEntry, Occurrence},
+};
 use crate::compile::{CodeId, Executable, NestedCallee, NestedKind, StmtId};
 use crate::machine::{Eval, Frame, KernelMachine, SlotState, exec::ArgumentOwners, fault};
 use lash_kernel_doc::{
@@ -9,7 +12,7 @@ use lash_kernel_doc::{
     heap::{EntityId, FamilyId, Identity, PageValue},
 };
 use lash_kernel_state::kernel_internals::logical::{
-    FrameEvent, JournalEvent, Owner, PublicationValue as PV, Slot, VirtualBody, VirtualEntity,
+    Owner, PublicationValue as PV, Slot, VirtualBody, VirtualEntity,
 };
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 
@@ -107,6 +110,30 @@ impl KernelMachine {
             source
                 .first_event(&source.site.child(0))
                 .map_err(|_| malformed("frame body has no first source event"))?
+        };
+        let frame_entry = FrameEntry::compile(exe, call.code)
+            .map_err(|_| malformed("frame entry descriptor failed verification"))?;
+        let frame_caller = if let Some(statement) = call.awaited_by {
+            let outer = self.frame(task_id)?;
+            if let Some(act) = call.capture.or(outer.nested) {
+                let entry = &exe.statement(statement).0.nested[act.ix()];
+                Some(FrameCaller {
+                    source: Arc::clone(&exe.code(outer.code).source_room),
+                    invocation: outer
+                        .logical
+                        .as_ref()
+                        .ok_or_else(|| malformed("entry caller has no invocation"))?
+                        .invocation()
+                        .clone(),
+                    entry,
+                    callable: callee.map(|reg| self.regs[reg.ix()]),
+                    save: call.capture.is_some(),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
         };
         let Some(bank) = self.regs.prepare_frame_entry(
             call.args,
@@ -239,35 +266,26 @@ impl KernelMachine {
                 position,
             )
             .map_err(|_| malformed("entry frontier failed authentication"))?;
-        let program = Program::new(vec![JournalEvent {
-            frame: Some(FrameEvent::Enter {
-                task: task_id,
-                invocation: invocation.id(),
-            }),
-            inputs,
-            outputs,
-            entities,
-            ..Default::default()
-        }]);
-        let (mut registration, batch) = installation.into_parts();
-        let mut dependencies =
-            buffer(call.given + usize::from(callee.is_some()) + caller.roles().len())?;
-        dependencies.extend(bank.dependencies());
-        let evaluated = program
-            .clone()
-            .evaluate(&ledger, registration.arena())
-            .and_then(|evaluated| {
-                evaluated.bind_dependencies(&ledger, registration.arena(), &dependencies)
-            })
-            .ok_or_else(|| malformed("entry source dependencies are unavailable"))?;
-        let prepared = evaluated
-            .prepare(&ledger, registration, &self.heap, program)
-            .map_err(|error| match error {
-                lash_kernel_state::kernel_internals::logical::MemberFault::Heap(error) => error,
-                lash_kernel_state::kernel_internals::logical::MemberFault::Native(error) => {
-                    native_fault(error)
-                }
-            })?;
+        let dependencies: Vec<_> = bank.dependencies().collect();
+        let Some((prepared, batch)) = frame_entry.prepare(
+            &source,
+            frame.link,
+            &frontier,
+            &invocation,
+            &ledger,
+            installation,
+            &self.heap,
+            &arguments,
+            frame.slot_states(),
+            frame_caller.as_ref(),
+            &inputs,
+            &outputs,
+            &entities,
+            &dependencies,
+        )?
+        else {
+            return Ok(Some(frame));
+        };
         let mut memory = MemoryLimit::of(
             self.bounds.memory_meter,
             &mut self.bounds.memory,
@@ -322,13 +340,13 @@ impl KernelMachine {
             .ok_or_else(|| malformed("entry resource facts are absent"))?;
         let accepted = prepared
             .admit(limit)
-            .ok_or_else(|| malformed("entry peak passed its granted memory limit"))?;
+            .map_err(|_| malformed("entry peak passed its granted memory limit"))?;
         let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
             return Ok(Some(frame));
         };
         drop(ledger);
         accepted.commit(|accepted| {
-            accepted.publish_materialized(&mut store.borrow_mut(), |arena, edits, _| {
+            accepted.publish(&mut store.borrow_mut(), |arena, edits| {
                 assert!(edits.is_empty());
                 batch.publish(arena);
                 bank.publish();

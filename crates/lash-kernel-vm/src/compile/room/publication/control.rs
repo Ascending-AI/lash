@@ -1,5 +1,7 @@
 //! Source control boundaries retain cached source roles and publish final roots.
 use super::*;
+mod frame;
+pub(crate) use frame::{FrameCaller, FrameEntry};
 use logical::{BoundaryTransaction, Dependencies, Owner as Root, RootValue};
 
 #[derive(Default)]

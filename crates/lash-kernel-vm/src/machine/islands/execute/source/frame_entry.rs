@@ -1,14 +1,12 @@
-//! A complete packet callee and caller continuation install in one journal.
+//! A complete packet callee and caller continuation install in one source boundary.
 use super::*;
 use crate::admission::{Allowance, SourceResources};
 use crate::compile::{NestedCallee, NestedKind};
-use lash_kernel_state::kernel_internals::logical::{
-    FrameEvent, JournalEvent, Program, PublicationValue as PV,
-};
+use lash_kernel_state::kernel_internals::logical::PublicationValue as PV;
 use lash_kernel_value::tokens::{TokenCodec, TokenWriter, logical_digest};
 use room::{
     ExitKind, Phase, Point,
-    publication::{Occurrence, Position as SourcePosition},
+    publication::{FrameCaller, FrameEntry, Occurrence, Position as SourcePosition},
 };
 use std::sync::Arc;
 
@@ -105,7 +103,8 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let slots = caller_source
             .owner_slots()
             .map_err(|_| malformed("packet caller owners failed verification"))?;
-        let caller_invocation = caller.invocation.id();
+        let caller_identity = caller.invocation.clone();
+        let caller_invocation = caller_identity.id();
         let input_owner = |reg: u32| -> Result<Option<Owner>, HeapFault> {
             let Some((_, at)) = roles.iter().find(|(input, _)| input.0 == reg) else {
                 return Ok(None);
@@ -181,6 +180,16 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
             outputs.push((output, PV::Existing(input)));
             dependencies.extend(values.regs[role.reg.ix()].handle());
         }
+        let frame_caller = FrameCaller {
+            source: Arc::clone(caller_source),
+            invocation: caller_identity,
+            entry,
+            callable: matches!(entry.kind, NestedKind::Call(NestedCallee::Read))
+                .then(|| values.regs[site.reg as usize]),
+            save: true,
+        };
+        let frame_entry = FrameEntry::compile(self.exe, target.plan.code)
+            .map_err(|_| malformed("packet frame descriptor failed verification"))?;
         slab.reserve_call(target)?;
         callers.try_reserve(1).map_err(|_| HeapFault::Exhausted {
             resource: doc::heap::HostResource::StagingBytes,
@@ -252,27 +261,25 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                 },
             )
             .map_err(|_| malformed("packet entry frontier failed authentication"))?;
-        let program = Program::new(vec![JournalEvent {
-            inputs,
-            outputs,
-            entities,
-            frame: Some(FrameEvent::Enter {
-                task: self.task,
-                invocation: invocation.id(),
-            }),
-            ..Default::default()
-        }]);
-        let (mut registration, batch) = installation.into_parts();
-        let evaluated = program
-            .clone()
-            .evaluate(&ledger, registration.arena())
-            .and_then(|evaluated| {
-                evaluated.bind_dependencies(&ledger, registration.arena(), &dependencies)
-            })
-            .ok_or_else(|| malformed("packet entry dependencies are unavailable"))?;
-        let prepared = evaluated
-            .prepare(&ledger, registration, self.heap, program)
-            .map_err(unit::member_fault)?;
+        let Some((prepared, batch)) = frame_entry.prepare(
+            &source,
+            target.link,
+            &frontier,
+            &invocation,
+            &ledger,
+            installation,
+            self.heap,
+            &arguments,
+            &bindings,
+            Some(&frame_caller),
+            &inputs,
+            &outputs,
+            &entities,
+            &dependencies,
+        )?
+        else {
+            return Ok(false);
+        };
         let after = prepared.balance()?.total()?;
         let safe_point = self.charged;
         let allowance = Allowance {
@@ -296,7 +303,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         let facts = resources
             .facts(&allowance)
             .ok_or_else(|| malformed("packet entry resource facts are unavailable"))?;
-        let Some(accepted) = prepared.admit(self.memory_bound) else {
+        let Ok(accepted) = prepared.admit(self.memory_bound) else {
             return Ok(false);
         };
         let Some(accepted) = resources.admit_interval(&facts, &allowance, accepted)? else {
@@ -304,7 +311,7 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
         };
         drop(ledger);
         accepted.commit(|accepted| {
-            accepted.publish_materialized(&mut store.borrow_mut(), |arena, edits, _| {
+            accepted.publish(&mut store.borrow_mut(), |arena, edits| {
                 assert!(edits.is_empty());
                 batch.publish(arena);
                 let ranges = slab.call(active, target, continuation.args, captured);
