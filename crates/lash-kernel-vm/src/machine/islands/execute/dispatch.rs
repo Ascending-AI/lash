@@ -527,21 +527,6 @@ impl<'e, const OBSERVING: bool> Island<'e, OBSERVING> {
                     return Err(self.at_held(site.miss, site.reg, input));
                 };
             }
-            Opcode::Kind => {
-                let sites::Kind { site, src } = &code.sites.kind[packet.x as usize];
-                let value = if packet.mode == 0 {
-                    regs[*src as usize]
-                } else {
-                    let reads = &code.inputs[packet.y as usize];
-                    let mut values = [Value::Absent; 1];
-                    self.source_inputs(frame, reads, &mut values)?;
-                    values[0]
-                };
-                frame.regs[site.same.reg as usize] = self
-                    .retaining(&mut frame.state.transient, |island| {
-                        island.kind_test(site, value)
-                    })?;
-            }
             Opcode::Field => {
                 let (dst, field, miss) = (&packet.dst, &(packet.x as usize), &packet.y);
 

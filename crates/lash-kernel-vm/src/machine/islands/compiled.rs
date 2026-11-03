@@ -867,14 +867,6 @@ pub(super) fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSit
     Some(site)
 }
 
-/// A kind-pure pair of calls and its first general answer per kind.
-pub(crate) struct KindTest {
-    pub(super) kind: OperatorSite,
-    pub(super) same: OperatorSite,
-    pub(super) literal: Value,
-    pub(super) memo: crate::compile::kind_test::KindMemo,
-}
-
 #[cfg(test)]
 #[path = "compiled/repeat_laws.rs"]
 pub(crate) mod repeat_laws;

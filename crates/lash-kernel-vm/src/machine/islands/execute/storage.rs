@@ -95,8 +95,7 @@ impl Slab {
             | Opcode::CollectionReadSlot
             | Opcode::CollectionMerge
             | Opcode::CollectionMergeTail
-            | Opcode::ReturnLiteral
-            | Opcode::Kind => true,
+            | Opcode::ReturnLiteral => true,
             Opcode::Operator => {
                 let site = &code.sites.operator[packet.x as usize];
                 matches!(site.inputs, super::super::code::OperatorInputs::Scalar(_))

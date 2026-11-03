@@ -176,14 +176,6 @@ impl Lib {
             && self.arity == 2
     }
 
-    /// Whether it is `kind`, whose answer is a function of its operand's
-    /// value kind alone.
-    pub(crate) fn is_kind(&self) -> bool {
-        self.specialization.native.symbolic == Some(lash_kernel_doc::SymbolicNative::Kind)
-            && matches!(self.run, LibRun::Native { .. })
-            && self.arity == 1
-    }
-
     /// What a call of `list.len` charges, whose answer on a list is that
     /// list's length: a region reads it from the arena where the list is
     /// resident, as the native's own call reads it, and charges the units

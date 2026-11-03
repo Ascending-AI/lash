@@ -116,10 +116,6 @@ macro_rules! operations {
                 pub(in crate::machine::islands) site: NativeSite,
                 pub(in crate::machine::islands) args: Box<[u32]>,
             }
-            pub(in crate::machine::islands) struct Kind {
-                pub(in crate::machine::islands) site: Box<KindTest>,
-                pub(in crate::machine::islands) src: u32,
-            }
             pub(in crate::machine::islands) struct Heap {
                 pub(in crate::machine::islands) site: HeapSite,
                 pub(in crate::machine::islands) args: Box<[u32]>,
@@ -248,10 +244,6 @@ operations! {
         Native {
             site: NativeSite,
             inputs: NativeInputs,
-        }
-        Kind {
-            site: Box<KindTest>,
-            input: KindInput,
         }
     }
     hot_structs {
@@ -408,7 +400,7 @@ operations! {
                 src: u32,
             }
         }
-        [Kind kind] {
+        [] {
             Index index {
                 site: Option<crate::compile::ReadSite>,
                 dst: u32,
@@ -475,11 +467,6 @@ pub(crate) enum ScalarInputs {
 pub(crate) enum NativeInputs {
     Registers(Box<[u32]>),
     Source(Box<[Read]>),
-}
-
-pub(crate) enum KindInput {
-    Register(u32),
-    Source(Read),
 }
 
 /// Cold source roles are independent of the physical packet operands.
@@ -654,15 +641,6 @@ impl Code {
                 self.sites.native.push(sites::Native { site, args });
                 (Opcode::Native, x, reads)
             }
-            Op::Kind { site, input } => {
-                let (src, reads) = match input {
-                    KindInput::Register(src) => (src, None),
-                    KindInput::Source(read) => (read.reg(), Some(Box::new([read]) as Box<[Read]>)),
-                };
-                let x = u32::try_from(self.sites.kind.len()).ok()?;
-                self.sites.kind.push(sites::Kind { site, src });
-                (Opcode::Kind, x, reads)
-            }
             _ => unreachable!("only compiler input facts select an input mode"),
         };
         let (mode, y) = match reads {
@@ -701,7 +679,7 @@ impl Code {
                     Op::Local { .. } | Op::Session { .. } | Op::Field { .. } | Op::Index { .. } => {
                         Reason::ResidentRead
                     }
-                    Op::Operator { .. } | Op::Unit { .. } | Op::Kind { .. } => Reason::Operator,
+                    Op::Operator { .. } | Op::Unit { .. } => Reason::Operator,
                     Op::Native { .. } | Op::Heap { .. } => Reason::Native,
                     Op::Call { .. } => Reason::Call,
                     Op::Bind { .. } | Op::Write { .. } | Op::Store { .. } | Op::Publish { .. } => {

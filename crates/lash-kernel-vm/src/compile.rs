@@ -45,7 +45,6 @@ use crate::functions::{MachineFunction, machine_function, machine_name};
 pub(crate) mod expr;
 mod formula;
 pub(crate) mod islands;
-pub(crate) mod kind_test;
 mod library;
 pub(crate) use library::{Lib, LibRun, Resident};
 mod frame;

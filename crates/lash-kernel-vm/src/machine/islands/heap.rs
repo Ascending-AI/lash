@@ -29,41 +29,6 @@ impl From<bool> for Check {
 }
 
 impl<const OBSERVING: bool> Island<'_, OBSERVING> {
-    /// Keep the ordered event owner out of the scalar operator's live frame.
-    #[inline(never)]
-    pub(super) fn operator_heap(
-        &mut self,
-        site: &OperatorSite,
-        args: &[Value],
-        (before, counted): (u64, Option<usize>),
-    ) -> Answer {
-        let Some(answer) = self
-            .admits(site)
-            .then(|| {
-                let deepest = self.exe.lib(site.lib).prepared_depth(self.exe);
-                self.heap_answer(
-                    site.lib,
-                    args,
-                    Some(deepest),
-                    site.checked.into(),
-                    (before, self.accounting),
-                    counted,
-                )
-            })
-            .flatten()
-        else {
-            return Err(self.at_operands(site.pc, site.reg, args));
-        };
-        self.admit_operator(
-            site,
-            args,
-            answer.value,
-            answer.admission.end - self.charged - before,
-            (before, counted),
-        )?;
-        self.commit_heap(answer)
-    }
-
     /// Claim another physical window only while its bytes and the nursery
     /// fit the same fixed entry allowance, before counting its call.
     #[inline(always)]

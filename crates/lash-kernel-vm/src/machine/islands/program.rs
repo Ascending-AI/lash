@@ -2,7 +2,7 @@
 //! recursion survives compilation; live source registers accompany each exit.
 
 use super::*;
-use crate::machine::islands::code::{KindInput, NativeInputs, OperatorInputs, ScalarInputs};
+use crate::machine::islands::code::{NativeInputs, OperatorInputs, ScalarInputs};
 
 #[path = "program/accumulation.rs"]
 mod accumulation;
@@ -12,8 +12,6 @@ pub(crate) use format::Format;
 #[path = "program/numeric.rs"]
 mod numeric;
 pub(crate) use numeric::{CallInputs, Destination, Operand};
-#[path = "program/guarded.rs"]
-mod guarded;
 #[path = "program/merge.rs"]
 mod merge;
 use crate::compile::expr::{Arm, Callee, Make};
@@ -1032,7 +1030,6 @@ impl<'e> Build<'e> {
                 });
                 self.result(reg, &[value.reg]);
             }
-            Kind::Operator { lib, args, .. } if self.fused && self.kind(expr, *lib, args)? => {}
             Kind::Operator {
                 args,
                 lib,

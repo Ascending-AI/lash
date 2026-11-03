@@ -218,9 +218,6 @@ impl<'a> Watching<'a> {
         self.phase(Some(GuestPhase::Native(lib.0)));
     }
 
-    pub(crate) fn prepared(&self) {
-        self.fast.set(true);
-    }
     pub(crate) fn guard_work(&self, units: u64) {
         self.guard.set(units);
     }
@@ -354,7 +351,6 @@ impl crate::observe::NativeObservation for Watching<'_> {
 pub(super) trait Projection: crate::observe::NativeObservation {
     fn reset_facts(&self);
     fn general_formula(&self, charging: bool);
-    fn prepared(&self);
     fn statement(&self, exe: &Executable, fact: StatementFact, meters: (u64, u64));
     fn expressions(&self, stream: &Stream, close: &Close, charging: bool);
     fn empty(&self, exe: &Executable, block: BlockId);
@@ -377,9 +373,6 @@ impl Projection for Watching<'_> {
     fn general_formula(&self, charging: bool) {
         self.fast.set(false);
         self.formulas.set(u64::from(charging));
-    }
-    fn prepared(&self) {
-        Watching::prepared(self);
     }
     fn statement(&self, exe: &Executable, fact: StatementFact, meters: (u64, u64)) {
         Watching::statement(self, exe, fact, meters);

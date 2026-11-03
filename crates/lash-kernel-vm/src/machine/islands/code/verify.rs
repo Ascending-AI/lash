@@ -50,12 +50,6 @@ impl Closes for sites::Native {
     }
 }
 
-impl Closes for sites::Kind {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.site.verify(stream)
-    }
-}
-
 impl Closes for sites::Heap {
     fn verify(&self, stream: &Stream) -> Result<(), Refused> {
         self.site.verify(stream)
@@ -67,13 +61,6 @@ impl Closes for compiled::Format {
         self.join.verify(stream)?;
         self.append.verify(stream)?;
         self.write.verify(stream)
-    }
-}
-
-impl Closes for KindTest {
-    fn verify(&self, stream: &Stream) -> Result<(), Refused> {
-        self.kind.verify(stream)?;
-        self.same.verify(stream)
     }
 }
 
