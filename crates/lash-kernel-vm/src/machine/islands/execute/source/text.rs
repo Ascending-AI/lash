@@ -702,6 +702,11 @@ impl<const OBSERVING: bool> Island<'_, OBSERVING> {
             #[cfg(test)]
             super::super::super::TEXT_APPENDED.with(|n| n.set(n.get() + 1));
         }
+        #[cfg(any(test, feature = "testing"))]
+        {
+            crate::machine::islands::witness::native_text_published();
+            crate::machine::islands::witness::text_operation_published(false);
+        }
         witnessed!(TextAppend, Commit);
         Ok(Some(true))
     }
