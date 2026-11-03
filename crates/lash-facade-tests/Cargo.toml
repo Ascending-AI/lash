@@ -69,10 +69,6 @@ tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 
 [[test]]
-name = "facade_warm_admission"
-path = "tests/facade_warm_admission.rs"
-
-[[test]]
 name = "facade_provider"
 path = "tests/facade_provider.rs"
 

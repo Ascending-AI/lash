@@ -868,28 +868,27 @@ fn progress_emits_only_new_event_delta() {
         SessionHistoryRecord::Conversation(record)
             if record.role == MessageRole::Assistant
     ));
-}
 
-#[test]
-fn progress_without_new_events_emits_empty_delta() {
-    let mut machine = TurnMachine::new(
+    // A progress carry with no new events emits an empty delta.
+    let mut quiet = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
         lash_protocol_types::AppendVec::new(),
         0,
     );
-
-    let effects = drain_effects(&mut machine);
+    let effects = drain_effects(&mut quiet);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
-    machine.handle_response(Response::LlmComplete {
+    quiet.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse::default()),
     });
-
-    let effects = drain_effects(&mut machine);
-    let delta = progress_event_delta(&effects).expect("progress delta");
-    assert!(delta.is_empty());
+    let effects = drain_effects(&mut quiet);
+    assert!(
+        progress_event_delta(&effects)
+            .expect("progress delta")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1277,60 +1276,6 @@ fn provider_error_is_live_but_absent_from_the_input_journal() {
         effect,
         Effect::Emit(SessionStreamEvent::Error(ReportedFailure { message, .. })) if message.contains(SECRET)
     )));
-}
-
-/// The neighbouring failure reasons on the same error path did not move: only
-/// `ContextOverflow` is singled out, everything else still stops as
-/// `ProviderError`.
-#[test]
-fn non_overflow_llm_errors_still_stop_as_provider_error() {
-    for reason in [
-        LlmTerminalReason::ProviderError,
-        LlmTerminalReason::ContentFilter,
-        LlmTerminalReason::Unknown,
-        LlmTerminalReason::OutputLimit,
-    ] {
-        let config = test_config(Arc::new(ProseDriver));
-        let msgs = vec![user_message("hello")];
-        let mut machine = TurnMachine::new(config, msgs, lash_protocol_types::AppendVec::new(), 0);
-
-        let effects = drain_effects(&mut machine);
-        let llm_id = *find_llm_call(&effects).expect("llm call").0;
-        machine.handle_response(Response::LlmComplete {
-            id: llm_id,
-            text_streamed: false,
-            result: Err(LlmCallError {
-                message: "provider said no".to_string(),
-                retryable: false,
-                kind: lash_protocol_types::llm::types::ProviderFailureKind::Unknown,
-                raw: None,
-                code: None,
-                terminal_reason: reason,
-                request_body: None,
-                partial_response: None,
-            }),
-        });
-
-        let effects = drain_effects(&mut machine);
-        let outcomes = effects
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            outcomes,
-            vec![&TurnOutcome::Stopped(TurnStop::ProviderError {
-                cause: lash_protocol_types::TurnErrorCause::provider(
-                    lash_protocol_types::ProviderFailureKind::Unknown,
-                    reason,
-                    None
-                )
-            })],
-            "{reason:?} must still stop as ProviderError"
-        );
-    }
 }
 
 /// The neighbouring terminal reasons keep their existing mapping: only

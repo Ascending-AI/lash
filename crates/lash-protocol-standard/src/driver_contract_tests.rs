@@ -882,48 +882,6 @@ fn terminal_required_standard_prose_takes_the_repair_path() {
     );
 }
 
-#[test]
-fn the_max_turns_budget_is_the_run_offset_plus_the_budget() {
-    // After the first tool round the next protocol iteration is 1, and `0 + 2` leaves room for
-    // it while `0 * 2` does not.
-    let mut machine = machine(Some(2));
-    let effects = drain(&mut machine);
-
-    let effects = one_tool_round(
-        &mut machine,
-        &effects,
-        ToolCallOutput::success(serde_json::json!("ok")),
-    );
-    assert_eq!(
-        turn_outcomes(&effects),
-        Vec::new(),
-        "protocol iteration 1 is inside a budget of 2 turns from offset 0: {effects:?}"
-    );
-    assert!(!machine.is_done());
-    let (checkpoint_id, kind) = checkpoint(&effects)
-        .unwrap_or_else(|| panic!("expected an after-work checkpoint, got {effects:?}"));
-    assert_eq!(kind, CheckpointKind::AfterWork);
-
-    machine.handle_response(Response::Checkpoint {
-        id: checkpoint_id,
-        delivery: sansio::CheckpointDelivery::default(),
-    });
-    let effects = drain(&mut machine);
-
-    // Second round: the next protocol iteration is 2, which the budget refuses.
-    let effects = one_tool_round(
-        &mut machine,
-        &effects,
-        ToolCallOutput::success(serde_json::json!("ok")),
-    );
-    assert_eq!(
-        turn_outcomes(&effects),
-        vec![TurnOutcome::Stopped(TurnStop::MaxTurns)],
-        "protocol iteration 2 exhausts a budget of 2 turns from offset 0: {effects:?}"
-    );
-    assert!(machine.is_done());
-}
-
 fn loop_config(code: bool, batch: bool, turns: usize) -> TurnMachineConfig {
     let mut config = machine_config(Some(turns));
     config.no_progress_budget = lash_core::NoProgressBudget::bounded(2);

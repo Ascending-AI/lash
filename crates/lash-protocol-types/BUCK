@@ -144,63 +144,11 @@ lash_rust_unit_test(
         "src/workflow_site.rs",
     ],
     data_patterns = [],
-    data_exclude = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-types",
     package_name = "lash-internal-protocol-types",
     tags = [],
     version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "blake3_domains__test",
-    crate_features = [
-        "default",
-        "schema-validation",
-        "testing",
-    ],
-    crate_name = "blake3_domains",
-    crate_root = "tests/blake3_domains.rs",
-    declared_features = [
-        "default",
-        "schema-validation",
-        "synthetic-next",
-        "testing",
-    ],
-    srcs_patterns = [
-        "src/blake3_domains.rs",
-        "tests/blake3_domains.rs",
-    ],
-    data_patterns = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-protocol-types", "blake3_domains", "//crates/lash-protocol-types:blake3_domains__test"),
-    extra_compile_data = [
-        "//:workspace_rust_sources",
-    ],
-    library = ":lash-protocol-types",
-    library_crate_name = "lash_protocol_types",
-    manifest_dir = "crates/lash-protocol-types",
-    package_name = "lash-internal-protocol-types",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-protocol-types:test_batch"),
-    jobs = 2,
-    tests = [
-        ":blake3_domains__test",
-        ":lash-protocol-types__unit_test",
-    ],
 )
 
 filegroup(
@@ -235,72 +183,6 @@ load(
     "//tools/buck2:lash_rust.bzl",
     "lash_rust_feature_library",
     "lash_rust_feature_test",
-)
-
-lash_rust_feature_test(
-    name = "blake3_domains__test__fv_52968314",
-    crate_features = [],
-    crate_name = "blake3_domains",
-    crate_root = "tests/blake3_domains.rs",
-    declared_features = [
-        "default",
-        "schema-validation",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-protocol-types", "blake3_domains", "//crates/lash-protocol-types:blake3_domains__test__fv_52968314"),
-    data_patterns = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
-    extra_compile_data = [
-        "//:workspace_rust_sources",
-    ],
-    library = "//crates/lash-protocol-types:lash-protocol-types__fv_52968314",
-    library_crate_name = "lash_protocol_types",
-    manifest_dir = "crates/lash-protocol-types",
-    package_name = "lash-internal-protocol-types",
-    srcs_patterns = ["src/blake3_domains.rs", "tests/blake3_domains.rs"],
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_00a6ea0a"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "blake3_domains__test__fv_b7ccb0db",
-    crate_features = [
-        "synthetic-next",
-    ],
-    crate_name = "blake3_domains",
-    crate_root = "tests/blake3_domains.rs",
-    declared_features = [
-        "default",
-        "schema-validation",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-protocol-types", "blake3_domains", "//crates/lash-protocol-types:blake3_domains__test__fv_b7ccb0db"),
-    data_patterns = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
-    extra_compile_data = [
-        "//:workspace_rust_sources",
-    ],
-    library = "//crates/lash-protocol-types:lash-protocol-types__fv_b7ccb0db",
-    library_crate_name = "lash_protocol_types",
-    manifest_dir = "crates/lash-protocol-types",
-    package_name = "lash-internal-protocol-types",
-    srcs_patterns = ["src/blake3_domains.rs", "tests/blake3_domains.rs"],
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_00a6ea0a"},
-    version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
@@ -653,10 +535,6 @@ lash_rust_feature_test(
         "src/workflow_site.rs",
     ],
     data_patterns = [],
-    data_exclude = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-types",
     package_name = "lash-internal-protocol-types",
@@ -765,10 +643,6 @@ lash_rust_feature_test(
         "src/workflow_site.rs",
     ],
     data_patterns = [],
-    data_exclude = [
-        "src/**/*.rs",
-        "tests/**/*.rs",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-types",
     package_name = "lash-internal-protocol-types",

@@ -11,5 +11,3 @@ mod tool_check_control;
 mod workflow_reads;
 
 mod tool_intent_ingress;
-
-mod facade_construction;

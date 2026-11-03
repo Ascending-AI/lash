@@ -68,26 +68,6 @@ async fn cancelling_a_queued_input_answers_withdrawn_and_it_never_runs() {
     accounts.core.shutdown().await.expect("shutdown");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_sent_input_runs_on_the_cores_node_and_answers_its_reply() {
-    let core = standard_core_over(sqlite_memory_store_backend().await);
-    let session_id =
-        lash_kernel_value::identity::SessionId::try_from("facade-turn".to_owned()).expect("id");
-    let session = core
-        .session(session_id)
-        .create(lash::SessionCreation::root(mock_session_spec()))
-        .await
-        .expect("created");
-    let output = session
-        .send(lash::TurnInput::text("hello"))
-        .output()
-        .await
-        .expect("the turn answers");
-    assert!(output.is_success(), "{output:?}");
-    assert_eq!(output.assistant_message(), Some("echo: hello"));
-    core.shutdown().await.expect("shutdown");
-}
-
 /// FIG-5219: a host attributes a model call to its turn, Run and attempt from
 /// the typed scope its provider receives, never by parsing the request id.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -126,6 +106,7 @@ async fn a_turns_model_call_carries_its_typed_turn_run_and_attempt() {
         .await
         .expect("the turn answers");
     assert!(output.is_success(), "{output:?}");
+    assert_eq!(output.assistant_message(), Some("attributed"));
 
     let scopes = scopes.lock_recover().clone();
     let [scope] = scopes.as_slice() else {

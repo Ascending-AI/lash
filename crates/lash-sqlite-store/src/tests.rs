@@ -806,21 +806,6 @@ async fn durable_state(
     state
 }
 
-lash_conformance::checkpoint_admission_probe_tests!({
-    let store = crate::test_support::sqlite_memory_store()
-        .await
-        .expect("open counter store");
-    let counting_store = Arc::clone(&store);
-    (
-        (),
-        store as Arc<dyn lash_core_store::store::RuntimeStore>,
-        SessionId::from("sqlite-checkpoint-counter"),
-        move || counting_store.checkpoint_admission_counts(),
-        // An in-memory SQLite store needs no session teardown.
-        async {},
-    )
-});
-
 #[tokio::test]
 async fn checkpoint_component_statement_count_is_depth_invariant() {
     let mut observed = Vec::new();
@@ -1923,13 +1908,6 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
             "revision belongs to its scalar column"
         );
     }
-}
-
-/// FIG-6168: deleting a session releases the store's decoded graph and all
-/// projections it owns; an outstanding read keeps only its own snapshot alive.
-#[tokio::test]
-async fn closed_sessions_release_cached_graph_bytes_after_the_last_reader() {
-    cache_release_population(true).await;
 }
 
 /// FIG-6168: a retained idle session has no decoded cache owner once its

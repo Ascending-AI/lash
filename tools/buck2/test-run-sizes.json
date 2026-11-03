@@ -658,15 +658,6 @@
     "peak_bytes": 80891904,
     "samples": 14
   },
-  "//crates/lash-durable-test:first_party_tools__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.95,
-    "memory_kb": 262144,
-    "p95_cores": 1.26,
-    "p99_peak_bytes": 210128896,
-    "peak_bytes": 210128896,
-    "samples": 14
-  },
   "//crates/lash-durable-test:frame_switch_crash_proof__test": {
     "cpu_count": 3,
     "mean_cores": 2.87,
@@ -1241,15 +1232,6 @@
     "p95_cores": 2.09,
     "p99_peak_bytes": 426844160,
     "peak_bytes": 426844160,
-    "samples": 7
-  },
-  "//crates/lash-facade-tests:facade_warm_admission__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.96,
-    "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 36204544,
-    "peak_bytes": 36204544,
     "samples": 7
   },
   "//crates/lash-http-transport:lash-http-transport__unit_test": {
@@ -1852,15 +1834,6 @@
     "peak_bytes": 13352960,
     "samples": 3
   },
-  "//crates/lash-protocol-types:test_batch": {
-    "cpu_count": 1,
-    "mean_cores": 0.84,
-    "memory_kb": 262144,
-    "p95_cores": 1.01,
-    "p99_peak_bytes": 25358336,
-    "peak_bytes": 25358336,
-    "samples": 10
-  },
   "//crates/lash-provider-anthropic:charge_safety__test": {
     "cpu_count": 1,
     "memory_kb": 1048576,
@@ -2430,15 +2403,6 @@
     "peak_bytes": 411439104,
     "samples": 7
   },
-  "//crates/lash:attachments_evidence__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.96,
-    "memory_kb": 262144,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 12931072,
-    "peak_bytes": 12931072,
-    "samples": 7
-  },
   "//crates/lash:integration__test": {
     "cpu_count": 2,
     "mean_cores": 2.16,
@@ -2662,24 +2626,6 @@
     "p95_cores": 1.32,
     "p99_peak_bytes": 230821888,
     "peak_bytes": 230821888,
-    "samples": 7
-  },
-  "//crates/lash:processes_evidence_b__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.72,
-    "memory_kb": 262144,
-    "p95_cores": 0.98,
-    "p99_peak_bytes": 13672448,
-    "peak_bytes": 13672448,
-    "samples": 7
-  },
-  "//crates/lash:sessions_evidence__test": {
-    "cpu_count": 1,
-    "mean_cores": 0.0,
-    "memory_kb": 262144,
-    "p95_cores": 0.0,
-    "p99_peak_bytes": 13668352,
-    "peak_bytes": 13668352,
     "samples": 7
   },
   "//crates/lash:workflow_laws__test": {

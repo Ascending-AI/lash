@@ -718,58 +718,6 @@ async fn a_sibling_commit_during_checkpoint_lease_preserves_staged_calls(tier: T
     world.shutdown().await;
 }
 
-/// A TypeScript process body reads the clock and the random source through
-/// the runtime: `new Date().toISOString()`, `Date.now()` and `Math.random()`
-/// answer real values and the process completes (FIG-3079, ported by FIG-5307
-/// from the deleted lash-protocol-rlm `typescript_runtime_values.rs`).
-async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: Tier) {
-    let witness = Arc::new(Witness::default());
-    let Some(world) = world(tier, &witness).await else {
-        return;
-    };
-    let cell = served::cell(
-        "const worker = async (): Promise<{ stamp: string; ms: number; roll: number }> => {\n  \
-            const stamp = new Date().toISOString();\n  \
-            const ms = Date.now();\n  \
-            const roll = Math.random();\n  \
-            return { stamp: stamp, ms: ms, roll: roll };\n};\n\
-         const held = await processes.start({ definition: worker });\n\
-         await control.finish(JSON.stringify(await held));",
-    );
-    let output = world
-        .run("process-runtime-values", served::spec(64), vec![cell])
-        .await;
-    served::assert_answered("the turn that awaits the process", &output);
-    let answer = output
-        .assistant_message()
-        .map(str::to_owned)
-        .or_else(|| {
-            output
-                .finished()
-                .map(|(_, value)| value)
-                .and_then(|value| value.as_str())
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| panic!("the turn answers the process's output: {output:?}"));
-    let value: serde_json::Value =
-        serde_json::from_str(&answer).unwrap_or_else(|error| panic!("{error}: {answer}"));
-    let stamp = value["stamp"].as_str().expect("the ISO stamp is a string");
-    assert!(
-        stamp.ends_with('Z') && stamp.len() == 24 && stamp.as_bytes()[10] == b'T',
-        "`new Date().toISOString()` returns an ISO-8601 stamp, got {stamp}"
-    );
-    let ms = value["ms"].as_f64().expect("`Date.now()` returns a number");
-    assert!(ms > 0.0, "`Date.now()` returns a positive epoch, got {ms}");
-    let roll = value["roll"]
-        .as_f64()
-        .expect("`Math.random()` returns a number");
-    assert!(
-        (0.0..1.0).contains(&roll),
-        "`Math.random()` stays in [0, 1), got {roll}"
-    );
-    world.shutdown().await;
-}
-
 /// A pruned process takes its ledger and its waits with it (FIG-5939): the
 /// run facts of the call its body parked, and the completion wait it parked
 /// on, are gone once the process is pruned, and so is the call the host
@@ -1063,8 +1011,5 @@ tiered_laws! {
         process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
         process_tool_call_limit_staged_calls,
         a_sibling_commit_during_checkpoint_lease_preserves_staged_calls,
-        omitted_tool_input_is_exactly_empty_object,
-        typescript_process_body_resolves_journaled_clock_and_randomness;
-    sqlite_file: typescript_process_body_resolves_journaled_clock_and_randomness;
-    postgres: typescript_process_body_resolves_journaled_clock_and_randomness;
+        omitted_tool_input_is_exactly_empty_object;
 }

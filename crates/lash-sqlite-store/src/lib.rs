@@ -227,10 +227,6 @@ pub struct SqliteStore {
     clock: Arc<dyn lash_core_ids::clock::Clock>,
     options: StoreOptions,
     commit_count: AtomicU64,
-    #[cfg(test)]
-    checkpoint_probe_count: AtomicUsize,
-    #[cfg(test)]
-    checkpoint_write_transaction_count: AtomicUsize,
 }
 
 impl SqliteStore {

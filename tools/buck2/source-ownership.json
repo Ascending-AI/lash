@@ -5,9 +5,6 @@
         "tests/artifact_referrers_evidence.rs",
         "tests/artifact_referrers_evidence/fixture.rs"
       ],
-      "attachments_evidence": [
-        "tests/attachments_evidence.rs"
-      ],
       "integration": [
         "tests/integration.rs",
         "tests/integration/embed_plugins.rs",
@@ -39,12 +36,6 @@
       ],
       "processes_evidence": [
         "tests/processes_evidence.rs"
-      ],
-      "processes_evidence_b": [
-        "tests/processes_evidence_b.rs"
-      ],
-      "sessions_evidence": [
-        "tests/sessions_evidence.rs"
       ],
       "ui": [
         "tests/ui.rs",
@@ -106,9 +97,6 @@
     ],
     "derive_tests": true,
     "test_includes": {
-      "otel_trace_evidence": [
-        "docs/instrumentation-contract.md"
-      ],
       "workflow_laws": [
         "tests/workflow_laws/fixtures/canvas-insert-request.json",
         "tests/workflow_laws/fixtures/information-create-request.json"
@@ -386,12 +374,6 @@
         "tests/support/dialect_store.rs",
         "tests/support/matrix.rs",
         "tests/support/scripted_steps.rs",
-        "tests/support/sim.rs"
-      ],
-      "first_party_tools": [
-        "tests/first_party_tools.rs",
-        "tests/support/packages.rs",
-        "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
       "frame_switch_crash_proof": [
@@ -1021,11 +1003,6 @@
   },
   "crates/lash-facade-tests": {
     "tests": {
-      "facade_warm_admission": [
-        "tests/facade_warm_admission.rs",
-        "tests/facade_warm_admission/tests/mod.rs",
-        "tests/facade_warm_admission/tests/warm_admission.rs"
-      ],
       "facade_provider": [
         "tests/facade_provider.rs",
         "tests/facade_provider/tests/direct_completion.rs",
@@ -1073,7 +1050,6 @@
       "facade_process": [
         "tests/facade_process.rs",
         "tests/facade_process/tests/aggregate_await_comprehension.rs",
-        "tests/facade_process/tests/facade_construction.rs",
         "tests/facade_process/tests/mod.rs",
         "tests/facade_process/tests/node_drain.rs",
         "tests/facade_process/tests/process_start_input.rs",
@@ -1116,7 +1092,6 @@
       ],
       "facade_tracing": [
         "tests/facade_tracing.rs",
-        "tests/facade_tracing/tests/facade_construction.rs",
         "tests/facade_tracing/tests/mod.rs",
         "tests/facade_tracing/tests/trace_call_ids.rs",
         "tests/facade_tracing/tests/trace_cells.rs",
@@ -1143,18 +1118,8 @@
   },
   "crates/lash-protocol-types": {
     "derive_tests": true,
-    "test_data": {
-      "blake3_domains": [
-        "src/**/*.rs",
-        "tests/**/*.rs"
-      ]
-    },
-    "tests": {
-      "blake3_domains": [
-        "src/blake3_domains.rs",
-        "tests/blake3_domains.rs"
-      ]
-    },
+    "test_data": {},
+    "tests": {},
     "test_includes": {},
     "test_input_fallbacks": {},
     "unit_test_sources": [

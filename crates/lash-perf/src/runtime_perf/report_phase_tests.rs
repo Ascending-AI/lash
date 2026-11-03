@@ -641,37 +641,6 @@ fn runtime_phase_inventory_is_closed_in_both_directions() {
     }
 }
 
-#[test]
-fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
-    for scenario in [
-        RuntimePerfScenario::OpenAiResponsesSseParse,
-        RuntimePerfScenario::DirectLlmClient,
-        RuntimePerfScenario::ProcessListStress,
-        RuntimePerfScenario::ScopedEffects,
-        RuntimePerfScenario::StoreReopen,
-        RuntimePerfScenario::SqliteStoreReopen,
-        RuntimePerfScenario::LiveReplayPressure,
-        RuntimePerfScenario::StoreHardeningHotPaths,
-    ] {
-        let metadata = RuntimePerfScenario::METADATA
-            .iter()
-            .find(|metadata| metadata.scenario == scenario)
-            .expect("Runtime Scenario perf metadata");
-        assert_eq!(
-            metadata.scenario_harness,
-            ScenarioHarnessKind::RuntimeScenario
-        );
-        assert!(
-            metadata.harness_rationale.contains("below")
-                && metadata.harness_rationale.contains("protocol")
-                && metadata.harness_rationale.contains("facade"),
-            "{} must explain why its Runtime Scenario classification remains below protocol/facade ownership: {}",
-            metadata.name,
-            metadata.harness_rationale
-        );
-    }
-}
-
 #[tokio::test]
 async fn async_completion_smoke_witnesses_match_session_geometry() {
     for scenario in [

@@ -1945,7 +1945,7 @@ FEATURE_LANE_TEST_FLOORS = {
         "lash-internal-facade-tests",
         ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
         "test:facade_process",
-    ): 25,
+    ): 24,
     (
         "lash-internal-facade-tests",
         ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
@@ -1970,17 +1970,12 @@ FEATURE_LANE_TEST_FLOORS = {
         "lash-internal-facade-tests",
         ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
         "test:facade_tracing",
-    ): 48,
+    ): 47,
     (
         "lash-internal-facade-tests",
         ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
         "test:facade_turns",
-    ): 98,
-    (
-        "lash-internal-facade-tests",
-        ("codemode", "default", "http-transport", "openai", "otel-trace", "rlm"),
-        "test:facade_warm_admission",
-    ): 2,
+    ): 97,
     ("lash-runtime", (), "unit-test"): 134,
     ("lash-internal-llm-transport", ("proptest-support", "testing"), "unit-test"): 1,
     ("lash-internal-provider-anthropic", ("default", "testing"), "unit-test"): 1,

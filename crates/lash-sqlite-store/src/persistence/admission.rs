@@ -35,17 +35,9 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
     store: &crate::SqliteStore,
     request: &CheckpointAdmissionRequest,
 ) -> Result<CheckpointAdmission, StoreError> {
-    #[cfg(test)]
-    store
-        .checkpoint_probe_count
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if !checkpoint_work_pending_sqlite(&store.conn, request).await? {
         return Ok(CheckpointAdmission::default());
     }
-    #[cfg(test)]
-    store
-        .checkpoint_write_transaction_count
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let request = request.clone();
     store
         .conn

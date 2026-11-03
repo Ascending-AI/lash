@@ -675,16 +675,6 @@
     "peak_bytes": 112128000,
     "samples": 116
   },
-  "lash-internal-durable-test/first_party_tools": {
-    "cpu_count": 1,
-    "cpu_samples": 115,
-    "mean_cores": 0.96,
-    "memory_kb": 786432,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 114774016,
-    "peak_bytes": 114798592,
-    "samples": 115
-  },
   "lash-internal-durable-test/frame_switch_crash_proof": {
     "cpu_count": 1,
     "cpu_samples": 115,
@@ -1225,16 +1215,6 @@
     "peak_bytes": 272752640,
     "samples": 113
   },
-  "lash-internal-facade-tests/facade_warm_admission": {
-    "cpu_count": 1,
-    "cpu_samples": 39,
-    "mean_cores": 0.85,
-    "memory_kb": 786432,
-    "p95_cores": 0.98,
-    "p99_peak_bytes": 57765888,
-    "peak_bytes": 57765888,
-    "samples": 39
-  },
   "lash-internal-facade-tests/lash_facade_tests": {
     "cpu_count": 1,
     "cpu_samples": 114,
@@ -1514,16 +1494,6 @@
     "p99_peak_bytes": 77533184,
     "peak_bytes": 77533184,
     "samples": 65
-  },
-  "lash-internal-protocol-types/blake3_domains": {
-    "cpu_count": 1,
-    "cpu_samples": 32,
-    "mean_cores": 0.85,
-    "memory_kb": 786432,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 36728832,
-    "peak_bytes": 36728832,
-    "samples": 32
   },
   "lash-internal-protocol-types/lash_protocol_types": {
     "cpu_count": 1,
@@ -2225,16 +2195,6 @@
     "peak_bytes": 133234688,
     "samples": 111
   },
-  "lash-runtime/attachments_evidence": {
-    "cpu_count": 1,
-    "cpu_samples": 30,
-    "mean_cores": 0.84,
-    "memory_kb": 524288,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 46104576,
-    "peak_bytes": 46104576,
-    "samples": 30
-  },
   "lash-runtime/generated_source": {
     "cpu_count": 1,
     "cpu_samples": 52,
@@ -2314,26 +2274,6 @@
     "p99_peak_bytes": 106274816,
     "peak_bytes": 106610688,
     "samples": 116
-  },
-  "lash-runtime/processes_evidence_b": {
-    "cpu_count": 1,
-    "cpu_samples": 35,
-    "mean_cores": 0.87,
-    "memory_kb": 524288,
-    "p95_cores": 1.01,
-    "p99_peak_bytes": 44732416,
-    "peak_bytes": 44732416,
-    "samples": 35
-  },
-  "lash-runtime/sessions_evidence": {
-    "cpu_count": 1,
-    "cpu_samples": 35,
-    "mean_cores": 0.84,
-    "memory_kb": 524288,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 49811456,
-    "peak_bytes": 49811456,
-    "samples": 35
   },
   "lash-runtime/ui": {
     "cpu_count": 1,

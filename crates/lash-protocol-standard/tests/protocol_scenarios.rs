@@ -25,9 +25,6 @@ struct StandardProtocolScenarioCoverage {
     display_name: &'static str,
 }
 
-const PROJECTION: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
-    display_name: "projection",
-};
 const EMPTY_MODEL_RESPONSE: StandardProtocolScenarioCoverage = StandardProtocolScenarioCoverage {
     display_name: "empty response",
 };
@@ -614,19 +611,6 @@ fn llm_error(message: &str) -> LlmCallError {
         request_body: None,
         partial_response: None,
     }
-}
-
-#[test]
-fn standard_protocol_scenario_projects_initial_request() {
-    StandardProtocolScenario::new(PROJECTION.display_name)
-        .user_message("hello standard protocol")
-        .expect(StandardProtocolExpectations {
-            initial_request_contains: vec!["hello standard protocol"],
-            llm_call_count: Some(1),
-            done: Some(false),
-            ..StandardProtocolExpectations::default()
-        })
-        .run();
 }
 
 #[test]

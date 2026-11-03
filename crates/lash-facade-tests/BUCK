@@ -121,7 +121,6 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/facade_process.rs",
         "tests/facade_process/tests/aggregate_await_comprehension.rs",
-        "tests/facade_process/tests/facade_construction.rs",
         "tests/facade_process/tests/mod.rs",
         "tests/facade_process/tests/node_drain.rs",
         "tests/facade_process/tests/process_start_input.rs",
@@ -358,7 +357,6 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/facade_tracing.rs",
-        "tests/facade_tracing/tests/facade_construction.rs",
         "tests/facade_tracing/tests/mod.rs",
         "tests/facade_tracing/tests/trace_call_ids.rs",
         "tests/facade_tracing/tests/trace_cells.rs",
@@ -429,46 +427,6 @@ lash_rust_integration_test(
         "tests/facade_turns/tests/turn_checkpoints.rs",
     ],
     exec_properties = sized_exec_properties("lash-internal-facade-tests", "facade_turns", "//crates/lash-facade-tests:facade_turns__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = ":lash-facade-tests",
-    library_crate_name = "lash_facade_tests",
-    manifest_dir = "crates/lash-facade-tests",
-    package_name = "lash-internal-facade-tests",
-    rustc_env = {},
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
-    name = "facade_warm_admission__test",
-    crate_features = [
-        "codemode",
-        "default",
-        "http-transport",
-        "openai",
-        "otel-trace",
-        "rlm",
-    ],
-    crate_name = "facade_warm_admission",
-    crate_root = "tests/facade_warm_admission.rs",
-    declared_features = [
-        "codemode",
-        "default",
-        "http-transport",
-        "openai",
-        "otel-trace",
-        "rlm",
-    ],
-    srcs_patterns = [
-        "tests/facade_warm_admission.rs",
-        "tests/facade_warm_admission/tests/mod.rs",
-        "tests/facade_warm_admission/tests/warm_admission.rs",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-facade-tests", "facade_warm_admission", "//crates/lash-facade-tests:facade_warm_admission__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -605,7 +563,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_facade_tests",
     manifest_dir = "crates/lash-facade-tests",
     package_name = "lash-internal-facade-tests",
-    srcs_patterns = ["tests/facade_process.rs", "tests/facade_process/tests/aggregate_await_comprehension.rs", "tests/facade_process/tests/facade_construction.rs", "tests/facade_process/tests/mod.rs", "tests/facade_process/tests/node_drain.rs", "tests/facade_process/tests/process_start_input.rs", "tests/facade_process/tests/protocol_effects.rs", "tests/facade_process/tests/session_turn_process.rs", "tests/facade_process/tests/tool_check_control.rs", "tests/facade_process/tests/tool_intent_ingress.rs", "tests/facade_process/tests/workflow_reads.rs"],
+    srcs_patterns = ["tests/facade_process.rs", "tests/facade_process/tests/aggregate_await_comprehension.rs", "tests/facade_process/tests/mod.rs", "tests/facade_process/tests/node_drain.rs", "tests/facade_process/tests/process_start_input.rs", "tests/facade_process/tests/protocol_effects.rs", "tests/facade_process/tests/session_turn_process.rs", "tests/facade_process/tests/tool_check_control.rs", "tests/facade_process/tests/tool_intent_ingress.rs", "tests/facade_process/tests/workflow_reads.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -800,7 +758,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_facade_tests",
     manifest_dir = "crates/lash-facade-tests",
     package_name = "lash-internal-facade-tests",
-    srcs_patterns = ["tests/facade_tracing.rs", "tests/facade_tracing/tests/facade_construction.rs", "tests/facade_tracing/tests/mod.rs", "tests/facade_tracing/tests/trace_call_ids.rs", "tests/facade_tracing/tests/trace_cells.rs", "tests/facade_tracing/tests/trace_detail.rs", "tests/facade_tracing/tests/trace_emission.rs", "tests/facade_tracing/tests/trace_enrichment.rs", "tests/facade_tracing/tests/trace_extension.rs", "tests/facade_tracing/tests/trace_nesting.rs", "tests/facade_tracing/tests/trace_parentage.rs", "tests/facade_tracing/tests/trace_policy.rs", "tests/facade_tracing/tests/trace_sampling.rs", "tests/facade_tracing/tests/trace_terminals.rs", "tests/facade_tracing/tests/tracing.rs"],
+    srcs_patterns = ["tests/facade_tracing.rs", "tests/facade_tracing/tests/mod.rs", "tests/facade_tracing/tests/trace_call_ids.rs", "tests/facade_tracing/tests/trace_cells.rs", "tests/facade_tracing/tests/trace_detail.rs", "tests/facade_tracing/tests/trace_emission.rs", "tests/facade_tracing/tests/trace_enrichment.rs", "tests/facade_tracing/tests/trace_extension.rs", "tests/facade_tracing/tests/trace_nesting.rs", "tests/facade_tracing/tests/trace_parentage.rs", "tests/facade_tracing/tests/trace_policy.rs", "tests/facade_tracing/tests/trace_sampling.rs", "tests/facade_tracing/tests/trace_terminals.rs", "tests/facade_tracing/tests/tracing.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",
@@ -840,45 +798,6 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash-facade-tests",
     package_name = "lash-internal-facade-tests",
     srcs_patterns = ["tests/facade_turns.rs", "tests/facade_turns/tests/agent_scenarios.rs", "tests/facade_turns/tests/cell_budget.rs", "tests/facade_turns/tests/cell_call_feedback.rs", "tests/facade_turns/tests/cell_race_loser.rs", "tests/facade_turns/tests/discovery_execution.rs", "tests/facade_turns/tests/facade_turn.rs", "tests/facade_turns/tests/mod.rs", "tests/facade_turns/tests/replay_origin.rs", "tests/facade_turns/tests/response_phase_replay.rs", "tests/facade_turns/tests/run_effects.rs", "tests/facade_turns/tests/session_cancel_loop.rs", "tests/facade_turns/tests/session_cancel_without_provider.rs", "tests/facade_turns/tests/standard_protocol_turns.rs", "tests/facade_turns/tests/store_faults.rs", "tests/facade_turns/tests/turn_cancel_modes.rs", "tests/facade_turns/tests/turn_cancel_waits.rs", "tests/facade_turns/tests/turn_checkpoints.rs"],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_23ce4a13", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_16275bb3", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_0ad69855", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_04159ee4", "//crates/lash-kernel-engine:lash-kernel-engine": "//crates/lash-kernel-engine:lash-kernel-engine__fv_ae21bb51", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_361a4f9a", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_e27e8213", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_ad247be4", "//crates/lash-plugin-mcp:lash-plugin-mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp__fv_b0a9a228", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_2255bab8", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_aa78c64d", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_c4e4e202", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_5536d0b6", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_50293035", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_8b4d3333", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_63c3cf6b", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_25b61542", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_6fcbae7c", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d42f7d63", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_5bbf8dcd", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_5efe86c7", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_b5165923", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_4c19bb07", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_0f61e28e", "//crates/lash:lash": "//crates/lash:lash__fv_5436520a"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_test(
-    name = "facade_warm_admission__test__fv_1a0bed29",
-    crate_features = [
-        "codemode",
-        "default",
-        "http-transport",
-        "openai",
-        "otel-trace",
-        "rlm",
-    ],
-    crate_name = "facade_warm_admission",
-    crate_root = "tests/facade_warm_admission.rs",
-    declared_features = [
-        "codemode",
-        "default",
-        "http-transport",
-        "openai",
-        "otel-trace",
-        "rlm",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-facade-tests", "facade_warm_admission", "//crates/lash-facade-tests:facade_warm_admission__test__fv_1a0bed29"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    library = "//crates/lash-facade-tests:lash-facade-tests__fv_1a0bed29",
-    library_crate_name = "lash_facade_tests",
-    manifest_dir = "crates/lash-facade-tests",
-    package_name = "lash-internal-facade-tests",
-    srcs_patterns = ["tests/facade_warm_admission.rs", "tests/facade_warm_admission/tests/mod.rs", "tests/facade_warm_admission/tests/warm_admission.rs"],
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [
         "feature-lane",

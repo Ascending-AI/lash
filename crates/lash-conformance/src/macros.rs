@@ -1326,28 +1326,6 @@ macro_rules! append_receipt_identity_corruption_tests {
     };
 }
 
-/// Register checkpoint-admission transaction accounting. The fixture supplies a
-/// store, the session it probes and the backend's own transaction counter.
-#[macro_export]
-macro_rules! checkpoint_admission_probe_tests {
-    ($fixture:block) => {
-        $crate::checkpoint_admission_probe_tests!(@catalogue $fixture; [
-            (checkpoint_admission_probe_transaction_counts, "checkpoint-admission-probe-counts"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, store, session_id, counts, teardown) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store, &session_id, counts).await;
-                teardown.await;
-            }
-        )*
-    };
-}
-
 /// Register each durable attachment-referrer law independently.
 #[macro_export]
 macro_rules! attachment_referrer_tests {

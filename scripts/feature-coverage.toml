@@ -692,7 +692,6 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_streaming", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_tracing", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_turns", "--no-default-features", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_warm_admission", "--no-default-features", "--locked"],
 ]
 
 # FIG-7153: the format carry law retains the previous kernel's exact Link code.

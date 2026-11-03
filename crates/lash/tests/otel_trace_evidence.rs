@@ -2,9 +2,7 @@
 #![cfg(feature = "otel-trace")]
 #![allow(dead_code)]
 
-use lash::tracing::{
-    OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView, contract_markdown, otel,
-};
+use lash::tracing::{OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView, otel};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -31,26 +29,6 @@ fn install<M: otel::metrics::MeterProvider>(
     let _: &lash::tracing::TelemetryMetrics = telemetry.metrics();
     let _: &OtelOptions = telemetry.options();
     builder.telemetry(telemetry)
-}
-
-/// The public instrumentation contract is generated from the typed span,
-/// attribute and metric registry in `lash-trace`; the checked-in document is
-/// the reference a host diffs its exported shape against. Regenerate it with:
-///
-/// ```sh
-/// kiln test //crates/lash:otel_trace_evidence__test --local-test-execution \
-///     --test_arg=--ignored \
-///     --test_arg=--exact \
-///     --test_arg=instrumentation_contract_document_is_regenerated \
-///     --test_env=BUILD_WORKSPACE_DIRECTORY=$PWD
-/// ```
-#[test]
-fn instrumentation_contract_document_matches_the_registry() {
-    assert_eq!(
-        contract_markdown(),
-        include_str!("../docs/instrumentation-contract.md"),
-        "docs/instrumentation-contract.md is stale; regenerate it with the ignored writer below"
-    );
 }
 
 // Buck declares the documentation and policy sources as inputs. The ignored

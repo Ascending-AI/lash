@@ -1218,11 +1218,12 @@ async fn a_run_reverting_to_base_clears_its_overlay_body(tier: Tier) {
 
 tiered_laws!(
     current_thread:
-    a_run_reverting_to_base_clears_its_overlay_body,
-    an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_lost_write,
-    an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit,
-    a_cells_pruned_calls_keep_their_changes_across_every_lost_write,
-    a_cells_pruned_calls_keep_their_changes_across_every_unseen_commit,
-    a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,
-    a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it,
+    sqlite_memory:
+        a_run_reverting_to_base_clears_its_overlay_body,
+        an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_lost_write,
+        an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_unseen_commit,
+        a_cells_pruned_calls_keep_their_changes_across_every_lost_write,
+        a_cells_pruned_calls_keep_their_changes_across_every_unseen_commit,
+        a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,
+        a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it,
 );

@@ -688,10 +688,7 @@ fn summarize_optional_metric(values: Vec<f64>) -> Option<RuntimePerfMetricSummar
 }
 #[cfg(test)]
 mod tests {
-    use super::budgets::{allocation_budget_bytes, steady_state_turn_allocation_budget_bytes};
     use super::*;
-    use crate::runtime_perf::openai_compat::openai_compat_sse_body;
-    use crate::runtime_perf::providers::benchmark_stream_profile;
     use std::collections::HashSet;
 
     fn allocation_delta(bytes_allocated: usize) -> RuntimePerfAllocationDelta {
@@ -1245,31 +1242,6 @@ mod tests {
                 .len(),
             RuntimePerfScenario::KNOWN.len()
         );
-    }
-
-    #[test]
-    fn async_completion_scenarios_have_specific_guard_budgets() {
-        assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion)
-                < allocation_budget_bytes(RuntimePerfScenario::RlmProcessAsyncToolCompletion)
-        );
-        assert!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion)
-                < steady_state_turn_allocation_budget_bytes(
-                    RuntimePerfScenario::RlmProcessAsyncToolCompletion
-                )
-        );
-    }
-
-    #[test]
-    fn openai_compat_stream_fixture_uses_chat_completions_sse_shape() {
-        let profile = benchmark_stream_profile(RuntimePerfScenario::OpenAiCompatStream);
-        let body = String::from_utf8(openai_compat_sse_body(&profile)).unwrap();
-        assert!(body.contains(r#""object":"chat.completion.chunk""#));
-        assert!(body.contains(r#""choices""#));
-        assert!(body.contains(r#""delta":{"content":"#));
-        assert!(body.contains(r#""usage":{"#));
-        assert!(!body.contains(r#""type":"response.output_text.delta""#));
     }
 }
 

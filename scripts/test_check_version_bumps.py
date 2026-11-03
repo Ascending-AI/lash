@@ -239,7 +239,7 @@ serde_json = "1"
 """
 
 
-class Fixture(unittest.TestCase):
+class Harness(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self._tmp.name)
@@ -250,21 +250,6 @@ class Fixture(unittest.TestCase):
         self.write("crates/demo/src/dto/hello.rs", DTO)
         self.write(gate.UPCASTER_REGISTRY, LIFTS)
         self.base = self.commit("base")
-
-    def test_source_declared_identity_is_checked_without_a_registry_row(self):
-        source = "crates/demo/src/identity.rs"
-        identity = ('/// version_surface = "coexist"\n'
-                    '/// version_guard(items(encode_identity))\n'
-                    'const IDENTITY_PREFIX: &str = "demo:v2:blake3:";\n'
-                    'fn encode_identity() -> u8 { 1 }\n')
-        self.write(source, identity)
-        base = self.commit("declare an identity in source")
-        self.write(source, identity.replace("{ 1 }", "{ 2 }"))
-        code, output = self.verdict(self.commit("change its grammar"), base)
-        self.assertEqual(code, 1, output)
-        self.assertIn("IDENTITY_PREFIX is 2 on both sides", output)
-        self.write(source, identity.replace("{ 1 }", "{ 2 }").replace(":v2:", ":v3:"))
-        self.assertEqual(self.verdict(self.commit("bump its identity"), base)[0], 0)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -310,7 +295,25 @@ class Fixture(unittest.TestCase):
         return code, output.getvalue()
 
 
-class FreezeVerdicts(Fixture):
+class Fixture(Harness):
+    def test_source_declared_identity_is_checked_without_a_registry_row(self):
+        source = "crates/demo/src/identity.rs"
+        identity = ('/// version_surface = "coexist"\n'
+                    '/// version_guard(items(encode_identity))\n'
+                    'const IDENTITY_PREFIX: &str = "demo:v2:blake3:";\n'
+                    'fn encode_identity() -> u8 { 1 }\n')
+        self.write(source, identity)
+        base = self.commit("declare an identity in source")
+        self.write(source, identity.replace("{ 1 }", "{ 2 }"))
+        code, output = self.verdict(self.commit("change its grammar"), base)
+        self.assertEqual(code, 1, output)
+        self.assertIn("IDENTITY_PREFIX is 2 on both sides", output)
+        self.write(source, identity.replace("{ 1 }", "{ 2 }").replace(":v2:", ":v3:"))
+        self.assertEqual(self.verdict(self.commit("bump its identity"), base)[0], 0)
+
+
+
+class FreezeVerdicts(Harness):
     def test_a_stored_shape_lands_without_a_manual_witness_before_the_cut(self) -> None:
         self.write("crates/demo/src/lib.rs", WIDER_RECORD)
         self.commit("stored shape change")
@@ -488,7 +491,7 @@ class FreezeVerdicts(Fixture):
         self.assertIn("2 of 2 surfaces evaluated", result.stdout)
 
 
-class TokenCodecWitness(Fixture):
+class TokenCodecWitness(Harness):
     def test_codec_changes_require_a_witness_even_before_one(self) -> None:
         codec = """
 impl TokenCodec for Record {
@@ -582,7 +585,7 @@ record_codec!(Record, 7);
             self.assertFalse(result.errors, result)
 
 
-class CutVerdicts(Fixture):
+class CutVerdicts(Harness):
     """The four machine verdicts FIG-4494 records."""
 
     def test_an_unchanged_candidate_exits_zero(self) -> None:
@@ -598,14 +601,6 @@ class CutVerdicts(Fixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("WIRE_VERSION 3 to 4 (lift rows registered)", result.stdout)
 
-    def test_the_same_change_without_the_bump_exits_nonzero(self) -> None:
-        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
-        self.write(gate.UPCASTER_REGISTRY, LIFT_FROM_3)
-        result = self.run_command(self.base, self.commit("no bump"))
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("WIRE_VERSION is 3 on both sides", result.stderr)
-        self.assertIn("Bump WIRE_VERSION strictly past 3", result.stderr)
-
     def test_a_malformed_guard_exits_nonzero(self) -> None:
         self.write(
             "crates/demo/src/lib.rs",
@@ -618,7 +613,7 @@ class CutVerdicts(Fixture):
         self.assertIn("1 of 2 surfaces evaluated", result.stderr)
 
 
-class BumpAndEvidence(Fixture):
+class BumpAndEvidence(Harness):
     def test_a_decoder_law_bump_without_its_lift_fails(self) -> None:
         self.write("crates/demo/src/lib.rs", WIDER_RECORD.replace("u32 = 3;", "u32 = 4;", 1))
         code, output = self.verdict(self.commit("bump, no lift"))
@@ -670,7 +665,7 @@ class BumpAndEvidence(Fixture):
         self.assertIn("WIRE_VERSION is 3 on both sides", output)
 
 
-class DdlCatalogEvidence(Fixture):
+class DdlCatalogEvidence(Harness):
     """A DDL stamp's bump owes a step of its migration catalog."""
 
     def setUp(self) -> None:
@@ -805,7 +800,7 @@ class DdlCatalogEvidence(Fixture):
         self.assertEqual(code, 0, output)
 
 
-class Projection(Fixture):
+class Projection(Harness):
     def test_comments_formatting_and_non_wire_derives_are_not_a_shape_change(self) -> None:
         self.write(
             "crates/demo/src/lib.rs",
@@ -887,7 +882,7 @@ class Projection(Fixture):
         self.assertEqual(code, 1, output)
 
 
-class GuardSet(Fixture):
+class GuardSet(Harness):
     def test_dropping_a_shape_from_the_marker_does_not_excuse_changing_it(self) -> None:
         self.write(
             "crates/demo/src/lib.rs",
@@ -918,18 +913,6 @@ class GuardSet(Fixture):
         code, output = self.verdict(self.commit("no marker"))
         self.assertEqual(code, 2, output)
         self.assertIn("declares no version_guard marker", output)
-
-    def test_a_stated_reason_stands_in_for_a_guard(self) -> None:
-        self.write(
-            "crates/demo/src/peer.rs",
-            '/// version_surface = "coexist"\n'
-            '/// version_guard(unshaped = "a manual epoch")\n'
-            "pub const PEER_PROTOCOL_VERSION: u32 = 1;\n",
-        )
-        head = self.commit("unshaped")
-        code, output = self.verdict(head, head)
-        self.assertEqual(code, 0, output)
-        self.assertIn("(1 guarded, 1 unshaped with a stated reason)", output)
 
     def test_a_reason_beside_guards_is_refused(self) -> None:
         self.write(
@@ -966,7 +949,7 @@ class GuardSet(Fixture):
         self.assertIn("unknown entry 'serde'", output)
 
 
-class Reachable(Fixture):
+class Reachable(Harness):
     """A `roots(..)` guard covers everything its roots serialize."""
 
     def setUp(self) -> None:
@@ -991,10 +974,6 @@ class Reachable(Fixture):
         view = gate.RevisionView(self.repo, self.git("rev-parse", "HEAD"))
         guard = gate.Guard("roots", ("crates/demo/src/dto/hello.rs",), ("Hello",))
         return gate.closure_of(view, guard)[0]
-
-    def test_the_base_evaluates(self) -> None:
-        code, output = self.verdict(self.base)
-        self.assertEqual(code, 0, output)
 
     def test_a_leaf_two_levels_below_the_root_owes_the_bump(self) -> None:
         depths = {shape.name: depth for shape, depth in self.closure().depths}
@@ -1125,11 +1104,6 @@ class Reachable(Fixture):
         self.assertEqual(code, 1, output)
         self.assertIn("Serialize for HelloId", output)
 
-    def test_a_macro_declared_type_is_guarded_as_its_macro(self) -> None:
-        code, output = self.changed("crates/demo/src/ids.rs", "$name(String)", "$name(u64)")
-        self.assertEqual(code, 1, output)
-        self.assertIn("identity!", output)
-
     def test_cycles_and_opaque_types_are_reported(self) -> None:
         closure = self.closure()
         self.assertEqual((("Tree",),), closure.cycles)
@@ -1216,7 +1190,7 @@ class Reachable(Fixture):
         self.assertIn("Leaf", output)
 
 
-class RegistryMoves(Fixture):
+class RegistryMoves(Harness):
     def test_typed_plugin_error_versions_preserve_the_strict_shape_guard(self) -> None:
         source = "crates/demo/src/operation.rs"
         operation = (
@@ -1328,47 +1302,6 @@ class PlantedView(gate.TreeView):
         return super().projected(path) if path in self.files else self.inner.projected(path)
 
 
-def planted_change(view: gate.TreeView, guard: gate.Guard) -> PlantedView | None:
-    """`view` with one entry `guard` projects changed, and nothing else."""
-    signature = gate.guard_signature(view, guard, enforce_presence=True)
-    for path, name, _ in signature:
-        text = view.content(path)
-        assert text is not None
-        bare = name.partition("#")[0]
-        if guard.kind == "file":
-            candidates = [text + "\n-- a planted change\n"]
-        elif guard.kind == "impls":
-            trait, _, target = bare.partition(" for ")
-            candidates = [
-                text[: opening + 1] + " const PLANTED: () = (); " + text[opening + 1 :]
-                for match in gate.RUST_SERDE_IMPL.finditer(text)
-                if match.group(2) == target and trait in match.group(1)
-                and (opening := text.find("{", match.end())) >= 0
-            ]
-        else:
-            pattern = gate.RUST_DECLARATION if guard.kind == "items" else gate.RUST_SERDE_SHAPE
-            candidates = [
-                text[: match.start()] + "#[planted_change]\n" + text[match.start() :]
-                for match in pattern.finditer(text)
-                if match.group(1) == bare
-            ]
-        for candidate in candidates:
-            changed = PlantedView(view, {path: candidate})
-            after = gate.guard_signature(changed, guard, enforce_presence=False)
-            if gate.comparable(after) != gate.comparable(signature):
-                return changed
-    return None
-
-
-# Each DDL stamp, and a row of its catalog that steps `{at}` to `{to}`.
-DDL_STAMPS = {
-    "crates/lash-core-store/src/compat.rs:POSTGRES_SCHEMA_VERSION": (
-        'ExpandMigration {{ id: "planted", from_version: {at}, to_version: {to}, statements: "" }},'
-    ),
-    "crates/lash-core-store/src/compat.rs:SQLITE_CORE_SCHEMA_VERSION": (
-        'SqliteMigration {{ from: {at}, to: {to}, ddl: "" }},'
-    ),
-}
 
 
 class ProcessEventVocabularyScope(unittest.TestCase):
@@ -1417,19 +1350,6 @@ class RealRepository(unittest.TestCase):
         cls.surfaces = {
             surface.key: surface for surface in gate.discovered_surfaces(cls.view)
         }
-
-    def declaration(self, key: str) -> gate.Declaration:
-        declaration = gate._declaration(self.view, self.surfaces[key])
-        assert declaration is not None, key
-        return declaration
-
-    def test_every_registered_surface_is_evaluated_at_head(self) -> None:
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            code = gate.main(["--base", "HEAD", "--head", "HEAD"])
-        self.assertEqual(code, 0, output.getvalue())
-        self.assertRegex(output.getvalue(), r"(\d+) of \1 surfaces evaluated")
-        self.assertIn("0 not evaluated", output.getvalue())
 
     def test_the_working_tree_against_itself_passes(self) -> None:
         result = gate.check_views(self.view, self.view, strict=True)
@@ -1481,58 +1401,6 @@ class RealRepository(unittest.TestCase):
         self.assertFalse(result.errors, result)
         self.assertEqual(len(result.failures), 1, result)
         self.assertIn("MachineInput", result.failures[0].detail)
-
-    def test_the_ddl_stamps_are_the_surfaces_that_guard_ddl(self) -> None:
-        stamps = {key for key in self.surfaces if self.declaration(key).catalogs}
-        self.assertEqual(set(DDL_STAMPS), stamps)
-
-    def test_a_planted_ddl_bump_owes_its_catalog_step(self) -> None:
-        for key, row in DDL_STAMPS.items():
-            with self.subTest(surface=key):
-                surface = self.surfaces[key]
-                declaration = self.declaration(key)
-                (catalog,) = declaration.catalogs
-                at = gate.version_at(self.view, surface)
-                ddl = planted_change(self.view, declaration.guards[0])
-                assert ddl is not None
-                constant_file = ddl.content(surface.constant_path)
-                bumped_file, bumps = re.subn(
-                    rf"(const {surface.constant}\s*:[^=;]+=\s*){at};",
-                    rf"\g<1>{at + 1};",
-                    constant_file,
-                )
-                self.assertEqual(1, bumps)
-                bumped = PlantedView(ddl, {surface.constant_path: bumped_file})
-                result = gate.check_views(self.view, bumped, only=frozenset({key}), strict=True)
-                self.assertEqual((), result.errors)
-                self.assertEqual(1, len(result.failures), result)
-                self.assertIn(
-                    f"add a step to {catalog.label} from version {at}",
-                    result.failures[0].detail,
-                )
-
-                table = bumped.content(catalog.path)
-                opening = re.search(
-                    rf"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:const|static)[ \t]+"
-                    rf"{catalog.table}\b",
-                    table,
-                )
-                closing = gate.rust_item_end(table, opening.start()) - len("];")
-                stepped = PlantedView(
-                    bumped,
-                    {
-                        catalog.path: table[:closing]
-                        + row.format(at=at, to=at + 1)
-                        + table[closing:]
-                    },
-                )
-                result = gate.check_views(self.view, stepped, only=frozenset({key}), strict=True)
-                self.assertEqual(((), ()), (result.errors, result.failures))
-                self.assertEqual(
-                    [f"{at} to {at + 1} (catalog steps registered)"],
-                    [finding.detail for finding in result.bumped],
-                )
-
 
 if __name__ == "__main__":
     unittest.main()

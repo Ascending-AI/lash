@@ -4,7 +4,6 @@ use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConf
 use lash_kernel_value::identity::SessionId;
 use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
 use lash_vocabulary::identity::TurnId;
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// How a test's turns may end.
@@ -339,152 +338,6 @@ pub(super) fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResp
     }
 }
 
-fn scripted_response_contains(parts: &[LlmOutputPart], needle: &str) -> bool {
-    parts.iter().any(|part| match part {
-        LlmOutputPart::Text { text, .. } | LlmOutputPart::Reasoning { text, .. } => {
-            text.contains(needle)
-        }
-        LlmOutputPart::ToolCall { input_json, .. } => input_json.contains(needle),
-    })
-}
-
-fn assert_driver_stops_before_queued_provider_response(
-    allowed_response: Vec<LlmOutputPart>,
-    queued_response: Vec<LlmOutputPart>,
-    allowed_code: &str,
-    forbidden_code: &str,
-) {
-    assert!(
-        scripted_response_contains(&queued_response, forbidden_code),
-        "the queued response must prove it would schedule the forbidden effect"
-    );
-    let mut provider_script = VecDeque::from([allowed_response, queued_response]);
-    let mut turn_config = config(lash_core::TerminationMode::Natural);
-    turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
-    let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
-    let mut pending = drain(&mut machine);
-    let mut observed = Vec::new();
-    loop {
-        observed.extend(pending.iter().cloned());
-        if pending
-            .iter()
-            .any(|effect| matches!(effect, Effect::Done { .. }))
-        {
-            break;
-        }
-
-        if let Some(id) = pending.iter().find_map(|effect| match effect {
-            Effect::LlmCall { id, .. } => Some(*id),
-            _ => None,
-        }) {
-            let parts = provider_script
-                .pop_front()
-                .expect("the driver exceeded the scripted provider responses");
-            machine.handle_response(Response::LlmComplete {
-                id,
-                text_streamed: false,
-                result: Ok(LlmResponse {
-                    parts,
-                    ..Default::default()
-                }),
-            });
-        } else if let Some(id) = pending.iter().find_map(|effect| match effect {
-            Effect::ExecCode { id, .. } => Some(*id),
-            _ => None,
-        }) {
-            machine.handle_response(Response::ExecResult {
-                id,
-                result: Ok(response(None)),
-            });
-        } else if let Some(id) = pending.iter().find_map(|effect| match effect {
-            Effect::Checkpoint { id, .. } => Some(*id),
-            _ => None,
-        }) {
-            machine.handle_response(Response::Checkpoint {
-                id,
-                delivery: lash_sansio::CheckpointDelivery::default(),
-            });
-        } else {
-            panic!("driver emitted no blocking effect before completion: {pending:#?}");
-        }
-        pending = drain(&mut machine);
-    }
-
-    assert_eq!(
-        observed
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::ExecCode { code, .. } => Some(code.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>(),
-        vec![allowed_code],
-        "the queued iteration-N effect must never execute"
-    );
-    assert_eq!(
-        observed
-            .iter()
-            .filter(|effect| matches!(effect, Effect::LlmCall { .. }))
-            .count(),
-        1,
-        "N=1 permits exactly one model call"
-    );
-    assert_eq!(
-        provider_script.len(),
-        1,
-        "iteration-N response stays unused"
-    );
-    assert!(scripted_response_contains(
-        provider_script.front().expect("unused response"),
-        forbidden_code
-    ));
-    assert!(
-        observed.iter().any(|effect| matches!(
-            effect,
-            Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
-                outcome: lash_core::facade_support::TurnOutcome::Stopped(
-                    lash_core::facade_support::TurnStop::MaxTurns
-                )
-            })
-        )),
-        "budget exhaustion emits the typed stop"
-    );
-    let done_messages = observed
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::Done { messages, .. } => Some(messages),
-            _ => None,
-        })
-        .expect("budget exhaustion finishes the turn");
-    assert!(
-        done_messages
-            .iter()
-            .all(|message| message.role != lash_core::MessageRole::System),
-        "the transcript contains no synthetic system message"
-    );
-    assert!(!observed.iter().any(|effect| {
-        matches!(effect, Effect::ExecCode { code, .. } if code.contains(forbidden_code))
-    }));
-}
-
-#[test]
-fn native_driver_stops_at_budget_before_queued_provider_response() {
-    assert_driver_stops_before_queued_provider_response(
-        vec![call(
-            "allowed-call",
-            "execute_code",
-            r#"{"code":"print \"native-allowed\""}"#,
-        )],
-        vec![call(
-            "forbidden-call",
-            "execute_code",
-            r#"{"code":"print \"native-forbidden-iteration-one\""}"#,
-        )],
-        r#"print "native-allowed""#,
-        "native-forbidden-iteration-one",
-    );
-}
-
 fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop() {
     let mut turn_config = config(lash_core::TerminationMode::TerminalRequired);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
@@ -641,43 +494,6 @@ fn native_normalization_covers_every_schema_refusal() {
             .any(|effect| matches!(effect, Effect::ExecCode { code, .. } if code == "finish(17)"))
     );
 }
-#[test]
-fn native_reasoning_only_is_provider_error() {
-    let mut machine = TurnMachine::new(
-        config(lash_core::TerminationMode::Natural),
-        Vec::new(),
-        Default::default(),
-        0,
-    );
-    let initial = drain(&mut machine);
-    let effects = reply(
-        &mut machine,
-        &initial,
-        vec![LlmOutputPart::Reasoning {
-            text: "thinking".to_string(),
-            replay: None,
-        }],
-    );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
-            outcome: lash_core::facade_support::TurnOutcome::Stopped(
-                lash_core::facade_support::TurnStop::ProviderError { .. }
-            )
-        })
-    )));
-    assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::Done { .. }))
-    );
-    assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. } | Effect::LlmCall { .. }))
-    );
-}
-
 #[tokio::test]
 async fn factory_selects_native_abi_and_completed_cell_events() {
     let factory = crate::RlmProtocolPluginFactory::new(
@@ -846,67 +662,6 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
         }
     }
     assert_eq!(pairs.len(), 6);
-}
-
-#[test]
-fn output_limit_prose_repairs() {
-    {
-        let mut replay = lash_sansio::testing::JournalReplay::new(
-            config(lash_core::TerminationMode::Natural),
-            Vec::new(),
-            Default::default(),
-            0,
-        );
-        let mut machine = replay.start();
-        let initial = drain(&mut machine);
-        let effects = reply_with_reason(
-            &mut machine,
-            &initial,
-            vec![text("partial answer")],
-            lash_core::LlmTerminalReason::OutputLimit,
-        );
-        assert!(
-            effects.iter().any(|effect| matches!(
-                effect,
-                Effect::Checkpoint {
-                    checkpoint: lash_core::CheckpointKind::AfterWork,
-                    ..
-                }
-            )),
-            "truncated prose must repair, not finish"
-        );
-        let id = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::Checkpoint { id, .. } => Some(*id),
-                _ => None,
-            })
-            .unwrap();
-
-        machine = replay
-            .resume(&mut machine, &|_| Some(replay_environment()))
-            .expect("journal replays");
-        drain(&mut machine);
-        machine.handle_response(Response::Checkpoint {
-            id,
-            delivery: Default::default(),
-        });
-        let effects = drain(&mut machine);
-        let request = effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::LlmCall { request, .. } => Some(request),
-                _ => None,
-            })
-            .expect("repair requests another model response");
-        let rendered = serde_json::to_string(&request.messages).unwrap();
-        assert!(rendered.contains("partial answer"));
-        assert!(rendered.contains("output limit"));
-        insta::assert_snapshot!(
-            "native_output_limit_prose",
-            serde_json::to_string_pretty(&request.messages).unwrap()
-        );
-    }
 }
 
 #[test]

@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_core::testing::store_fixtures::admit_at_checkpoint_for_test;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;
 use lash_kernel_value::identity::SessionId;
 use lash_vocabulary::identity::TurnId;
@@ -92,6 +91,6 @@ pub use append_receipts::{
 };
 use checkpoint_admissions::*;
 pub use checkpoint_admissions::{
-    checkpoint_admission_probe_transaction_counts, checkpoint_rejects_unknown_component_ref,
+    checkpoint_rejects_unknown_component_ref,
     complete_runtime_checkpoint_component_set_survives_cold_reopens,
 };

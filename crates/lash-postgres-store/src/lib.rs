@@ -212,10 +212,6 @@ pub struct PostgresStore {
     decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(any(test, feature = "testing"))]
     decoded_turn_receipts: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(test)]
-    checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
-    #[cfg(test)]
-    checkpoint_write_transaction_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[derive(Clone)]
@@ -779,10 +775,6 @@ impl PostgresStorage {
             decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(any(test, feature = "testing"))]
             decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -879,18 +871,6 @@ impl PostgresStore {
         if let Some(woken) = woken {
             self.wakes.wake(woken);
         }
-    }
-}
-
-impl PostgresStore {
-    #[cfg(test)]
-    fn checkpoint_admission_counts(&self) -> (usize, usize) {
-        (
-            self.checkpoint_probe_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            self.checkpoint_write_transaction_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
     }
 }
 

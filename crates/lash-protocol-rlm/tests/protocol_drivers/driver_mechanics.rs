@@ -92,6 +92,16 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
         Some(&serde_json::json!("empty_response")),
         "the terminal must retain the failed assistant-output check"
     );
+    assert!(
+        find_done(&effects).is_some(),
+        "the reasoning-only response settles the turn"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ExecCode { .. } | Effect::LlmCall { .. })),
+        "a reasoning-only response schedules no further work"
+    );
 }
 
 #[test]
@@ -138,6 +148,23 @@ fn output_limit_prose_retries_with_the_request_cap() {
                 && part.content().contains("2048")
                 && part.content().contains("shorter answer")))
     );
+
+    let (checkpoint_id, _) = find_checkpoint(&effects).expect("the repair parks");
+    machine.handle_response(Response::Checkpoint {
+        id: checkpoint_id,
+        delivery: Default::default(),
+    });
+    let effects = drain_effects(&mut machine);
+    let request = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LlmCall { request, .. } => Some(request),
+            _ => None,
+        })
+        .expect("the repair retries the model");
+    let rendered = serde_json::to_string(&request.messages).unwrap();
+    assert!(rendered.contains("cut off mid-sen"), "{rendered}");
+    assert!(rendered.contains("shorter answer"), "{rendered}");
 }
 
 /// S17-A2: the stall epilogue emits the same projection it guards on. A
@@ -234,29 +261,49 @@ fn rlm_driver_state_this_build_cannot_decode_refuses_pending_work() {
     });
     drain_effects(&mut machine);
     let (language, code, driver_state) = machine.waiting_exec().expect("pending execution");
-    let mut encoded = serde_json::to_value(driver_state).unwrap();
-    assert!(rewrite_first_rlm_driver_state_owner(&mut encoded));
-    let work = lash_sansio::PendingWork::Exec {
-        language: language.to_owned(),
-        code: code.to_owned(),
-        driver_state: serde_json::from_value(encoded).unwrap(),
+    let encoded = serde_json::to_value(driver_state).unwrap();
+    let refused = |encoded: serde_json::Value| {
+        let work = lash_sansio::PendingWork::Exec {
+            language: language.to_owned(),
+            code: code.to_owned(),
+            driver_state: serde_json::from_value(encoded).unwrap(),
+        };
+        let mut resumed = TurnMachine::new(
+            test_config(),
+            vec![user_message("run some code")],
+            Default::default(),
+            0,
+        );
+        resumed.resume_with(work);
+        drain_effects(&mut resumed);
+        resumed.check_parked_state().expect_err("refused")
     };
-    let mut resumed = TurnMachine::new(
-        test_config(),
-        vec![user_message("run some code")],
-        Default::default(),
-        0,
-    );
-    resumed.resume_with(work);
-    drain_effects(&mut resumed);
-    let refusal = resumed
-        .check_parked_state()
-        .expect_err("foreign driver state is refused");
+
+    let mut foreign = encoded.clone();
+    assert!(rewrite_first_rlm_driver_state_owner(&mut foreign));
+    let refusal = refused(foreign);
     assert_eq!(refusal.driver, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
     assert!(
         refusal.reason.contains("driver state belongs to plugin"),
         "{refusal:?}"
     );
+
+    for mutate in [
+        |payload: &mut serde_json::Map<String, serde_json::Value>| {
+            payload.insert("schema_version".into(), u32::MAX.into());
+        },
+        |payload: &mut serde_json::Map<String, serde_json::Value>| {
+            payload.remove("schema_version");
+        },
+    ] {
+        let mut stamped = encoded.clone();
+        mutate(
+            stamped["payload"]
+                .as_object_mut()
+                .expect("driver payload is an object"),
+        );
+        refused(stamped);
+    }
 }
 
 #[test]

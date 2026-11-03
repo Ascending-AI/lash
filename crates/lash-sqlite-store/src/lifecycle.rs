@@ -231,10 +231,6 @@ impl SqliteStore {
             clock,
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
-            #[cfg(test)]
-            checkpoint_probe_count: AtomicUsize::new(0),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: AtomicUsize::new(0),
         })
     }
 
@@ -260,21 +256,7 @@ impl SqliteStore {
             clock: Arc::new(lash_core_ids::clock::SystemClock),
             options: StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
-            #[cfg(test)]
-            checkpoint_probe_count: AtomicUsize::new(0),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: AtomicUsize::new(0),
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn checkpoint_admission_counts(&self) -> (usize, usize) {
-        (
-            self.checkpoint_probe_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-            self.checkpoint_write_transaction_count
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
     }
 
     pub async fn load_session_head_meta(

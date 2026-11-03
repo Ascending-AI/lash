@@ -22,5 +22,3 @@ mod trace_sampling;
 #[cfg(feature = "otel-trace")]
 mod trace_terminals;
 mod tracing;
-
-mod facade_construction;

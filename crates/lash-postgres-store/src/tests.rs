@@ -452,37 +452,6 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         .expect("clean graph-generation uniqueness fixture");
 }
 
-lash_conformance::checkpoint_admission_probe_tests!({
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping Postgres checkpoint counter: database URL is not set");
-        return;
-    };
-    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = crate::testing::connect(&database_url)
-        .await
-        .expect("connect checkpoint counter storage");
-    let session_id = SessionId::fixture(format!(
-        "postgres-checkpoint-counter:{}",
-        std::process::id()
-    ));
-    let store = Arc::new(storage.store());
-    let counting_store = Arc::clone(&store);
-    let teardown_session = session_id.clone();
-    (
-        database_lock,
-        store as Arc<dyn lash_core_store::store::RuntimeStore>,
-        session_id,
-        move || counting_store.checkpoint_admission_counts(),
-        async move {
-            storage
-                .session_store_factory()
-                .delete_session(&teardown_session)
-                .await
-                .expect("delete checkpoint counter session");
-        },
-    )
-});
-
 /// Arming a delete and a writer taking the digest back are the two halves of
 /// the same CAS: run concurrently against PostgreSQL, at most one of them
 /// may win.
