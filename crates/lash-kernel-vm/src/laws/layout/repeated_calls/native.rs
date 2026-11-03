@@ -195,6 +195,44 @@ fn observe(
 }
 pub(super) fn runtime() {
     use crate::machine::islands::compiled::{take_loop_invocations, take_loop_publications};
+    // Two calls in one caller statement retain their distinct source debts.
+    let source = scalar_document(
+        "let i = 0 let s = 0 while flat.lt(i,4) { set s = invoke wrapped.known(s,invoke wrapped.known(i,i)) let previous = flat.identity(i) set i = invoke wrapped.known(previous,1) } return (s,i)",
+    );
+    take_loop_publications();
+    take_loop_invocations();
+    let reference = observe(
+        &source,
+        ExecutionMode::Source,
+        Layout(0),
+        true,
+        u64::MAX,
+        false,
+        super::super::super::embedder::ROOMY,
+    );
+    assert_eq!(
+        reference.0.0,
+        format!("finished {:?}", Datum::Tuple(vec![int(12), int(4)]))
+    );
+    assert_eq!(take_loop_publications(), 0);
+    let actual = observe(
+        &source,
+        ExecutionMode::Specialized,
+        Layout(0),
+        true,
+        u64::MAX,
+        false,
+        super::super::super::embedder::ROOMY,
+    );
+    assert_eq!(
+        actual, reference,
+        "two calls in one statement preserve source, tape and holdings"
+    );
+    assert_eq!(
+        take_loop_publications(),
+        1,
+        "two calls in one caller statement require one real loop publication"
+    );
     for (name, eligible, test, invocations, copy) in [
         ("wrapped.known", true, "flat.lt", None, "wrapped.chain"),
         (
