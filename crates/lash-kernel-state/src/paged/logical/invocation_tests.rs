@@ -4,6 +4,7 @@ use super::*;
 /// Closed virtual calls still consume identities. A rejected or abandoned
 /// prefix consumes none, and cold reopening never recycles committed IDs.
 pub(super) fn completed_prefix() {
+    entered_boundary();
     use crate::paged::{EditEpoch, SemanticHeap};
     use lash_kernel_doc::Value;
     let (mut heap, pages) = fresh();
@@ -155,5 +156,212 @@ pub(super) fn completed_prefix() {
     assert_eq!(
         reopened_ledger.prospective_invocation(TaskId::MAIN).id(),
         first + 3
+    );
+}
+
+/// K-MACH-008: frame entry and caller roots consume one actual invocation only
+/// after the prepared parameter graph and its source peak win admission.
+fn entered_boundary() {
+    use lash_kernel_doc::{Value, heap::PageValue};
+    let (heap, _) = fresh();
+    let mut arena = crate::arena::Arena::new();
+    let mut ledger = Ledger::fresh();
+    let (caller, enter) = ledger
+        .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
+        .unwrap();
+    ledger.commit(enter.admit(u64::MAX).ok().unwrap()).unwrap();
+    let first = caller.owner(Slot::Operand(0));
+    let second = caller.owner(Slot::Operand(1));
+    let initial = ledger
+        .prepare_source_ownership(
+            &mut arena,
+            &heap,
+            &[],
+            &[
+                (first, RootValue::Value(&Value::Int(7))),
+                (second, RootValue::Value(&Value::Int(9))),
+            ],
+        )
+        .unwrap();
+    ledger
+        .commit(initial.admit(u64::MAX).ok().unwrap())
+        .unwrap();
+    let invocation = ledger.prospective_invocation(TaskId::MAIN);
+    let cell = arena.next_provisional();
+    let page = PageValue::Ref(Identity::Object(cell));
+    let entities = [VirtualEntity {
+        entity: cell,
+        body: VirtualBody::Variable(PageValue::Int(9.into())),
+    }];
+    let inputs = [first, second];
+    let outputs = [
+        (
+            caller.owner(Slot::Continuation(0)),
+            RootValue::Existing(first),
+        ),
+        (invocation.owner(Slot::Binding(0)), RootValue::Page(&page)),
+    ];
+    for foreign in [false, true] {
+        let mut foreign_ledger = Ledger::fresh();
+        let (_, entered) = foreign_ledger
+            .prepare_enter(TaskId::MAIN, &mut arena, heap.pages(), &[], &[])
+            .unwrap();
+        foreign_ledger
+            .commit(entered.admit(u64::MAX).ok().unwrap())
+            .unwrap();
+        let other = foreign_ledger.prospective_invocation(TaskId::MAIN);
+        assert_eq!(other.id(), invocation.id());
+        let prepared = ledger.prepare_frame_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            if foreign { &other } else { &invocation },
+            &inputs,
+            &outputs,
+            &entities,
+        );
+        if foreign {
+            assert!(
+                prepared.is_err(),
+                "another ledger cannot lend an equal numeric invocation"
+            );
+            drop(prepared);
+        } else {
+            drop(prepared.unwrap());
+        }
+        assert_eq!(ledger.prospective_invocation(TaskId::MAIN), invocation);
+        assert_eq!(arena.next_provisional(), cell);
+    }
+    assert!(
+        ledger
+            .prepare_frame_boundary(
+                arena.registration().unwrap(),
+                &heap,
+                &invocation,
+                &inputs,
+                &[(
+                    invocation.owner(Slot::Operand(0)),
+                    RootValue::Existing(first)
+                )],
+                &[]
+            )
+            .is_err()
+    );
+    assert!(
+        ledger
+            .prepare_frame_boundary(
+                arena.registration().unwrap(),
+                &heap,
+                &invocation,
+                &inputs,
+                &[(invocation.frame(), RootValue::Frame)],
+                &[]
+            )
+            .is_err()
+    );
+    let before = ledger.balance().unwrap();
+    let prepared = ledger
+        .prepare_frame_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            &invocation,
+            &inputs,
+            &outputs,
+            &entities,
+        )
+        .unwrap();
+    let peak = prepared.peak();
+    assert!(
+        prepared.admit(peak - 1).is_err(),
+        "frame header and cell graph both belong to the source peak"
+    );
+    assert_eq!(ledger.balance().unwrap(), before);
+    assert_eq!(ledger.prospective_invocation(TaskId::MAIN), invocation);
+    assert_eq!(arena.next_provisional(), cell);
+    let stale = ledger
+        .prepare_frame_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            &invocation,
+            &inputs,
+            &outputs,
+            &entities,
+        )
+        .unwrap()
+        .admit(u64::MAX)
+        .ok()
+        .unwrap();
+    ledger.handoff().unwrap();
+    assert!(
+        stale
+            .publish(&mut ledger, |_, _| panic!(
+                "stale frame entry cannot publish storage"
+            ))
+            .is_err()
+    );
+    assert_eq!(ledger.prospective_invocation(TaskId::MAIN), invocation);
+    assert_eq!(arena.next_provisional(), cell);
+    let prepared = ledger
+        .prepare_frame_boundary(
+            arena.registration().unwrap(),
+            &heap,
+            &invocation,
+            &inputs,
+            &outputs,
+            &entities,
+        )
+        .unwrap();
+    let mut applied = false;
+    prepared
+        .admit(u64::MAX)
+        .ok()
+        .unwrap()
+        .publish(&mut ledger, |_, edits| {
+            assert!(edits.is_empty());
+            applied = true;
+        })
+        .unwrap();
+    assert!(applied);
+    assert_eq!(
+        ledger
+            .invocation(TaskId::MAIN, invocation.id(), heap.pages())
+            .unwrap(),
+        invocation
+    );
+    assert_eq!(
+        ledger.prospective_invocation(TaskId::MAIN).id(),
+        invocation.id() + 1
+    );
+    assert!(ledger.holding(first, heap.pages()).unwrap().is_none());
+    assert!(ledger.holding(second, heap.pages()).unwrap().is_none());
+    assert_eq!(
+        ledger
+            .holding(caller.owner(Slot::Continuation(0)), heap.pages())
+            .unwrap()
+            .unwrap()
+            .bytes(),
+        17
+    );
+    assert_eq!(
+        ledger
+            .holding(invocation.owner(Slot::Binding(0)), heap.pages())
+            .unwrap()
+            .unwrap()
+            .bytes(),
+        16
+    );
+    assert!(ledger.entity_holding(cell, heap.pages()).unwrap().is_some());
+    assert_ne!(arena.next_provisional(), cell);
+    assert!(
+        ledger
+            .prepare_frame_boundary(
+                arena.registration().unwrap(),
+                &heap,
+                &invocation,
+                &[],
+                &[],
+                &[]
+            )
+            .is_err(),
+        "an entered invocation cannot enter twice"
     );
 }

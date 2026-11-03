@@ -76,6 +76,61 @@ impl Ledger {
             },
         ))
     }
+    /// One actual frame entry, caller continuation transfer and prepared cell
+    /// graph share a single affine boundary. `outputs` excludes the canonical
+    /// header, which this method inserts before the callee's bindings.
+    /// Source identity, formal order, saved roles, charges and the full source
+    /// peak remain the caller's compiled entry certificate obligations.
+    pub fn prepare_frame_boundary<'a>(
+        &self,
+        registration: Registration<'a>,
+        heap: &super::super::heap_impl::PagedHeap,
+        invocation: &Invocation,
+        inputs: &[Owner],
+        outputs: &[(Owner, RootValue<'_>)],
+        entities: &[VirtualEntity],
+    ) -> Result<BoundaryTransaction<'a>, HeapFault> {
+        let Owner::Frame { task, .. } = invocation.frame() else {
+            unreachable!()
+        };
+        if self.prospective_invocation(task) != *invocation {
+            return Err(invalid("frame boundary has a stale or foreign invocation"));
+        }
+        let next = invocation
+            .id()
+            .checked_add(1)
+            .ok_or_else(|| invalid("logical invocation overflow"))?;
+        if self.holding(invocation.frame(), heap.pages())?.is_some() {
+            return Err(invalid("frame boundary invocation is already entered"));
+        }
+        for (owner, value) in outputs {
+            if matches!(owner, Owner::Frame { .. }) || matches!(value, RootValue::Frame) {
+                return Err(invalid("frame boundary cannot substitute a frame header"));
+            }
+            if let Owner::Value {
+                task: owner_task,
+                invocation: id,
+                slot,
+            } = owner
+                && *owner_task == task
+                && *id == invocation.id()
+                && (!matches!(slot, Slot::Binding(_) | Slot::Capture(_))
+                    || matches!(value, RootValue::Frozen(_) | RootValue::Departure))
+            {
+                return Err(invalid(
+                    "frame boundary has another formal owner or value kind",
+                ));
+            }
+        }
+        let roots: Vec<_> = std::iter::once((invocation.frame(), RootValue::Frame))
+            .chain(outputs.iter().copied())
+            .collect();
+        let (mut boundary, _) =
+            self.prepare_construction_boundary(registration, heap, inputs, &roots, entities)?;
+        boundary.prepared.next.next_invocation = next;
+        Ok(boundary)
+    }
+
     pub fn prepare_leave_publication<'a>(
         &self,
         invocation: &Invocation,
